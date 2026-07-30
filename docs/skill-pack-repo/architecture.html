@@ -1,0 +1,558 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>skill-pack — Architecture</title>
+<script>
+  (function () {
+    const saved = localStorage.getItem('theme');
+    const dark = saved ? saved === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.classList.toggle('dark', dark);
+  })();
+</script>
+<style>
+  :root {
+    --bg: #FAF9F5; --surface: #FFFFFF; --surface2: #F0EEE6;
+    --ink: #141413; --body: #3D3D3A; --muted: #87867F;
+    --line: #D1CFC5; --line-soft: #E6E3DA;
+    --clay: #D97757; --clay-soft: rgba(217,119,87,0.10);
+    --olive: #788C5D; --olive-soft: rgba(120,140,93,0.12);
+    --zone: rgba(20,20,19,0.025); --zone-line: #D1CFC5;
+    --serif: ui-serif, Georgia, "Times New Roman", serif;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  html.dark {
+    --bg: #141413; --surface: #1F1F1D; --surface2: #2A2A28;
+    --ink: #FAF9F5; --body: #D1CFC5; --muted: #87867F;
+    --line: #3D3D3A; --line-soft: #2A2A28;
+    --clay: #E48A6E; --clay-soft: rgba(228,138,110,0.14);
+    --olive: #9DB07C; --olive-soft: rgba(157,176,124,0.16);
+    --zone: rgba(250,249,245,0.03); --zone-line: #3D3D3A;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--body); font-family: var(--sans);
+    -webkit-font-smoothing: antialiased; display: flex; flex-direction: column; overflow: hidden;
+  }
+
+  /* ── top bar ─────────────────────────────── */
+  .bar {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 12px 20px; border-bottom: 1px solid var(--line-soft); flex: none;
+  }
+  .bar h1 { font-family: var(--serif); font-weight: 500; font-size: 19px; color: var(--ink); letter-spacing: -0.01em; }
+  .bar .sub { font-family: var(--mono); font-size: 10.5px; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+  .spacer { flex: 1; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em;
+    padding: 5px 11px; border: 1px solid var(--line); border-radius: 999px;
+    background: transparent; color: var(--muted); cursor: pointer; transition: all .15s ease;
+  }
+  .chip:hover { color: var(--ink); border-color: var(--muted); }
+  .chip.on { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+  .chip.ghost { text-decoration: none; }
+  #themeToggle {
+    font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em;
+    padding: 5px 10px; border: 1px solid var(--line); border-radius: 6px;
+    background: transparent; color: var(--muted); cursor: pointer;
+  }
+  #themeToggle:hover { color: var(--ink); border-color: var(--muted); }
+
+  /* ── stage ───────────────────────────────── */
+  .stage { flex: 1; position: relative; min-height: 0; }
+  .stage svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+  /* zones */
+  .zone rect { fill: var(--zone); stroke: var(--zone-line); stroke-width: 1; stroke-dasharray: 5 5; rx: 16; }
+  .zone .ztitle { font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; fill: var(--muted); }
+  .zone .zsub { font-family: var(--mono); font-size: 10.5px; fill: var(--muted); opacity: 0.75; }
+
+  /* nodes */
+  .node { cursor: pointer; }
+  .node rect { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; rx: 10; transition: stroke .15s ease; }
+  .node:hover rect { stroke: var(--muted); }
+  .node.sel rect { stroke: var(--clay) !important; stroke-width: 2; }
+  .node:focus-visible rect { stroke: var(--clay); stroke-width: 2; }
+  .node .t { font-family: var(--sans); font-size: 14.5px; font-weight: 600; fill: var(--ink); pointer-events: none; }
+  .node .m { font-family: var(--mono); font-size: 11px; fill: var(--muted); pointer-events: none; }
+  .node .k { font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; fill: var(--clay); pointer-events: none; }
+  .node.gate rect { fill: var(--clay-soft); stroke: var(--clay); }
+  .node.store rect { fill: var(--surface2); }
+  .node.do rect { fill: var(--olive-soft); stroke: var(--olive); }
+  .node.ext rect { stroke-dasharray: 6 3; }
+
+  /* edges */
+  .edge { stroke: var(--muted); stroke-width: 1.6; fill: none; marker-end: url(#a-mut); transition: opacity .2s ease, stroke .2s ease; }
+  .edge.dash { stroke-dasharray: 5 4; }
+  .elbl { font-family: var(--mono); font-size: 10.5px; fill: var(--muted); transition: opacity .2s ease; }
+
+  /* flow highlighting */
+  .stage.flowing .edge { opacity: 0.13; }
+  .stage.flowing .elbl { opacity: 0.13; }
+  .stage.flowing .node { opacity: 0.30; }
+  .stage.flowing .zone { opacity: 0.45; }
+  .stage.flowing .edge.lit {
+    opacity: 1; stroke: var(--clay); marker-end: url(#a-clay);
+    stroke-dasharray: 7 5; animation: march 0.9s linear infinite;
+  }
+  .stage.flowing .elbl.lit { opacity: 1; fill: var(--clay); }
+  .stage.flowing .node.lit { opacity: 1; }
+  .stage.flowing .node.lit rect { stroke: var(--clay); }
+  @keyframes march { to { stroke-dashoffset: -12; } }
+  @media (prefers-reduced-motion: reduce) { .stage.flowing .edge.lit { animation: none; } }
+
+  /* ── floating cards ──────────────────────── */
+  .card {
+    position: absolute; max-width: 360px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px 16px; box-shadow: 0 6px 24px rgba(0,0,0,0.08);
+  }
+  #detail { right: 16px; bottom: 16px; width: 340px; }
+  #detail h3 { font-family: var(--serif); font-weight: 500; font-size: 17px; color: var(--ink); margin-bottom: 2px; }
+  #detail .meta { font-family: var(--mono); font-size: 10.5px; color: var(--muted); margin-bottom: 8px; }
+  #detail p { font-size: 12.5px; line-height: 1.55; }
+  #detail p code, #flowcap code { font-family: var(--mono); font-size: 11px; color: var(--clay); }
+  #flowcap { left: 16px; bottom: 16px; max-width: 460px; display: none; }
+  #flowcap.show { display: block; }
+  #flowcap .fname { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--clay); margin-bottom: 6px; }
+  #flowcap ol { margin-left: 18px; }
+  #flowcap li { font-size: 12.5px; line-height: 1.55; }
+  .src { position: absolute; top: 10px; right: 16px; font-family: var(--mono); font-size: 10px; color: var(--muted); opacity: 0.8; }
+  @media (max-width: 880px) {
+    body { overflow: auto; }
+    .stage { min-height: 70vh; }
+    #detail { position: static; width: auto; margin: 10px 16px; }
+    #flowcap { position: static; margin: 0 16px 16px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div>
+    <h1>skill-pack — one namespace, fifteen skills</h1>
+    <div class="sub">read in place · no marketplace · 8 bundled agents</div>
+  </div>
+  <div class="spacer"></div>
+  <div class="chips" id="chips">
+    <button class="chip on" data-flow="all" aria-pressed="true">Everything</button>
+    <button class="chip" data-flow="install" aria-pressed="false">Install</button>
+    <button class="chip" data-flow="routing" aria-pressed="false">Model routing</button>
+    <button class="chip" data-flow="issues" aria-pressed="false">Fix issues</button>
+    <button class="chip" data-flow="review" aria-pressed="false">Review</button>
+    <button class="chip" data-flow="spec" aria-pressed="false">Spec → build</button>
+    <button class="chip" data-flow="prereq" aria-pressed="false">Prerequisites</button>
+  </div>
+  <a class="chip ghost" href="spec.html">&larr; Spec</a>
+  <button id="themeToggle">Theme</button>
+</div>
+
+<div class="stage" id="stage">
+<svg viewBox="0 0 1560 980" preserveAspectRatio="xMidYMid meet" aria-labelledby="arch-title">
+  <title id="arch-title">Architecture of the skill pack: a git repository symlinked into a Claude Code skills directory, discovered as the plugin named r, exposing fifteen namespaced skills that dispatch eight bundled agents, ship a workflow-guard hook, and depend on a mandatory tier of external tooling plus one optional plugin.</title>
+  <defs>
+    <marker id="a-mut" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" style="fill: var(--muted)"/>
+    </marker>
+    <marker id="a-clay" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" style="fill: var(--clay)"/>
+    </marker>
+  </defs>
+
+  <!-- ── zones ─────────────────────────────── -->
+  <g class="zone" id="z-repo">
+    <rect x="40" y="90" width="300" height="800"/>
+    <text class="ztitle" x="62" y="122">Repository</text>
+    <text class="zsub" x="62" y="140">82 files · 1,257 KB · the only source</text>
+  </g>
+  <g class="zone" id="z-cc">
+    <rect x="370" y="90" width="270" height="690"/>
+    <text class="ztitle" x="392" y="122">Claude Code</text>
+    <text class="zsub" x="392" y="140">reads, never installs</text>
+  </g>
+  <g class="zone" id="z-pipe">
+    <rect x="680" y="60" width="370" height="720"/>
+    <text class="ztitle" x="702" y="92">Task &amp; review pipeline</text>
+  </g>
+  <g class="zone" id="z-stand">
+    <rect x="1090" y="60" width="430" height="400"/>
+    <text class="ztitle" x="1112" y="92">Standalone skills</text>
+  </g>
+  <g class="zone" id="z-ext">
+    <rect x="680" y="795" width="370" height="168"/>
+    <text class="ztitle" x="702" y="822">Not shipped — prerequisites</text>
+  </g>
+
+  <!-- ── edges ─────────────────────────────── -->
+  <path class="edge" id="e-clone"      d="M185,235 L185,284"/>
+  <path class="edge" id="e-write"      d="M185,370 L185,419"/>
+  <path class="edge" id="e-man-skills" d="M160,520 L160,569"/>
+  <path class="edge" id="e-man-agents" d="M300,520 C 322,558 322,662 302,696"/>
+  <path class="edge" id="e-man-hooks"  d="M296,520 C 334,580 334,740 300,796"/>
+  <path class="edge" id="e-read"       d="M308,466 C 348,462 356,232 386,198"/>
+  <path class="edge" id="e-ns"         d="M505,235 L505,284"/>
+  <path class="edge" id="e-list"       d="M505,370 L505,419"/>
+  <path class="edge" id="e-route"      d="M505,525 L505,574"/>
+  <path class="edge" id="e-skills-ns"  d="M308,600 C 350,594 356,382 386,344"/>
+  <path class="edge dash" id="e-agents-rev" d="M308,752 C 460,800 620,788 686,520"/>
+  <path class="edge" id="e-r-ghfix"    d="M618,600 C 662,588 666,214 696,172"/>
+  <path class="edge" id="e-gh-run"     d="M865,205 L865,254"/>
+  <path class="edge" id="e-gh-rev"     d="M750,205 C 700,250 692,342 710,391"/>
+  <path class="edge" id="e-run-rev"    d="M865,340 L865,389"/>
+  <path class="edge" id="e-rev-bugs"   d="M779,480 L779,529"/>
+  <path class="edge" id="e-rev-qual"   d="M950,480 L950,529"/>
+  <path class="edge" id="e-rev-scan"   d="M730,480 C 700,540 690,620 716,671"/>
+  <path class="edge" id="e-rev-adv"    d="M1000,480 C 1034,540 1040,620 1014,671"/>
+  <path class="edge dash" id="e-scan-cli"  d="M779,760 L779,841"/>
+  <path class="edge dash" id="e-adv-codex" d="M950,760 L950,841"/>
+  <path class="edge" id="e-brain-plan" d="M1297,165 L1309,165"/>
+  <path class="edge" id="e-plan-run"   d="M1313,198 C 1280,228 1130,232 1060,240 C 1030,246 1010,250 1002,254"/>
+  <path class="edge" id="e-run-commit" d="M1028,300 C 1060,302 1085,294 1106,292"/>
+  <path class="edge dash" id="e-cmd-rev" d="M1313,318 C 1255,350 1135,356 1070,390 C 1050,405 1036,424 1032,434"/>
+
+  <!-- edge labels -->
+  <text class="elbl" data-e="e-write" x="196" y="400">82 files · 1,257 KB</text>
+  <text class="elbl" data-e="e-read" x="318" y="300">read at session start</text>
+  <text class="elbl" data-e="e-list" x="516" y="400">15 descriptions · 15,186 chars</text>
+  <text class="elbl" data-e="e-route" x="516" y="556">chosen from text alone</text>
+  <text class="elbl" data-e="e-agents-rev" x="470" y="792">dispatches 4 bug-hunters</text>
+  <text class="elbl" data-e="e-scan-cli" x="700" y="808" text-anchor="end">pmd · spotbugs · semgrep</text>
+  <text class="elbl" data-e="e-adv-codex" x="962" y="808">needs the codex plugin</text>
+  <text class="elbl" data-e="e-cmd-rev" x="1150" y="376" text-anchor="middle">claudemd-patch only</text>
+
+  <!-- ── nodes: repository ─────────────────── -->
+  <g class="node ext" data-k="remote" tabindex="0" role="button">
+    <rect x="62" y="155" width="246" height="80"/>
+    <text class="t" x="84" y="185">git remote</text>
+    <text class="m" x="84" y="207">the published pack</text>
+    <text class="m" x="84" y="225">clone or pull — nothing else</text>
+  </g>
+  <g class="node" data-k="install" tabindex="0" role="button">
+    <rect x="62" y="290" width="246" height="80"/>
+    <text class="t" x="84" y="320">install.sh</text>
+    <text class="m" x="84" y="342">symlink → ~/.claude/skills/r</text>
+    <text class="m" x="84" y="360">also provisions mandatory deps</text>
+  </g>
+  <g class="node gate" data-k="manifest" tabindex="0" role="button">
+    <rect x="62" y="425" width="246" height="95"/>
+    <text class="t" x="84" y="455">plugin.json</text>
+    <text class="k" x="84" y="475">the single point of failure</text>
+    <text class="m" x="84" y="495">"name": "r" → the namespace</text>
+    <text class="m" x="84" y="513">malformed → nothing loads, silently</text>
+  </g>
+  <g class="node" data-k="skills" tabindex="0" role="button">
+    <rect x="62" y="575" width="246" height="75"/>
+    <text class="t" x="84" y="605">skills/</text>
+    <text class="m" x="84" y="627">15 directories, flat</text>
+    <text class="m" x="84" y="643">domain-first names, ≤3 segments</text>
+  </g>
+  <g class="node" data-k="agents" tabindex="0" role="button">
+    <rect x="62" y="700" width="246" height="70"/>
+    <text class="t" x="84" y="730">agents/</text>
+    <text class="m" x="84" y="752">8 subagents the skills dispatch</text>
+  </g>
+  <g class="node gate" data-k="hooks" tabindex="0" role="button">
+    <rect x="62" y="800" width="246" height="75"/>
+    <text class="t" x="84" y="830">hooks/</text>
+    <text class="k" x="84" y="850">blocks the pack if left global</text>
+    <text class="m" x="84" y="868">workflow guard · PreToolUse</text>
+  </g>
+
+  <!-- ── nodes: claude code ────────────────── -->
+  <g class="node" data-k="loader" tabindex="0" role="button">
+    <rect x="392" y="155" width="226" height="80"/>
+    <text class="t" x="414" y="185">skill loader</text>
+    <text class="m" x="414" y="207">runs at session start only</text>
+    <text class="m" x="414" y="225">never mid-session</text>
+  </g>
+  <g class="node" data-k="namespace" tabindex="0" role="button">
+    <rect x="392" y="290" width="226" height="80"/>
+    <text class="t" x="414" y="320">namespace r</text>
+    <text class="m" x="414" y="342">r@skills-dir</text>
+    <text class="m" x="414" y="360">/r:&lt;name&gt; × 15</text>
+  </g>
+  <g class="node store" data-k="listing" tabindex="0" role="button">
+    <rect x="392" y="425" width="226" height="100"/>
+    <text class="t" x="414" y="455">skill listing</text>
+    <text class="m" x="414" y="477">descriptions only, always in context</text>
+    <text class="m" x="414" y="495">capped at 1,536 chars each</text>
+    <text class="m" x="414" y="513">bodies cost nothing until used</text>
+  </g>
+  <g class="node do" data-k="router" tabindex="0" role="button">
+    <rect x="392" y="580" width="226" height="105"/>
+    <text class="t" x="414" y="610">the model, routing</text>
+    <text class="k" x="414" y="630">prose is the router</text>
+    <text class="m" x="414" y="650">picks a skill from descriptions</text>
+    <text class="m" x="414" y="668">can reach any of the fifteen</text>
+  </g>
+
+  <!-- ── nodes: pipeline ───────────────────── -->
+  <g class="node" data-k="ghfix" tabindex="0" role="button">
+    <rect x="702" y="125" width="326" height="80"/>
+    <text class="t" x="724" y="155">gh-issues-fix</text>
+    <text class="m" x="724" y="177">triage → group → fix, one group at a time</text>
+    <text class="m" x="724" y="195">33 KB single file · needs gh</text>
+  </g>
+  <g class="node" data-k="taskrun" tabindex="0" role="button">
+    <rect x="702" y="260" width="326" height="80"/>
+    <text class="t" x="724" y="290">task-run</text>
+    <text class="m" x="724" y="312">one unit of work, end to end → PR</text>
+    <text class="m" x="724" y="330">plan → review → implement (TDD)</text>
+  </g>
+  <g class="node" data-k="taskrev" tabindex="0" role="button">
+    <rect x="702" y="395" width="326" height="85"/>
+    <text class="t" x="724" y="425">task-review</text>
+    <text class="m" x="724" y="447">the post-task pipeline over the diff</text>
+    <text class="m" x="724" y="465">never auto-fires · calls code-scan ×22</text>
+  </g>
+  <g class="node" data-k="bugs" tabindex="0" role="button">
+    <rect x="702" y="535" width="155" height="85"/>
+    <text class="t" x="720" y="565">code-bugs</text>
+    <text class="m" x="720" y="587">real defects</text>
+    <text class="m" x="720" y="605">+ doc drift</text>
+  </g>
+  <g class="node" data-k="quality" tabindex="0" role="button">
+    <rect x="873" y="535" width="155" height="85"/>
+    <text class="t" x="891" y="565">code-quality</text>
+    <text class="m" x="891" y="587">readability</text>
+    <text class="m" x="891" y="605">reports only</text>
+  </g>
+  <g class="node" data-k="scan" tabindex="0" role="button">
+    <rect x="702" y="675" width="155" height="85"/>
+    <text class="t" x="720" y="705">code-scan</text>
+    <text class="m" x="720" y="727">3 analyzers</text>
+    <text class="m" x="720" y="745">no server</text>
+  </g>
+  <g class="node" data-k="advers" tabindex="0" role="button">
+    <rect x="873" y="675" width="155" height="85"/>
+    <text class="t" x="891" y="705">code-adversarial</text>
+    <text class="m" x="891" y="727">Codex review</text>
+    <text class="m" x="891" y="745">wrapper only</text>
+  </g>
+
+  <!-- ── nodes: standalone ─────────────────── -->
+  <g class="node" data-k="brainstorm" tabindex="0" role="button">
+    <rect x="1112" y="125" width="185" height="80"/>
+    <text class="t" x="1130" y="155">spec-brainstorm</text>
+    <text class="m" x="1130" y="177">idea → spec.html</text>
+    <text class="m" x="1130" y="195">+ architecture.html</text>
+  </g>
+  <g class="node" data-k="specplan" tabindex="0" role="button">
+    <rect x="1313" y="125" width="185" height="80"/>
+    <text class="t" x="1331" y="155">spec-plan</text>
+    <text class="m" x="1331" y="177">spec → todo.md</text>
+    <text class="m" x="1331" y="195">phased, traceable</text>
+  </g>
+  <g class="node" data-k="commit" tabindex="0" role="button">
+    <rect x="1112" y="255" width="185" height="75"/>
+    <text class="t" x="1130" y="285">git-commit</text>
+    <text class="m" x="1130" y="307">logical commits</text>
+    <text class="m" x="1130" y="323">conventional format</text>
+  </g>
+  <g class="node" data-k="claudemd" tabindex="0" role="button">
+    <rect x="1313" y="255" width="185" height="75"/>
+    <text class="t" x="1331" y="285">claudemd-* × 2</text>
+    <text class="m" x="1331" y="307">compact · patch</text>
+    <text class="m" x="1331" y="323">context hygiene</text>
+  </g>
+  <g class="node" data-k="testswrite" tabindex="0" role="button">
+    <rect x="1112" y="380" width="185" height="65"/>
+    <text class="t" x="1130" y="410">tests-write</text>
+    <text class="m" x="1130" y="432">JVM test conventions</text>
+  </g>
+  <g class="node" data-k="testapp" tabindex="0" role="button">
+    <rect x="1313" y="380" width="185" height="65"/>
+    <text class="t" x="1331" y="410">test-app-create</text>
+    <text class="m" x="1331" y="432">scaffolds /test-app</text>
+  </g>
+
+  <!-- ── nodes: prerequisites ──────────────── -->
+  <g class="node ext" data-k="cli" tabindex="0" role="button">
+    <rect x="702" y="845" width="155" height="98"/>
+    <text class="t" x="720" y="873">CLI binaries</text>
+    <text class="k" x="720" y="893">mandatory</text>
+    <text class="m" x="720" y="912">pmd · spotbugs</text>
+    <text class="m" x="720" y="930">semgrep · gh</text>
+  </g>
+  <g class="node ext" data-k="codex" tabindex="0" role="button">
+    <rect x="873" y="845" width="155" height="98"/>
+    <text class="t" x="891" y="873">codex plugin</text>
+    <text class="k" x="891" y="893">optional</text>
+    <text class="m" x="891" y="912">openai-codex</text>
+    <text class="m" x="891" y="930">reports as skipped</text>
+  </g>
+</svg>
+
+  <div class="src">spec.html · draft 2026-07-30</div>
+
+  <div class="card" id="flowcap" aria-live="polite">
+    <div class="fname" id="f-name"></div>
+    <ol id="f-steps"></ol>
+  </div>
+
+  <div class="card" id="detail" aria-live="polite">
+    <h3 id="d-title">Click anything</h3>
+    <div class="meta" id="d-meta">node detail</div>
+    <p id="d-body">Every box is clickable, and reachable by keyboard. The chips up top light the paths — how the pack installs, how the model chooses a skill, and what breaks when a prerequisite is missing.</p>
+  </div>
+</div>
+<script>
+const DETAIL = {
+  remote:    { t:"git remote", m:"external · the published pack", b:"The only distribution channel. No marketplace entry, no plugin catalogue, no npm package. Because there is no marketplace, there is also <b>no way to declare a dependency</b> on another plugin — which is why the <code>codex</code> requirement can only live in the README." },
+  install:   { t:"install.sh", m:"clone · link · provision", b:"Clones on a fresh machine, pulls on an existing one, links the result as <code>~/.claude/skills/r</code>, installs the mandatory prerequisites, and removes the superseded global guard registration. Then it prints what to do next: restart the session for a first install, <code>/reload-plugins</code> if anything outside a <code>SKILL.md</code> changed. It still never executes packed code — what it now runs is <code>brew</code> and <code>npm</code>, each command echoed first, with <code>--dry-run</code> and <code>--no-deps</code> available.<br><br><b>Before running it at all</b>, <code>claude --plugin-dir &lt;repo&gt;</code> loads the pack for one session without installing anything — the cheapest way to prove the manifest and namespace work before a symlink is involved." },
+  manifest:  { t:"plugin.json", m:"the gate · required for discovery", b:"<b>This one file decides whether anything works.</b> Present and valid, the directory becomes plugin <code>r</code> and fifteen commands appear. Malformed, and the folder degrades to a plain skills directory — every <code>/r:</code> command vanishes with no error, no warning, and nothing in autocomplete. <code>/plugin</code> not listing <code>r@skills-dir</code> is the only reliable signal." },
+  skills:    { t:"skills/", m:"15 directories, flat", b:"One directory per skill, exactly two levels below the repo root. No category folders — the domain-first names do the grouping instead, in the one place grouping is visible: the alphabetically sorted <code>/</code> menu. The directory name <i>is</i> the skill name, so a rename is a move, not a frontmatter edit." },
+  agents:    { t:"agents/", m:"8 subagent definitions", b:"Not skills — dispatchable workers with their own context and tools. They ship with the pack because <code>task-review</code> dispatches four bug-hunters and <code>task-run</code> needs the build runners; without them the review fan-out has nothing to dispatch to on a fresh machine." },
+  hooks:     { t:"hooks/", m:"the guard · declared in plugin.json", b:"A <code>PreToolUse</code> hook that keeps the two review pipelines immutable: it refuses any <code>Workflow</code> run of a forked <code>task-review</code> or <code>task-run</code> script. <b>It is also the reason the pack cannot simply be copied into place.</b> The guard's allow-list is two literal <code>~/.claude/skills/…</code> paths, and it blocks by <i>content</i> — any script declaring the guarded <code>meta.name</code> from any other path is refused, and its <code>Write</code>/<code>Edit</code> branch refuses to create one too. Left registered globally, the packed copies can neither run <b>nor be built</b>. So the pack ships its own, builds the allow-list from <code>$CLAUDE_PLUGIN_ROOT</code> plus both originals, and the installer removes the global registration." },
+  loader:    { t:"skill loader", m:"session start only", b:"Reads the manifest, registers the namespace, and enters each description into the listing. It runs at session start and <b>never mid-session</b> — an install that appears to have done nothing is almost always a session that has not been restarted." },
+  namespace: { t:"namespace r", m:"r@skills-dir", b:"The plugin name becomes the prefix, so every skill is reachable as <code>/r:&lt;name&gt;</code>. Two characters before a command typed dozens of times a day, and the only thing separating these fifteen from the forty-odd other skills installed beside them." },
+  listing:   { t:"skill listing", m:"always-on context cost", b:"Descriptions live here permanently; bodies cost nothing until invoked. That asymmetry is the whole design pressure — 15,186 characters (about 3,796 tokens) sit in every session in every project. One description is currently <b>638 characters over the 1,536 cap</b>, so its tail never reaches the model at all." },
+  router:    { t:"the model, routing", m:"prose is the routing layer", b:"No routing table exists. A language model reads the descriptions and decides which skill to load, which makes description text a <b>functional component</b> with real failure modes: under-triggering when vague, mis-routing between neighbours that overlap. Three skills are barred from auto-firing entirely; every skill can always be forced by typing its name." },
+  ghfix:     { t:"gh-issues-fix", m:"orchestrator · user-invoked", b:"The reason the pack is fifteen skills rather than seven: it calls <code>task-run</code> twelve times and <code>task-review</code> eight, so shipping it without them ships something that cannot run. At 33 KB it is the largest single file in the pack — a natural candidate for a <code>references/</code> split, deliberately deferred so restructuring never rides along with the rename." },
+  taskrun:   { t:"task-run", m:"plan → implement → review → PR", b:"One unit of work end to end, always on a feature branch. Its description is the one that <b>exceeds the listing cap</b> at 2,174 characters, so the tail carrying its <code>--light/--standard/--full</code> triggers is silently dropped — the skill under-triggers today and the cause is invisible." },
+  taskrev:   { t:"task-review", m:"never auto-fires", b:"The review pipeline over the current diff: parallel hunters, one fix phase, build with tests, mandatory static analysis, a Codex read of the final diff. Its own text says it must never trigger on its own, so the pack enforces that in frontmatter rather than trusting the prose." },
+  bugs:      { t:"code-bugs", m:"defects + doc drift", b:"Hunts code that will actually break, and separately checks the diff against the project's own written intent. Dispatches two of the bundled bug-hunter agents." },
+  quality:   { t:"code-quality", m:"report-only", b:"The readability layer a static analyzer cannot do: confusing names, control flow you re-read, leaky abstractions. Deliberately anti-dogma, and it never edits code." },
+  scan:      { t:"code-scan", m:"pmd + spotbugs + semgrep", b:"Server-free static analysis, then triage and fix. <code>task-review</code> calls it 22 times and calls the step mandatory, which is why it had to be in the pack. Needs three binaries on <code>PATH</code> that the pack cannot ship." },
+  advers:    { t:"code-adversarial", m:"wrapper around Codex", b:"Runs the real Codex adversarial review, never an imitation of it. <b>It is the one packed skill with an external plugin dependency</b>, and the chosen distribution mechanism cannot declare that — so a fresh machine gets a pipeline that fails partway unless the prerequisite is installed." },
+  brainstorm:{ t:"spec-brainstorm", m:"idea → specification", b:"Produces <code>spec.html</code> plus an interactive <code>architecture.html</code> — this page was written by it. Carries 380 KB of vendored third-party HTML examples, which is 30% of the whole repository." },
+  specplan:  { t:"spec-plan", m:"spec → phased todo.md", b:"Turns a written spec into an ordered plan with stable ids and runnable done-when checks, which <code>task-run</code> then executes one phase at a time. Its frontmatter is <b>the one block that fails strict YAML</b> — an unquoted description containing a colon." },
+  commit:    { t:"git-commit", m:"logical commits", b:"Groups a working tree into separate Conventional Commits by functionality. The smallest skill in the pack and the only one with no dependencies in either direction." },
+  claudemd:  { t:"claudemd-compact · claudemd-patch", m:"two skills, one family", b:"Drawn as one box because they are a pair: one compacts and de-stales a CLAUDE.md hierarchy, the other inserts the maintainer's standard rule blocks. They are the reason the naming convention pays off — domain-first puts them adjacent in the menu." },
+  testswrite:{ t:"tests-write", m:"model-invoked, proactively", b:"JVM test conventions, loaded automatically whenever Java or Kotlin behaviour is written or changed. One of the few skills meant to fire without being asked." },
+  testapp:   { t:"test-app-create", m:"generates, does not test", b:"Scaffolds a project-local <code>/test-app</code> tailored to the detected stack. The generated skill is deliberately <b>not</b> vendored — a single copy would carry one repository's stack assumptions into every other one." },
+  cli:       { t:"CLI binaries", m:"mandatory · installer provisions", b:"<code>pmd</code>, <code>spotbugs</code> and <code>semgrep</code> for <code>code-scan</code>; <code>gh</code> for <code>gh-issues-fix</code>; and <code>agent-browser</code> for UI verification. <b>Mandatory</b> — the pipeline calls <code>code-scan</code> 22 times and treats it as required, so a machine missing these loses review coverage quietly. They cannot be vendored, so the installer provisions them instead. Their absence is at least detectable: each skill checks and names what is missing before running." },
+  codex:     { t:"codex plugin", m:"optional · degrades to skipped", b:"Needed by <code>code-adversarial</code>, and the <b>only optional</b> prerequisite — a machine without it still installs and still reviews. The dangerous failure is not absence but silence: a review step that is skipped or improvised while the run <b>reports a completed review that never happened</b> is output identical to success. So the rule is exact — the step is recorded as <b>skipped</b> and named, and a model-written substitute is never allowed to stand in for it." },
+};
+
+const FLOWS = {
+  install: {
+    name: "Install — clone, link, provision, restart",
+    edges: ["e-clone","e-write","e-man-hooks","e-read","e-ns","e-list"],
+    nodes: ["remote","install","manifest","hooks","loader","namespace","listing"],
+    steps: [
+      "<code>./install.sh</code> clones the remote to a working directory and links it as <code>~/.claude/skills/r</code> — 82 files, 1,257 KB",
+      "It provisions the mandatory prerequisites, then removes the superseded global guard registration — leave that in place and the packed pipelines stay blocked",
+      "Nothing loads yet. Skills-directory plugins are discovered on the <b>next</b> session, never mid-session",
+      "On restart the loader reads <code>plugin.json</code>, registers namespace <code>r</code>, and lists 15 descriptions",
+      "Verify in two steps: <code>claude --plugin-dir &lt;repo&gt;</code> proves the manifest and namespace without installing anything, then <code>/plugin</code> must show <code>r@skills-dir</code> after linking. Run alone, either check confounds a broken manifest with a symlink that was not followed"
+    ]
+  },
+  routing: {
+    name: "Model routing — prose as the router",
+    edges: ["e-list","e-route","e-r-ghfix"],
+    nodes: ["listing","router","ghfix"],
+    steps: [
+      "Only the descriptions enter context — 15,186 characters, capped at 1,536 per skill",
+      "The model reads that text and picks a skill. There is no routing table to correct",
+      "Any of the fifteen is reachable this way; <code>gh-issues-fix</code> is lit as one example",
+      "Failure modes: under-triggering when text is vague, and mis-routing between overlapping neighbours"
+    ]
+  },
+  issues: {
+    name: "Fix issues — the reason the pack is 15 skills",
+    edges: ["e-r-ghfix","e-gh-run","e-gh-rev","e-run-rev","e-rev-bugs","e-rev-qual","e-rev-scan","e-rev-adv"],
+    nodes: ["ghfix","taskrun","taskrev","bugs","quality","scan","advers"],
+    steps: [
+      "<code>/r:gh-issues-fix</code> lists open bugs, verifies each against the code, groups by subsystem",
+      "Each approved group goes to <code>task-run</code> — 12 references — which implements it",
+      "<code>task-review</code> then reviews the diff — 8 references — and fans out to the four review skills",
+      "Ship only 7 skills and this entire path is dead, which is why the pack expanded to 15"
+    ]
+  },
+  review: {
+    name: "Review — where the bundled agents earn their place",
+    edges: ["e-run-rev","e-rev-bugs","e-rev-qual","e-rev-scan","e-rev-adv","e-agents-rev","e-scan-cli","e-adv-codex"],
+    nodes: ["taskrun","taskrev","bugs","quality","scan","advers","agents","cli","codex"],
+    steps: [
+      "<code>task-review</code> dispatches four bug-hunter agents in parallel — hence <code>agents/</code> ships with the pack",
+      "<code>code-scan</code> is mandatory here: 22 references, and it needs three binaries on <code>PATH</code>",
+      "<code>code-adversarial</code> reaches outside the pack entirely, to the <code>codex</code> plugin",
+      "Two of the nine lit boxes are things the pack <b>cannot</b> ship — the honest edge of self-containment"
+    ]
+  },
+  spec: {
+    name: "Spec → build — the planning chain",
+    edges: ["e-brain-plan","e-plan-run","e-run-commit"],
+    nodes: ["brainstorm","specplan","taskrun","commit"],
+    steps: [
+      "<code>/r:spec-brainstorm</code> interviews, researches, and writes <code>spec.html</code> — this page included",
+      "<code>/r:spec-plan</code> turns that spec into a phased <code>todo.md</code> with traceable ids",
+      "<code>task-run</code> executes one phase per session; <code>git-commit</code> shapes the history",
+      "These four are why <code>spec-plan</code> had to join the pack even though it was not in the original six"
+    ]
+  },
+  prereq: {
+    name: "Prerequisites — mandatory, optional, and the gap between",
+    edges: ["e-scan-cli","e-adv-codex"],
+    nodes: ["scan","advers","cli","codex"],
+    steps: [
+      "A skills-directory plugin has <b>no dependency declaration mechanism</b> — nothing can be required, only checked. That is the one real cost of the distribution choice",
+      "<b>Mandatory:</b> <code>pmd</code>, <code>spotbugs</code>, <code>semgrep</code>, <code>gh</code>, <code>node</code>, <code>python3</code>, <code>agent-browser</code>. The pipeline cannot run honestly without them, so the installer provisions them rather than documenting them",
+      "<b>Optional:</b> the <code>codex</code> plugin. Absent, the step is recorded as skipped and named — never improvised, never substituted",
+      "Three of the four families already check themselves at the moment of need, which beats any install-time check because they can say <i>which coverage was lost</i>. The pack adds one aggregate check for the question they cannot answer: will this work here at all?"
+    ]
+  }
+};
+
+const stage = document.getElementById('stage');
+const nodes = document.querySelectorAll('.node');
+const edges = document.querySelectorAll('.edge');
+const elbls = document.querySelectorAll('.elbl');
+const chips = document.querySelectorAll('.chip[data-flow]');
+const fcap = document.getElementById('flowcap');
+
+function setFlow(key) {
+  chips.forEach(c => {
+    const on = c.dataset.flow === key;
+    c.classList.toggle('on', on);
+    c.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+  edges.forEach(e => e.classList.remove('lit'));
+  elbls.forEach(l => l.classList.remove('lit'));
+  nodes.forEach(n => n.classList.remove('lit'));
+  history.replaceState(null, '', key === 'all' ? location.pathname : '#' + key);
+  if (key === 'all') { stage.classList.remove('flowing'); fcap.classList.remove('show'); return; }
+  const f = FLOWS[key];
+  stage.classList.add('flowing');
+  f.edges.forEach(id => document.getElementById(id)?.classList.add('lit'));
+  elbls.forEach(l => { if (f.edges.includes(l.dataset.e)) l.classList.add('lit'); });
+  f.nodes.forEach(k => document.querySelector(`.node[data-k="${k}"]`)?.classList.add('lit'));
+  document.getElementById('f-name').textContent = f.name;
+  document.getElementById('f-steps').innerHTML = f.steps.map(s => `<li>${s}</li>`).join('');
+  fcap.classList.add('show');
+}
+chips.forEach(c => c.addEventListener('click', () => setFlow(c.dataset.flow)));
+
+function showDetail(n) {
+  nodes.forEach(x => x.classList.remove('sel'));
+  n.classList.add('sel');
+  const d = DETAIL[n.dataset.k];
+  if (!d) return;
+  document.getElementById('d-title').textContent = d.t;
+  document.getElementById('d-meta').textContent = d.m;
+  document.getElementById('d-body').innerHTML = d.b;
+}
+nodes.forEach(n => {
+  n.addEventListener('click', () => showDetail(n));
+  n.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showDetail(n); }
+  });
+});
+
+document.getElementById('themeToggle').addEventListener('click', () => {
+  const dark = !document.documentElement.classList.contains('dark');
+  document.documentElement.classList.toggle('dark', dark);
+  localStorage.setItem('theme', dark ? 'dark' : 'light');
+});
+
+function applyHash() { const k = location.hash.slice(1); setFlow(FLOWS[k] ? k : 'all'); }
+applyHash();
+window.addEventListener('hashchange', applyHash);
+</script>
+</body>
+</html>

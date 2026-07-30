@@ -1,0 +1,2293 @@
+<title>skill-pack — specification</title>
+<style>
+  :root {
+    --ivory:    #FAF9F5;
+    --surface:  #FFFFFF;
+    --gray-150: #F0EEE6;
+    --gray-300: #D1CFC5;
+    --gray-500: #87867F;
+    --gray-700: #3D3D3A;
+    --slate:    #141413;
+    --clay:     #D97757;
+    --olive:    #788C5D;
+    --serif: ui-serif, Georgia, "Times New Roman", serif;
+    --sans:  system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono:  ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    padding: 0 1.5rem 6rem;
+    background: var(--ivory);
+    color: var(--gray-700);
+    font-family: var(--sans);
+    font-size: 15.5px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .sheet { max-width: 62rem; margin: 0 auto; }
+
+  h1, h2, h3, h4 { font-family: var(--serif); color: var(--slate); line-height: 1.2; font-weight: 600; }
+  h1 { font-size: 2.6rem; margin: 0 0 .5rem; letter-spacing: -.02em; }
+  h2 {
+    font-size: 1.6rem;
+    margin: 3.5rem 0 1rem;
+    padding-bottom: .5rem;
+    border-bottom: 1px solid var(--gray-300);
+  }
+  h3 { font-size: 1.15rem; margin: 2rem 0 .6rem; }
+  h4 { font-size: 1rem; margin: 1.4rem 0 .4rem; font-family: var(--sans); }
+  p { margin: 0 0 1rem; }
+  ul, ol { margin: 0 0 1rem; padding-left: 1.3rem; }
+  li { margin-bottom: .35rem; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: .7rem;
+    text-transform: uppercase;
+    letter-spacing: .12em;
+    color: var(--gray-500);
+    margin: 0 0 .6rem;
+  }
+
+  /* ---------- header ---------- */
+  header.doc {
+    padding: 3.5rem 0 1.5rem;
+    border-bottom: 2px solid var(--slate);
+    margin-bottom: 1rem;
+  }
+  .lede { font-size: 1.15rem; color: var(--gray-700); max-width: 46rem; margin-bottom: 1.4rem; }
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .45rem 1.6rem;
+    font-family: var(--mono);
+    font-size: .78rem;
+    color: var(--gray-500);
+  }
+  .meta b { color: var(--slate); font-weight: 500; }
+  .status {
+    display: inline-block;
+    padding: .1rem .5rem;
+    border: 1px solid var(--clay);
+    color: var(--clay);
+    border-radius: 2px;
+    font-size: .72rem;
+    letter-spacing: .04em;
+  }
+
+  /* ---------- links ---------- */
+  a { color: inherit; }
+  .xlink {
+    color: var(--clay);
+    text-decoration: none;
+    border-bottom: 1px solid var(--gray-300);
+    padding-bottom: 1px;
+    transition: border-color .15s;
+  }
+  .xlink:hover { border-bottom-color: var(--clay); }
+
+  /* ---------- tables ---------- */
+  .scroll { overflow-x: auto; margin: 0 0 1.2rem; }
+  table { border-collapse: collapse; width: 100%; font-size: .87rem; }
+  th, td { text-align: left; padding: .5rem .7rem; border-bottom: 1px solid var(--gray-300); vertical-align: top; }
+  th {
+    font-family: var(--mono);
+    font-size: .7rem;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    color: var(--gray-500);
+    border-bottom: 1px solid var(--slate);
+    white-space: nowrap;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  td code, th code { white-space: nowrap; }
+
+  /* ---------- risk table gets weight ---------- */
+  .risk-panel {
+    background: var(--surface);
+    border: 1px solid var(--gray-300);
+    border-left: 3px solid var(--clay);
+    padding: 1.2rem 1.4rem .4rem;
+    margin-bottom: 1.2rem;
+  }
+  .risk-panel table { font-size: .88rem; }
+  .sev { font-family: var(--mono); font-size: .72rem; letter-spacing: .05em; white-space: nowrap; }
+  .sev-h { color: var(--clay); font-weight: 600; }
+  .sev-m { color: var(--gray-700); }
+  .sev-l { color: var(--gray-500); }
+
+  /* ---------- code ---------- */
+  code {
+    font-family: var(--mono);
+    font-size: .85em;
+    background: var(--gray-150);
+    padding: .08em .32em;
+    border-radius: 2px;
+  }
+  pre {
+    background: var(--surface);
+    border: 1px solid var(--gray-300);
+    border-radius: 3px;
+    padding: .9rem 1.1rem;
+    overflow-x: auto;
+    margin: 0 0 1.2rem;
+  }
+  pre code { background: none; padding: 0; font-size: .82rem; line-height: 1.55; }
+
+  /* ---------- ids and tags ---------- */
+  .rid {
+    font-family: var(--mono);
+    font-size: .78rem;
+    color: var(--slate);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .tag {
+    font-family: var(--mono);
+    font-size: .68rem;
+    color: var(--gray-500);
+    white-space: nowrap;
+  }
+  .must { font-family: var(--mono); font-size: .68rem; color: var(--clay); }
+  .should { font-family: var(--mono); font-size: .68rem; color: var(--gray-500); }
+
+  .req {
+    border-left: 2px solid var(--gray-300);
+    padding: .1rem 0 .1rem 1rem;
+    margin: 0 0 1.1rem;
+  }
+  .req .gwt { color: var(--gray-500); font-size: .9rem; font-style: italic; }
+
+  /* ---------- callouts ---------- */
+  .note {
+    background: var(--gray-150);
+    border-radius: 3px;
+    padding: .9rem 1.1rem;
+    margin: 0 0 1.2rem;
+    font-size: .92rem;
+  }
+  .note b { color: var(--slate); }
+  .quote {
+    border-left: 2px solid var(--clay);
+    padding-left: 1rem;
+    margin: 0 0 1.2rem;
+    color: var(--gray-700);
+    font-size: .92rem;
+  }
+
+  /* ---------- figures ---------- */
+  .svg-figure {
+    margin: 1.6rem 0 2rem;
+    padding: 1.2rem;
+    background: var(--surface);
+    border: 1px solid var(--gray-300);
+    border-radius: 3px;
+  }
+  .svg-figure svg { display: block; width: 100%; height: auto; }
+  .svg-figure figcaption {
+    font-family: var(--mono);
+    font-size: .73rem;
+    color: var(--gray-500);
+    margin-top: .9rem;
+    line-height: 1.5;
+  }
+
+  /* SVG classes bound to the palette */
+  .n-fill   { fill: var(--surface); stroke: var(--gray-500); stroke-width: 1.2; }
+  .n-alt    { fill: var(--gray-150); stroke: var(--gray-500); stroke-width: 1.2; }
+  .n-accent { fill: var(--surface); stroke: var(--clay);      stroke-width: 1.6; }
+  .n-ext    { fill: var(--surface); stroke: var(--gray-300);  stroke-width: 1.2; stroke-dasharray: 4 3; }
+  .zone     { fill: none; stroke: var(--gray-300); stroke-width: 1; stroke-dasharray: 3 3; }
+  .edge     { stroke: var(--gray-500); stroke-width: 1.2; fill: none; }
+  .edge-acc { stroke: var(--clay); stroke-width: 1.6; fill: none; }
+  .life     { stroke: var(--gray-300); stroke-width: 1; stroke-dasharray: 3 4; }
+  .t        { font-family: var(--sans); font-size: 13px; fill: var(--slate); }
+  .t-sm     { font-family: var(--sans); font-size: 11.5px; fill: var(--gray-700); }
+  .t-mono   { font-family: var(--mono); font-size: 11px; fill: var(--gray-500); }
+  .t-lbl    { font-family: var(--mono); font-size: 10.5px; fill: var(--gray-500); text-transform: uppercase; letter-spacing: .08em; }
+  .t-mid    { text-anchor: middle; }
+  .t-end    { text-anchor: end; }
+
+  /* ---------- misc ---------- */
+  .two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); gap: 0 2rem; }
+  .kv { font-family: var(--mono); font-size: .8rem; }
+  hr.soft { border: none; border-top: 1px solid var(--gray-300); margin: 2rem 0; }
+  .star { color: var(--clay); }
+  .term { font-family: var(--mono); font-size: .8rem; color: var(--slate); white-space: nowrap; }
+
+  @media print {
+    body { padding: 0; font-size: 10.5pt; }
+    h2 { page-break-after: avoid; }
+    .svg-figure, table, .risk-panel { page-break-inside: avoid; }
+  }
+</style>
+
+<div class="sheet">
+
+<header class="doc">
+  <p class="eyebrow">Specification &middot; standard depth</p>
+  <h1>skill-pack</h1>
+  <p class="lede">
+    Package fifteen personal Claude Code skills and the eight agents they dispatch into one git
+    repository that installs with a single <code>git clone</code>, loads as a skills-directory plugin
+    named <code>r</code>, and exposes every skill under an <code>/r:</code> namespace with a
+    consistent domain-first name.
+  </p>
+  <div class="meta">
+    <span><b>Status</b> <span class="status">draft</span></span>
+    <span><b>Owner</b> mirum8</span>
+    <span><b>Date</b> 2026-07-30</span>
+    <span><b>Depth</b> standard</span>
+    <span><b>Diagram</b> <a class="xlink" href="architecture.html">architecture.html &rarr;</a></span>
+  </div>
+</header>
+
+<section id="risks">
+  <h2>1 &middot; Recommendations &amp; risks</h2>
+  <p>
+    Placed first because this is the section that changes what gets built. Every risk below was found
+    by reading the fifteen source skills this session, not inferred from the shape of the problem.
+  </p>
+
+  <div class="risk-panel">
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th>id</th><th>Risk</th><th>L</th><th>Impact</th><th>Recommended action</th><th>Revisit trigger</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="rid">R-1</td>
+            <td>A blind find-and-replace corrupts prose. The pack contains 678 raw occurrences of the
+                old skill names but only 309 are actual references; <code>commit</code> appears 101
+                times and <code>refactor</code> 61 times mostly as ordinary English verbs.</td>
+            <td class="sev sev-h">H</td>
+            <td>Silent semantic damage across 82 files, invisible on review</td>
+            <td>Rename only via the four bounded patterns in <span class="rid">BR-3</span>. Never
+                <code>sed</code> a bare name.</td>
+            <td>Any rename script that matches a name not preceded by <code>/</code>, <code>`</code>,
+                or a known key</td>
+          </tr>
+          <tr>
+            <td class="rid">R-2</td>
+            <td><code>run-task</code>'s description is 2,174 characters against a 1,536-character
+                listing cap, so 638 characters — including its
+                <code>--light/--standard/--full</code> triggers — never reach the model that decides
+                whether to load it.</td>
+            <td class="sev sev-h">H</td>
+            <td>The skill under-triggers today, and the cause is invisible</td>
+            <td>Rewrite the description to fit the cap, key use case first, before packing.</td>
+            <td>Any description exceeding 1,536 characters</td>
+          </tr>
+          <tr>
+            <td class="rid">R-3</td>
+            <td>The pack's own review pipeline depends on an <em>external</em> plugin:
+                <code>code-adversarial</code> shells out to <code>codex:adversarial-review</code> from
+                the <code>openai-codex</code> marketplace. A skills-directory plugin has no
+                dependency-declaration mechanism.</td>
+            <td class="sev sev-m">M</td>
+            <td>A fresh machine gets a pipeline that fails partway through</td>
+            <td>README prerequisite plus a fail-loudly runtime check in the skill.
+                <span class="rid">FR-15</span> holds the runtime check for v2, gated on rollout step 7.</td>
+            <td>Claude Code gaining dependency declarations for skills-dir plugins</td>
+          </tr>
+          <tr>
+            <td class="rid">R-4</td>
+            <td><b>Permanent</b> dual-run: every packed skill exists twice under two names — flat
+                <code>~/.claude/skills/commit</code> and packed <code>/r:git-commit</code> — for as
+                long as the pack lives. An edit made to the wrong copy is lost work with no error, and
+                the descriptions of both are in the listing, so the model can route to either.</td>
+            <td class="sev sev-h">H</td>
+            <td>Edits appear not to take effect; duplicated descriptions compete for the same task</td>
+            <td><b>Accepted risk</b> (<span class="rid">ADR-13</span>) — the originals are never
+                deleted, by decision. Mitigated by one rule: <b>only the pack is ever edited.</b>
+                <span class="rid">FR-17</span>'s pre-push script reports any original that has drifted
+                from its packed twin beyond the rename itself.</td>
+            <td>The first edit that lands in a flat original, or the first observed mis-route between a
+                pair</td>
+          </tr>
+          <tr>
+            <td class="rid">R-5</td>
+            <td>No CI. The user declined the <code>claude plugin validate</code> workflow, so a
+                malformed <code>plugin.json</code> or an over-cap description reaches
+                <code>main</code> and is only discovered by a broken session.</td>
+            <td class="sev sev-m">M</td>
+            <td>Whole pack silently fails to load; every <code>/r:</code> command disappears</td>
+            <td><b>Accepted risk</b> (<span class="rid">ADR-10</span>), now with a real mitigation
+                rather than an asserted one: <span class="rid">FR-17</span> makes the local pre-push
+                validation script a deliverable, and it is what must be run before every push.</td>
+            <td>The first load failure that reaches a second machine, or any push made without running
+                the script</td>
+          </tr>
+          <tr>
+            <td class="rid">R-6</td>
+            <td><code>spec-to-todo</code>'s frontmatter is invalid under strict YAML — its
+                unquoted description contains <code>Stack-agnostic: it follows…</code>. Claude Code
+                tolerates it; a linter, a validator, or any future stricter parser will not.</td>
+            <td class="sev sev-m">M</td>
+            <td>One skill fails to load after an upstream parser change</td>
+            <td>Normalise all fifteen to block scalars (<code>&gt;-</code>) during packing.
+                <span class="rid">FR-8</span>.</td>
+            <td>Any skill whose frontmatter fails <code>yaml.safe_load</code></td>
+          </tr>
+          <tr>
+            <td class="rid">R-7</td>
+            <td>The always-on cost of the pack is 15,186 characters of skill descriptions
+                (&asymp;3,796 tokens) present in every session in every project, because the pack
+                installs at personal scope.</td>
+            <td class="sev sev-l">L</td>
+            <td>A fixed context tax on unrelated work</td>
+            <td>Accept for v1; the descriptions are what make the skills trigger. Trim only if the
+                listing budget starts evicting entries.</td>
+            <td>Total listing cost above &asymp;6,000 tokens, or any skill dropped from the listing</td>
+          </tr>
+          <tr>
+            <td class="rid">R-8</td>
+            <td>380 KB of the 1,257 KB pack is vendored third-party HTML
+                (<code>html-effectiveness</code>) carrying its own <code>LICENSE</code>,
+                <code>CODE_OF_CONDUCT.md</code> and <code>SECURITY.md</code>.</td>
+            <td class="sev sev-l">L</td>
+            <td>Most of the repo by volume is someone else's work; licence obligations travel with it</td>
+            <td>Keep it (<span class="rid">ADR-9</span>), preserve the upstream <code>LICENSE</code>
+                verbatim, and record provenance in the README.</td>
+            <td>Upstream relicensing, or the vendored tree exceeding half the repo</td>
+          </tr>
+          <tr>
+            <td class="rid">R-9</td>
+            <td>Two skills promise in prose what nothing enforces. <code>code-bugs</code> and
+                <code>code-quality</code> both state they only report and never edit, and
+                <code>tests-write</code> is JVM-only yet auto-fires on any task. The frontmatter fields
+                that would make those true — <code>disallowed-tools</code> and <code>paths</code> —
+                exist and are deliberately not used in v1.</td>
+            <td class="sev sev-m">M</td>
+            <td>A report-only skill edits code; a JVM skill loads on unrelated work and spends context</td>
+            <td><b>Accepted for v1</b> (<span class="rid">ADR-14</span>) because using them is a
+                behaviour change and <span class="rid">ADR-12</span> bars those from the rename diff.
+                <span class="rid">FR-18</span> holds the work for v2.</td>
+            <td>The first time a report-only skill modifies a file, or v1 shipping and proving stable</td>
+          </tr>
+          <tr>
+            <td class="rid">R-10</td>
+            <td>The install shape is a symlink: the repo lives in a working directory and
+                <code>~/.claude/skills/r</code> points at it. Symlinked <em>skill</em> entries are
+                documented and proven — two are in use on this machine today. Symlinked
+                <em>plugin</em> discovery is not documented anywhere, and it is what
+                <span class="rid">FR-1</span> depends on.</td>
+            <td class="sev sev-h">H</td>
+            <td>If <code>@skills-dir</code> discovery does not follow the symlink to
+                <code>.claude-plugin/plugin.json</code>, the manifest is never read, the
+                <code>r</code> namespace never exists, and all fifteen skills either fail to load or
+                load unnamespaced and collide with the originals kept by
+                <span class="rid">FR-14</span></td>
+            <td><b>Two commands, in this order, before any rename work.</b> First
+                <code>claude --plugin-dir &lt;repo&gt;</code>, which loads a plugin "directly without
+                requiring installation" and touches nothing on disk: if <code>/r:git-commit</code>
+                resolves there, the manifest, the namespace and the layout are all proven. Only then
+                symlink and check <code>claude plugin list</code> for <code>r@skills-dir</code>. The
+                two commands isolate the failure — manifest broken versus symlink not followed — which
+                a single post-install check cannot tell apart, since both present identically as a
+                namespace that simply does not exist.
+                <span class="tag">[verified: plugins docs, read 2026-07-30]</span> Fall back to
+                cloning in place at <code>~/.claude/skills/r</code>, the documented shape, which costs
+                only the working-directory convenience.</td>
+            <td>Checked once at first install; re-check if Claude Code changes plugin discovery</td>
+          </tr>
+          <tr>
+            <td class="rid">R-11</td>
+            <td><span class="rid">FR-22</span> makes the Codex step skippable, which reverses today's
+                hard stop. That is a behaviour change inside a pipeline this project otherwise only
+                repackages, and the pipeline is declared immutable with two encodings — the workflow
+                script and <code>references/prose-pipeline.md</code> — that must change together,
+                behind the very guard hook <span class="rid">FR-20</span> ships.</td>
+            <td class="sev sev-m">M</td>
+            <td>The two engines diverge silently if only one encoding is edited, so a review run through
+                the workflow and one run through the prose path stop meaning the same thing. And it sits
+                against <span class="rid">ADR-12</span>/<span class="rid">ADR-14</span>, which bar
+                behaviour changes from the rename diff — so a bug here is attributed to the rename</td>
+            <td>Land <span class="rid">FR-22</span> as its own commit, never mixed into the rename
+                diff, with both encodings changed together and the control-flow test asserting the
+                skipped path. Alternatively defer it to v2 at the cost of requiring Codex on every
+                machine.</td>
+            <td>Any divergence between the two encodings, or the first run that reports a Codex step
+                without one having happened</td>
+          </tr>
+          <tr>
+            <td class="rid">R-12</td>
+            <td><span class="rid">FR-21</span> makes <code>install.sh</code> run package-manager
+                commands. The previous draft's security control stated the opposite in as many words —
+                that the install step runs nothing and only clones and prints — and that control has
+                been rewritten, not quietly dropped.</td>
+            <td class="sev sev-m">M</td>
+            <td>Installing the pack now mutates the machine beyond the Claude tree, and couples install
+                to Homebrew and therefore to macOS. A reader who trusted the old control would be
+                wrong about what running the script does</td>
+            <td>Echo every command before running it; ship <code>--dry-run</code> and
+                <code>--no-deps</code> (<span class="rid">FR-21</span>); never install silently. The
+                pack's own scripts remain in-repo and reviewable — what changed is that
+                third-party tooling is now fetched, not that the pack executes anything hidden.</td>
+            <td>Any non-macOS install target, or a prerequisite that stops being installable by one
+                package-manager line</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="note">
+    <b>Research honesty.</b> This spec's external claims come from serial web lookups of the Claude
+    Code documentation and one reference repository, <em>not</em> from the three-agent parallel
+    research fan-out that standard depth normally runs — this session's instructions forbid
+    subagents. Coverage of prior art is therefore narrower than usual. Every third-party claim
+    carries a confidence tag; untagged sentences are statements about this repository, which was read
+    directly.
+  </div>
+</section>
+
+<section id="problem">
+  <h2>2 &middot; Problem, goals &amp; non-goals</h2>
+
+  <h3>Who hurts, and how much</h3>
+  <p>
+    Fifteen skills and eight agents currently live as loose directories in
+    <code>~/.claude/skills/</code> and <code>~/.claude/agents/</code> on one machine. They are not
+    version-controlled as a unit, they cannot be installed anywhere else without copying
+    directories by hand, and their names follow three different conventions at once — verb-first
+    (<code>write-tests</code>, <code>find-bugs</code>), noun-first
+    (<code>claudemd-compact</code>, <code>local-scan</code>), and bare verbs
+    (<code>commit</code>, <code>refactor</code>). Nothing distinguishes them in the
+    <code>/</code> menu from the twenty-odd unrelated skills sitting beside them.
+  </p>
+  <p>
+    The concrete costs today: a second machine gets none of them; a rename means hand-editing
+    cross-references with no way to find them all; and there is no artefact that says which skills
+    depend on which, so removing one is guesswork. The dependency graph is real and dense —
+    <code>post-task-review</code> alone references <code>local-scan</code> 22 times.
+  </p>
+
+  <h3>Goals</h3>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Goal</th><th>Metric</th></tr></thead>
+      <tbody>
+        <tr><td>One-command install on a new machine</td><td>Exactly one <code>git clone</code>; zero manual file copies; zero marketplace registration</td></tr>
+        <tr><td>Every packed skill reachable under one namespace</td><td>15 of 15 resolve as <code>/r:&lt;name&gt;</code> after one session restart</td></tr>
+        <tr><td>One naming convention</td><td>15 of 15 names match <code>&lt;domain&gt;-&lt;action&gt;</code>, &le;3 kebab segments</td></tr>
+        <tr><td>No dangling cross-references</td><td>0 references to a skill that is neither packed, bundled with Claude Code, nor a documented external prerequisite</td></tr>
+        <tr><td>Prose survives the rename intact</td><td>369 non-reference occurrences of old names unchanged, byte for byte</td></tr>
+        <tr><td>Skill edits take effect without reinstalling</td><td><code>SKILL.md</code> edits live in the current session; component changes need one <code>/reload-plugins</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Non-goals</h3>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Not doing</th><th>Revisit when</th></tr></thead>
+      <tbody>
+        <tr><td>Publishing to a plugin marketplace or the official plugin catalogue</td><td>Someone other than the maintainer needs discovery rather than a clone URL</td></tr>
+        <tr><td>An <code>npx</code>-style installer that copies editable files into a project</td><td>A project needs skills checked into <em>its</em> repo rather than the maintainer's home directory</td></tr>
+        <tr><td>Packing the <code>sdd-*</code> family, the three <code>html*</code> skills, <code>sonar</code>, or <code>htmx</code></td><td>A packed skill acquires a real call to one of them (none exists today — see <span class="rid">ADR-7</span>)</td></tr>
+        <tr><td>Vendoring a copy of <code>test-app</code></td><td>Never for a generic pack: it is generated per project by <code>test-app-create</code> and a vendored copy would carry one repo's stack assumptions everywhere</td></tr>
+        <tr><td>Rewriting any skill's behaviour or prompt logic</td><td>After the pack ships and the rename is proven; behaviour changes and a 309-reference rename must not land in the same diff</td></tr>
+        <tr><td>CI validation on push</td><td>The first load failure that reaches a second machine (<span class="rid">R-5</span>). Replaced by a local pre-push script, <span class="rid">FR-17</span>.</td></tr>
+        <tr><td>Deleting the fifteen original flat skills</td><td><b>Never, by decision</b> (<span class="rid">ADR-13</span>). Both copies coexist permanently; the cost is <span class="rid">R-4</span>.</td></tr>
+        <tr><td>Making the repository public in v1</td><td>When the pack is proven in daily use. The flip is gated on the secret audit, not on a date.</td></tr>
+        <tr><td>Multi-user or team distribution, access control, telemetry</td><td>A second person installs the pack</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="domain">
+  <h2>3 &middot; Business domain</h2>
+
+  <h3>Narrative</h3>
+  <p>
+    An <em>agent skill</em> is a markdown file of instructions that an LLM coding agent loads on
+    demand. Claude Code discovers skills from directories, keeps only each skill's short
+    <code>description</code> permanently in context, and loads the full body only when the skill is
+    invoked — by the user typing <code>/name</code>, or by the model deciding the description matches
+    the task. That last point is what makes this domain unusual: <strong>the product's routing layer
+    is a language model reading prose.</strong> A skill with a vague description is not a
+    documentation problem, it is a dispatch failure.
+  </p>
+  <p>
+    Nobody pays anybody here. The economics are context and attention: every description costs tokens
+    in every session forever, while every skill body costs nothing until used. That asymmetry is the
+    whole design pressure — descriptions must be short enough to afford and specific enough to route
+    correctly, and bodies can be as long as they need to be. A pack of fifteen skills is therefore
+    a shared budget problem, not fifteen independent files.
+  </p>
+  <p>
+    What the maintainer actually does all day: invokes these skills against real repositories, notices
+    one mis-fires or goes stale, edits the markdown, and wants the edit to apply immediately and to
+    exist on every machine. The risk sits in silent failure — a skill that stops triggering, or
+    triggers instead of a better one, produces no error. It just quietly does not happen.
+  </p>
+
+  <h3>Actors</h3>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Actor</th><th>Goal</th><th>Frequency</th><th>Authority &amp; limits</th><th>What hurts today</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><b>Maintainer</b> (mirum8)</td>
+          <td>Author and evolve the skills; have them present everywhere</td>
+          <td>Daily</td>
+          <td>Full write access; sole decision-maker on naming and scope</td>
+          <td>No versioning as a unit; renames are unsafe; second machine has nothing</td>
+        </tr>
+        <tr>
+          <td><b>Claude Code skill loader</b></td>
+          <td>Discover directories, register namespaces, enforce the listing budget</td>
+          <td>Every session start, plus <code>/reload-plugins</code></td>
+          <td>Decides what exists; silently truncates descriptions at 1,536 chars; cannot be configured per skill beyond visibility overrides</td>
+          <td>Nothing — but it is the component whose rules the pack must obey exactly</td>
+        </tr>
+        <tr>
+          <td><b>The model as router</b></td>
+          <td>Pick the right skill for the task from descriptions alone</td>
+          <td>Every turn</td>
+          <td>Chooses freely among all listed skills; sees only description text, never the body</td>
+          <td>Ambiguous or truncated descriptions; two skills whose descriptions overlap</td>
+        </tr>
+        <tr>
+          <td><b>A second machine</b> (or a rebuilt one)</td>
+          <td>Reach a known-good set of skills quickly</td>
+          <td>Rarely, urgently</td>
+          <td>Read-only consumer of a git ref</td>
+          <td>Today there is no path at all short of copying directories</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>The core process, as an event timeline</h3>
+  <p>
+    Past-tense events in order. <span class="star">&#9733;</span> marks pivotal events where
+    ownership or identity changes — these are where the module boundaries belong.
+  </p>
+  <pre><code>Skill Authored
+  → Skill Packed                      (moved under skills/, renamed, references rewritten)
+  → <span class="star">★</span> Pack Published              (pushed to the git remote — names become canonical here)
+  → Pack Cloned                       (git clone → ~/.claude/skills/r)
+  → <span class="star">★</span> Pack Discovered             (session start reads .claude-plugin/plugin.json → namespace "r" exists)
+  → Skills Listed                     (15 descriptions enter context, capped at 1,536 chars each)
+  → <span class="star">★</span> Skill Invoked               (user types /r:name, or the model routes to it)
+  → Skill Body Loaded
+  → Skill Executed
+  → Pack Updated                      (git pull → SKILL.md live immediately; other components need /reload-plugins)
+
+unhappy endings
+  → Pack Not Discovered               (plugin.json absent or malformed → the whole namespace is missing, no error shown)
+  → Skill Mis-routed                  (the model picks a neighbour whose description overlaps)
+  → Skill Never Listed                (description evicted by the listing budget)
+  → Reference Dangling                (a body calls /old-name, or a name outside the pack)
+  → Skill Retired                     (deleted or renamed — terminal)
+
+waiting points
+  ⏸ session start                     skills-dir plugins load on the NEXT session, never mid-session
+  ⏸ /reload-plugins                   required for agents/, hooks/, .mcp.json changes; NOT for SKILL.md
+  ⏸ workspace trust dialog            project scope only; personal scope has no gate</code></pre>
+
+  <h3>Entity lifecycles</h3>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Entity</th><th>States</th><th>Terminal</th></tr></thead>
+      <tbody>
+        <tr><td><b>Skill</b></td><td>authored → packed → published → discovered → listed → loaded → executed</td><td><code>retired</code> (deleted), <code>renamed</code> (superseded by a new name)</td></tr>
+        <tr><td><b>Pack</b></td><td>drafted → published → cloned → discovered → (updated)*</td><td><code>uninstalled</code> — literally <code>rm -rf</code>; the docs note "There is no <code>uninstall</code> step because nothing was installed from a marketplace" <span class="tag">[verified: code.claude.com/docs/en/plugins-reference, read 2026-07-30]</span></td></tr>
+        <tr><td><b>Reference</b> (one skill naming another)</td><td>authored → classified (reference vs prose) → rewritten → resolved</td><td><code>resolved</code> (target is packed/bundled), <code>documented-external</code>, <code>dangling</code> (a defect)</td></tr>
+        <tr><td><b>Agent</b></td><td>authored → packed → loaded → dispatchable</td><td><code>orphaned</code> — no packed skill dispatches it, so it is dead weight</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Glossary</h3>
+  <p>Class, directory and command names must match these terms exactly; renaming one without the other is a defect.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Term</th><th>Definition</th><th>Also called</th><th>Not to be confused with</th><th>Maps to</th></tr></thead>
+      <tbody>
+        <tr><td class="term">skill</td><td>A directory containing <code>SKILL.md</code>, optionally with <code>references/</code> and <code>scripts/</code></td><td>slash command</td><td>agent — a skill is instructions, an agent is a dispatchable worker with its own context</td><td><code>skills/&lt;name&gt;/</code></td></tr>
+        <tr><td class="term">skills-dir plugin</td><td>A folder inside a skills directory that contains <code>.claude-plugin/plugin.json</code>, loaded in place as <code>&lt;name&gt;@skills-dir</code> with no marketplace and no install step</td><td>—</td><td>marketplace plugin — that one is fetched and copied into a plugin cache</td><td><code>~/.claude/skills/r/</code></td></tr>
+        <tr><td class="term">namespace</td><td>The plugin name, prepended to every skill it contains</td><td>prefix</td><td>the skill's own <code>name</code> field</td><td><code>r</code> &rarr; <code>/r:git-commit</code></td></tr>
+        <tr><td class="term">description</td><td>The frontmatter field the model reads to decide whether to load a skill; permanently in context</td><td>trigger text</td><td>the skill body, which is loaded on demand and costs nothing until used</td><td><code>SKILL.md</code> frontmatter</td></tr>
+        <tr><td class="term">listing budget</td><td>The character allowance for all skill descriptions in context; each entry capped at 1,536 characters</td><td>skill listing</td><td>the model's context window as a whole</td><td><code>skillListingMaxDescChars</code></td></tr>
+        <tr><td class="term">progressive disclosure</td><td>Keeping <code>SKILL.md</code> short and moving detail into <code>references/</code> loaded only when needed</td><td>—</td><td>splitting one skill into several skills</td><td><code>references/*.md</code></td></tr>
+        <tr><td class="term">model-invoked</td><td>The model loads the skill because the description matched the task</td><td>auto-triggered</td><td>user-invoked — the user typed <code>/name</code></td><td><code>disable-model-invocation</code></td></tr>
+        <tr><td class="term">reference</td><td>An occurrence of a skill name that names the skill: <code>/name</code>, <code>`name`</code>, <code>Skill(name)</code>, or a <code>key: "name"</code> value</td><td>cross-reference</td><td>prose — the same word used as English (<code>commit</code>, <code>refactor</code>)</td><td><span class="rid">BR-3</span></td></tr>
+        <tr><td class="term">dangling reference</td><td>A reference whose target is not packed, not bundled with Claude Code, and not a documented external prerequisite</td><td>broken link</td><td>a deliberate "NOT for:" routing pointer, which names a skill in order to <em>exclude</em> it</td><td><span class="rid">FR-10</span></td></tr>
+        <tr><td class="term">agent</td><td>A markdown definition of a dispatchable subagent with its own tool set and context</td><td>subagent</td><td>skill</td><td><code>agents/&lt;name&gt;.md</code></td></tr>
+        <tr><td class="term">workflow</td><td>A JavaScript orchestration script a skill runs to spawn many agents deterministically</td><td>—</td><td>agent — a workflow spawns agents</td><td><code>*.workflow.js</code></td></tr>
+        <tr><td class="term">dual-run</td><td>The migration window in which flat skills and the packed pack are both installed</td><td>overlap window</td><td>the final state, which has only the pack</td><td><span class="rid">FR-14</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Business metrics</h3>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Metric</th><th>Today</th><th>Target</th></tr></thead>
+      <tbody>
+        <tr><td>Skills reachable on a fresh machine</td><td>0</td><td>15</td></tr>
+        <tr><td>Naming conventions in simultaneous use</td><td>3</td><td>1</td></tr>
+        <tr><td>Dangling cross-references</td><td>309 references pointing at unprefixed names</td><td>0</td></tr>
+        <tr><td>Descriptions over the 1,536-character cap</td><td>1 (<code>run-task</code>, at 2,174)</td><td>0</td></tr>
+        <tr><td>Frontmatter blocks failing strict YAML</td><td>1 (<code>spec-to-todo</code>)</td><td>0</td></tr>
+        <tr><td>Always-on listing cost</td><td>15,186 chars &asymp; 3,796 tokens</td><td>No worse; a hard ceiling at <span class="rid">NFR-1</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="prior-art">
+  <h2>4 &middot; Prior art</h2>
+
+  <h3>Problem framing</h3>
+  <p>
+    The category is <strong>agent skill distribution</strong> — packaging prompt-and-instruction
+    assets so an agent runtime discovers them, with versioning and an install path. It is adjacent to
+    editor-extension packaging and to dotfile management, and it borrows from both: a manifest and a
+    namespace from the former, clone-in-place and live editing from the latter. Claude Code skills
+    follow the Agent Skills open standard
+    <span class="tag">[verified: code.claude.com/docs/en/skills, read 2026-07-30]</span>, so the
+    format is portable even though the packaging mechanism here is Claude-Code-specific.
+  </p>
+
+  <h3>Must-have gates</h3>
+  <ol>
+    <li>Produces a real namespace prefix, so the skills are visually separable in the <code>/</code> menu. Non-negotiable: this is the user's stated requirement.</li>
+    <li>No marketplace publication and no submission to any central catalogue.</li>
+    <li>Install is one command on a fresh machine.</li>
+    <li>Editing a packed <code>SKILL.md</code> affects the current session, because the maintainer edits these daily.</li>
+    <li>Carries agents and executable scripts, not markdown alone — the pack includes <code>.workflow.js</code>, Python and shell.</li>
+  </ol>
+
+  <h3>Candidates</h3>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Solution</th><th>Type</th><th>Cost</th><th>Maturity signal</th><th>Verdict</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><b>Skills-directory plugin</b><br><span class="tag">clone into <code>~/.claude/skills/r/</code></span></td>
+          <td>Built-in Claude Code mechanism</td>
+          <td>Free</td>
+          <td>Documented with an explicit "no marketplace and no install step" guarantee <span class="tag">[verified: plugins-reference, read 2026-07-30]</span></td>
+          <td><b>Chosen.</b> Passes all five gates.</td>
+        </tr>
+        <tr>
+          <td><b>Marketplace plugin</b><br><span class="tag">own <code>marketplace.json</code>, self-hosted</span></td>
+          <td>Built-in</td>
+          <td>Free</td>
+          <td>What <code>mattpocock/skills</code> and the local <code>openai-codex</code> install use <span class="tag">[verified: github.com/mattpocock/skills, read 2026-07-30]</span></td>
+          <td>Out — fails gates 2 and 4. Adds a registration step, and the plugin is copied into a cache rather than read in place, so edits do not land where you made them.</td>
+        </tr>
+        <tr>
+          <td><b>Flat personal skills</b><br><span class="tag">the status quo</span></td>
+          <td>Built-in</td>
+          <td>Free</td>
+          <td>Currently in use; 54 directories in <code>~/.claude/skills/</code></td>
+          <td>Out — fails gate 1. No namespace exists, which is the entire ask.</td>
+        </tr>
+        <tr>
+          <td><b><code>npx skills add</code></b><br><span class="tag">file-copy installer</span></td>
+          <td>Third-party npm package</td>
+          <td>Free <span class="tag">[unverified]</span></td>
+          <td>Offered as one of three install routes by <code>mattpocock/skills</code> <span class="tag">[verified: github.com/mattpocock/skills, read 2026-07-30]</span></td>
+          <td>Out — fails gate 1, and copying files into a project makes the maintainer's home directory not the source of truth. Also a non-goal.</td>
+        </tr>
+        <tr>
+          <td><b>Dotfile symlink farm</b><br><span class="tag">GNU Stow or equivalent</span></td>
+          <td>Generic tooling — the boring baseline</td>
+          <td>Free</td>
+          <td>Decades old, universally available</td>
+          <td>Out — fails gate 1: a farm of per-skill symlinks gives no namespace, so the fifteen land flat and collide with the originals <span class="rid">FR-14</span> keeps forever. <b>Note the distinction, since the chosen install does use a symlink</b> (<span class="rid">ADR-11</span>): <em>one</em> link to the pack root keeps the manifest, the namespace and the plugin boundary intact, whereas <em>fifteen</em> links bypass the manifest entirely. The rejection is of the farm, not of symlinks.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Comparison matrix</h3>
+  <p>Every axis here can change the verdict; axes that could not were deleted.</p>
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Axis</th><th>skills-dir plugin</th><th>marketplace plugin</th><th>flat skills</th><th>npx installer</th><th>symlink farm</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Namespace prefix</td><td><b>yes</b></td><td>yes</td><td>no</td><td>no</td><td>no</td></tr>
+        <tr><td>Marketplace / registration needed</td><td><b>none</b></td><td>required</td><td>none</td><td>none</td><td>none</td></tr>
+        <tr><td>Install command count</td><td><b>1 clone</b></td><td>2 (add + install)</td><td>n copies</td><td>1</td><td>1 + config</td></tr>
+        <tr><td>Loaded in place vs copied to cache</td><td><b>in place</b></td><td>copied</td><td>in place</td><td>copied</td><td>in place</td></tr>
+        <tr><td>Edit takes effect in current session</td><td><b>yes, for SKILL.md</b></td><td>no</td><td>yes</td><td>yes</td><td>yes</td></tr>
+        <tr><td>Carries agents / hooks / scripts</td><td><b>yes</b></td><td>yes</td><td>no (skills only)</td><td>partial</td><td>yes</td></tr>
+        <tr><td>Versioned as one unit</td><td><b>git</b></td><td>manifest + git</td><td>no</td><td>package version</td><td>git</td></tr>
+        <tr><td>Can declare a dependency on another plugin</td><td><b>no</b></td><td>yes</td><td>no</td><td>no</td><td>no</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    That last row is the one real cost of the choice, and it is what <span class="rid">R-3</span>
+    records: the chosen mechanism cannot declare that <code>code-adversarial</code> needs the
+    <code>codex</code> plugin. The marketplace route <em>can</em>
+    (<code>allowCrossMarketplaceDependenciesOn</code>)
+    <span class="tag">[verified: plugin-marketplaces, read 2026-07-30]</span>, and it was still
+    rejected, because gates 2 and 4 matter more than one README line.
+  </p>
+
+  <h4>Known weakness, one per shortlisted candidate</h4>
+  <ul>
+    <li><b>Skills-directory plugin</b> — no dependency declaration; and at project scope it "load[s] only from the <code>.claude/skills/</code> of the directory where you start Claude Code", not walking up to the repo root, so launching from a subdirectory silently misses it <span class="tag">[verified: plugins-reference, read 2026-07-30]</span>. Personal scope avoids this, which is why v1 uses it.</li>
+    <li><b>Marketplace plugin</b> — edits do not apply to the cached copy, so the daily edit loop breaks.</li>
+    <li><b>Flat personal skills</b> — no unit of versioning; a rename has no safe mechanism.</li>
+  </ul>
+
+  <h3>Reference architecture distilled</h3>
+  <p>
+    Only one comparable pack was read (<code>mattpocock/skills</code>), so this is a single data
+    point rather than a distilled pattern across many — stated plainly rather than dressed up as a
+    consensus. The components it has that this pack also needs: a top-level <code>skills/</code>
+    directory, one directory per skill with <code>SKILL.md</code>, a <code>.claude-plugin/</code>
+    manifest directory, a README that states the install command, and a
+    user-invoked / model-invoked distinction per skill
+    <span class="tag">[verified: github.com/mattpocock/skills, read 2026-07-30]</span>.
+  </p>
+
+  <h3>What we copy, and what we deliberately do differently</h3>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>From <code>mattpocock/skills</code></th><th>Decision</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td>Top-level <code>skills/</code> directory, one folder per skill</td><td><b>Copy</b></td><td>Required by the plugin loader anyway.</td></tr>
+        <tr><td>Category subdirectories (<code>skills/engineering/</code>, <code>skills/productivity/</code>)</td><td><b>Differ</b> — flat</td><td>Fifteen skills do not need a taxonomy, and the domain-first names already group them in the one place grouping is visible: the <code>/</code> menu. See <span class="rid">ADR-4</span>.</td></tr>
+        <tr><td>Three parallel install routes (plugin, npx, tinkerer)</td><td><b>Differ</b> — one</td><td>Their README warns "Pick one — installing both leaves you with every skill twice." One route cannot be got wrong.</td></tr>
+        <tr><td>No namespace prefix on skill names</td><td><b>Differ</b> — <code>r:</code></td><td>The user's requirement; also the only thing that separates these fifteen from the ~40 other skills present.</td></tr>
+        <tr><td>A <code>/setup-…</code> skill run once per repository</td><td><b>Differ</b> — omit</td><td>No packed skill needs per-repository configuration. <code>test-app-create</code> already fills that role where it is needed.</td></tr>
+        <tr><td>Marketplace publication</td><td><b>Differ</b> — none</td><td>Explicit user requirement.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Build / buy / extend</h3>
+  <p>
+    <b>Extend</b> — the mechanism already exists in Claude Code and needs a manifest, a directory
+    move and a rename. Nothing is being built. <b>Reversibility:</b> under an hour. Delete
+    <code>~/.claude/skills/r/</code> and the pack is gone with no uninstall step; the fifteen source
+    directories are untouched during dual-run. What would make us undo it: Claude Code changing
+    skills-dir plugin discovery, or the namespace proving noisy enough to type around daily.
+  </p>
+
+  <h3>Sources</h3>
+  <ul>
+    <li><a class="xlink" href="https://code.claude.com/docs/en/plugins-reference">Plugins reference</a> — skills-dir plugins, plugin manifest schema, namespacing, <code>plugin init</code>. Read 2026-07-30.</li>
+    <li><a class="xlink" href="https://code.claude.com/docs/en/skills">Skills</a> — frontmatter fields, command-name resolution, 1,536-character listing cap, nested discovery. Read 2026-07-30.</li>
+    <li><a class="xlink" href="https://code.claude.com/docs/en/plugin-marketplaces">Plugin marketplaces</a> — <code>marketplace.json</code> schema, reserved names, <code>claude plugin validate</code>. Read 2026-07-30.</li>
+    <li><a class="xlink" href="https://github.com/mattpocock/skills">mattpocock/skills</a> — layout, install routes, category folders. Read 2026-07-30.</li>
+    <li>Local inspection of <code>~/.claude/skills/</code> and <code>~/.claude/agents/</code>, and <code>~/.claude/settings.json</code> (<code>enabledPlugins</code> confirming <code>codex@openai-codex</code> resolves as <code>/codex:*</code>). Read 2026-07-30.</li>
+  </ul>
+</section>
+
+<section id="requirements">
+  <h2>5 &middot; Requirements</h2>
+
+  <h3>Functional</h3>
+
+  <div class="req">
+    <p><span class="rid">FR-1</span> <span class="must">must</span> — The pack <b>shall</b> contain
+    <code>.claude-plugin/plugin.json</code> with <code>"name": "r"</code> at the repository root, so
+    that the repo is discovered as a skills-directory plugin when reached from a skills directory.</p>
+    <p class="gwt">Given the repo cloned to a working directory of the maintainer's choosing and
+    symlinked as <code>~/.claude/skills/r</code>, when a new session starts, then <code>/plugin</code>
+    lists <code>r@skills-dir</code> and <code>/r:git-commit</code> resolves.</p>
+    <p class="gwt">The symlink is load-bearing and only half documented. A
+    <code>&lt;skill-name&gt;</code> entry at the personal location "can be a symlink to a directory
+    elsewhere on disk. Claude Code follows the symlink and reads <code>SKILL.md</code> from the target
+    directory" <span class="tag">[verified: skills docs, read 2026-07-30]</span> — but nothing states
+    that <code>@skills-dir</code> <em>plugin</em> discovery follows a symlinked entry to find
+    <code>.claude-plugin/plugin.json</code>. The marketplace symlink rules do not apply here, because a
+    skills-directory plugin is "discovered in place rather than copied into the plugin cache"
+    <span class="tag">[verified: plugins-reference, read 2026-07-30]</span>. Carried as
+    <span class="rid">R-10</span>.</p>
+  </div>
+
+  <div class="req">
+    <p><span class="rid">FR-2</span> <span class="must">must</span> — The pack <b>shall</b> place all
+    fifteen skills as immediate children of <code>skills/</code>, each independently invocable.</p>
+    <p class="gwt">Given the pack is discovered, when the user types <code>/r:</code>, then all
+    fifteen names appear in autocomplete and any one can be invoked without invoking another.</p>
+  </div>
+
+  <div class="req">
+    <p><span class="rid">FR-3</span> <span class="must">must</span> — Each skill directory
+    <b>shall</b> be named per <span class="rid">BR-1</span>, following the rename map in
+    <span class="rid">BR-2</span>.</p>
+    <p class="gwt">Given the rename map, when the pack is built, then every directory under
+    <code>skills/</code> matches <code>^[a-z0-9]+(-[a-z0-9]+){0,2}$</code> and equals its map target.</p>
+  </div>
+
+  <div class="req">
+    <p><span class="rid">FR-4</span> <span class="must">must</span> — <b>When</b> a skill body
+    contains a reference to a renamed skill, the build <b>shall</b> rewrite it to the
+    <code>r:</code>-prefixed new name, and <b>shall</b> leave every non-reference occurrence
+    byte-identical.</p>
+    <p class="gwt">Given 678 raw occurrences of old names of which 309 are references, when the
+    rewrite runs, then exactly 309 occurrences change and a diff of the remaining 369 is empty.</p>
+  </div>
+
+  <div class="req">
+    <p><span class="rid">FR-5</span> <span class="must">must</span> — The pack <b>shall</b> ship an
+    <code>agents/</code> directory containing the eight agents that packed skills dispatch.</p>
+    <p class="gwt">Given a fresh machine with only the pack installed, when
+    <code>/r:task-review</code> dispatches <code>bug-hunter-ui</code>, then the agent resolves rather
+    than failing as unknown.</p>
+  </div>
+
+  <div class="req">
+    <p><span class="rid">FR-6</span> <span class="must">must</span> — The pack <b>shall</b> provide an
+    install script that clones or updates the repo, links it as <code>~/.claude/skills/r</code>,
+    provisions the mandatory prerequisites of <span class="rid">FR-21</span>, removes the superseded
+    global guard registration per <span class="rid">FR-20</span>, and reports the next required
+    action.</p>
+    <p class="gwt">Given a machine with git and Claude Code, when the script runs on a clean machine,
+    then the repo is present at its working location, <code>~/.claude/skills/r</code> resolves to it,
+    every mandatory prerequisite reports present, and the script prints that a session restart is
+    required; when it runs over an existing install, then it updates and prints that
+    <code>/reload-plugins</code> is required for non-<code>SKILL.md</code> changes.</p>
+    <p class="gwt">The script no longer merely clones and prints — <span class="rid">FR-21</span> makes
+    it run package-manager commands, which is a deliberate reversal of an earlier control and is carried
+    as <span class="rid">R-12</span>.</p>
+  </div>
+
+  <div class="req">
+    <p><span class="rid">FR-7</span> <span class="must">must</span> — Every <code>SKILL.md</code>
+    frontmatter block <b>shall</b> parse under a strict YAML parser.</p>
+    <p class="gwt">Given <code>spec-to-todo</code>'s current unquoted description containing
+    <code>Stack-agnostic: it follows…</code>, when it is converted to a <code>&gt;-</code> block
+    scalar, then <code>yaml.safe_load</code> succeeds for all fifteen.</p>
+  </div>
+
+  <div class="req">
+    <p><span class="rid">FR-8</span> <span class="must">must</span> — <b>If</b> a skill's
+    <code>description</code> <b>plus its <code>when_to_use</code></b> exceeds 1,536 characters,
+    <b>then</b> the build <b>shall</b> fail rather than ship a silently truncated description.</p>
+    <p class="gwt">Given <code>run-task</code>'s 2,174-character description, when the build runs before
+    it is rewritten, then the build fails naming the skill and the overage (638). Given a skill that
+    later adds <code>when_to_use</code>, then the check counts both fields together, because
+    <code>when_to_use</code> is "appended to <code>description</code> in the skill listing and counts
+    toward the 1,536-character cap" <span class="tag">[verified: skills docs, read 2026-07-30]</span>.
+    No skill uses that field today, which is why the measured 15,186 total is still correct.</p>
+  </div>
+
+  <div class="req">
+    <p><span class="rid">FR-9</span> <span class="must">must</span> — The pack <b>shall</b> contain no
+    dangling references: every skill name referenced in a body is packed, bundled with Claude Code, or
+    listed as an external prerequisite in the README.</p>
+    <p class="gwt">Given the reference inventory, when the check runs, then it reports zero
+    unclassified names; <code>/security-review</code> and <code>/simplify</code> classify as bundled,
+    <code>codex:adversarial-review</code> and <code>agent-browser</code> as documented external.</p>
+  </div>
+
+  <div class="req">
+    <p><span class="rid">FR-10</span> <span class="must">must</span> — The pack <b>shall</b> drop
+    <code>version:</code> from every <code>SKILL.md</code>.</p>
+    <p class="gwt">Given the four skills carrying <code>version:</code>, when the pack is built, then no
+    <code>SKILL.md</code> contains <code>version:</code> and the pack version lives in
+    <code>plugin.json</code> plus a git tag. <b>No longer conditional:</b> <code>version</code> is
+    absent from the documented frontmatter field list, and unlike <code>plugin.json</code> the skills
+    documentation carries no "unrecognized fields are ignored" clause — so it is an undocumented key of
+    unknown effect <span class="tag">[verified: skills docs, read 2026-07-30]</span>.</p>
+  </div>
+
+  <div class="req">
+    <p><span class="rid">FR-11</span> <span class="must">must</span> — The pack <b>shall</b> carry a
+    real eval suite for <b>every one of the fifteen skills</b> under
+    <code>skills/&lt;name&gt;/evals/</code>.</p>
+    <p class="gwt">Given only <code>git-commit</code> and <code>spec-brainstorm</code> have
+    <code>evals.json</code> today, when the pack ships, then those two are carried over unchanged and
+    thirteen new suites exist, each asserting at least that the skill triggers on its intended phrasing
+    and does <em>not</em> trigger on its nearest neighbour's. Placeholder or empty files do not
+    satisfy this.</p>
+    <p class="gwt">This is the one addition promoted <b>into v1</b>, and it is what turns the
+    "not instrumented" rows in &sect;13 into measurable ones: evals are the only mechanism that catches
+    a description drifting until it stops triggering.</p>
+  </div>
+
+  <div class="req">
+    <p><span class="rid">FR-12</span> <span class="should">should</span> — <b>Where</b> third-party
+    material is vendored, the pack <b>shall</b> preserve its <code>LICENSE</code> verbatim and record
+    provenance and retrieval date in the README.</p>
+    <p class="gwt">Given the 380 KB <code>html-effectiveness</code> tree, when the pack ships, then
+    its <code>LICENSE</code>, <code>CODE_OF_CONDUCT.md</code> and <code>SECURITY.md</code> are intact
+    and the README names its origin.</p>
+  </div>
+
+  <div class="req">
+    <p><span class="rid">FR-13</span> <span class="must">must</span> — The pack <b>shall</b> exclude
+    build artefacts from version control.</p>
+    <p class="gwt">Given two committed <code>__pycache__/*.pyc</code> files under
+    <code>post-task-review/scripts/</code>, when <code>.gitignore</code> is applied, then
+    <code>git status --porcelain --ignored</code> shows them ignored and no <code>.pyc</code> is
+    tracked.</p>
+  </div>
+
+  <div class="req">
+    <p><span class="rid">FR-14</span> <span class="must">must</span> — The fifteen original flat skills
+    <b>shall</b> remain installed and functional under their old names <b>permanently</b>. There is no
+    cut-over and no deletion step.</p>
+    <p class="gwt">Given both installed, when the user types <code>/commit</code>, then the flat skill
+    runs; when they type <code>/r:git-commit</code>, then the packed skill runs; and neither shadows the
+    other.</p>
+    <p class="gwt">Because both sets stay forever, the operating rule is not a schedule but an
+    invariant: <b>only the packed copy is ever edited.</b> <span class="rid">FR-17</span>'s script
+    reports any original that has drifted from its packed twin beyond the rename itself, which is the
+    only defence against <span class="rid">R-4</span>.</p>
+  </div>
+
+  <div class="req">
+    <p><span class="rid">FR-15</span> <span class="must">must</span> — The pack <b>shall</b> ship a
+    single <code>check-prereqs.sh</code> that reports every external prerequisite as
+    <b>mandatory</b> or <b>optional</b>, and <b>shall</b> exit non-zero <b>only</b> when a mandatory
+    one is missing.</p>
+    <p class="gwt">Given a machine, when the script runs, then it reports each of
+    <code>pmd</code>, <code>spotbugs</code>, <code>semgrep</code>, <code>python3</code>,
+    <code>node</code>, <code>gh</code> (present <em>and</em> authenticated), and
+    <code>agent-browser</code> as mandatory, and the <code>codex</code> plugin as optional; and it
+    prints the install command for anything missing. Given only the <code>codex</code> plugin missing,
+    then it warns and exits zero.</p>
+    <p class="gwt"><b>This requirement was rewritten, and the reason matters more than the text.</b>
+    It previously demanded per-skill prerequisite checking that <em>already exists upstream</em> and is
+    better than an install-time check, because it fires at the moment of need with the context to say
+    what is uncovered: <code>code-scan</code> ships
+    <code>scripts/check-tools.sh</code>, which names each analyzer, prints its <code>brew</code> line,
+    runs on a subset while telling the user which categories are therefore uncovered, and exits 1 when
+    none is available <span class="tag">[verified: local-scan/scripts/check-tools.sh, read 2026-07-30]</span>;
+    <code>gh-issues-fix</code> gates the whole loop on
+    <code>command -v gh &amp;&amp; gh auth status</code>
+    <span class="tag">[verified: fix-gh-issues/SKILL.md:53]</span>; and
+    <code>code-adversarial</code>'s wrapper exits 3 when the Codex companion is absent
+    <span class="tag">[verified: adversarial-review/scripts/run.sh:54]</span>. So this requirement
+    <b>documents and aggregates</b> those guards rather than replacing them. What it genuinely adds is
+    the one question they cannot answer between them — <em>"will this pack work on my machine
+    at all?"</em> — asked once, before the first failure.</p>
+    <p class="gwt">Promoted <b>into v1</b>, with <code>agent-browser</code> the only prerequisite that
+    had no guard of any kind.</p>
+  </div>
+
+  <div class="req">
+    <p><span class="rid">FR-16</span> <span class="must">must</span> — <b>Where</b> a skill's own text
+    states it must not fire on its own, the pack <b>shall</b> set
+    <code>disable-model-invocation: true</code> on it, so the stated rule is enforced by the harness
+    rather than by hope.</p>
+    <p class="gwt">Given <code>post-task-review</code>, whose body says "This routine is NOT
+    automatic&hellip; Never trigger it on your own", when it is packed as <code>task-review</code>,
+    then its frontmatter carries <code>disable-model-invocation: true</code> and the model cannot
+    auto-load it. Same for <code>task-run</code> and <code>gh-issues-fix</code>.</p>
+  </div>
+
+  <div class="req">
+    <p><span class="rid">FR-17</span> <span class="must">must</span> — The pack <b>shall</b> ship a
+    local pre-push validation script, and it <b>shall</b> be run before every push.</p>
+    <p class="gwt">Given the pack, when the script runs, then it executes every static check in
+    &sect;12 — manifest parses with <code>name == "r"</code>, fifteen skill directories at depth two,
+    names matching <span class="rid">BR-1</span> and the <span class="rid">BR-2</span> map, all
+    frontmatter valid YAML, no description over cap, zero dangling references, no <code>version:</code>
+    key, every bundled agent dispatched by some packed skill, no tracked <code>*.pyc</code> — plus the
+    <span class="rid">R-4</span> drift check comparing each flat original against its packed twin, and
+    exits non-zero naming every failure.</p>
+    <p class="gwt">This is the substance behind <span class="rid">ADR-10</span>: CI was declined, so the
+    same checks exist as a script run by hand. Every check is static and completes in under a second,
+    which is what makes declining CI survivable rather than merely cheaper.</p>
+  </div>
+
+  <div class="req">
+    <p><span class="rid">FR-18</span> <span class="should">should</span> <span class="tag">[deferred to v2]</span> —
+    The pack <b>shall</b> enforce in frontmatter what two skills currently only assert in prose:
+    <code>paths</code> to stop JVM-only skills auto-firing on unrelated work, and
+    <code>disallowed-tools</code> to make report-only skills genuinely unable to edit.</p>
+    <p class="gwt">Given <code>tests-write</code> and <code>code-scan</code>, which apply only to
+    <code>.java</code> and <code>.kt</code> sources,
+    when they carry <code>paths</code> globs for <code>**/*.java</code> and <code>**/*.kt</code>, then
+    Claude "loads the skill automatically only when working with files matching the patterns"
+    <span class="tag">[verified: skills docs, read 2026-07-30]</span>. Given <code>code-bugs</code> and
+    <code>code-quality</code>, whose own text says they never edit, when they carry
+    <code>disallowed-tools: Edit Write</code>, then those tools are removed from the pool while the skill
+    is active and the promise becomes structural rather than advisory.</p>
+    <p class="gwt">Deferred because it changes behaviour, which <span class="rid">ADR-12</span> keeps out
+    of the rename diff. The cost of deferring is <span class="rid">R-9</span>.</p>
+  </div>
+
+  <div class="req">
+    <p><span class="rid">FR-19</span> <span class="must">must</span> — The pack <b>shall</b> carry no
+    absolute path to a skill directory. Every such reference <b>shall</b> resolve through a substituted
+    variable instead.</p>
+    <p class="gwt">Given the 42 hard-coded references measured across twelve files in seven skills,
+    when the pack is built, then each of the 26 <b>self</b>-references uses
+    <code>${CLAUDE_SKILL_DIR}</code> and each of the 16 <b>cross-skill</b> references uses
+    <code>${CLAUDE_PLUGIN_ROOT}/skills/&lt;new-name&gt;/…</code>; and
+    <code>grep -rE '(\$HOME|~)"?/\.claude/skills/'</code> over the pack returns only the two
+    intentional originals inside the guard's <code>CANON</code>
+    (<span class="rid">FR-20</span>).</p>
+    <p class="gwt">The two variables are not interchangeable, which is the whole reason this
+    requirement exists rather than a single find-and-replace.
+    <code>${CLAUDE_SKILL_DIR}</code> is "the directory containing the skill's <code>SKILL.md</code>
+    file. For plugin skills, this is the skill's subdirectory within the plugin, not the plugin root"
+    — so it cannot reach a sibling skill. Claude Code substitutes it "in two places: the skill's
+    markdown content, and Bash rules in the <code>allowed-tools</code> frontmatter"
+    <span class="tag">[verified: skills docs, read 2026-07-30]</span>, and
+    <code>${CLAUDE_PLUGIN_ROOT}</code> resolves "anywhere the placeholder appears" in skill and agent
+    content <span class="tag">[verified: plugins-reference, read 2026-07-30]</span>.</p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>referencing file</th><th>refs</th><th>kind</th></tr></thead>
+        <tbody>
+          <tr><td><code>post-task-review/references/prose-pipeline.md</code></td><td>10</td><td>self + cross</td></tr>
+          <tr><td><code>post-task-review/post-task-review.workflow.js</code></td><td>9</td><td>self + cross</td></tr>
+          <tr><td><code>post-task-review/scripts/guard-workflow.py</code></td><td>7</td><td>see <span class="rid">FR-20</span></td></tr>
+          <tr><td><code>run-task/run-task-implement.workflow.js</code></td><td>3</td><td>self + cross</td></tr>
+          <tr><td><code>adversarial-review/SKILL.md</code></td><td>3</td><td>self</td></tr>
+          <tr><td><code>fix-gh-issues/SKILL.md</code></td><td>2</td><td>cross</td></tr>
+          <tr><td><code>create-test-app/assets/test-app.SKILL.md.template</code></td><td>2</td><td>cross</td></tr>
+          <tr><td><code>claudemd-patch/SKILL.md</code></td><td>2</td><td>cross</td></tr>
+          <tr><td><code>run-task/SKILL.md</code> · <code>run-task/tests/control-flow.test.mjs</code></td><td>2</td><td>self</td></tr>
+          <tr><td><code>post-task-review/SKILL.md</code> · <code>post-task-review/tests/control-flow.test.mjs</code></td><td>2</td><td>self</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="gwt"><span class="tag">[verified: measured 2026-07-30]</span> This disproves an
+    assumption the previous draft carried as fact — that no packed skill depended on its install path.
+    The dependency is not incidental: it is how <code>task-run</code> and <code>task-review</code>
+    invoke their own pipelines.</p>
+  </div>
+
+  <div class="req">
+    <p><span class="rid">FR-20</span> <span class="must">must</span> — The pack <b>shall</b> ship the
+    workflow-immutability guard as its own <code>PreToolUse</code> hook, declared in
+    <code>hooks/hooks.json</code> at the plugin root, and its allow-list <b>shall</b> be built at run
+    time from <code>$CLAUDE_PLUGIN_ROOT</code> <b>plus</b> the two flat original paths.</p>
+    <p class="gwt">Hooks may live either in "<code>hooks/hooks.json</code> in plugin root, or inline in
+    <code>plugin.json</code>" <span class="tag">[verified: plugins-reference, read 2026-07-30]</span>.
+    The separate file is chosen so <code>plugin.json</code> stays what
+    <span class="rid">R-5</span> calls the single point of failure — identity and namespace only —
+    rather than also carrying executable wiring whose syntax errors would take the whole namespace down
+    with them. Note the documented trap: <code>hooks/</code> belongs at the <b>plugin root</b>, never
+    inside <code>.claude-plugin/</code>, which holds nothing but the manifest.</p>
+    <p class="gwt">Given the guard's current allow-list is the literal pair
+    <code>~/.claude/skills/post-task-review/post-task-review.workflow.js</code> and
+    <code>~/.claude/skills/run-task/run-task-implement.workflow.js</code>, and given its
+    <code>PTR</code> regex blocks any <code>Workflow</code> call whose script declares
+    <code>meta.name</code> of <code>post-task-review</code> or <code>run-task-implement</code> from any
+    other path, when the packed copies run from
+    <code>${CLAUDE_PLUGIN_ROOT}/skills/task-review/…</code>, then they are permitted; and when a genuine
+    fork is attempted from anywhere, then it is still blocked.</p>
+    <p class="gwt">Without this the pack is not merely degraded, it is inert: the guard's
+    <code>Write</code>/<code>Edit</code> branch blocks writing that content to a non-canonical path, so
+    the two flagship skills could neither run <b>nor be built</b>
+    <span class="tag">[verified: post-task-review/scripts/guard-workflow.py, read 2026-07-30]</span>.
+    Retaining the two originals in the allow-list is what keeps <span class="rid">FR-14</span>'s
+    permanent dual-run honest — both copies stay runnable.</p>
+    <p class="gwt">Symlinked installs are safe here without special handling: the guard already calls
+    <code>os.path.realpath()</code> on both the allow-list entries and the incoming
+    <code>scriptPath</code>, so both sides collapse to the same real path.</p>
+    <p class="gwt">The install script <b>shall</b> remove the superseded global registration at
+    <code>~/.claude/settings.json</code>, because a guard registered outside the pack would keep
+    blocking the packed copies no matter what the packed guard permits.</p>
+    <p class="gwt">The packed guard <b>shall</b> additionally narrow its match to files that are
+    actually workflow scripts, rather than any file whose text contains a guarded pipeline name.
+    <b>This was observed, not predicted:</b> while this specification was being written, the guard
+    blocked an edit to <code>interview-notes.md</code> — a prose document, in an unrelated repository,
+    that merely quoted the two guarded names in their declared form. The consequence is concrete and
+    self-inflicted if left unfixed: the pack's own README, spec and notes could not describe the
+    pipelines they ship, and neither could the rename script of <span class="rid">FR-4</span>, which
+    must write those very strings while rewriting references. A guard that blocks documentation of the
+    thing it protects is over-matching, not protecting.</p>
+  </div>
+
+  <div class="req">
+    <p><span class="rid">FR-21</span> <span class="must">must</span> — The install script <b>shall</b>
+    provision every mandatory prerequisite, printing each command before running it, and <b>shall</b>
+    support <code>--dry-run</code> and <code>--no-deps</code>.</p>
+    <p class="gwt">Given a machine missing the analyzers, when the script runs, then it executes
+    <code>brew install pmd spotbugs semgrep</code> and
+    <code>npm i -g agent-browser &amp;&amp; agent-browser install</code>, each echoed first; and when
+    run with <code>--dry-run</code>, then it prints the same commands and executes none.</p>
+    <p class="gwt">Mandatory because the pack's own pipeline depends on them:
+    <code>code-scan</code> is invoked 22 times by <code>task-review</code>, and
+    <code>agent-browser</code> is reached through
+    <code>task-review → bug-hunter-ui → /test-app</code>, where the generated skill calls UI
+    verification "<b>Mandatory whenever UI is in scope</b>"
+    <span class="tag">[verified: create-test-app/assets/test-app.SKILL.md.template:86]</span>.</p>
+    <p class="gwt"><code>--no-deps</code> exists because this step couples install to Homebrew and
+    therefore to macOS (<span class="rid">R-12</span>); it is the escape hatch for any machine that
+    provisions differently.</p>
+  </div>
+
+  <div class="req">
+    <p><span class="rid">FR-22</span> <span class="must">must</span> — <b>If</b> the <code>codex</code>
+    plugin is absent, <b>then</b> the affected step <b>shall</b> be recorded as <b>skipped</b> and the
+    run <b>shall</b> continue; and it <b>shall never</b> be satisfied by a model-written substitute.</p>
+    <p class="gwt">Given a machine without the Codex plugin, when <code>/r:code-adversarial</code>
+    runs, then it reports the review as not run, names the missing plugin and how to add it, and
+    returns a skipped result rather than stopping the caller; and when
+    <code>/r:task-review</code> runs, then its report shows the Codex step as skipped and every other
+    step as executed.</p>
+    <p class="gwt"><b>Skipped must never decay into faked.</b> The prohibition in
+    <code>adversarial-review</code>'s own text — "Do <b>not</b> fake a review or substitute an LLM
+    imitation" <span class="tag">[verified: adversarial-review/SKILL.md:83]</span> — survives this
+    requirement verbatim. A skipped step that is reported as skipped is honest degradation; a skipped
+    step reported as a review is the single failure that would make the whole pipeline worthless, and
+    it is the reason this requirement specifies the report and not just the control flow.</p>
+    <p class="gwt">This is a <b>behaviour change</b>, not a repackaging change: it reverses today's
+    exit-3 stop, and <code>task-review</code>'s two encodings — the workflow script and
+    <code>references/prose-pipeline.md</code> — must change together or the two engines silently
+    diverge. That places it against <span class="rid">ADR-12</span> and
+    <span class="rid">ADR-14</span>, which keep behaviour changes out of the rename diff. Carried as
+    <span class="rid">R-11</span>.</p>
+  </div>
+
+  <h3>Non-functional</h3>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>id</th><th>Target</th><th>Measured how</th><th>Confidence</th></tr></thead>
+      <tbody>
+        <tr><td class="rid">NFR-1</td><td>Always-on listing cost &le; 16,000 characters (&asymp;4,000 tokens) across all fifteen descriptions</td><td>Sum of <code>min(len(description), 1536)</code>; measured at 15,186 today</td><td><span class="tag">[verified: measured 2026-07-30]</span></td></tr>
+        <tr><td class="rid">NFR-2</td><td><b>Repo install</b> — clone plus symlink completes in one command and under 60 seconds on a 20 Mbit link for a 1,257 KB repo. Scope is the repo only; prerequisite provisioning is <span class="rid">NFR-8</span></td><td>Time <code>git clone</code> plus <code>ln -s</code> end to end</td><td><span class="tag">[assumption]</span> — size is measured, transfer time is not</td></tr>
+        <tr><td class="rid">NFR-3</td><td>A <code>SKILL.md</code> edit takes effect with no restart; any other component change needs exactly one <code>/reload-plugins</code></td><td>Documented behaviour, confirmed by observation after packing</td><td><span class="tag">[verified: plugins-reference, read 2026-07-30]</span></td></tr>
+        <tr><td class="rid">NFR-4</td><td>Repository size &le; 2 MB, of which vendored third-party material &le; 50%</td><td><code>du</code>; today 1,257 KB with 380 KB (30%) vendored</td><td><span class="tag">[verified: measured 2026-07-30]</span></td></tr>
+        <tr><td class="rid">NFR-5</td><td>Rename correctness: 100% of the 309 references rewritten, 0 of the 369 prose occurrences altered</td><td>Diff line count against the pattern-bounded inventory</td><td><span class="tag">[verified: measured 2026-07-30]</span></td></tr>
+        <tr><td class="rid">NFR-6</td><td>Backup and restore: the pack is fully recoverable from the git remote alone, with no local state to preserve. Uninstalling is removing the symlink — the working clone survives, so an uninstall is never a data loss</td><td>Remove the <code>~/.claude/skills/r</code> symlink, re-run the install script, confirm fifteen skills resolve</td><td><span class="tag">[verified: plugins-reference — nothing is copied into a plugin cache, read 2026-07-30]</span></td></tr>
+        <tr><td class="rid">NFR-7</td><td>Availability and cost: not applicable — no service, no runtime, no hosted component</td><td>—</td><td><span class="tag">[assumption]</span> stated so its absence is deliberate rather than forgotten</td></tr>
+        <tr><td class="rid">NFR-8</td><td><b>Prerequisite provisioning</b> (<span class="rid">FR-21</span>) — a cold run installs three Homebrew formulae and an npm package that downloads a browser engine. <b>No target is stated</b>, because none was measured</td><td>Time <code>install.sh</code> on a machine with none of the prerequisites present, separating the Homebrew phase from the <code>agent-browser install</code> phase. Until that is run, the only honest statement is "minutes, not seconds"</td><td><span class="tag">[not measured]</span> — deliberately unquantified rather than guessed; this is why <span class="rid">NFR-2</span> was narrowed to the repo alone, since its 60-second claim silently became false once the installer began provisioning</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Business rules</h3>
+
+  <div class="req">
+    <p><span class="rid">BR-1</span> — <b>When</b> a skill is added to the pack, <b>if</b> its
+    directory name does not match <code>^[a-z0-9]+(-[a-z0-9]+){0,2}$</code> with the first segment
+    naming its domain, <b>the build</b> rejects it <b>per skill directory</b>; <b>on violation</b> the
+    build fails naming the offending directory.<br>
+    <span class="tag">Source: this spec, 2026-07-30. Configurable: no.</span></p>
+  </div>
+
+  <div class="req">
+    <p><span class="rid">BR-2</span> — The rename map is exactly the fifteen pairs below. <b>When</b>
+    the pack is built, <b>if</b> a source directory is not a key in this map, <b>the build</b>
+    excludes it <b>per build</b>; <b>on violation</b> — a source directory present but unmapped — the
+    build fails rather than silently dropping a skill.</p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>old</th><th>new</th><th>family</th><th>old</th><th>new</th><th>family</th></tr></thead>
+        <tbody>
+          <tr><td><code>claudemd-compact</code></td><td><code>claudemd-compact</code></td><td>claudemd</td><td><code>local-scan</code></td><td><code>code-scan</code></td><td>code</td></tr>
+          <tr><td><code>claudemd-patch</code></td><td><code>claudemd-patch</code></td><td>claudemd</td><td><code>fix-gh-issues</code></td><td><code>gh-issues-fix</code></td><td>gh</td></tr>
+          <tr><td><code>adversarial-review</code></td><td><code>code-adversarial</code></td><td>code</td><td><code>commit</code></td><td><code>git-commit</code></td><td>git</td></tr>
+          <tr><td><code>find-bugs</code></td><td><code>code-bugs</code></td><td>code</td><td><code>brainstorm</code></td><td><code>spec-brainstorm</code></td><td>spec</td></tr>
+          <tr><td><code>code-quality</code></td><td><code>code-quality</code></td><td>code</td><td><code>spec-to-todo</code></td><td><code>spec-plan</code></td><td>spec</td></tr>
+          <tr><td><code>refactor</code></td><td><code>code-refactor</code></td><td>code</td><td><code>run-task</code></td><td><code>task-run</code></td><td>task</td></tr>
+          <tr><td colspan="3"></td><td><code>post-task-review</code></td><td><code>task-review</code></td><td>task</td></tr>
+          <tr><td colspan="3"></td><td><code>create-test-app</code></td><td><code>test-app-create</code></td><td>test-app</td></tr>
+          <tr><td colspan="3"></td><td><code>write-tests</code></td><td><code>tests-write</code></td><td>tests</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="tag">Source: interview round 1–2, 2026-07-30. Configurable: yes, before first publish; after publish a rename needs its own migration.</p>
+  </div>
+
+  <div class="req">
+    <p><span class="rid">BR-3</span> — <b>When</b> the reference rewriter encounters an old skill
+    name, <b>if</b> the occurrence matches one of exactly four patterns — <code>/name</code> not
+    followed by a name character, <code>`name`</code> in backticks, <code>Skill(name)</code>, or a
+    <code>subagent_type</code>/<code>agentType</code>/<code>skill</code> key whose quoted value is the
+    name — <b>the rewriter</b> replaces it <b>per occurrence</b>; <b>on violation</b> — a bare
+    occurrence outside all four patterns — it is left untouched and counted in the prose tally.<br>
+    <span class="tag">Source: measured inventory, 2026-07-30 — 309 pattern-bounded vs 678 raw. Configurable: no.</span></p>
+  </div>
+
+  <div class="req">
+    <p><span class="rid">BR-4</span> — <b>When</b> a description is authored, <b>if</b> the combined
+    length of <code>description</code> and <code>when_to_use</code> exceeds 1,536 characters, <b>the
+    listing</b> truncates the remainder <b>per skill entry</b>; <b>on violation</b> the build fails,
+    because the dropped tail is invisible at runtime.<br>
+    <span class="tag">Source: code.claude.com/docs/en/skills, read 2026-07-30. Configurable: yes, via <code>skillListingMaxDescChars</code> — but the pack must not depend on a non-default setting.</span></p>
+  </div>
+
+  <div class="req">
+    <p><span class="rid">BR-5</span> — <b>When</b> a skill name is referenced from inside the pack,
+    <b>if</b> the target is another packed skill, <b>the reference</b> carries the <code>r:</code>
+    prefix <b>per reference</b>; <b>on violation</b> the reference resolves to a flat same-named skill
+    outside the pack, if one exists, or to nothing.<br>
+    <span class="tag">Source: this spec, 2026-07-30. Configurable: no — this is what makes the pack self-contained.</span></p>
+  </div>
+</section>
+
+<section id="architecture">
+  <h2>6 &middot; Architecture &amp; stack</h2>
+
+  <p>
+    There is no runtime to design. The architecture is a directory layout plus a build step, and the
+    decisions that shape everything else are three: <em>where the pack lives</em> (a skills directory,
+    so it is read in place), <em>what names it exposes</em> (one namespace, domain-first), and
+    <em>what it refuses to contain</em> (anything no packed skill actually calls).
+  </p>
+
+  <figure class="svg-figure">
+    <svg viewBox="0 0 940 480" role="img" aria-label="Container diagram: git remote through install script into the pack directory, discovered by the Claude Code skill loader, with external prerequisites that are not shipped.">
+      <defs>
+        <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#87867F"/>
+        </marker>
+        <marker id="ah-acc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#D97757"/>
+        </marker>
+      </defs>
+
+      <text class="t-lbl" x="20" y="24">source</text>
+      <text class="t-lbl" x="360" y="24">the pack — one git repository, read in place</text>
+      <text class="t-lbl" x="710" y="24">claude code</text>
+
+      <rect class="n-ext" x="20" y="190" width="140" height="56" rx="3"/>
+      <text class="t t-mid" x="90" y="213">git remote</text>
+      <text class="t-mono t-mid" x="90" y="231">GitHub</text>
+
+      <rect class="n-alt" x="200" y="190" width="120" height="56" rx="3"/>
+      <text class="t t-mid" x="260" y="213">install.sh</text>
+      <text class="t-mono t-mid" x="260" y="231">clone · pull</text>
+
+      <rect class="zone" x="360" y="70" width="300" height="340" rx="4"/>
+      <text class="t-mono" x="372" y="90">~/.claude/skills/r</text>
+      <text class="t-lbl" x="372" y="106">plugin r@skills-dir · personal scope</text>
+
+      <rect class="n-accent" x="378" y="118" width="264" height="44" rx="3"/>
+      <text class="t t-mid" x="510" y="136">.claude-plugin/plugin.json</text>
+      <text class="t-mono t-mid" x="510" y="153">"name": "r"  →  the namespace</text>
+
+      <rect class="n-fill" x="378" y="176" width="264" height="50" rx="3"/>
+      <text class="t t-mid" x="510" y="196">skills/</text>
+      <text class="t-mono t-mid" x="510" y="214">15 skills, flat, one dir each</text>
+
+      <rect class="n-fill" x="378" y="240" width="264" height="44" rx="3"/>
+      <text class="t t-mid" x="510" y="258">agents/</text>
+      <text class="t-mono t-mid" x="510" y="275">8 dispatchable subagents</text>
+
+      <rect class="n-alt" x="378" y="298" width="264" height="44" rx="3"/>
+      <text class="t-sm t-mid" x="510" y="316">install.sh · README · .gitignore</text>
+      <text class="t-mono t-mid" x="510" y="333">LICENSE (incl. vendored)</text>
+
+      <rect class="n-fill" x="710" y="118" width="210" height="56" rx="3"/>
+      <text class="t t-mid" x="815" y="141">skill loader</text>
+      <text class="t-mono t-mid" x="815" y="159">on session start</text>
+
+      <rect class="n-accent" x="710" y="204" width="210" height="56" rx="3"/>
+      <text class="t t-mid" x="815" y="227">/r:&lt;name&gt;  ×15</text>
+      <text class="t-mono t-mid" x="815" y="245">in the / menu</text>
+
+      <rect class="zone" x="710" y="300" width="210" height="152" rx="4"/>
+      <text class="t-lbl" x="722" y="320">not shipped — prerequisites</text>
+      <rect class="n-ext" x="724" y="330" width="182" height="34" rx="3"/>
+      <text class="t-sm t-mid" x="815" y="351">codex plugin</text>
+      <rect class="n-ext" x="724" y="372" width="182" height="34" rx="3"/>
+      <text class="t-sm t-mid" x="815" y="393">bundled skills</text>
+      <rect class="n-ext" x="724" y="414" width="182" height="34" rx="3"/>
+      <text class="t-mono t-mid" x="815" y="435">pmd spotbugs semgrep gh</text>
+
+      <path class="edge" d="M 160 218 L 194 218" marker-end="url(#ah)"/>
+      <path class="edge" d="M 320 218 L 354 218" marker-end="url(#ah)"/>
+      <text class="t-mono" x="326" y="208">writes</text>
+
+      <path class="edge-acc" d="M 660 200 L 686 200 L 686 146 L 704 146" marker-end="url(#ah-acc)"/>
+      <text class="t-mono" x="600" y="192">discovered</text>
+
+      <path class="edge-acc" d="M 815 174 L 815 198" marker-end="url(#ah-acc)"/>
+      <path class="edge" d="M 815 300 L 815 266" stroke-dasharray="4 3" marker-end="url(#ah)"/>
+    </svg>
+    <figcaption>
+      Containers and the one direction that matters: the pack is <em>read</em>, never installed.
+      Deleting the directory removes it; there is no cache to clean and no uninstall step.
+      Deployment topology and the explorable dependency graph live in
+      <a class="xlink" href="architecture.html">the interactive version &rarr;</a>
+    </figcaption>
+  </figure>
+
+  <h3>Codebase facts</h3>
+  <p>
+    Every line below was read this session. Nothing here is inferred from naming or convention.
+  </p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Fact</th><th>Citation</th></tr></thead>
+      <tbody>
+        <tr><td>The plugin name becomes the skill namespace: <code>my-plugin/skills/review/SKILL.md</code> &rarr; <code>/my-plugin:review</code></td><td><code>code.claude.com/docs/en/skills</code> &mdash; command-name resolution table <span class="tag">[verified, read 2026-07-30]</span></td></tr>
+        <tr><td>Locally confirmed: <code>codex@openai-codex</code> in <code>enabledPlugins</code> surfaces as <code>/codex:rescue</code>, <code>/codex:setup</code></td><td><code>~/.claude/settings.json</code> &rarr; <code>enabledPlugins</code></td></tr>
+        <tr><td><code>brainstorm</code> forbids calling the three <code>html*</code> skills, which is why 1.2 MB stays out of the pack</td><td><code>brainstorm/SKILL.md:163</code></td></tr>
+        <tr><td><code>local-scan</code> is "the offline cousin of <code>/sonar</code>" &mdash; a comparison, not a dependency</td><td><code>local-scan/SKILL.md:9</code>, and the "How it differs from /sonar" heading at <code>:107</code></td></tr>
+        <tr><td><code>test-app</code> is generated per project, so it must not be vendored</td><td><code>create-test-app/SKILL.md:17</code></td></tr>
+        <tr><td><code>post-task-review</code> ships executable payload: a workflow script, three Python scripts, a shell script and a control-flow test</td><td><code>post-task-review/post-task-review.workflow.js</code>, <code>scripts/{review-stats,guard-workflow,record-run}.py</code>, <code>scripts/worktree-deploy.sh</code>, <code>tests/control-flow.test.mjs</code></td></tr>
+        <tr><td>Two compiled Python artefacts are currently committed</td><td><code>post-task-review/scripts/__pycache__/record-run.cpython-312.pyc</code>, <code>review-stats.cpython-312.pyc</code></td></tr>
+        <tr><td><code>agent-browser</code> is a symlink out of the Claude tree, and its target is only a <b>2.8 KB discovery stub</b> — "not the usage guide", pointing at a CLI that must be installed separately. The real dependency is the npm package plus a browser engine, which is why it is provisioned rather than vendored</td><td><code>~/.claude/skills/agent-browser</code> &rarr; <code>~/.agents/skills/agent-browser/SKILL.md</code>; origin <code>vercel-labs/agent-browser</code> per <code>~/.agents/.skill-lock.json</code>; CLI 0.26.0 at <code>/opt/homebrew/bin/agent-browser</code></td></tr>
+        <tr><td><b>42 hard-coded absolute skill paths</b> across twelve files in seven skills — 26 self-references, 16 cross-skill. This is how <code>task-run</code> and <code>task-review</code> invoke their own pipelines, so it is structural, not incidental</td><td>Measured 2026-07-30 over the fifteen source skills; breakdown in <span class="rid">FR-19</span></td></tr>
+        <tr><td>The workflow guard's allow-list is two literal <code>~/.claude/skills/…</code> paths, and its <code>PTR</code> regex blocks any <code>Workflow</code> whose script declares <code>meta.name</code> of <code>post-task-review</code> or <code>run-task-implement</code> from any other path. Its <code>Write</code>/<code>Edit</code> branch blocks that content being written elsewhere too — so packed copies could neither run nor be built. It calls <code>os.path.realpath()</code> on both sides, so symlinks are safe</td><td><code>post-task-review/scripts/guard-workflow.py</code> &mdash; <code>CANON</code>, <code>PTR</code>, <code>main()</code>; registered at <code>~/.claude/settings.json:159</code></td></tr>
+        <tr><td>Three of four dependency families already guard themselves at point of use: <code>check-tools.sh</code> names each analyzer and its install line and reports uncovered categories; <code>gh</code> is gated on <code>command -v gh &amp;&amp; gh auth status</code>; the Codex wrapper exits 3 and its skill text forbids substituting an imitation</td><td><code>local-scan/scripts/check-tools.sh</code>; <code>fix-gh-issues/SKILL.md:53</code>; <code>adversarial-review/scripts/run.sh:54</code> and <code>SKILL.md:83</code></td></tr>
+        <tr><td><code>${CLAUDE_SKILL_DIR}</code> is "the skill's subdirectory within the plugin, <b>not the plugin root</b>" and substitutes in "the skill's markdown content"; <code>${CLAUDE_PLUGIN_ROOT}</code> substitutes "anywhere the placeholder appears" in skill and agent content. A symlinked skill entry is followed; symlinked <em>plugin</em> discovery is undocumented</td><td><code>code.claude.com/docs/en/skills</code> &mdash; string-substitution table and symlink note; <code>plugins-reference</code> &mdash; environment-variable table <span class="tag">[verified, read 2026-07-30]</span></td></tr>
+        <tr><td>Claude Code is at <b>2.1.220</b> here, clearing every version floor this spec relies on (<code>displayName</code> 2.1.143+, <code>${CLAUDE_SKILL_DIR}</code> in <code>allowed-tools</code> 2.1.129+, <code>background</code> 2.1.218+)</td><td><code>claude --version</code>, read 2026-07-30 &mdash; this closes a former assumption</td></tr>
+        <tr><td><code>spec-to-todo</code>'s frontmatter description is a bare scalar containing <code>Stack-agnostic: it follows…</code>, which strict YAML rejects</td><td><code>spec-to-todo/SKILL.md:3</code></td></tr>
+        <tr><td><code>run-task</code>'s description is 2,174 characters &mdash; 638 over the listing cap</td><td>Measured from <code>run-task/SKILL.md</code> frontmatter</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Stack</h3>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Concern</th><th>Choice</th><th>Version / basis</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td>Distribution</td><td>Skills-directory plugin</td><td>Requires Claude Code v2.1.x; <code>renames</code> needs v2.1.193+, <code>displayName</code> v2.1.143+ <span class="tag">[verified: plugin docs, read 2026-07-30]</span></td><td>No marketplace, no install step, read in place</td></tr>
+        <tr><td>Namespace</td><td><code>r</code></td><td>Kebab-case, no spaces; not on the reserved-marketplace list <span class="tag">[verified: plugin-marketplaces, read 2026-07-30]</span></td><td>Shortest possible prefix to type</td></tr>
+        <tr><td>Manifest</td><td><code>.claude-plugin/plugin.json</code></td><td>Optional for marketplace plugins, <b>required</b> for skills-dir detection</td><td>It is the thing that makes the directory a plugin</td></tr>
+        <tr><td>Scope</td><td>Personal (<code>~/.claude/skills/</code>)</td><td>Loads in every project, no trust dialog <span class="tag">[verified: plugins-reference, read 2026-07-30]</span></td><td>Project scope would gate on trust and drop background monitors</td></tr>
+        <tr><td>Versioning</td><td>Git tags + <code>plugin.json</code> <code>version</code></td><td>Semver strings, maintained by hand</td><td><code>version</code> is not a <code>SKILL.md</code> field at all — absent from the documented list, with no "unrecognized fields ignored" clause to fall back on (<span class="rid">FR-10</span>)</td></tr>
+        <tr><td>Build / rename tooling</td><td>Python 3.12 standard library, plus <code>PyYAML</code> for frontmatter</td><td>Python 3.12 already present at <code>/Library/Frameworks/Python.framework/Versions/3.12</code></td><td>The existing skills already ship Python scripts; no new toolchain</td></tr>
+        <tr><td>Install</td><td><code>install.sh</code>, POSIX shell + git</td><td>—</td><td>One command, no package manager, no network beyond git</td></tr>
+        <tr><td>JVM toolchain</td><td><b>None — deliberately unpinned</b></td><td>n/a</td><td>The pack never compiles or runs anything. <code>tests-write</code> supplies conventions for <code>.kt</code> and <code>.java</code> sources, and the build-runner agents invoke whatever Maven or Gradle the target project already has. Pinning a language version here would invent a constraint the pack does not impose.</td></tr>
+        <tr><td>Validation</td><td>Local pre-push script only</td><td>—</td><td>CI was declined (<span class="rid">ADR-10</span>, <span class="rid">R-5</span>)</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Repository layout</h3>
+  <pre><code>r/                                  ← clone target: ~/.claude/skills/r
+├── .claude-plugin/
+│   └── plugin.json                 {"name": "r", "version": "1.0.0", ...}
+├── skills/
+│   ├── claudemd-compact/           SKILL.md + references/ ×2
+│   ├── claudemd-patch/             SKILL.md
+│   ├── code-adversarial/           SKILL.md + references/
+│   ├── code-bugs/                  SKILL.md + references/
+│   ├── code-quality/               SKILL.md + references/
+│   ├── code-refactor/              SKILL.md
+│   ├── code-scan/                  SKILL.md + references/
+│   ├── gh-issues-fix/              SKILL.md (33 KB, single file — unchanged in v1)
+│   ├── git-commit/                 SKILL.md + evals/
+│   ├── spec-brainstorm/            SKILL.md + references/ + scripts/ + evals/
+│   ├── spec-plan/                  SKILL.md + references/
+│   ├── task-review/                SKILL.md + workflow.js + scripts/ + tests/
+│   ├── task-run/                   SKILL.md + workflow.js + tests/
+│   ├── test-app-create/            SKILL.md + references/
+│   └── tests-write/                SKILL.md + references/
+├── agents/                         8 × &lt;name&gt;.md
+├── install.sh
+├── .gitignore                      __pycache__/, *.pyc
+├── LICENSE
+└── README.md                       install, prerequisites, provenance</code></pre>
+  <p>
+    <b>No skill's internal shape changes in v1.</b> The pack is a move, a rename and a reference
+    rewrite — nothing more. That includes <code>gh-issues-fix</code>, whose 33 KB single file is the
+    largest in the pack and a natural candidate for a <code>references/</code> split; splitting it is
+    deliberately deferred to v2 (<span class="rid">ADR-12</span>) so that a structural change never rides
+    along with a 309-reference rename. Restructuring and renaming in one diff makes both
+    unreviewable.
+  </p>
+</section>
+
+<section id="data-model">
+  <h2>7 &middot; Data model</h2>
+  <p>
+    The "data" here is configuration the loader parses. Getting a field name or a cardinality wrong
+    means the pack does not load, so it is worth writing down precisely.
+  </p>
+
+  <figure class="svg-figure">
+    <svg viewBox="0 0 920 430" role="img" aria-label="Entity relationship diagram of the plugin manifest, skills, references, scripts, evals and agents.">
+      <defs>
+        <marker id="er-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#87867F"/>
+        </marker>
+      </defs>
+
+      <!-- Plugin -->
+      <rect class="n-accent" x="20" y="120" width="200" height="120" rx="3"/>
+      <rect x="20" y="120" width="200" height="26" rx="3" fill="#F0EEE6" stroke="#D97757" stroke-width="1.6"/>
+      <text class="t" x="32" y="138">Plugin</text>
+      <text class="t-mono" x="32" y="164">name : string (PK) = "r"</text>
+      <text class="t-mono" x="32" y="182">version : semver</text>
+      <text class="t-mono" x="32" y="200">description : string</text>
+      <text class="t-mono" x="32" y="218">author, license, keywords</text>
+      <text class="t-lbl" x="32" y="234">.claude-plugin/plugin.json</text>
+
+      <!-- Skill -->
+      <rect class="n-fill" x="330" y="60" width="250" height="176" rx="3"/>
+      <rect x="330" y="60" width="250" height="26" rx="3" fill="#F0EEE6" stroke="#87867F" stroke-width="1.2"/>
+      <text class="t" x="342" y="78">Skill</text>
+      <text class="t-mono" x="342" y="104">dir_name : string (PK)</text>
+      <text class="t-mono" x="342" y="122">plugin_name : string (FK)</text>
+      <text class="t-mono" x="342" y="140">description : string ≤1536</text>
+      <text class="t-mono" x="342" y="158">model, effort : enum?</text>
+      <text class="t-mono" x="342" y="176">allowed-tools : list?</text>
+      <text class="t-mono" x="342" y="194">disable-model-invocation : bool?</text>
+      <text class="t-mono" x="342" y="212">user-invocable : bool?</text>
+      <text class="t-lbl" x="342" y="230">skills/&lt;dir_name&gt;/SKILL.md</text>
+
+      <!-- Reference file -->
+      <rect class="n-alt" x="680" y="40" width="215" height="74" rx="3"/>
+      <rect x="680" y="40" width="215" height="26" rx="3" fill="#F0EEE6" stroke="#87867F" stroke-width="1.2"/>
+      <text class="t" x="692" y="58">ReferenceDoc</text>
+      <text class="t-mono" x="692" y="84">path : string (PK)</text>
+      <text class="t-mono" x="692" y="102">loaded : on demand only</text>
+
+      <!-- Script -->
+      <rect class="n-alt" x="680" y="132" width="215" height="74" rx="3"/>
+      <rect x="680" y="132" width="215" height="26" rx="3" fill="#F0EEE6" stroke="#87867F" stroke-width="1.2"/>
+      <text class="t" x="692" y="150">Script</text>
+      <text class="t-mono" x="692" y="176">path : string (PK)</text>
+      <text class="t-mono" x="692" y="194">kind : py | sh | workflow.js</text>
+
+      <!-- Eval -->
+      <rect class="n-alt" x="680" y="224" width="215" height="74" rx="3"/>
+      <rect x="680" y="224" width="215" height="26" rx="3" fill="#F0EEE6" stroke="#87867F" stroke-width="1.2"/>
+      <text class="t" x="692" y="242">EvalSuite</text>
+      <text class="t-mono" x="692" y="268">path : evals/evals.json</text>
+      <text class="t-mono" x="692" y="286">present for 2 of 15 today</text>
+
+      <!-- Agent -->
+      <rect class="n-fill" x="330" y="292" width="250" height="98" rx="3"/>
+      <rect x="330" y="292" width="250" height="26" rx="3" fill="#F0EEE6" stroke="#87867F" stroke-width="1.2"/>
+      <text class="t" x="342" y="310">Agent</text>
+      <text class="t-mono" x="342" y="336">name : string (PK)</text>
+      <text class="t-mono" x="342" y="354">tools : list</text>
+      <text class="t-lbl" x="342" y="374">agents/&lt;name&gt;.md</text>
+
+      <!-- edges -->
+      <path class="edge" d="M 220 160 L 275 160 L 275 120 L 324 120" marker-end="url(#er-ah)"/>
+      <text class="t-mono" x="228" y="152">1</text>
+      <text class="t-mono" x="300" y="112">15</text>
+
+      <path class="edge" d="M 220 200 L 275 200 L 275 330 L 324 330" marker-end="url(#er-ah)"/>
+      <text class="t-mono" x="228" y="216">1</text>
+      <text class="t-mono" x="300" y="322">8</text>
+
+      <path class="edge" d="M 580 110 L 630 110 L 630 77 L 674 77" marker-end="url(#er-ah)"/>
+      <text class="t-mono" x="590" y="102">1</text>
+      <text class="t-mono" x="648" y="69">0..n</text>
+
+      <path class="edge" d="M 580 148 L 630 148 L 630 169 L 674 169" marker-end="url(#er-ah)"/>
+      <text class="t-mono" x="648" y="161">0..n</text>
+
+      <path class="edge" d="M 580 190 L 620 190 L 620 261 L 674 261" marker-end="url(#er-ah)"/>
+      <text class="t-mono" x="640" y="253">0..1</text>
+
+      <path class="edge" d="M 455 236 L 455 292" stroke-dasharray="4 3" marker-end="url(#er-ah)"/>
+      <text class="t-mono" x="462" y="268">dispatches 0..n</text>
+    </svg>
+    <figcaption>
+      One plugin, fifteen skills, eight agents. <code>Skill</code> is keyed by its directory name —
+      the frontmatter <code>name</code> field is optional and defaults to it, which is why the
+      rename is a directory move rather than a frontmatter edit.
+    </figcaption>
+  </figure>
+
+  <h3><code>SKILL.md</code> frontmatter — every documented field</h3>
+  <p>
+    All seventeen documented fields are listed, not just the ones the pack sets, because two of the
+    fields it does <em>not</em> set (<code>paths</code>, <code>disallowed-tools</code>) would enforce
+    promises two skills currently make only in prose, and one (<code>when_to_use</code>) silently shares
+    the description budget. A partial list is how those were missed on the first pass.
+  </p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Unique</th><th>Constraint</th><th>Pack convention</th></tr></thead>
+      <tbody>
+        <tr><td><code>name</code></td><td>string</td><td>No</td><td>Yes, within the plugin</td><td>Defaults to the directory name</td><td><b>Omit.</b> Let the directory be the single source of the name, so a rename cannot half-apply.</td></tr>
+        <tr><td><code>description</code></td><td>string</td><td>Recommended</td><td>—</td><td>Truncated at 1,536 chars in the listing, combined with <code>when_to_use</code></td><td><b>Required</b> by the pack. Hard-fail over the cap (<span class="rid">BR-4</span>). Key use case first.</td></tr>
+        <tr><td><code>model</code></td><td>enum</td><td>No</td><td>—</td><td>Same values as <code>/model</code>, or <code>inherit</code></td><td>Only where it genuinely matters; today only <code>spec-brainstorm</code> sets it (<code>opus</code>).</td></tr>
+        <tr><td><code>effort</code></td><td>enum</td><td>No</td><td>—</td><td><code>low</code> · <code>medium</code> · <code>high</code> · <code>xhigh</code> · <code>max</code></td><td>Set on all fifteen, so effort is deliberate rather than inherited by accident. Currently set on 5 of 6 named skills.</td></tr>
+        <tr><td><code>allowed-tools</code></td><td>string / list</td><td>No</td><td>—</td><td>Grant clears at the next user message</td><td>Only where a skill is otherwise unusable without prompts.</td></tr>
+        <tr><td><code>disable-model-invocation</code></td><td>bool</td><td>No</td><td>—</td><td>Also blocks preloading into subagents and scheduled-task firing</td><td>Set <code>true</code> on skills that must never auto-fire. See <span class="rid">FR-16</span>.</td></tr>
+        <tr><td><code>user-invocable</code></td><td>bool</td><td>No</td><td>—</td><td><code>false</code> hides it from the <code>/</code> menu but keeps the description in context</td><td>Leave default <code>true</code> — all fifteen are meant to be typeable.</td></tr>
+        <tr><td><code>argument-hint</code></td><td>string</td><td>No</td><td>—</td><td>Autocomplete hint</td><td>Add where a skill takes arguments, e.g. <code>[issue-number]</code> for <code>gh-issues-fix</code>.</td></tr>
+        <tr><td><code>when_to_use</code></td><td>string</td><td>No</td><td>—</td><td>Appended to <code>description</code> in the listing and <b>counts toward the same 1,536-char cap</b></td><td>Unused by all fifteen today. The cap check must count it (<span class="rid">BR-4</span>) so adding it later cannot silently truncate a description.</td></tr>
+        <tr><td><code>paths</code></td><td>string / list</td><td>No</td><td>—</td><td>Globs limiting <em>automatic</em> activation to matching files</td><td><b>v2</b> (<span class="rid">FR-18</span>). The mechanism that would stop <code>tests-write</code> and <code>code-scan</code> firing on non-JVM work.</td></tr>
+        <tr><td><code>disallowed-tools</code></td><td>string / list</td><td>No</td><td>—</td><td>Tools removed from the pool while the skill is active; clears at the next user message</td><td><b>v2</b> (<span class="rid">FR-18</span>). Would make <code>code-bugs</code> and <code>code-quality</code> structurally report-only.</td></tr>
+        <tr><td><code>hooks</code></td><td>object</td><td>No</td><td>—</td><td>Hooks scoped to this skill's lifecycle</td><td>Not used. <code>claudemd-patch</code> deliberately installs a hook into the <em>target project's</em> settings, which is its job — a skill-scoped hook would not reach there.</td></tr>
+        <tr><td><code>arguments</code></td><td>string / list</td><td>No</td><td>—</td><td>Named positional args for <code>$name</code> substitution</td><td>Not used. No packed skill parses positional arguments today.</td></tr>
+        <tr><td><code>context</code> · <code>agent</code> · <code>background</code></td><td>enum / string / bool</td><td>No</td><td>—</td><td><code>fork</code> runs the skill in a subagent; <code>background</code> requires Claude Code v2.1.218+</td><td>Not used. The pack's orchestrators spawn agents explicitly through Workflow scripts instead.</td></tr>
+        <tr><td><code>shell</code></td><td>enum</td><td>No</td><td>—</td><td><code>bash</code> (default) or <code>powershell</code></td><td>Leave default. The pack ships shell scripts that assume POSIX.</td></tr>
+        <tr><td><code>version</code></td><td>—</td><td>—</td><td>—</td><td><b>Not a field at all.</b> Absent from the documented list, and the skills docs carry no "unrecognized fields are ignored" clause — that clause exists only for <code>plugin.json</code>. Present on 4 of the 6 originally named skills.</td><td><b>Drop</b> (<span class="rid">FR-10</span>).</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="tag">
+    Field list and constraints: [verified: code.claude.com/docs/en/skills, read 2026-07-30].
+  </p>
+
+  <h3>Retention and classification</h3>
+  <p>
+    No personal data, no secrets, no user content — the pack is instructions. Classification matters in
+    one direction only: the repository starts <b>private and is intended to go public later</b>, and
+    nothing in the fifteen skills has been audited for embedded internal URLs or tokens. Deferring the
+    flip does not defer the audit's importance, it only moves it to a moment that is easy to forget —
+    so it is a gate on the flip itself (<span class="rid">Rollout</span> step 7), not on the initial
+    push. Retention is git history, kept indefinitely.
+  </p>
+</section>
+
+<section id="interfaces">
+  <h2>8 &middot; Interfaces</h2>
+  <p>
+    This system has no API. Its interfaces are fifteen slash commands, three Claude Code commands the
+    maintainer types, and one shell script.
+  </p>
+
+  <h3>Slash commands the pack exposes</h3>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Command</th><th>Invocation</th><th>Does</th><th>Needs</th></tr></thead>
+      <tbody>
+        <tr><td><code>/r:claudemd-compact</code></td><td>user + model</td><td>Compacts and de-stales a project's CLAUDE.md hierarchy; has an <code>--auto</code> mode</td><td>—</td></tr>
+        <tr><td><code>/r:claudemd-patch</code></td><td>user + model</td><td>Inserts the maintainer's standard rule blocks and a PreToolUse hook into a project</td><td>—</td></tr>
+        <tr><td><code>/r:code-adversarial</code></td><td>model (wrapper)</td><td>Runs the Codex adversarial review over the current diff; reports <b>skipped</b> if the plugin is absent (<span class="rid">FR-22</span>)</td><td>codex plugin <span class="tag">optional</span></td></tr>
+        <tr><td><code>/r:code-bugs</code></td><td>user + model</td><td>Hunts production bugs and code/doc drift</td><td><code>bug-hunter-security</code>, <code>bug-hunter-docs</code></td></tr>
+        <tr><td><code>/r:code-quality</code></td><td>user + model</td><td>Reports readability and idiom problems; never edits</td><td>—</td></tr>
+        <tr><td><code>/r:code-refactor</code></td><td>user + model</td><td>Refactors behind a behaviour-locking test</td><td>—</td></tr>
+        <tr><td><code>/r:code-scan</code></td><td>user + model</td><td>PMD + SpotBugs + Semgrep, then triage and fix</td><td><code>pmd</code>, <code>spotbugs</code>, <code>semgrep</code></td></tr>
+        <tr><td><code>/r:gh-issues-fix</code></td><td>user</td><td>Triages, groups and fixes open GitHub bug issues, one group at a time</td><td><code>gh</code>; calls <code>/r:task-run</code> and <code>/r:task-review</code></td></tr>
+        <tr><td><code>/r:git-commit</code></td><td>user + model</td><td>Groups changes into logical Conventional Commits</td><td>—</td></tr>
+        <tr><td><code>/r:spec-brainstorm</code></td><td>user + model</td><td>Turns an idea into <code>spec.html</code> + <code>architecture.html</code></td><td>—</td></tr>
+        <tr><td><code>/r:spec-plan</code></td><td>user + model</td><td>Turns a spec into a phased <code>todo.md</code></td><td>—</td></tr>
+        <tr><td><code>/r:task-review</code></td><td>user</td><td>The post-task review pipeline over the current diff</td><td>4 bug-hunter agents, build runners, <code>/r:code-scan</code></td></tr>
+        <tr><td><code>/r:task-run</code></td><td>user</td><td>Runs one unit of work end to end and opens a PR</td><td>build runners; calls <code>/r:task-review</code></td></tr>
+        <tr><td><code>/r:test-app-create</code></td><td>user</td><td>Scaffolds a project-local <code>/test-app</code> skill</td><td>—</td></tr>
+        <tr><td><code>/r:tests-write</code></td><td>model, proactively</td><td>JVM test conventions for <code>.java</code> / <code>.kt</code> sources</td><td>—</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Maintainer commands</h3>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Command</th><th>When</th><th>Effect</th></tr></thead>
+      <tbody>
+        <tr><td><code>./install.sh</code></td><td>New machine, or to update</td><td>Clones or pulls the repo, symlinks it as <code>~/.claude/skills/r</code>, provisions mandatory prerequisites (<span class="rid">FR-21</span>), removes the superseded global guard registration (<span class="rid">FR-20</span>), prints the follow-up. Accepts <code>--dry-run</code> and <code>--no-deps</code>.</td></tr>
+        <tr><td><code>./check-prereqs.sh</code></td><td>Before first use, or when a step reports skipped</td><td>Reports every prerequisite as mandatory or optional and prints install lines for anything missing. Non-zero only on a missing mandatory one (<span class="rid">FR-15</span>).</td></tr>
+        <tr><td><code>/reload-plugins</code></td><td>After changing <code>agents/</code>, <code>hooks/</code>, <code>.mcp.json</code></td><td>Re-reads plugin components. <b>Not needed</b> for <code>SKILL.md</code> edits, which are live.</td></tr>
+        <tr><td><code>claude --plugin-dir &lt;repo&gt;</code></td><td><b>Before</b> the first install, and while developing</td><td>Loads the pack for one session without installing anything, so the manifest, namespace and layout can be proven before a symlink exists. This is the first half of <span class="rid">R-10</span>'s check. Repeat the flag to load several plugins; a local copy also takes precedence over a same-named installed plugin, so the pack can be tested against an existing install.</td></tr>
+        <tr><td><code>/plugin</code></td><td>To verify after installing</td><td>Should list <code>r@skills-dir</code>. If absent <b>and</b> <code>--plugin-dir</code> worked, symlinked plugin discovery is the cause (<span class="rid">R-10</span>); if absent under both, <code>plugin.json</code> is malformed (<span class="rid">R-5</span>). That is the whole reason for running the two in order.</td></tr>
+        <tr><td><code>rm ~/.claude/skills/r</code></td><td>To uninstall</td><td>Removes the symlink; the working clone survives. "There is no <code>uninstall</code> step because nothing was installed from a marketplace." <span class="tag">[verified: plugins-reference, read 2026-07-30]</span> Prerequisites installed by <span class="rid">FR-21</span> are <b>not</b> removed — they are ordinary tools that may predate the pack.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3><code>plugin.json</code> — the shape that ships</h3>
+  <pre><code>{
+  "name": "r",
+  "displayName": "r — personal skill pack",
+  "version": "1.0.0",
+  "description": "15 personal engineering skills and the 8 agents they dispatch.",
+  "author": { "name": "mirum8" },
+  "repository": "https://github.com/&lt;owner&gt;/skill-pack",
+  "license": "MIT",
+  "keywords": ["skills", "review", "tdd", "claudemd"]
+}</code></pre>
+  <p>
+    <code>skills</code>, <code>agents</code> and <code>hooks</code> paths are omitted deliberately:
+    the loader auto-discovers the default locations, and naming them adds a second place to keep
+    correct. <code>displayName</code> requires Claude Code v2.1.143 or later
+    <span class="tag">[verified: plugins-reference, read 2026-07-30]</span>; if the pack must support
+    older versions, drop that one line.
+  </p>
+</section>
+
+<section id="security">
+  <h2>9 &middot; Security &amp; error handling</h2>
+
+  <h3>Trust and blast radius</h3>
+  <p>
+    A skill is arbitrary instructions to an agent with tool access, and this pack additionally ships
+    executable Python, shell and JavaScript. Installing it at personal scope means <em>no trust gate
+    at all</em> — personal-scope plugins have none of the project-scope restrictions
+    <span class="tag">[verified: plugins-reference, read 2026-07-30]</span>. That is the right
+    trade-off for the author's own machine and the wrong one for anybody else, so the README must say
+    so plainly rather than presenting the pack as generally installable.
+  </p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Concern</th><th>Control</th></tr></thead>
+      <tbody>
+        <tr><td>Secrets in skill text</td><td>Scan all 82 files for tokens, internal hostnames and absolute home paths. While the repo is private this is a sanity check; it becomes a hard gate on the public flip (<span class="rid">Rollout</span> step 7).</td></tr>
+        <tr><td>Absolute paths leaking one machine's layout</td><td><b>Two variables, not one</b> — the distinction is load-bearing (<span class="rid">FR-19</span>). A reference to the skill's <em>own</em> files uses <code>${CLAUDE_SKILL_DIR}</code>, which is "the directory containing the skill's <code>SKILL.md</code> file. For plugin skills, this is the skill's subdirectory within the plugin, <b>not the plugin root</b>" — so it cannot reach a sibling skill. A reference to <em>another packed skill</em> must use <code>${CLAUDE_PLUGIN_ROOT}/skills/&lt;name&gt;/…</code> instead. <span class="tag">[verified: skills docs + plugins-reference, read 2026-07-30]</span> 42 such references exist today and all are absolute.</td></tr>
+        <tr><td>Executable payload</td><td>The pack's own scripts stay in-repo and reviewable, and nothing in the pack is executed at install time. <b>Revised:</b> <code>install.sh</code> no longer merely clones and prints — <span class="rid">FR-21</span> has it fetch third-party tooling through Homebrew and npm. Every command is echoed before it runs, <code>--dry-run</code> shows them without executing, and <code>--no-deps</code> skips provisioning entirely. What is fetched is ordinary public tooling; what is <em>not</em> is any hidden execution of pack content. Carried as <span class="rid">R-12</span>.</td></tr>
+        <tr><td>Supply chain</td><td>Prerequisites are pinned by nothing (<span class="rid">R-3</span>). The README records the versions the pack is <b>known to work with</b> — read 2026-07-30, stated as tested-against, not as minimum floors, because no lower bound was tested: <code>pmd</code> 7.26.0 · <code>spotbugs</code> 4.10.2 · <code>semgrep</code> 1.168.0 · <code>gh</code> 2.96.0 · <code>codex-cli</code> 0.146.0 · <code>node</code> v26.4.0 · <code>agent-browser</code> 0.26.0 · Claude Code 2.1.220. The pack vendors none of them and auto-installs only the mandatory tier (<span class="rid">ADR-16</span>).</td></tr>
+        <tr><td>Authentication / authorisation</td><td>None exists and none is needed: a git remote's own access control is the whole model. Stated so the omission is visible.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Error taxonomy</h3>
+  <p>
+    Every failure mode in this system is silent by default, which is the single most important thing
+    about operating it. The controls below exist to convert silence into a message.
+  </p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Failure</th><th>Default symptom</th><th>Detection</th><th>Response</th></tr></thead>
+      <tbody>
+        <tr><td>Malformed <code>plugin.json</code></td><td>Namespace absent; every <code>/r:</code> command simply does not exist. No error.</td><td><code>/plugin</code> does not list <code>r@skills-dir</code></td><td>Pre-push validation of the manifest; fail before publish</td></tr>
+        <tr><td>Description over the cap</td><td>Tail dropped from the listing; skill under-triggers</td><td>Build check against 1,536 (<span class="rid">BR-4</span>)</td><td>Hard build failure naming skill and overage</td></tr>
+        <tr><td>Frontmatter invalid YAML</td><td>Tolerated today; may stop loading after a parser change</td><td><code>yaml.safe_load</code> over all fifteen</td><td>Hard build failure; convert to a block scalar</td></tr>
+        <tr><td>Dangling reference</td><td>Model tries to invoke a name that does not resolve; degrades mid-run</td><td>Reference inventory check (<span class="rid">FR-9</span>)</td><td>Hard build failure unless classified bundled or documented-external</td></tr>
+        <tr><td>Missing <b>mandatory</b> prerequisite</td><td>A review step reports success without having run</td><td>Per-skill guard at point of use, plus <code>check-prereqs.sh</code> up front (<span class="rid">FR-15</span>)</td><td>Stop and name the missing dependency and the fix</td></tr>
+        <tr><td>Missing <b>optional</b> prerequisite (codex)</td><td>Nothing — the step would otherwise vanish from the report without comment</td><td>Wrapper exit 3, surfaced as a skipped result (<span class="rid">FR-22</span>)</td><td>Continue the run, record the step as <b>skipped</b>, name the plugin and how to add it. <b>Never</b> substitute a model-written review — a skipped step reported as a review is worse than no review at all.</td></tr>
+        <tr><td>Symlinked plugin not discovered</td><td>Namespace absent, exactly like a malformed manifest — indistinguishable from it without testing</td><td><code>claude --plugin-dir</code> loads the pack but <code>claude plugin list</code> omits <code>r@skills-dir</code> after symlinking. Either check alone is ambiguous; the pair is not (<span class="rid">R-10</span>)</td><td>Clone in place at <code>~/.claude/skills/r</code> instead of symlinking</td></tr>
+        <tr><td>Packed workflow blocked by the guard</td><td><code>Workflow</code> call refused; <code>task-review</code> and <code>task-run</code> cannot run <b>or be built</b></td><td>Guard writes <code>BLOCKED:</code> to stderr naming the path</td><td>Allow-list built from <code>$CLAUDE_PLUGIN_ROOT</code> plus both originals, global registration removed (<span class="rid">FR-20</span>)</td></tr>
+        <tr><td><b>Guard over-matches documentation</b> — any file quoting a guarded pipeline name in its declared form is refused, including prose and the rename script's own output</td><td>An edit to an ordinary <code>.md</code> file is blocked, which reads as a tooling fault rather than a policy</td><td><b>Observed while writing this spec:</b> an edit to <code>interview-notes.md</code> was blocked</td><td>Narrow the match to actual workflow scripts (<span class="rid">FR-20</span>); until then, avoid the quoted form in prose</td></tr>
+        <tr><td>Stale duplicate loaded during dual-run</td><td>Edits appear not to take effect</td><td>Two entries with the same behaviour under different names</td><td>Close the dual-run window; delete the fifteen originals</td></tr>
+        <tr><td>Prose corrupted by the rename</td><td>Instructions subtly changed; no error ever</td><td>Diff line count against the 369 expected-unchanged occurrences (<span class="rid">NFR-5</span>)</td><td>Revert the rename commit; fix the pattern; re-run</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    No timeout, retry or idempotency policy applies — there are no network calls and no mutating
+    endpoints. The rename build step is idempotent by construction: it maps old names to new, and
+    re-running it over already-renamed content matches nothing.
+  </p>
+</section>
+
+<section id="decisions">
+  <h2>10 &middot; Key decisions</h2>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>id</th><th>Decision</th><th>Options considered</th><th>Consequences &mdash; better / worse</th><th>Revisit trigger</th><th>Confirmed by</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="rid">ADR-1</td>
+          <td>Distribute as a <b>skills-directory plugin</b>, cloned into <code>~/.claude/skills/r</code></td>
+          <td>Marketplace plugin · flat skills · <code>npx</code> installer · symlink farm</td>
+          <td><b>Better:</b> no marketplace, no install step, read in place so edits apply where made. <b>Worse:</b> no dependency declaration (<span class="rid">R-3</span>); discovery depends on a documented behaviour that could change.</td>
+          <td>Claude Code changing skills-dir discovery, or needing to declare the <code>codex</code> dependency in metadata</td>
+          <td><code>/plugin</code> lists <code>r@skills-dir</code> after a session restart</td>
+        </tr>
+        <tr>
+          <td class="rid">ADR-2</td>
+          <td>Name the plugin <code>r</code></td>
+          <td><code>r</code> · <code>mirum8</code> · <code>skill-pack</code></td>
+          <td><b>Better:</b> two characters to type before every command, on a prefix used dozens of times a day. <b>Worse:</b> meaningless to anyone else, and a one-letter name is easy to collide with if a second pack ever appears.</td>
+          <td>A second pack needing its own namespace</td>
+          <td><code>plugin.json</code> <code>name</code> field; <code>/r:</code> autocomplete resolves</td>
+        </tr>
+        <tr>
+          <td class="rid">ADR-3</td>
+          <td><b>Domain-first naming:</b> <code>&lt;domain&gt;-&lt;action&gt;</code>, &le;3 kebab segments</td>
+          <td>Verb-first imperative · terse single words · keep current names</td>
+          <td><b>Better:</b> the <code>/</code> menu sorts alphabetically, so <code>claudemd-*</code>, <code>code-*</code>, <code>spec-*</code> and <code>task-*</code> cluster into visible families. <b>Worse:</b> names read as nouns not commands, and <code>spec-brainstorm</code> is an awkward fit for a verb that has no natural domain.</td>
+          <td>The pack exceeding roughly 25 skills, where families may need real subdirectories instead</td>
+          <td><span class="rid">BR-1</span> regex check in the build</td>
+        </tr>
+        <tr>
+          <td class="rid">ADR-4</td>
+          <td><b>Flat <code>skills/</code></b> — no category subdirectories</td>
+          <td>Category folders as <code>mattpocock/skills</code> uses (<code>engineering/</code>, <code>productivity/</code>)</td>
+          <td><b>Better:</b> one fewer taxonomy to maintain; the domain-first names already group the skills in the only place grouping is visible to the user. <b>Worse:</b> a flat listing of 25+ directories eventually becomes hard to scan in the filesystem.</td>
+          <td>Same as <span class="rid">ADR-3</span> — roughly 25 skills</td>
+          <td>Directory depth check: every <code>SKILL.md</code> is exactly two levels below the repo root</td>
+        </tr>
+        <tr>
+          <td class="rid">ADR-5</td>
+          <td><b>Expand the pack to 15 skills</b> rather than ship 7 and document the rest as prerequisites</td>
+          <td>Document as prerequisites · rewrite the skills to be self-contained</td>
+          <td><b>Better:</b> <code>gh-issues-fix</code> actually works on a fresh machine; the pack is a coherent unit. <b>Worse:</b> the pack is more than twice the intended size, and eight skills the user did not ask to maintain are now inside it.</td>
+          <td>A packed dependency becoming a maintenance burden the user does not want</td>
+          <td><span class="rid">FR-9</span> zero-dangling-references check</td>
+        </tr>
+        <tr>
+          <td class="rid">ADR-6</td>
+          <td>Ship the <b>eight agents</b> that packed skills dispatch</td>
+          <td>Ship all ten in <code>~/.claude/agents/</code> · ship none and document them</td>
+          <td><b>Better:</b> the review fan-out has something to dispatch to on a fresh machine. <b>Worse:</b> two of the eight (<code>java-backend-developer</code>, <code>htmx-thymeleaf-dev</code>) are stack-specific and will look out of place in a non-JVM project.</td>
+          <td>An agent no packed skill dispatches — it becomes <code>orphaned</code> and should be dropped</td>
+          <td>Dispatch inventory: every name in <code>agents/</code> appears in at least one packed skill</td>
+        </tr>
+        <tr>
+          <td class="rid">ADR-7</td>
+          <td><b>Exclude</b> <code>html</code>, <code>html-diagram</code>, <code>html-plan</code>, the five <code>sdd-*</code> skills, <code>sonar</code>, <code>htmx</code> and <code>test-app</code></td>
+          <td>Vendor the whole 26-skill closure</td>
+          <td><b>Better:</b> 1.4 MB and eleven skills stay out, all on cited evidence rather than taste. <b>Worse:</b> the closure is no longer mechanically complete, so each exclusion needs its evidence kept current.</td>
+          <td>Any packed skill acquiring a real call to an excluded name</td>
+          <td>The exclusion table in <code>interview-notes.md</code>, each row carrying a <code>path:line</code></td>
+        </tr>
+        <tr>
+          <td class="rid">ADR-8</td>
+          <td><b>Drop <code>version:</code></b> from <code>SKILL.md</code>; version the pack with git tags and <code>plugin.json</code></td>
+          <td>Keep per-skill versions · add them to all fifteen for consistency</td>
+          <td><b>Better:</b> one version per releasable unit, and the field is not in the documented schema anyway. <b>Worse:</b> per-skill history is only recoverable from git, not readable in the file.</td>
+          <td>Claude Code documenting <code>version</code> as a real <code>SKILL.md</code> field</td>
+          <td>Grep: no <code>SKILL.md</code> contains a <code>version:</code> key</td>
+        </tr>
+        <tr>
+          <td class="rid">ADR-9</td>
+          <td><b>Keep</b> the vendored <code>html-effectiveness</code> tree (380 KB, 24 files)</td>
+          <td>Drop it and rewrite the five citations · replace with links to the upstream repo</td>
+          <td><b>Better:</b> <code>spec-brainstorm</code> keeps working offline and the five citations stay valid. <b>Worse:</b> 30% of the repo is third-party material with its own licence obligations (<span class="rid">R-8</span>).</td>
+          <td>Upstream relicensing, or the vendored tree exceeding 50% of the repo (<span class="rid">NFR-4</span>)</td>
+          <td>Upstream <code>LICENSE</code> present and byte-identical; provenance recorded in the README</td>
+        </tr>
+        <tr>
+          <td class="rid">ADR-10</td>
+          <td><b>No CI.</b> Validation is a local pre-push script only</td>
+          <td>GitHub Actions running <code>claude plugin validate .</code> plus a frontmatter linter</td>
+          <td><b>Better:</b> nothing to maintain, no Actions minutes, no workflow file. <b>Worse:</b> the failure mode this protects against — a malformed manifest making the entire namespace vanish with no error — reaches <code>main</code> unchallenged.</td>
+          <td>The first load failure that reaches a second machine</td>
+          <td><span class="rid">FR-17</span> — the pre-push script. On the first pass this cell read "nothing automated confirms this decision"; the mitigation is now a named deliverable rather than an assertion, though it still depends on the maintainer remembering to run it.</td>
+        </tr>
+        <tr>
+          <td class="rid">ADR-11</td>
+          <td>Install at <b>personal scope</b>, not project scope</td>
+          <td>Project scope (<code>&lt;repo&gt;/.claude/skills/</code>)</td>
+          <td><b>Better:</b> loads in every project with no trust dialog; no dependence on which directory Claude Code started in. <b>Worse:</b> the listing cost is paid in every session in every project (<span class="rid">R-7</span>), and the skills are not versioned alongside any project that uses them.</td>
+          <td>Wanting a project to pin a specific pack revision</td>
+          <td><code>~/.claude/skills/r</code> resolves to the pack; <code>/plugin</code> shows it in an unrelated project. <b>Amended 2026-07-30:</b> the scope decision stands unchanged; the mechanism is now clone-to-a-working-directory plus a symlink at that path, rather than cloning in place. That keeps the repo where the maintainer actually works on it, makes uninstall a symlink removal that cannot lose the clone (<span class="rid">NFR-6</span>), and adds one unverified dependency — <span class="rid">R-10</span>.</td>
+        </tr>
+        <tr>
+          <td class="rid">ADR-12</td>
+          <td><b>No behavioural or structural change to any skill in v1</b> — move, rename, rewrite references, stop</td>
+          <td>Split <code>gh-issues-fix</code> into <code>references/</code> in the same pass · rewrite descriptions freely</td>
+          <td><b>Better:</b> the rename diff is mechanically reviewable, and any behaviour regression must come from the rename itself. <b>Worse:</b> known improvements wait — the 33 KB single file, and <code>paths</code>/<code>disallowed-tools</code> (<span class="rid">R-9</span>). Two things are exempted as correctness rather than behaviour: the over-cap description (<span class="rid">FR-8</span>) and the invalid YAML (<span class="rid">FR-7</span>). <b>Eval suites (<span class="rid">FR-11</span>) also join v1</b> — they add files without altering any skill's instructions, so they don't breach this decision.</td>
+          <td>v1 published and the rename proven on a second machine</td>
+          <td>Diff review: only path renames, reference rewrites, frontmatter normalisation, the two correctness fixes, and new <code>evals/</code> directories</td>
+        </tr>
+        <tr>
+          <td class="rid">ADR-13</td>
+          <td><b>Keep both copies permanently.</b> The fifteen flat originals are never deleted</td>
+          <td>Delete at cut-over after a one-week dual-run · delete each original as its twin is proven</td>
+          <td><b>Better:</b> rollout has no point of no return at all, so rollback stays trivial forever and the old names keep working for muscle memory. <b>Worse:</b> every skill exists twice under two names for good, both descriptions sit in the listing competing for the same task, and an edit to the wrong copy is lost silently — <span class="rid">R-4</span>, now rated H rather than M because the exposure never closes.</td>
+          <td>The first edit that lands in a flat original, or the first observed mis-route between a pair</td>
+          <td><span class="rid">FR-17</span>'s drift check: each original is compared against its packed twin, and any difference beyond the rename is reported. <b>Accepted risk</b> — recommended against once, decided by the user, not re-litigated.</td>
+        </tr>
+        <tr>
+          <td class="rid">ADR-14</td>
+          <td><b>Defer <code>paths</code> and <code>disallowed-tools</code> to v2</b></td>
+          <td>Adopt both in v1 alongside the rename</td>
+          <td><b>Better:</b> holds <span class="rid">ADR-12</span>'s line — the rename diff contains no behaviour change, so a regression can only have come from the rename. <b>Worse:</b> for all of v1, <code>code-bugs</code> and <code>code-quality</code> can edit code while claiming they never do, and <code>tests-write</code> keeps loading on non-JVM work and spending context. That is <span class="rid">R-9</span>.</td>
+          <td>v1 shipped and stable, or the first time a report-only skill modifies a file</td>
+          <td><span class="rid">FR-18</span> holds the requirement so it is scheduled rather than forgotten</td>
+        </tr>
+        <tr>
+          <td class="rid">ADR-15</td>
+          <td><b>Ship the workflow-immutability guard inside the pack</b> and remove the global registration (<span class="rid">FR-20</span>)</td>
+          <td>Widen the existing global guard's allow-list in place · drop the guard from the packed copies</td>
+          <td><b>Better:</b> the fix travels with the repo, so a clone on any machine works; the pack stops depending on a hand-edited file outside itself. <b>Worse:</b> installing now edits <code>~/.claude/settings.json</code>, which is the maintainer's own configuration, and a botched removal leaves two guards where the stricter one wins. Widening in place was rejected because the fix would live outside the repo — a fresh clone elsewhere is blocked again, and nothing in the pack would reveal why. Dropping the guard was rejected because the packed copies would still be blocked by the global one, so it solves nothing while also losing the fork protection.</td>
+          <td>Claude Code gaining a way for a plugin to extend an existing hook's configuration rather than replace it</td>
+          <td>With the pack installed and the global registration removed, <code>/r:task-review</code> runs its workflow, <code>/post-task-review</code> still runs the original, and a deliberately forked copy of either is still blocked</td>
+        </tr>
+        <tr>
+          <td class="rid">ADR-16</td>
+          <td><b>Two dependency tiers.</b> The <code>code-scan</code> analyzers and <code>agent-browser</code> are <b>mandatory</b> and installer-provisioned; the <code>codex</code> plugin is <b>optional</b> and degrades to a reported skip</td>
+          <td>All prerequisites mandatory (today's shape) · all prerequisites optional and documented only</td>
+          <td><b>Better:</b> matches how the pack actually fails — a machine without <code>semgrep</code> or a browser silently loses review coverage, while a machine without Codex loses one clearly-named step. It also lets the pack install on a machine that has no Codex licence at all. <b>Worse:</b> the installer now provisions software (<span class="rid">R-12</span>), and making Codex optional is a behaviour change to an immutable pipeline (<span class="rid">R-11</span>). Making everything mandatory was rejected because it blocks install on any machine without Codex; making everything optional was rejected because silent partial review is the failure mode this pack exists to prevent.</td>
+          <td>Codex becoming a hard dependency of a step that has no honest skipped state, or an analyzer becoming installable only by hand</td>
+          <td><code>check-prereqs.sh</code> (<span class="rid">FR-15</span>) exits non-zero with only a mandatory prerequisite missing, and exits zero with only Codex missing</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="tag">
+    ADR-1, ADR-3, ADR-5, ADR-6, ADR-10, ADR-11, ADR-13, ADR-15 and ADR-16 record decisions the user
+    made explicitly. Two are overruled objections, and in both the recommendation was retracted while
+    the risk was kept: CI was recommended and declined (R-5), and a time-boxed cut-over was
+    recommended and declined in favour of permanent coexistence (R-4). ADR-16 carries a concern that
+    was raised and not overruled — that making Codex optional is a behaviour change against ADR-12 —
+    recorded as R-11 rather than argued twice.
+  </p>
+</section>
+
+<section id="flows">
+  <h2>11 &middot; Runtime flows</h2>
+  <p>
+    Five flows matter. The first is drawn because it is the one that must work; the rest are step
+    lists, including three failure paths.
+  </p>
+
+  <h3>Flow 1 &mdash; fresh install to first invocation <span class="tag">(happy path)</span></h3>
+  <figure class="svg-figure">
+    <svg viewBox="0 0 900 400" role="img" aria-label="Sequence diagram: maintainer runs install.sh, git clones the pack, the session restarts, the loader discovers the plugin, and the first r-prefixed command runs.">
+      <defs>
+        <marker id="sq-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#87867F"/>
+        </marker>
+        <marker id="sq-ah-acc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#D97757"/>
+        </marker>
+      </defs>
+
+      <!-- lanes -->
+      <rect class="n-alt" x="30" y="20" width="130" height="34" rx="3"/>
+      <text class="t t-mid" x="95" y="42">maintainer</text>
+      <line class="life" x1="95" y1="54" x2="95" y2="380"/>
+
+      <rect class="n-alt" x="230" y="20" width="130" height="34" rx="3"/>
+      <text class="t t-mid" x="295" y="42">install.sh</text>
+      <line class="life" x1="295" y1="54" x2="295" y2="380"/>
+
+      <rect class="n-alt" x="430" y="20" width="130" height="34" rx="3"/>
+      <text class="t t-mid" x="495" y="42">git remote</text>
+      <line class="life" x1="495" y1="54" x2="495" y2="380"/>
+
+      <rect class="n-accent" x="630" y="20" width="150" height="34" rx="3"/>
+      <text class="t t-mid" x="705" y="42">skill loader</text>
+      <line class="life" x1="705" y1="54" x2="705" y2="380"/>
+
+      <!-- steps -->
+      <path class="edge" d="M 95 90 L 289 90" marker-end="url(#sq-ah)"/>
+      <text class="t-sm" x="103" y="84">1. ./install.sh</text>
+
+      <path class="edge" d="M 295 128 L 489 128" marker-end="url(#sq-ah)"/>
+      <text class="t-sm" x="303" y="122">2. git clone → ~/.claude/skills/r</text>
+
+      <path class="edge" d="M 489 160 L 301 160" marker-end="url(#sq-ah)"/>
+      <text class="t-sm" x="330" y="154">3. 82 files, 1,257 KB</text>
+
+      <path class="edge" d="M 289 194 L 101 194" marker-end="url(#sq-ah)"/>
+      <text class="t-sm" x="112" y="188">4. "restart your session"</text>
+
+      <path class="edge-acc" d="M 95 232 L 699 232" marker-end="url(#sq-ah-acc)"/>
+      <text class="t-sm" x="103" y="226">5. new session starts  ⏸ the only waiting point that matters</text>
+
+      <path class="edge-acc" d="M 705 268 L 705 268" />
+      <rect class="n-accent" x="600" y="252" width="210" height="32" rx="3"/>
+      <text class="t-sm t-mid" x="705" y="272">6. reads .claude-plugin/plugin.json</text>
+
+      <rect class="n-fill" x="600" y="296" width="210" height="32" rx="3"/>
+      <text class="t-sm t-mid" x="705" y="316">7. registers namespace "r"</text>
+
+      <path class="edge-acc" d="M 95 358 L 699 358" marker-end="url(#sq-ah-acc)"/>
+      <text class="t-sm" x="103" y="352">8. /r:git-commit  →  resolves, body loads on demand</text>
+    </svg>
+    <figcaption>
+      Steps 1&ndash;4 take seconds; step 5 is the gate. Skills-directory plugins load on the
+      <em>next</em> session, never mid-session, so an install that appears to have done nothing is
+      almost always a session that has not been restarted.
+      <a class="xlink" href="architecture.html">Explore the dependency graph &rarr;</a>
+    </figcaption>
+  </figure>
+
+  <h3>Flow 2 &mdash; edit a skill <span class="tag">(happy path)</span></h3>
+  <ol>
+    <li>Maintainer edits <code>~/.claude/skills/r/skills/git-commit/SKILL.md</code>.</li>
+    <li>The change is live in the current session immediately — no reload, no restart.</li>
+    <li>If instead they edited <code>agents/bug-hunter-ui.md</code>, <code>hooks/</code> or <code>.mcp.json</code>, nothing happens until <code>/reload-plugins</code>.</li>
+    <li><code>git commit</code> and <code>git push</code>; other machines pick it up on their next <code>./install.sh</code>.</li>
+  </ol>
+  <p class="tag">Live-edit and reload behaviour: [verified: code.claude.com/docs/en/plugins-reference, read 2026-07-30].</p>
+
+  <h3>Flow 3 &mdash; the pack fails to load <span class="tag">(failure path)</span></h3>
+  <ol>
+    <li>A trailing comma is introduced into <code>plugin.json</code>.</li>
+    <li>Next session start: the loader finds no valid manifest, so the folder is treated as a plain skill directory rather than a plugin.</li>
+    <li><b>Every <code>/r:</code> command silently ceases to exist.</b> There is no error, no warning, and autocomplete simply offers nothing.</li>
+    <li>Detection: <code>/plugin</code> does not list <code>r@skills-dir</code>. This is the only reliable signal.</li>
+    <li>Recovery: fix the JSON, restart. With <span class="rid">ADR-10</span> there is no automated gate to stop step 1 reaching <code>main</code> — see <span class="rid">R-5</span>.</li>
+  </ol>
+
+  <h3>Flow 4 &mdash; a review step silently does not run <span class="tag">(failure path)</span></h3>
+  <ol>
+    <li><code>/r:task-review</code> reaches its Codex adversarial step.</li>
+    <li>The machine has no <code>codex</code> plugin, so <code>codex:adversarial-review</code> does not resolve.</li>
+    <li><b>Without <span class="rid">FR-15</span>:</b> the step is skipped or improvised, and the run reports a completed review that never happened — the worst failure in this system, because the output looks identical to success.</li>
+    <li><b>With <span class="rid">FR-15</span>:</b> the skill checks first, stops, and names the missing plugin and the command to add it.</li>
+  </ol>
+
+  <h3>Flow 5 &mdash; the rename corrupts prose <span class="tag">(failure path)</span></h3>
+  <ol>
+    <li>A build script runs <code>sed -i 's/commit/git-commit/g'</code> across the pack.</li>
+    <li>All 101 occurrences of <code>commit</code> change, but only 2 were references. Ninety-nine English sentences now read "create a git-commit".</li>
+    <li>Nothing fails. Tests pass, the pack loads, and the instructions are subtly wrong forever.</li>
+    <li>Prevention: <span class="rid">BR-3</span>'s four bounded patterns, and <span class="rid">NFR-5</span>'s diff-count check against the 369 expected-unchanged occurrences.</li>
+  </ol>
+</section>
+
+<section id="tests">
+  <h2>12 &middot; Test strategy</h2>
+  <p>
+    There is no application code to unit-test. What can go wrong is <em>packaging</em>, so the tests
+    are checks over the built pack — and each one maps to a requirement that would otherwise fail
+    silently.
+  </p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Check</th><th>Proves</th><th>Layer</th><th>How</th></tr></thead>
+      <tbody>
+        <tr><td>Manifest parses and <code>name == "r"</code></td><td><span class="rid">FR-1</span></td><td>static</td><td><code>json.load</code>; assert the name</td></tr>
+        <tr><td>Fifteen directories, each with a <code>SKILL.md</code>, exactly two levels deep</td><td><span class="rid">FR-2</span>, <span class="rid">ADR-4</span></td><td>static</td><td>Directory walk with a depth assertion</td></tr>
+        <tr><td>Every directory name matches the naming regex and the rename map</td><td><span class="rid">FR-3</span>, <span class="rid">BR-1</span>, <span class="rid">BR-2</span></td><td>static</td><td>Regex + set equality against the map's values</td></tr>
+        <tr><td>Exactly 309 references rewritten; 369 prose occurrences byte-identical</td><td><span class="rid">FR-4</span>, <span class="rid">NFR-5</span></td><td>differential</td><td>Re-run the pattern inventory pre- and post-build; compare counts</td></tr>
+        <tr><td>All fifteen frontmatter blocks pass <code>yaml.safe_load</code></td><td><span class="rid">FR-7</span></td><td>static</td><td>Parse each; fail naming the skill</td></tr>
+        <tr><td>No description exceeds 1,536 characters</td><td><span class="rid">FR-8</span>, <span class="rid">BR-4</span></td><td>static</td><td>Length check; report the overage</td></tr>
+        <tr><td>Zero unclassified skill references</td><td><span class="rid">FR-9</span></td><td>static</td><td>Every referenced name resolves to packed, bundled, or a README-listed external</td></tr>
+        <tr><td>No <code>SKILL.md</code> contains <code>version:</code></td><td><span class="rid">FR-10</span>, <span class="rid">ADR-8</span></td><td>static</td><td>Frontmatter key check</td></tr>
+        <tr><td>Every agent in <code>agents/</code> is dispatched by at least one packed skill</td><td><span class="rid">FR-5</span>, <span class="rid">ADR-6</span></td><td>static</td><td>Dispatch inventory; flag orphans</td></tr>
+        <tr><td>No tracked <code>*.pyc</code>; <code>__pycache__</code> ignored</td><td><span class="rid">FR-13</span></td><td>static</td><td><code>git ls-files</code> assertion</td></tr>
+        <tr><td>Vendored <code>LICENSE</code> byte-identical to upstream</td><td><span class="rid">FR-12</span></td><td>static</td><td>Hash comparison</td></tr>
+        <tr><td>Every skill has a non-empty <code>evals/evals.json</code></td><td><span class="rid">FR-11</span></td><td>static</td><td>Presence + parses + at least one trigger case and one neighbour-exclusion case per skill</td></tr>
+        <tr><td>No flat original has drifted from its packed twin</td><td><span class="rid">R-4</span>, <span class="rid">ADR-13</span></td><td>static</td><td>Diff each original against its twin; the only expected differences are the name and its references</td></tr>
+        <tr><td>Eval suites actually pass</td><td><span class="rid">FR-11</span>; routing quality</td><td><b>model-dependent</b></td><td>Run the suites; a failing neighbour-exclusion case means that skill is mis-routing now</td></tr>
+        <tr><td>Fifteen skills resolve after a real install</td><td><span class="rid">FR-1</span>, <span class="rid">FR-2</span>, <span class="rid">NFR-6</span></td><td><b>manual, once per release</b></td><td>Clone to a scratch path, restart, confirm <code>/plugin</code> and autocomplete</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    Every static row runs in under a second and together they are exactly what
+    <span class="rid">FR-17</span>'s pre-push script executes. That is what makes
+    <span class="rid">ADR-10</span> survivable rather than merely cheaper: declining CI removed the
+    trigger, not the checks. The residual exposure is that a script has to be remembered, which is why
+    <span class="rid">R-5</span>'s revisit trigger includes "any push made without running it".
+  </p>
+  <p>
+    Two rows are not static and cannot join the script. The real-install check needs a Claude Code
+    session, so it stays a manual gate once per release. The eval suites need a model, so they are run
+    deliberately — after editing any description, and before a release — rather than on every push.
+  </p>
+  <p>
+    Note what the suites do and do not prove. They test whether a skill's <em>instructions</em> work and
+    whether its description still routes correctly; they say nothing about whether the pack is
+    well formed. Those are separate failures with separate checks, and conflating them is how a pack
+    passes its tests while failing to load at all.
+  </p>
+</section>
+
+<section id="observability">
+  <h2>13 &middot; Observability</h2>
+  <p>
+    There is no service emitting telemetry. What is observable is the pack's <em>effect</em>, and the
+    honest answer is that most of it is not instrumented and cannot easily be.
+  </p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Signal</th><th>Where it comes from</th><th>Threshold / action</th></tr></thead>
+      <tbody>
+        <tr><td>Pack is loaded</td><td><code>/plugin</code> lists <code>r@skills-dir</code></td><td>Absent &rarr; manifest is broken; nothing else works. Check first, always.</td></tr>
+        <tr><td>Skill count</td><td><code>/r:</code> autocomplete</td><td>Fewer than 15 &rarr; a directory or frontmatter problem</td></tr>
+        <tr><td>Always-on listing cost</td><td>Build-time sum of capped description lengths</td><td>Above 16,000 characters &rarr; trim descriptions (<span class="rid">NFR-1</span>)</td></tr>
+        <tr><td>Descriptions over cap</td><td>Build check</td><td>Any &rarr; build fails</td></tr>
+        <tr><td>Which skills actually get used</td><td><b>Not instrumented.</b> No mechanism exists to count invocations.</td><td>Still the real gap: a skill that never triggers looks identical to one that is never needed. Reviewed by hand, occasionally, from memory.</td></tr>
+        <tr><td>Mis-routing and description drift</td><td>Eval suites, <b>now all fifteen</b> (<span class="rid">FR-11</span>, in v1)</td><td>A suite that starts failing is the signal a description has drifted. Run them after editing any description; a skill whose neighbour-exclusion case fails is routing badly right now.</td></tr>
+        <tr><td>Duplicate-copy drift</td><td>The <span class="rid">FR-17</span> drift check</td><td>Any original differing from its packed twin beyond the rename &rarr; an edit went to the wrong copy (<span class="rid">R-4</span>)</td></tr>
+        <tr><td>Drift between pack and machine</td><td><code>git status</code> and <code>git log</code> in <code>~/.claude/skills/r</code></td><td>Uncommitted local edits &rarr; commit or lose them on the next machine</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    One row still reads "not instrumented", and it is the honest state: nothing counts invocations, so
+    an unused skill and an unnecessary skill look the same. Writing that down beats inventing a metric
+    nobody will collect.
+  </p>
+  <p>
+    Everything else is now measurable, and that is the direct effect of promoting eval suites into v1.
+    On the first pass this section had two uninstrumented rows and pointed at eval coverage as a
+    someday-if-it-becomes-a-problem answer; it is now a v1 requirement, so routing quality has an actual
+    instrument rather than a plan for one.
+  </p>
+</section>
+
+<section id="environments">
+  <h2>14 &middot; Environments &amp; release</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Environment</th><th>Is</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><td><b>Authoring</b></td><td><code>~/.claude/skills/r</code> — the working clone <em>is</em> the installed pack</td><td>Daily editing. There is no separate dev copy, which is the point: edits apply where they are made.</td></tr>
+        <tr><td><b>Published</b></td><td>The git remote, <code>main</code></td><td>What another machine clones</td></tr>
+        <tr><td><b>Scratch verification</b></td><td>A throwaway clone at another path</td><td>The manual release gate — proves a clean clone loads, without disturbing the working copy</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    The authoring environment being the live install is unusual and worth stating clearly: there is no
+    promotion step, and an uncommitted local edit is a real change to the maintainer's tooling that
+    exists nowhere else. <code>git status</code> is therefore part of the workflow, not hygiene.
+  </p>
+  <h3>Release</h3>
+  <ol>
+    <li>Run the static checks from &sect;12 locally.</li>
+    <li>Commit on <code>main</code>; tag <code>v&lt;major&gt;.&lt;minor&gt;.&lt;patch&gt;</code> matching <code>plugin.json</code>'s <code>version</code>.</li>
+    <li>Push.</li>
+    <li>Once per release: clone to a scratch path, restart a session, confirm fifteen skills resolve.</li>
+  </ol>
+  <p>
+    No feature flags. The unit of rollback is a git revert plus a session restart, and the
+    <code>renames</code> field in a marketplace manifest — the mechanism that would let existing users
+    migrate automatically across a rename — is <b>not available</b> to a skills-directory plugin,
+    because there is no marketplace entry to carry it
+    <span class="tag">[likely: the field is documented only for marketplace plugin entries, and skills-dir plugins have no marketplace entry &mdash; not explicitly stated either way in the docs read 2026-07-30]</span>.
+    That is why the rename needs the dual-run window below rather than an automatic mapping.
+  </p>
+</section>
+
+<section id="rollout">
+  <h2>15 &middot; Rollout &amp; migration</h2>
+  <p>
+    An existing, in-daily-use system is being restructured, so this section is mandatory regardless of
+    depth. The migration is <em>expand &rarr; migrate &rarr; contract</em>: the pack appears alongside
+    the flat skills, both work, then the originals are removed.
+  </p>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>#</th><th>Step</th><th>Reversible?</th><th>Done when</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td><b>Sanity scan.</b> Check all 82 files for secrets, tokens, internal hostnames and absolute home paths. The repo starts private, so this is a check rather than a gate — the gate is step 7.</td><td>n/a</td><td>Every hit is triaged or waived deliberately</td></tr>
+        <tr><td>2</td><td><b>Build the pack in a new repo.</b> Copy the 15 skills and 8 agents, rename directories per <span class="rid">BR-2</span>, rewrite the 309 references per <span class="rid">BR-3</span>, normalise frontmatter and drop <code>version:</code>, fix <code>run-task</code>'s over-cap description and <code>spec-to-todo</code>'s invalid YAML, <b>author eval suites for the thirteen skills that lack them</b> (<span class="rid">FR-11</span>), add <code>plugin.json</code>, <code>.gitignore</code>, <code>install.sh</code>, the pre-push script (<span class="rid">FR-17</span>), README, LICENSE.</td><td>Yes — nothing outside the new repo is touched</td><td>The pre-push script exits zero</td></tr>
+        <tr><td>3</td><td><b>Expand.</b> Clone to <code>~/.claude/skills/r</code>. Both the flat skills and the pack are now installed. Restart the session.</td><td>Yes — <code>rm -rf</code></td><td><code>/plugin</code> lists <code>r@skills-dir</code>; all 15 <code>/r:</code> commands resolve; the old <code>/commit</code> still works</td></tr>
+        <tr><td>4</td><td><b>Adopt the <code>/r:</code> names.</b> Use them in preference to the old ones and exercise each skill at least once from the pack.</td><td>Yes — the old names never stop working</td><td>Each of the 15 has run from the pack at least once with no regression</td></tr>
+        <tr><td>5</td><td><b>Hold the invariant, permanently.</b> There is no contract step: the originals stay (<span class="rid">ADR-13</span>). From here the only rule that matters is <b>edits go to the pack, never to an original</b>, enforced by the drift check in <span class="rid">FR-17</span>.</td><td>n/a — nothing is destroyed, so there is nothing to undo</td><td>The drift check reports no original differing from its twin beyond the rename</td></tr>
+        <tr><td>6</td><td><b>Second machine.</b> Run <code>install.sh</code> elsewhere and confirm the pack loads from scratch.</td><td>Yes</td><td>15 skills resolve on a machine that never had the flat skills</td></tr>
+        <tr><td>7</td><td><b class="star">Public flip — the one irreversible step.</b> Change the repository to public.</td><td><b>No.</b> Anything already fetched or indexed stays fetched. Making it private again does not unpublish it.</td><td>The step-1 scan has been re-run and is clean, and the README states the pack installs at personal scope with no trust gate</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Reconciliation — permanent, not a phase</h3>
+  <p>
+    Both copies exist forever, so they can diverge forever. The reconciliation rule is one-directional
+    and absolute: <b>the pack is the only place edits are made.</b> An edit that lands in a flat original
+    by habit is not lost at a cut-over — there is no cut-over — it simply sits there, working when you
+    type the old name and missing when you type the new one, which is harder to notice than losing it
+    outright.
+  </p>
+  <p>
+    That is why the drift check in <span class="rid">FR-17</span> is not optional housekeeping but the
+    only control on <span class="rid">R-4</span>: it diffs each original against its packed twin and
+    expects differences only in the name and its references. Any other difference is an edit that went
+    to the wrong copy, and the script says which file.
+  </p>
+
+  <h3>Rollback</h3>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Failure at step</th><th>Rollback</th><th>Cost</th></tr></thead>
+      <tbody>
+        <tr><td>2 &mdash; build is wrong</td><td>Discard the new repo</td><td>Zero. Nothing outside it changed.</td></tr>
+        <tr><td>3 &mdash; pack does not load</td><td><code>rm ~/.claude/skills/r</code> (the symlink only), restart. If the manifest parses but the namespace is absent, the cause is <span class="rid">R-10</span> — re-point the path at a real directory rather than a link before concluding the manifest is at fault.</td><td>Minutes, and the clone survives. Flat skills untouched throughout.</td></tr>
+        <tr><td>4 &mdash; a packed skill misbehaves</td><td>Keep using the flat original under its old name while fixing the pack</td><td>Low, and it stays low indefinitely — this is what permanent coexistence buys.</td></tr>
+        <tr><td>5 &mdash; an edit landed in the wrong copy</td><td>Move it to the packed copy; revert the original</td><td>Low if the drift check catches it, unbounded if it doesn't — the change quietly exists under one name only.</td></tr>
+        <tr><td>7 &mdash; something sensitive went public</td><td><b>None that works.</b> Rotate whatever leaked and treat it as disclosed.</td><td><b>Highest, and unrecoverable.</b> This is the only irreversible step in the whole rollout, which is why the scan gates it.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    Backfill does not apply — there is no data to migrate, only names. There is no feature flag either,
+    because the two names <em>are</em> the flag: typing <code>/commit</code> versus
+    <code>/r:git-commit</code> selects which implementation runs. Unlike a normal flag, this one is never
+    removed, so it never stops being a choice the maintainer has to make correctly.
+  </p>
+  <p>
+    Worth stating plainly, because it inverts the usual shape of a migration: <b>steps 1–6 are all
+    reversible and nothing is ever deleted.</b> The single irreversible act in this plan is not a
+    technical cut-over at all — it is making the repository public.
+  </p>
+</section>
+
+<section id="model-routing">
+  <h2>16 &middot; Model-driven skill selection</h2>
+  <p>
+    This module exists because a language model, not a router table, decides which of these fifteen
+    skills loads. That makes description text a functional component with its own failure modes.
+  </p>
+
+  <h3>What the model decides</h3>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Decision</th><th>Input it sees</th><th>Failure mode</th><th>Control</th></tr></thead>
+      <tbody>
+        <tr><td>Whether to load a skill at all</td><td><code>description</code> + <code>when_to_use</code>, capped at 1,536 characters combined</td><td>Under-triggering — the skill exists and is never used</td><td><span class="rid">FR-8</span> cap enforcement; key use case first in every description</td></tr>
+        <tr><td>Which of two similar skills to load</td><td>Both descriptions, side by side in the listing</td><td>Mis-routing between neighbours — <code>code-bugs</code> vs <code>code-quality</code> vs <code>code-scan</code> all review code. <b>Made worse in v1 by <span class="rid">ADR-13</span>:</b> every packed skill's flat twin is also listed, so each pair competes with itself.</td><td>Each description already carries an explicit "NOT for:" clause naming its neighbours; preserving those verbatim through the rename is a correctness requirement. <span class="rid">FR-11</span>'s eval suites assert the neighbour-exclusion case directly.</td></tr>
+        <tr><td>Whether to fire without being asked</td><td>The description plus <code>disable-model-invocation</code></td><td>A heavyweight pipeline auto-firing after an ordinary edit</td><td><span class="rid">FR-16</span> — enforce the skill's own stated rule in frontmatter</td></tr>
+        <tr><td>Whether the task is even in the skill's domain</td><td>The description alone. <b>Nothing scopes it in v1.</b></td><td><code>tests-write</code> only covers <code>.java</code>/<code>.kt</code> sources and <code>code-scan</code> needs a JVM toolchain, yet both are eligible on every task in every language</td><td><code>paths</code> globs would fix this at the harness level, deferred as <span class="rid">FR-18</span> / <span class="rid">ADR-14</span>. Until then the only control is description text, which is why <span class="rid">R-9</span> stays open through v1.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Human review path</h3>
+  <p>
+    Every skill in the pack is user-invocable, so the human override is always available: type the
+    name and the model's routing choice is bypassed entirely. Three skills go further and are
+    barred from auto-firing altogether (<span class="rid">FR-16</span>). There is no case where the
+    model's choice cannot be overridden, which is what keeps mis-routing an annoyance rather than a
+    hazard.
+  </p>
+
+  <h3>Monitoring for drift</h3>
+  <p>
+    Drift here means descriptions slowly overlapping until routing becomes unreliable — likely as the
+    pack grows, and invisible while it happens. <b>This is monitored in v1</b>, because
+    <span class="rid">FR-11</span> requires an eval suite for all fifteen skills and each asserts both
+    that its skill triggers on its own phrasing and that it does <em>not</em> trigger on its nearest
+    neighbour's. A suite that starts failing is drift, caught the next time the suites run rather than
+    the next time a review silently goes to the wrong skill.
+  </p>
+  <p>
+    One cheap static check belongs alongside them in <span class="rid">FR-17</span>: flag any two
+    descriptions whose leading sentence shares most of its significant words. With every packed skill's
+    flat twin also in the listing (<span class="rid">ADR-13</span>), exact-duplicate descriptions are
+    guaranteed rather than hypothetical, so the check must compare across the pack only and treat each
+    pack/original pair as expected.
+  </p>
+</section>
+
+<section id="scope">
+  <h2>17 &middot; Scope, assumptions &amp; open questions</h2>
+
+  <h3>The v1 line</h3>
+  <p>
+    v1 is <b>a pack that installs and loads correctly with no behaviour changes.</b> Stated as
+    capabilities, not phases: the ordered, phased plan is a separate artefact derived from this spec,
+    and writing phases here would create a second one that drifts.
+  </p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>In v1 &mdash; must have</th><th>Deferred</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>
+            <span class="rid">FR-1</span> manifest and namespace ·
+            <span class="rid">FR-2</span> fifteen flat skills ·
+            <span class="rid">FR-3</span> renamed directories ·
+            <span class="rid">FR-4</span> bounded reference rewrite ·
+            <span class="rid">FR-5</span> eight agents ·
+            <span class="rid">FR-6</span> install script ·
+            <span class="rid">FR-7</span> valid YAML frontmatter ·
+            <span class="rid">FR-8</span> description cap enforced ·
+            <span class="rid">FR-9</span> zero dangling references ·
+            <span class="rid">FR-10</span> drop <code>version:</code> ·
+            <span class="rid">FR-11</span> <b>eval suites for all fifteen</b> ·
+            <span class="rid">FR-13</span> gitignore ·
+            <span class="rid">FR-14</span> permanent dual-run ·
+            <span class="rid">FR-15</span> <b>prerequisite check script</b> ·
+            <span class="rid">FR-16</span> no-auto-fire flags ·
+            <span class="rid">FR-17</span> <b>pre-push validation script</b> ·
+            <span class="rid">FR-19</span> <b>path references de-absolutised</b> ·
+            <span class="rid">FR-20</span> <b>guard hook shipped in-pack</b> ·
+            <span class="rid">FR-21</span> <b>installer provisions mandatory prerequisites</b> ·
+            <span class="rid">FR-22</span> <b>codex degrades to a reported skip</b>
+          </td>
+          <td>
+            <span class="rid">FR-12</span> full provenance documentation beyond preserving the LICENSE ·
+            <span class="rid">FR-18</span> <code>paths</code> + <code>disallowed-tools</code> enforcement ·
+            splitting <code>gh-issues-fix</code>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    Two changes from the first pass, both from the round-3 answers. <span class="rid">FR-11</span> moved
+    <em>into</em> v1 — eval suites for all fifteen skills, not just the two that have them — which is
+    what gives &sect;13 and &sect;16 a real drift instrument instead of a plan for one. And
+    <span class="rid">FR-17</span> is new: the pre-push script that <span class="rid">ADR-10</span>
+    previously assumed without requiring.
+  </p>
+  <p>
+    <b>v1 grew on 2026-07-30, and the reason is worth stating plainly: four of these are not new ideas
+    but repairs to a spec that was wrong.</b> <span class="rid">FR-19</span> and
+    <span class="rid">FR-20</span> exist because the claim that no skill depended on its install path
+    was false — without them the pack does not merely degrade, its two flagship skills can neither run
+    nor be built. <span class="rid">FR-15</span> moved into v1 and was rewritten, because it had been
+    specifying prerequisite checking that three of four dependency families already do better than an
+    install-time check would. <span class="rid">FR-21</span> follows from the decision that the
+    analyzers and <code>agent-browser</code> are mandatory: a dependency the pipeline cannot run
+    without is not a README line. Only <span class="rid">FR-22</span> is a genuine addition of scope,
+    and it is the one carrying a risk row (<span class="rid">R-11</span>) precisely because it changes
+    behaviour rather than packaging.
+  </p>
+  <p>
+    Nothing was deferred to make room. <span class="rid">FR-12</span>,
+    <span class="rid">FR-18</span> and the <code>gh-issues-fix</code> split stay in v2 exactly where
+    round 3 put them.
+  </p>
+
+  <h3>Assumptions</h3>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Assumption</th><th>Why</th><th>Breaks if wrong</th><th>Confirm by</th></tr></thead>
+      <tbody>
+        <tr><td><code>@skills-dir</code> plugin discovery <b>follows a symlinked entry</b> to find <code>.claude-plugin/plugin.json</code></td><td>Symlinked <em>skill</em> entries are documented and two are in use on this machine; plugin discovery through one is not documented either way, and the marketplace symlink rules do not apply because a skills-dir plugin is never copied into the cache</td><td><span class="rid">FR-1</span> fails outright — no manifest read, no <code>r</code> namespace, and fifteen skills either absent or colliding with the originals. This is <span class="rid">R-10</span>, the highest-rated risk in the spec</td><td><code>claude plugin list</code> on the first install, <b>before</b> any rename work. Fallback: clone in place</td></tr>
+        <tr><td><code>agent-browser</code> is provisioned by the installer rather than vendored into the pack</td><td>Its skill file is a 2.8 KB discovery stub, so vendoring would copy a pointer while the real dependency — the CLI and a browser engine — still needed installing. Vendoring would also add 925 characters to the always-on listing (<span class="rid">NFR-1</span>: 15,186 &rarr; 16,111), pull in <span class="rid">ADR-9</span> licence work, and create a second copy beside the existing symlink</td><td>A machine where npm-global installs are unavailable gets no UI verification, and <span class="rid">FR-21</span> needs a second route</td><td>Stated as a decision the user can overrule in one line; confirm on the first install where <code>agent-browser</code> was not already present</td></tr>
+        <tr><td>The skills-directory plugin mechanism stays as documented</td><td>Read from the current docs this session</td><td>The whole distribution choice fails and the pack falls back to a marketplace plugin (<span class="rid">ADR-1</span>)</td><td>Re-read the plugins reference at each Claude Code minor upgrade</td></tr>
+        <tr><td>Personal scope is the right scope</td><td>Loads everywhere, no trust gate</td><td>A project needing a pinned pack revision cannot have one</td><td>First time a project wants version pinning</td></tr>
+        <tr><td>Public later means <em>published</em>, not <em>installed by others</em></td><td>The repo starts private and goes public when proven; nothing was said about other people installing it</td><td>Less than it did: <span class="rid">FR-15</span> and <span class="rid">FR-21</span> are now v1, so a second machine is provisioned and checked rather than left to discover gaps at runtime</td><td>Ask before rollout step 7</td></tr>
+        <tr><td>Research coverage is adequate</td><td>Serial web lookups, one reference repo — not the three-agent parallel fan-out standard depth normally runs, because this session forbids subagents</td><td>A better-established packaging convention exists and was missed</td><td>Search for other public Claude Code skill packs before v2</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="tag">
+    Three assumptions were removed on 2026-07-30 rather than carried forward, because each was
+    settled by reading rather than asking. <b>Claude Code v2.1.143+</b> &mdash; confirmed, 2.1.220 is
+    installed. <b>"No packed skill depends on its install path"</b> &mdash; <b>disproved</b>: 42
+    absolute references exist and they are how the two flagship skills invoke their own pipelines,
+    which is now <span class="rid">FR-19</span> and <span class="rid">FR-20</span>. <b>"Every external
+    prerequisite needs a runtime check built"</b> &mdash; three of four families already had one, so
+    <span class="rid">FR-15</span> was rewritten to aggregate and document them instead of
+    re-specifying work that existed. An assumption that survives a real check is worth more than one
+    that was never tested; these did not survive.
+  </p>
+
+  <h3>Open questions</h3>
+  <p>
+    <b>None.</b> An earlier draft of this spec carried six, against seven questions asked — a ratio that
+    is the signature of an unfinished interview rather than a thorough document, since an open question
+    is meant for something nobody in the room can answer today. Five were answerable in a sentence and
+    have been answered; one was answerable by reading the documentation and should never have been a
+    question at all.
+  </p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Was</th><th>Resolution</th><th>What it changed</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Does <code>version:</code> do anything?</td>
+          <td><b>Resolved by reading, not asking.</b> Absent from the documented field list, and the skills docs carry no "unrecognized fields are ignored" clause — that exists only for <code>plugin.json</code>.</td>
+          <td><span class="rid">FR-10</span> promoted from <i>should</i> to <i>must</i> and no longer conditional</td>
+        </tr>
+        <tr>
+          <td>How long is dual-run?</td>
+          <td>It never ends. The originals are never deleted (<span class="rid">ADR-13</span>).</td>
+          <td><span class="rid">FR-14</span>, <span class="rid">R-4</span> raised to H, rollout lost its point of no return, &sect;16 gained a self-competition failure mode</td>
+        </tr>
+        <tr>
+          <td>How is the <code>codex</code> prerequisite surfaced?</td>
+          <td>README only in v1; the runtime check waits.</td>
+          <td><span class="rid">FR-15</span> stays deferred, now gated on rollout step 7 rather than on nothing</td>
+        </tr>
+        <tr>
+          <td>Split <code>gh-issues-fix</code>?</td>
+          <td>v2, as its own change.</td>
+          <td><span class="rid">ADR-12</span> holds</td>
+        </tr>
+        <tr>
+          <td>Eval suites for the other thirteen?</td>
+          <td><b>Yes — in v1.</b></td>
+          <td><span class="rid">FR-11</span> promoted to <i>must</i> and moved into v1; &sect;13 and &sect;16 now have a real drift instrument</td>
+        </tr>
+        <tr>
+          <td>Public or private?</td>
+          <td>Private now, public later.</td>
+          <td>&sect;7 and &sect;9 corrected — they asserted "intended to be public"; the audit became a gate on the new rollout step 7, the one irreversible act in the plan</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    Two questions asked in that round are recorded as <b>not applicable</b> rather than answered, because
+    the project has no such area: <b>scale</b> — fifteen markdown files read from disk at session start
+    have no throughput, concurrency or growth curve, and the one quantity that does constrain the design
+    is already fixed as <span class="rid">NFR-1</span> — and <b>deadline and team size</b>, which are one
+    maintainer and no schedule, and which change no line of this document.
+  </p>
+</section>
+</div>
