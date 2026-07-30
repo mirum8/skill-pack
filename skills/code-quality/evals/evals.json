@@ -1,0 +1,26 @@
+{
+  "skill_name": "code-quality",
+  "evals": [
+    {
+      "id": 0,
+      "name": "routing-triggers",
+      "kind": "trigger",
+      "prompt": "is this readable? the naming feels off and I keep re-reading the loop",
+      "expected_output": "code-quality loads and reports readability and idiom problems — confusing names, control flow you have to re-read, leaky abstractions. It reports and never edits.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 1,
+      "name": "routing-excludes-code-bugs",
+      "kind": "neighbour-exclusion",
+      "neighbour": "code-bugs",
+      "prompt": "this returns the wrong total when the cart is empty, find out what's broken",
+      "expected_output": "A correctness defect is code-bugs' job; code-quality must not load, because it judges how code reads, not whether it works.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    }
+  ]
+}

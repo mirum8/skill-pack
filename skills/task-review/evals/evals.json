@@ -1,0 +1,26 @@
+{
+  "skill_name": "task-review",
+  "evals": [
+    {
+      "id": 0,
+      "name": "routing-triggers",
+      "kind": "trigger",
+      "prompt": "/r:task-review",
+      "expected_output": "task-review loads and runs the review pipeline over the current diff: parallel hunters, one fix phase, build with tests, mandatory static analysis, Codex end-verify.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 1,
+      "name": "routing-excludes-task-run",
+      "kind": "neighbour-exclusion",
+      "neighbour": "task-run",
+      "prompt": "implement the CSV export and ship it",
+      "expected_output": "Building the change is task-run's job; task-review must not load, because there is no diff to review yet. task-review also carries disable-model-invocation, so it can only ever be reached deliberately.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    }
+  ]
+}

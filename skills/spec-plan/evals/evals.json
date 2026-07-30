@@ -7,7 +7,7 @@
       "name": "enterprise-spec-to-plan",
       "prompt": "/r:spec-plan docs/fraud-detection-platform/spec.html",
       "fixture": "../../brainstorm-workspace/iteration-1/enterprise-antifraud/with_skill/outputs/docs/fraud-detection-platform",
-      "expected_output": "todo.md beside the spec. 18-35 phases grouped under named milestones, 10-18 in v1. Every FR in the spec reaches a phase. Phases touching money, auth, persistence or concurrency carry a Risk line. Unknowns whose mitigation is 'investigate', and any non-engineering work, appear under '## Resolve first' with an owner and the phase they block \u2014 not as numbered phases.",
+      "expected_output": "todo.md beside the spec. 18-35 phases grouped under named milestones, 10-18 in v1. Every FR in the spec reaches a phase. Phases touching money, auth, persistence or concurrency carry a Risk line. Unknowns whose mitigation is 'investigate', and any non-engineering work, appear under '## Resolve first' with an owner and the phase they block — not as numbered phases.",
       "assertions": [
         {
           "id": "location",
@@ -77,7 +77,7 @@
         },
         {
           "id": "counts",
-          "text": "3-6 total phases, 3-5 in v1 \u2014 proportionate to a weekend project"
+          "text": "3-6 total phases, 3-5 in v1 — proportionate to a weekend project"
         },
         {
           "id": "coverage",
@@ -160,6 +160,27 @@
           "text": "Points at /r:spec-brainstorm to produce a spec first"
         }
       ]
+    },
+    {
+      "id": 4,
+      "name": "routing-triggers",
+      "kind": "trigger",
+      "prompt": "break this spec into phases with a runnable done-when check for each",
+      "expected_output": "spec-plan loads, reads the spec, and writes a phased todo.md with stable ids, real file paths and a check that can actually be run.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 5,
+      "name": "routing-excludes-spec-brainstorm",
+      "kind": "neighbour-exclusion",
+      "neighbour": "spec-brainstorm",
+      "prompt": "I have an idea for a bot that watches our deploys — how should I build it?",
+      "expected_output": "Designing something that has not been specified yet is spec-brainstorm's job; spec-plan must not load, because there is no spec to phase.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
     }
   ]
 }

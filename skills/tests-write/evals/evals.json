@@ -1,0 +1,26 @@
+{
+  "skill_name": "tests-write",
+  "evals": [
+    {
+      "id": 0,
+      "name": "routing-triggers",
+      "kind": "trigger",
+      "prompt": "add a service method that applies a discount, with tests",
+      "expected_output": "tests-write loads automatically and shapes the tests — Given/When/Then, AssertJ, JUnit 5, self-contained, hard-coded expectations.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 1,
+      "name": "routing-excludes-code-refactor",
+      "kind": "neighbour-exclusion",
+      "neighbour": "code-refactor",
+      "prompt": "this Kotlin class is too complex, split it up without changing behaviour",
+      "expected_output": "Restructuring existing code is code-refactor's job. tests-write may inform the safety-net test but must not be what the request routes to.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    }
+  ]
+}

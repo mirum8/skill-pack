@@ -41,6 +41,27 @@
         "Fixed weak MD5 and == comparison (ideally flags hardcoded secret)",
         "Ran the real analyzers; findings.json present"
       ]
+    },
+    {
+      "id": 3,
+      "name": "routing-triggers",
+      "kind": "trigger",
+      "prompt": "run pmd and spotbugs over what I changed and fix what they find",
+      "expected_output": "code-scan loads, runs PMD + SpotBugs/find-sec-bugs + Semgrep as local CLIs over the diff, then triages and fixes the findings. No server, no tokens.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 4,
+      "name": "routing-excludes-code-bugs",
+      "kind": "neighbour-exclusion",
+      "neighbour": "code-bugs",
+      "prompt": "read through my changes and spot the logic mistakes",
+      "expected_output": "A judgement-based hunt is code-bugs' job; code-scan must not load, because it runs mechanical analyzers rather than reading for intent.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
     }
   ]
 }

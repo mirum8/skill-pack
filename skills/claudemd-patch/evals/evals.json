@@ -1,0 +1,26 @@
+{
+  "skill_name": "claudemd-patch",
+  "evals": [
+    {
+      "id": 0,
+      "name": "routing-triggers",
+      "kind": "trigger",
+      "prompt": "bring this project's CLAUDE.md up to date with my usual rules",
+      "expected_output": "claudemd-patch loads and inserts the standard Test-Writing Policy and Code Conventions blocks, plus the PreToolUse write-tests hook in .claude/settings.json.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 1,
+      "name": "routing-excludes-claudemd-compact",
+      "kind": "neighbour-exclusion",
+      "neighbour": "claudemd-compact",
+      "prompt": "this CLAUDE.md is way too long, trim it down and move the detail out",
+      "expected_output": "Shrinking and reorganizing an existing CLAUDE.md is claudemd-compact's job; claudemd-patch must not load, because it adds fixed blocks rather than compacting.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    }
+  ]
+}

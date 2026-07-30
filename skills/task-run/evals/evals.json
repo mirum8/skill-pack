@@ -1,0 +1,26 @@
+{
+  "skill_name": "task-run",
+  "evals": [
+    {
+      "id": 0,
+      "name": "routing-triggers",
+      "kind": "trigger",
+      "prompt": "run this task: add a dark-mode toggle to the settings page",
+      "expected_output": "task-run loads, branches, plans, implements test-first, calls task-review, and opens a PR.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 1,
+      "name": "routing-excludes-task-review",
+      "kind": "neighbour-exclusion",
+      "neighbour": "task-review",
+      "prompt": "review the diff I already have and fix what it turns up",
+      "expected_output": "Reviewing an existing diff is task-review's job; task-run must not load, because the work is already done.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    }
+  ]
+}

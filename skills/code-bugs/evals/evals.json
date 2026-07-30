@@ -1,0 +1,26 @@
+{
+  "skill_name": "code-bugs",
+  "evals": [
+    {
+      "id": 0,
+      "name": "routing-triggers",
+      "kind": "trigger",
+      "prompt": "anything broken in the diff? check for N+1 queries too",
+      "expected_output": "code-bugs loads and hunts real defects — wrong results, edge-case failures, N+1 queries, unbounded fetches — plus drift between the changes and the docs.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 1,
+      "name": "routing-excludes-code-quality",
+      "kind": "neighbour-exclusion",
+      "neighbour": "code-quality",
+      "prompt": "is this method readable, or is the control flow too convoluted?",
+      "expected_output": "Readability and idiom judgement is code-quality's job; code-bugs must not load, because nothing here is claimed to be broken.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    }
+  ]
+}

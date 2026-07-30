@@ -1,0 +1,26 @@
+{
+  "skill_name": "code-adversarial",
+  "evals": [
+    {
+      "id": 0,
+      "name": "routing-triggers",
+      "kind": "trigger",
+      "prompt": "run the codex adversarial review over this diff",
+      "expected_output": "code-adversarial loads and runs the REAL Codex review through the wrapper script, returning its findings. It never substitutes an LLM imitation.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 1,
+      "name": "routing-excludes-code-bugs",
+      "kind": "neighbour-exclusion",
+      "neighbour": "code-bugs",
+      "prompt": "have a look through my changes and tell me if anything is broken",
+      "expected_output": "A plain bug hunt over the diff is code-bugs' job; code-adversarial must not load, because it is specifically the wrapper around the external Codex tool.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    }
+  ]
+}

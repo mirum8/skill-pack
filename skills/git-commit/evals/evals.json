@@ -27,6 +27,27 @@
       "files": [],
       "fixture": "setup_refactor.sh",
       "assertions": []
+    },
+    {
+      "id": 3,
+      "name": "routing-triggers",
+      "kind": "trigger",
+      "prompt": "I'm done for now, commit my changes please",
+      "expected_output": "git-commit loads and groups the working tree into separate logical Conventional Commits by functionality.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 4,
+      "name": "routing-excludes-task-run",
+      "kind": "neighbour-exclusion",
+      "neighbour": "task-run",
+      "prompt": "build the dark-mode toggle end to end and open a PR",
+      "expected_output": "Running a whole unit of work through plan, implement, review and PR is task-run's job; git-commit must not load, because there is nothing to commit yet.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
     }
   ]
 }

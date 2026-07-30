@@ -1,0 +1,26 @@
+{
+  "skill_name": "claudemd-compact",
+  "evals": [
+    {
+      "id": 0,
+      "name": "routing-triggers",
+      "kind": "trigger",
+      "prompt": "my CLAUDE.md is 900 lines and half of it is out of date, can you sort it out",
+      "expected_output": "claudemd-compact loads and compacts/de-stales the CLAUDE.md hierarchy, splitting detail into references and dropping rules the repo already enforces.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 1,
+      "name": "routing-excludes-claudemd-patch",
+      "kind": "neighbour-exclusion",
+      "neighbour": "claudemd-patch",
+      "prompt": "add my usual test-writing policy block to this project's CLAUDE.md",
+      "expected_output": "Inserting the maintainer's standard reusable rule blocks is claudemd-patch's job; claudemd-compact must not load, because it reorganizes what is there rather than adding the standard blocks.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    }
+  ]
+}

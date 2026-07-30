@@ -1,0 +1,26 @@
+{
+  "skill_name": "test-app-create",
+  "evals": [
+    {
+      "id": 0,
+      "name": "routing-triggers",
+      "kind": "trigger",
+      "prompt": "set up the /test-app skill for this repo",
+      "expected_output": "test-app-create loads, detects the stack, and writes a tailored .claude/skills/test-app/SKILL.md plus its references/subagent-prompt.md.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 1,
+      "name": "routing-excludes-test-app",
+      "kind": "neighbour-exclusion",
+      "neighbour": "test-app",
+      "prompt": "test the app and check the checkout flow still works",
+      "expected_output": "Actually exercising the running app is the generated test-app skill's job; test-app-create must not load, because it generates that skill rather than running it.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    }
+  ]
+}

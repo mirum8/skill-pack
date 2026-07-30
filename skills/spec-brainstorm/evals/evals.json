@@ -10,21 +10,74 @@
       "persona": "Head of Engineering at a mid-size Dutch retail bank, 4.2M retail customers. ~11M card transactions/day, peak ~1,100 TPS Friday evenings. Today: in-house fraud rules in Oracle PL/SQL, nightly batch plus a thin real-time layer; 62% false-positive rate; 24 analysts drowning in alerts. Team: 9 Java/Spring engineers, 2 data scientists. Infra: Kafka, PostgreSQL 16, Kubernetes on-prem, Azure for analytics. Compliance: PSD2 SCA/TRA, EU AML, GDPR incl. Art.22, PCI DSS, internal model risk management. Wants real-time card authorization scoring inside a 300ms issuer timeout, APP scam detection on SEPA Instant, mule account detection, analyst case management, and the ability to explain any decline to a regulator. Chargeback labels arrive 30-120 days later. 12-month timeline. Buy-vs-build undecided. Answers 'enterprise' when asked the depth.",
       "expected_output": "Depth enterprise, chosen via the one depth question (no flag was passed). docs/<topic>/ with spec.html, architecture.html and interview-notes.md. Spec explains the fraud business domain, compares real named vendors each with a weakness, states a latency budget in ms, names specific regulatory instruments, and puts Recommendations & risks near the top. Every third-party claim carries a confidence tag. architecture.html is interactive with dark mode and flow chips.",
       "assertions": [
-        {"id": "files", "text": "Creates spec.html, architecture.html and interview-notes.md in one docs/<topic>/ folder", "check": "script"},
-        {"id": "no_todo", "text": "Does NOT write todo.md — that is spec-to-todo's job", "check": "script"},
-        {"id": "depth", "text": "Uses enterprise depth, decided by asking once rather than inferring"},
-        {"id": "domain", "text": "Business domain section explains fraud types (CNP, ATO, APP scam, mule) rather than only listing requirements"},
-        {"id": "priorart", "text": "Compares at least 4 real named existing solutions"},
-        {"id": "weakness", "text": "Every shortlisted prior-art candidate carries a named weakness"},
-        {"id": "honesty_tags", "text": "Third-party claims carry [verified:]/[likely]/[unverified]/[assumption] tags — the failure mode of the previous version at this size", "check": "script"},
-        {"id": "risks_early", "text": "Recommendations & risks appears in the first third of spec.html"},
-        {"id": "spec_static", "text": "spec.html has no <script>, no html.dark, no localStorage", "check": "script"},
-        {"id": "arch_dark", "text": "architecture.html has html.dark, a theme toggle, localStorage and the apply-before-paint script", "check": "script"},
-        {"id": "arch_sync", "text": "Every FLOWS edge id exists in the SVG, every node key has a data-k, every data-k has a DETAIL entry", "check": "script"},
-        {"id": "arch_novar", "text": "Zero hard-coded hex inside the SVG and no document-palette names in architecture.html", "check": "script"},
-        {"id": "compliance", "text": "Names specific instruments (PSD2/SCA, GDPR Art.22, PCI DSS, AML) rather than 'compliance requirements'"},
-        {"id": "req_ids", "text": "Requirements carry stable unpadded ids (FR-7, not FR-07)", "check": "script"},
-        {"id": "v1_line", "text": "States the v1 line as capabilities/FR ids, not as a phase list"}
+        {
+          "id": "files",
+          "text": "Creates spec.html, architecture.html and interview-notes.md in one docs/<topic>/ folder",
+          "check": "script"
+        },
+        {
+          "id": "no_todo",
+          "text": "Does NOT write todo.md — that is spec-to-todo's job",
+          "check": "script"
+        },
+        {
+          "id": "depth",
+          "text": "Uses enterprise depth, decided by asking once rather than inferring"
+        },
+        {
+          "id": "domain",
+          "text": "Business domain section explains fraud types (CNP, ATO, APP scam, mule) rather than only listing requirements"
+        },
+        {
+          "id": "priorart",
+          "text": "Compares at least 4 real named existing solutions"
+        },
+        {
+          "id": "weakness",
+          "text": "Every shortlisted prior-art candidate carries a named weakness"
+        },
+        {
+          "id": "honesty_tags",
+          "text": "Third-party claims carry [verified:]/[likely]/[unverified]/[assumption] tags — the failure mode of the previous version at this size",
+          "check": "script"
+        },
+        {
+          "id": "risks_early",
+          "text": "Recommendations & risks appears in the first third of spec.html"
+        },
+        {
+          "id": "spec_static",
+          "text": "spec.html has no <script>, no html.dark, no localStorage",
+          "check": "script"
+        },
+        {
+          "id": "arch_dark",
+          "text": "architecture.html has html.dark, a theme toggle, localStorage and the apply-before-paint script",
+          "check": "script"
+        },
+        {
+          "id": "arch_sync",
+          "text": "Every FLOWS edge id exists in the SVG, every node key has a data-k, every data-k has a DETAIL entry",
+          "check": "script"
+        },
+        {
+          "id": "arch_novar",
+          "text": "Zero hard-coded hex inside the SVG and no document-palette names in architecture.html",
+          "check": "script"
+        },
+        {
+          "id": "compliance",
+          "text": "Names specific instruments (PSD2/SCA, GDPR Art.22, PCI DSS, AML) rather than 'compliance requirements'"
+        },
+        {
+          "id": "req_ids",
+          "text": "Requirements carry stable unpadded ids (FR-7, not FR-07)",
+          "check": "script"
+        },
+        {
+          "id": "v1_line",
+          "text": "States the v1 line as capabilities/FR ids, not as a phase list"
+        }
       ]
     },
     {
@@ -35,15 +88,44 @@
       "persona": "Solo hobbyist developer. Python, a little JavaScript. One weekend of work. Cheap VPS or just the laptop. Two users. No money, no personal data beyond their own plants. Doesn't care about uptime. Answers casually. To anything enterprise-flavoured: 'it's just for me, keep it simple' or 'no idea, you decide'.",
       "expected_output": "Depth small, taken from the flag without asking. A short spec around 11 sections. No compliance, capacity, SLO, threat-model, multi-tenancy or operational-readiness sections. One process, one database. architecture.html only if there is genuinely more than one moving part.",
       "assertions": [
-        {"id": "files", "text": "Creates spec.html and interview-notes.md in one docs/<topic>/ folder", "check": "script"},
-        {"id": "flag_honored", "text": "Uses the --small flag without asking a depth question"},
-        {"id": "no_bigtech", "text": "No Kafka, Kubernetes, CQRS, event sourcing, microservices, service mesh or separate cache tier"},
-        {"id": "no_ent_secs", "text": "No compliance, SLO/error-budget, threat-model, multi-tenancy, capacity or operational-readiness sections"},
-        {"id": "questions", "text": "Asks 8 or fewer questions in at most 4 AskUserQuestion calls"},
-        {"id": "size", "text": "spec.html stays under ~900 lines"},
-        {"id": "nongoals", "text": "Still includes non-goals and a glossary, which are cheap at any depth"},
-        {"id": "arch_optional", "text": "If architecture.html was skipped, the skill says why; if written, the system genuinely has multiple parts"},
-        {"id": "spec_static", "text": "spec.html has no <script>, no html.dark, no localStorage", "check": "script"}
+        {
+          "id": "files",
+          "text": "Creates spec.html and interview-notes.md in one docs/<topic>/ folder",
+          "check": "script"
+        },
+        {
+          "id": "flag_honored",
+          "text": "Uses the --small flag without asking a depth question"
+        },
+        {
+          "id": "no_bigtech",
+          "text": "No Kafka, Kubernetes, CQRS, event sourcing, microservices, service mesh or separate cache tier"
+        },
+        {
+          "id": "no_ent_secs",
+          "text": "No compliance, SLO/error-budget, threat-model, multi-tenancy, capacity or operational-readiness sections"
+        },
+        {
+          "id": "questions",
+          "text": "Asks 8 or fewer questions in at most 4 AskUserQuestion calls"
+        },
+        {
+          "id": "size",
+          "text": "spec.html stays under ~900 lines"
+        },
+        {
+          "id": "nongoals",
+          "text": "Still includes non-goals and a glossary, which are cheap at any depth"
+        },
+        {
+          "id": "arch_optional",
+          "text": "If architecture.html was skipped, the skill says why; if written, the system genuinely has multiple parts"
+        },
+        {
+          "id": "spec_static",
+          "text": "spec.html has no <script>, no html.dark, no localStorage",
+          "check": "script"
+        }
       ]
     },
     {
@@ -55,15 +137,44 @@
       "persona": "Tech lead owning the wholesale-orders Spring Boot service, 4 Java devs. Customer can request a return on a SHIPPED order within 30 days. Partial returns required (some lines, partial quantities). Warehouse approves or rejects on receipt. Approved return triggers a refund via the existing billing service through the existing orders.v1 Kafka topic. A refund must never exceed what was paid for the returned lines. EUR only. Stack questions: 'whatever the repo already does'. Outbox pattern non-negotiable, Flyway append-only, no code comments. Answers 'standard' when asked the depth.",
       "expected_output": "Reads the repo before asking anything. Spec cites real path:line references and describes only the delta. Includes a rollout section because an existing system is touched. architecture.html marks new/changed nodes with .new. No stack re-decision.",
       "assertions": [
-        {"id": "files", "text": "Creates spec.html, architecture.html and interview-notes.md inside the repo's docs/<topic>/", "check": "script"},
-        {"id": "read_repo", "text": "Read the real repo files before asking questions"},
-        {"id": "citations", "text": "Spec cites real repo paths with line numbers (Order.java, OrderStatus.java, OrderService.java, V1__init.sql, CLAUDE.md)"},
-        {"id": "outbox", "text": "Respects the outbox pattern — refund events go through outbox_events, not straight to Kafka"},
-        {"id": "no_restack", "text": "Does not re-decide the stack; stays on Spring Boot 3.3 / Postgres / Kafka / JUnit+Testcontainers"},
-        {"id": "rollout", "text": "Includes a rollout/migration section, mandatory at any depth when an existing system is touched"},
-        {"id": "arch_new", "text": "architecture.html marks new or changed components with the .new class"},
-        {"id": "delta_only", "text": "Spec describes the delta, not a rewrite of the order service"},
-        {"id": "no_todo", "text": "Does NOT write todo.md", "check": "script"}
+        {
+          "id": "files",
+          "text": "Creates spec.html, architecture.html and interview-notes.md inside the repo's docs/<topic>/",
+          "check": "script"
+        },
+        {
+          "id": "read_repo",
+          "text": "Read the real repo files before asking questions"
+        },
+        {
+          "id": "citations",
+          "text": "Spec cites real repo paths with line numbers (Order.java, OrderStatus.java, OrderService.java, V1__init.sql, CLAUDE.md)"
+        },
+        {
+          "id": "outbox",
+          "text": "Respects the outbox pattern — refund events go through outbox_events, not straight to Kafka"
+        },
+        {
+          "id": "no_restack",
+          "text": "Does not re-decide the stack; stays on Spring Boot 3.3 / Postgres / Kafka / JUnit+Testcontainers"
+        },
+        {
+          "id": "rollout",
+          "text": "Includes a rollout/migration section, mandatory at any depth when an existing system is touched"
+        },
+        {
+          "id": "arch_new",
+          "text": "architecture.html marks new or changed components with the .new class"
+        },
+        {
+          "id": "delta_only",
+          "text": "Spec describes the delta, not a rewrite of the order service"
+        },
+        {
+          "id": "no_todo",
+          "text": "Does NOT write todo.md",
+          "check": "script"
+        }
       ]
     },
     {
@@ -74,14 +185,40 @@
       "persona": "Two technical co-founders in Berlin, hiring a third. Node.js and PostgreSQL on Hetzner. Each clinic has 3-15 physiotherapists. Patients book online or the receptionist books for them. SMS and email reminders. Monthly SaaS subscription to the clinic via Stripe hosted checkout (never touch card data), plus per-session invoices the patient submits to their insurer. Patient data: name, contact, appointment history, short free-text treatment note. EU-based, GDPR applies, no US patients so no HIPAA. Launch in 4 months. To anything beyond their scale: 'we're two people, that's for later'.",
       "expected_output": "Depth standard from the flag. Content triggers fire for health data, EU personal data, payments and tenancy, adding short modules at standard depth without escalating the whole document. Proportionate for a 2-person team: no error-budget policy, no DR game days, no team topology.",
       "assertions": [
-        {"id": "files", "text": "Creates spec.html, architecture.html and interview-notes.md in one docs/<topic>/ folder", "check": "script"},
-        {"id": "flag_honored", "text": "Uses the --standard flag without asking a depth question"},
-        {"id": "triggers", "text": "Health-data, EU-privacy, payments and tenancy trigger modules appear, each short rather than a chapter"},
-        {"id": "no_escalation", "text": "Health data does NOT escalate the whole spec to enterprise depth — the old PHI/HIPAA wording bug"},
-        {"id": "pci_scope", "text": "Notes that Stripe hosted checkout keeps them out of PCI scope"},
-        {"id": "proportion", "text": "No error-budget policy, DR game days, team topology or capacity model"},
-        {"id": "priorart", "text": "Compares real existing clinic-scheduling products"},
-        {"id": "arch_dark", "text": "architecture.html has dark mode with a toggle and localStorage persistence", "check": "script"}
+        {
+          "id": "files",
+          "text": "Creates spec.html, architecture.html and interview-notes.md in one docs/<topic>/ folder",
+          "check": "script"
+        },
+        {
+          "id": "flag_honored",
+          "text": "Uses the --standard flag without asking a depth question"
+        },
+        {
+          "id": "triggers",
+          "text": "Health-data, EU-privacy, payments and tenancy trigger modules appear, each short rather than a chapter"
+        },
+        {
+          "id": "no_escalation",
+          "text": "Health data does NOT escalate the whole spec to enterprise depth — the old PHI/HIPAA wording bug"
+        },
+        {
+          "id": "pci_scope",
+          "text": "Notes that Stripe hosted checkout keeps them out of PCI scope"
+        },
+        {
+          "id": "proportion",
+          "text": "No error-budget policy, DR game days, team topology or capacity model"
+        },
+        {
+          "id": "priorart",
+          "text": "Compares real existing clinic-scheduling products"
+        },
+        {
+          "id": "arch_dark",
+          "text": "architecture.html has dark mode with a toggle and localStorage persistence",
+          "check": "script"
+        }
       ]
     },
     {
@@ -93,18 +230,75 @@
       "persona": "Platform engineer at a 40-person SaaS company, owns the on-call rota. Came back to the spec because something felt thin, but will NOT volunteer what — answers only what is asked. Truths that only come out if asked: (1) they left PagerDuty for Opsgenie eight months ago, and Slack is being replaced by Teams next quarter, so both integrations in the spec are wrong; (2) nobody 'operates' it — the same 9 engineers deploy it themselves and would see failures in the existing Sentry project, there is no platform team; (3) if a notification fails they want it visible in the app, not dropped silently; (4) 12-month retention is fine, confirmed. If instead the run proposes edits or asks 'apply?' without raising the integrations, failure-behaviour or operations rows, the persona replies 'we never actually discussed the integrations' — the same correction the real session needed.",
       "expected_output": "Audits the ledger instead of trusting it: notices that integrations, failure-behaviour and operations are marked answered with nothing in ## Answers behind them, says so, and asks about them. Does not re-ask the seven rows that do have logged answers. Offers keep-going / apply / stop rather than a bare 'Apply?', and writes nothing before an explicit yes. The applied edit keeps FR-1..FR-6 and appends, rewrites only the sections the new answers touch, and rewrites the ledger with verdicts and evidence.",
       "assertions": [
-        {"id": "no_premature_apply", "text": "Does not propose applying edits, or offer 'apply?' as the only choice, while integrations / failure-behaviour / operations are still unexplored"},
-        {"id": "audits_ledger", "text": "Names the rows the ledger claims are answered but nothing evidences — integrations, failure-behaviour, operations — and says it is downgrading them"},
-        {"id": "asks_the_gaps", "text": "Asks about the uncovered topics, including the external systems the tool talks to"},
-        {"id": "no_reask", "text": "Does NOT re-ask users, core flow, scale, data, stack, anti-scope, v1 line or distribution — all have logged answers"},
-        {"id": "three_way_offer", "text": "Offers keep-going / apply-and-default / stop, and names what it would default each remaining topic to"},
-        {"id": "no_write_before_yes", "text": "spec.html and architecture.html are not changed before the user says yes; appending to interview-notes.md as the interview runs is expected and does not count"},
-        {"id": "ids_frozen", "text": "FR-1..FR-6 and NFR-1..NFR-2 keep their numbers; anything new appends", "check": "script"},
-        {"id": "ledger_rewritten", "text": "The updated ledger records how each row was settled (answered/repo/research/n\\a/assumed) with evidence, not a bare 'answered'", "check": "script"},
-        {"id": "status_honest", "text": "status is generated only if no row is left open or assumed", "check": "script"},
-        {"id": "corrections_land", "text": "The corrected integrations (Opsgenie, Teams migration) and operations (self-run, Sentry) reach spec.html, replacing the inferred PagerDuty/Slack/platform-team text"},
-        {"id": "in_place", "text": "Updates docs/oncall-handover/ in place — no second folder, no regeneration from scratch"}
+        {
+          "id": "no_premature_apply",
+          "text": "Does not propose applying edits, or offer 'apply?' as the only choice, while integrations / failure-behaviour / operations are still unexplored"
+        },
+        {
+          "id": "audits_ledger",
+          "text": "Names the rows the ledger claims are answered but nothing evidences — integrations, failure-behaviour, operations — and says it is downgrading them"
+        },
+        {
+          "id": "asks_the_gaps",
+          "text": "Asks about the uncovered topics, including the external systems the tool talks to"
+        },
+        {
+          "id": "no_reask",
+          "text": "Does NOT re-ask users, core flow, scale, data, stack, anti-scope, v1 line or distribution — all have logged answers"
+        },
+        {
+          "id": "three_way_offer",
+          "text": "Offers keep-going / apply-and-default / stop, and names what it would default each remaining topic to"
+        },
+        {
+          "id": "no_write_before_yes",
+          "text": "spec.html and architecture.html are not changed before the user says yes; appending to interview-notes.md as the interview runs is expected and does not count"
+        },
+        {
+          "id": "ids_frozen",
+          "text": "FR-1..FR-6 and NFR-1..NFR-2 keep their numbers; anything new appends",
+          "check": "script"
+        },
+        {
+          "id": "ledger_rewritten",
+          "text": "The updated ledger records how each row was settled (answered/repo/research/n\\a/assumed) with evidence, not a bare 'answered'",
+          "check": "script"
+        },
+        {
+          "id": "status_honest",
+          "text": "status is generated only if no row is left open or assumed",
+          "check": "script"
+        },
+        {
+          "id": "corrections_land",
+          "text": "The corrected integrations (Opsgenie, Teams migration) and operations (self-run, Sentry) reach spec.html, replacing the inferred PagerDuty/Slack/platform-team text"
+        },
+        {
+          "id": "in_place",
+          "text": "Updates docs/oncall-handover/ in place — no second folder, no regeneration from scratch"
+        }
       ]
+    },
+    {
+      "id": 5,
+      "name": "routing-triggers",
+      "kind": "trigger",
+      "prompt": "help me architect a service that syncs invoices to our accounting system",
+      "expected_output": "spec-brainstorm loads, interviews for the missing decisions, researches prior art, and writes docs/<topic>/spec.html plus architecture.html.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 6,
+      "name": "routing-excludes-spec-plan",
+      "kind": "neighbour-exclusion",
+      "neighbour": "spec-plan",
+      "prompt": "turn the spec we wrote into a phased todo I can work through",
+      "expected_output": "Turning a written spec into an ordered plan is spec-plan's job; spec-brainstorm must not load, because the specification already exists.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
     }
   ]
 }

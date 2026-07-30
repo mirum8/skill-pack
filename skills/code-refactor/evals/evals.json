@@ -1,0 +1,26 @@
+{
+  "skill_name": "code-refactor",
+  "evals": [
+    {
+      "id": 0,
+      "name": "routing-triggers",
+      "kind": "trigger",
+      "prompt": "clean up this method, it's doing five things at once",
+      "expected_output": "code-refactor loads, writes a behaviour-locking test first, then restructures the method without changing what it does.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 1,
+      "name": "routing-excludes-code-quality",
+      "kind": "neighbour-exclusion",
+      "neighbour": "code-quality",
+      "prompt": "review this class and tell me what a senior dev would find hard to follow",
+      "expected_output": "A report with no edits is code-quality's job; code-refactor must not load, because nobody asked for the code to be changed.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    }
+  ]
+}
