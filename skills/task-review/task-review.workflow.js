@@ -239,7 +239,11 @@ const GP = { agentType: 'general-purpose' }
 // had no findings and "converged", a null triage skipped the whole review, a null fix-triage
 // dropped every finding on the floor. Nothing downstream ever treats blocked() as anything but
 // "this track is bad", so counting a dead agent as blocked is correct at every call site.
-const blocked = (x) => !x || !!(x.blocked || x.ran === false)
+// FR-22: an optional prerequisite that is simply absent. Distinct from blocked (a tool that
+// died) and from clean (a review that ran and found nothing) — collapsing the three is how a
+// step nobody ran gets reported as a step that passed.
+const skipped = (x) => !!(x && typeof x.coverage === 'string' && /^SKIPPED\b/.test(x.coverage))
+const blocked = (x) => !skipped(x) && (!x || !!(x.blocked || x.ran === false))
 
 // Appended to every report-only track's prompt. The schema alone isn't enough — the subagent
 // has to be told that an empty findings list is a CLAIM, not a safe default.
@@ -703,7 +707,10 @@ phase('Review')
      "what this run examined" block in 'coverage' (reviewer mode + whether the diff text was
      embedded or Codex had to fetch it itself) — those lines are provenance, NOT findings, and
      they are what tells a clean verdict over a real read apart from one over a file list.
-     Exit codes: 0 => it ran;
+     Exit codes: 0 with a first stdout line starting "CODEX SKIPPED:" => the Codex plugin
+     is NOT installed: return ran=false, findings [], and coverage starting with the exact
+     word SKIPPED followed by the reason — never a clean review, never an imitation of one;
+     0 otherwise => it ran;
      3 (CLI missing) => blocked; 4 / timeout => not-run, drop the "Review blocked" text
      (it is NOT a finding); ANY OTHER non-zero exit => the wrapper itself failed and its
      stdout is NOT findings — report it as not-run, never as a clean review.${RAN_CLAUSE}`,
@@ -729,7 +736,10 @@ if (codex && Array.isArray(codex.findings)) {
 for (const [name, r, ran] of [['codex', codex, wantCodexUpfront],
                               [hunterTrack, bugs, true],
                               ['code-quality', quality, wantQuality]]) {
-  if (ran && blocked(r)) log(`post-task-review: ${name} track BLOCKED — proceeding with the others (not faked)`)
+  if (ran && skipped(r)) log(`post-task-review: ${name} SKIPPED — the OpenAI Codex plugin is not ` +
+    `installed, so no Codex review ran; every other track proceeded. Add it with ` +
+    `/plugin install codex@openai-codex. The step was NOT faked and is NOT reported as reviewed.`)
+  else if (ran && blocked(r)) log(`post-task-review: ${name} track BLOCKED — proceeding with the others (not faked)`)
 }
 if (profile === 'standard') {
   log('post-task-review: standard tier — a Codex --mode review pass read the diff, alongside the ' +
@@ -1341,10 +1351,13 @@ if (triage.hasTestApp) {
 // that forgot it would silently lose the run, which is the failure the sink exists to avoid.
 
 // ------------------------------------------------------------- consolidate ---
-const tracksBlocked = [['codex', codex, wantCodexUpfront],
-                       [hunterTrack, bugs, profile !== 'light'],
-                       ['code-quality', quality, wantQuality]]
-  .filter(([, r, ran]) => ran && blocked(r)).map(([n]) => n)
+const TRACKS = [['codex', codex, wantCodexUpfront],
+                [hunterTrack, bugs, profile !== 'light'],
+                ['code-quality', quality, wantQuality]]
+const tracksBlocked = TRACKS.filter(([, r, ran]) => ran && blocked(r)).map(([n]) => n)
+// Named separately from tracksBlocked so a caller can tell an absent optional prerequisite
+// from a tool that failed. Both mean the step did not run; only one is anybody's fault.
+const tracksSkipped = TRACKS.filter(([, r, ran]) => ran && skipped(r)).map(([n]) => n)
 const endVerifyVerdict = !endVerifyWanted ? 'skipped'
   : endVerifyBlocked ? 'blocked'
   : (endVerifyUnresolved.length ? 'findings-unresolved' : 'passed')
@@ -1378,6 +1391,7 @@ const statsRow = {
   uiTouched,
   scope: opts.scope === 'all' ? 'all' : 'diff',
   tracksBlocked,
+  tracksSkipped,
   fixedBySource,
   fixedCorrectness: (fixList ? fixList.correctness.length : 0) + endVerifyFixed,
   fixedReadability: fixList ? fixList.readability.length : 0,
@@ -1407,6 +1421,7 @@ return {
   // Only tracks this tier dispatched can be reported blocked. A track the tier never ran is not
   // a failure, and naming it here would tell a caller a tool died when nothing did.
   tracksBlocked,
+  tracksSkipped,
   // What each finding track actually bought: correctness items that survived triage, keyed by the
   // track that found them. This is the number that can retire a track on evidence instead of
   // argument; it is also written to ~/.claude/review-stats.jsonl for accumulation across runs.

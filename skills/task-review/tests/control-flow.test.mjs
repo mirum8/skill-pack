@@ -849,3 +849,12 @@ test('a first-attempt failure that recovers does NOT count as a blocked review',
   })
   assert.equal(out.endVerify, 'passed')
 })
+
+test('FR-22: an absent codex plugin is reported skipped, and never as a clean review', async () => {
+  const SKIP = { ran: false, findings: [], coverage: 'SKIPPED — codex plugin not installed' }
+  const { out, logText } = await run({ profile: 'full', overrides: { codex: SKIP } })
+  assert.deepEqual(out.tracksSkipped, ['codex'])
+  assert.ok(!out.tracksBlocked.includes('codex'), 'a skip is not a tool failure')
+  assert.match(logText, /codex SKIPPED/)
+  assert.match(logText, /NOT faked/)
+})

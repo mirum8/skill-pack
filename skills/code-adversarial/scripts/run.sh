@@ -51,9 +51,14 @@ else
 fi
 
 if [[ -z "$COMPANION" || ! -f "$COMPANION" ]]; then
-  echo "ERROR: codex companion script not found. The OpenAI Codex plugin is not installed." >&2
-  echo "Install/repair it, then retry — do NOT fake the review." >&2
-  exit 3
+  # The Codex plugin is OPTIONAL. Absent, this is a SKIP the caller records
+  # and moves past — not a failure that stops it. Exit 0 so no caller can
+  # mistake it for a hard error; the CODEX SKIPPED marker on the first line
+  # is what tells a skip apart from a clean review.
+  echo "CODEX SKIPPED: the OpenAI Codex plugin is not installed, so NO Codex review ran."
+  echo "CODEX SKIPPED: add it with  /plugin marketplace add openai-codex  then  /plugin install codex@openai-codex"
+  echo "CODEX SKIPPED: report this step as skipped. Do NOT fake a review or substitute an LLM imitation." >&2
+  exit 0
 fi
 
 # Which Codex reviewer to run. Defaults to the strict adversarial/challenge

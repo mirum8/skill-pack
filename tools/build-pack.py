@@ -58,6 +58,113 @@ DESCRIPTIONS = {
 }
 
 # ---------------------------------------------------------------------------
+# FR-22 — the codex plugin is the pack's one OPTIONAL prerequisite (ADR-16).
+# Today its absence is exit 3, which every caller is told to treat as a STOP.
+# It becomes a reported SKIP instead: the run continues, the report names the
+# step as skipped, and no model-written substitute is ever allowed to stand in
+# for it. This is a behaviour change, not a repackaging one, so it lands in its
+# own commit and both encodings of the pipeline move together (R-11).
+SH_PATCHES = {
+    "code-adversarial/scripts/run.sh": [
+        ('  echo "ERROR: codex companion script not found. The OpenAI Codex plugin is not installed." >&2\n'
+         '  echo "Install/repair it, then retry — do NOT fake the review." >&2\n'
+         '  exit 3',
+         '  # The Codex plugin is OPTIONAL. Absent, this is a SKIP the caller records\n'
+         '  # and moves past — not a failure that stops it. Exit 0 so no caller can\n'
+         '  # mistake it for a hard error; the CODEX SKIPPED marker on the first line\n'
+         '  # is what tells a skip apart from a clean review.\n'
+         '  echo "CODEX SKIPPED: the OpenAI Codex plugin is not installed, so NO Codex review ran."\n'
+         '  echo "CODEX SKIPPED: add it with  /plugin marketplace add openai-codex  then  /plugin install codex@openai-codex"\n'
+         '  echo "CODEX SKIPPED: report this step as skipped. Do NOT fake a review or substitute an LLM imitation." >&2\n'
+         '  exit 0'),
+    ],
+}
+
+FR22_MD = {
+    "code-adversarial/SKILL.md": [
+        ("- **`3`** — the Codex companion script wasn't found, i.e. the OpenAI Codex plugin isn't "
+         "installed. Do **not** fake a review or substitute an LLM imitation — STOP and tell the user "
+         "the prerequisite is missing so it can be installed/repaired. (Retrying won't help — a "
+         "missing plugin won't fix itself.)",
+         "- **`0` with `CODEX SKIPPED:` as the first stdout line** — the OpenAI Codex plugin isn't "
+         "installed. This is the pack's one **optional** prerequisite, so it is a **skip, not a "
+         "failure**: return a skipped result, let the caller carry on with its other reviewers, and "
+         "say plainly in the report that no Codex review ran and how to add the plugin. Retrying "
+         "won't help — a missing plugin won't fix itself. **A skipped step must never decay into a "
+         "faked one:** do not fake a review or substitute an LLM imitation, and never report the "
+         "step as completed. A skipped step reported as a review is worse than no review at all.\n"
+         "- **`3`** — no longer returned for a missing plugin; retained only so an older caller "
+         "that still maps it keeps treating it as not-run."),
+    ],
+    "task-review/references/prose-pipeline.md": [
+        ("- **`3`** — the Codex CLI/plugin is genuinely missing → **STOP and tell the user it's "
+         "blocked** (missing-prerequisite non-negotiable); never fake the review.",
+         "- **`0` with `CODEX SKIPPED:` first on stdout** — the Codex plugin is not installed. It is "
+         "the one **optional** prerequisite, so this is a **skip, not a block**: print "
+         "`post-task-review: codex SKIPPED — the OpenAI Codex plugin is not installed; every other "
+         "step ran` and continue with the remaining tracks. Record the step as **skipped** in the "
+         "report — never as reviewed, and never fake it. At standard that costs the correctness "
+         "reader, so say which tracks actually survived rather than reporting the tier as reviewed."),
+    ],
+}
+
+FR22_JS = {
+    "task-review/task-review.workflow.js": [
+        ("     Exit codes: 0 => it ran;\n"
+         "     3 (CLI missing) => blocked; 4 / timeout => not-run, drop the \"Review blocked\" text",
+         "     Exit codes: 0 with a first stdout line starting \"CODEX SKIPPED:\" => the Codex plugin\n"
+         "     is NOT installed: return ran=false, findings [], and coverage starting with the exact\n"
+         "     word SKIPPED followed by the reason — never a clean review, never an imitation of one;\n"
+         "     0 otherwise => it ran;\n"
+         "     3 (CLI missing) => blocked; 4 / timeout => not-run, drop the \"Review blocked\" text"),
+        ("for (const [name, r, ran] of [['codex', codex, wantCodexUpfront],\n"
+         "                              [hunterTrack, bugs, true],\n"
+         "                              ['code-quality', quality, wantQuality]]) {\n"
+         "  if (ran && blocked(r)) log(`post-task-review: ${name} track BLOCKED — proceeding with the others (not faked)`)\n"
+         "}",
+         "for (const [name, r, ran] of [['codex', codex, wantCodexUpfront],\n"
+         "                              [hunterTrack, bugs, true],\n"
+         "                              ['code-quality', quality, wantQuality]]) {\n"
+         "  if (ran && skipped(r)) log(`post-task-review: ${name} SKIPPED — the OpenAI Codex plugin is not ` +\n"
+         "    `installed, so no Codex review ran; every other track proceeded. Add it with ` +\n"
+         "    `/plugin install codex@openai-codex. The step was NOT faked and is NOT reported as reviewed.`)\n"
+         "  else if (ran && blocked(r)) log(`post-task-review: ${name} track BLOCKED — proceeding with the others (not faked)`)\n"
+         "}"),
+        ("const blocked = (x) => !x || !!(x.blocked || x.ran === false)",
+         "// FR-22: an optional prerequisite that is simply absent. Distinct from blocked (a tool that\n"
+         "// died) and from clean (a review that ran and found nothing) — collapsing the three is how a\n"
+         "// step nobody ran gets reported as a step that passed.\n"
+         "const skipped = (x) => !!(x && typeof x.coverage === 'string' && /^SKIPPED\\b/.test(x.coverage))\n"
+         "const blocked = (x) => !skipped(x) && (!x || !!(x.blocked || x.ran === false))"),
+        ("const tracksBlocked = [['codex', codex, wantCodexUpfront],\n"
+         "                       [hunterTrack, bugs, profile !== 'light'],\n"
+         "                       ['code-quality', quality, wantQuality]]\n"
+         "  .filter(([, r, ran]) => ran && blocked(r)).map(([n]) => n)",
+         "const TRACKS = [['codex', codex, wantCodexUpfront],\n"
+         "                [hunterTrack, bugs, profile !== 'light'],\n"
+         "                ['code-quality', quality, wantQuality]]\n"
+         "const tracksBlocked = TRACKS.filter(([, r, ran]) => ran && blocked(r)).map(([n]) => n)\n"
+         "// Named separately from tracksBlocked so a caller can tell an absent optional prerequisite\n"
+         "// from a tool that failed. Both mean the step did not run; only one is anybody's fault.\n"
+         "const tracksSkipped = TRACKS.filter(([, r, ran]) => ran && skipped(r)).map(([n]) => n)"),
+        ("  tracksBlocked,\n", "  tracksBlocked,\n  tracksSkipped,\n"),
+    ],
+}
+
+FR22_TEST = {
+    "task-review/tests/control-flow.test.mjs": ["""
+test('FR-22: an absent codex plugin is reported skipped, and never as a clean review', async () => {
+  const SKIP = { ran: false, findings: [], coverage: 'SKIPPED — codex plugin not installed' }
+  const { out, logText } = await run({ profile: 'full', overrides: { codex: SKIP } })
+  assert.deepEqual(out.tracksSkipped, ['codex'])
+  assert.ok(!out.tracksBlocked.includes('codex'), 'a skip is not a tool failure')
+  assert.match(logText, /codex SKIPPED/)
+  assert.match(logText, /NOT faked/)
+})
+"""],
+}
+
+# ---------------------------------------------------------------------------
 # Files whose name carries the old skill name.
 FILE_RENAMES = {
     ("post-task-review", "post-task-review.workflow.js"): "task-review.workflow.js",
@@ -350,11 +457,14 @@ def build(source_root, report):
                 # like the source: `.claude/skills/post-task-review/...` would
                 # otherwise be mistaken for a `/name` slash-command reference.
                 key = f"{new}/{rel}"
-                for table in (JS_PATCHES, TEST_PATCHES, TEMPLATE_PATCHES, MD_PATCHES):
+                for table in (JS_PATCHES, TEST_PATCHES, TEMPLATE_PATCHES, MD_PATCHES,
+                              SH_PATCHES, FR22_MD, FR22_JS):
                     if key in table:
                         text = apply_exact(text, table[key], key, report)
                 if key in JS_PATCHES:
                     text = insert_preamble(text, key)
+                if key in FR22_TEST:
+                    text += FR22_TEST[key][0]
                 # Generic FR-19 substitution covers plain skill markdown; the
                 # workflow scripts, the tests and the project-local template
                 # each need a different mechanism and were patched above.
