@@ -171,6 +171,14 @@ FILE_RENAMES = {
     ("run-task", "run-task-implement.workflow.js"): "task-run-implement.workflow.js",
 }
 
+# A dangling reference that predates the pack: the agent points at `/find-bug`,
+# which has never existed — the skill is find-bugs, packed as code-bugs. FR-9
+# allows no reference that resolves to nothing, and the validator caught it.
+AGENT_PATCHES = {
+    "bug-hunter": [("/find-bug ", "/r:code-bugs "),
+                   ("/find-bug skill", "/r:code-bugs skill")],
+}
+
 # The guard moves out of the skill and becomes the plugin's own hook (FR-20).
 DROP_FILES = {("post-task-review", "scripts/guard-workflow.py")}
 
@@ -499,6 +507,8 @@ def build(source_root, report):
         cross_refs += c
         if c:
             report.append((f"agents/{a}.md", f"0 self / {c} cross", "FR-19 path variables"))
+        if a in AGENT_PATCHES:
+            text = apply_exact(text, AGENT_PATCHES[a], f"agents/{a}.md", report)
         text, hits = R.rewrite_refs(text)
         for o, n in hits.items():
             report.append((f"agents/{a}.md", f"{n}x reference", f"{o} -> {R.qualified(o)}"))
