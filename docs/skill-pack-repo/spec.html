@@ -372,28 +372,28 @@
           </tr>
           <tr>
             <td class="rid">R-10</td>
-            <td>The install shape is a symlink: the repo lives in a working directory and
-                <code>~/.claude/skills/r</code> points at it. Symlinked <em>skill</em> entries are
-                documented and proven — two are in use on this machine today. Symlinked
-                <em>plugin</em> discovery is not documented anywhere, and it is what
-                <span class="rid">FR-1</span> depends on.</td>
-            <td class="sev sev-h">H</td>
-            <td>If <code>@skills-dir</code> discovery does not follow the symlink to
-                <code>.claude-plugin/plugin.json</code>, the manifest is never read, the
-                <code>r</code> namespace never exists, and all fifteen skills either fail to load or
-                load unnamespaced and collide with the originals kept by
-                <span class="rid">FR-14</span></td>
-            <td><b>Two commands, in this order, before any rename work.</b> First
+            <td><b>Rewritten 2026-07-30.</b> This row used to carry the highest-rated risk in the
+                spec: the install was a symlink, and symlinked <em>plugin</em> discovery is
+                documented nowhere. The install now <b>copies</b>
+                (<span class="rid">ADR-11</span>), which is the documented shape, so that risk is
+                gone. What replaces it is the cost of copying: <b>the working clone and the installed
+                pack are two copies that can diverge.</b> An edit made in the repo does nothing until
+                <code>install.sh</code> runs again, and an edit made in
+                <code>~/.claude/skills/r</code> is destroyed by the next install.</td>
+            <td class="sev sev-m">M</td>
+            <td>Edits appear to have no effect, or disappear — both silently. The first reads as the
+                pack being broken; the second loses work. Neither raises an error, because a stale
+                copy is a perfectly valid pack.</td>
+            <td>Publish only through <code>./install.sh</code>, never by editing the installed copy —
+                the same one-directional rule <span class="rid">FR-14</span> already imposes on the
+                flat originals, applied to the second copy this decision creates.
+                <code>diff -r</code> between the repo and <code>~/.claude/skills/r</code> settles it
+                in one command. <b>Verification is still two commands, in this order:</b> first
                 <code>claude --plugin-dir &lt;repo&gt;</code>, which loads a plugin "directly without
-                requiring installation" and touches nothing on disk: if <code>/r:git-commit</code>
-                resolves there, the manifest, the namespace and the layout are all proven. Only then
-                symlink and check <code>claude plugin list</code> for <code>r@skills-dir</code>. The
-                two commands isolate the failure — manifest broken versus symlink not followed — which
-                a single post-install check cannot tell apart, since both present identically as a
-                namespace that simply does not exist.
-                <span class="tag">[verified: plugins docs, read 2026-07-30]</span> Fall back to
-                cloning in place at <code>~/.claude/skills/r</code>, the documented shape, which costs
-                only the working-directory convenience.</td>
+                requiring installation" and touches nothing on disk — if <code>/r:git-commit</code>
+                resolves there, the manifest, the namespace and the layout are all proven; only then
+                install and check <code>claude plugin list</code> for <code>r@skills-dir</code>.
+                <span class="tag">[verified: plugins docs, read 2026-07-30]</span></td>
             <td>Checked once at first install; re-check if Claude Code changes plugin discovery</td>
           </tr>
           <tr>
@@ -706,7 +706,7 @@ waiting points
           <td>Generic tooling — the boring baseline</td>
           <td>Free</td>
           <td>Decades old, universally available</td>
-          <td>Out — fails gate 1: a farm of per-skill symlinks gives no namespace, so the fifteen land flat and collide with the originals <span class="rid">FR-14</span> keeps forever. <b>Note the distinction, since the chosen install does use a symlink</b> (<span class="rid">ADR-11</span>): <em>one</em> link to the pack root keeps the manifest, the namespace and the plugin boundary intact, whereas <em>fifteen</em> links bypass the manifest entirely. The rejection is of the farm, not of symlinks.</td>
+          <td>Out — fails gate 1: a farm of per-skill symlinks gives no namespace, so the fifteen land flat and collide with the originals <span class="rid">FR-14</span> keeps forever. <b>An earlier draft then adopted a symlink install anyway, which read as this verdict being reversed.</b> It is no longer: <span class="rid">ADR-11</span> now copies, so the pack uses no symlinks at all and this rejection stands without a caveat. The distinction is still worth keeping, though — what was rejected is a farm of fifteen links that bypasses the manifest, not the idea of a link.</td>
         </tr>
       </tbody>
     </table>
@@ -804,17 +804,20 @@ waiting points
     <code>.claude-plugin/plugin.json</code> with <code>"name": "r"</code> at the repository root, so
     that the repo is discovered as a skills-directory plugin when reached from a skills directory.</p>
     <p class="gwt">Given the repo cloned to a working directory of the maintainer's choosing and
-    symlinked as <code>~/.claude/skills/r</code>, when a new session starts, then <code>/plugin</code>
-    lists <code>r@skills-dir</code> and <code>/r:git-commit</code> resolves.</p>
-    <p class="gwt">The symlink is load-bearing and only half documented. A
-    <code>&lt;skill-name&gt;</code> entry at the personal location "can be a symlink to a directory
-    elsewhere on disk. Claude Code follows the symlink and reads <code>SKILL.md</code> from the target
-    directory" <span class="tag">[verified: skills docs, read 2026-07-30]</span> — but nothing states
-    that <code>@skills-dir</code> <em>plugin</em> discovery follows a symlinked entry to find
-    <code>.claude-plugin/plugin.json</code>. The marketplace symlink rules do not apply here, because a
+    <b>copied</b> into <code>~/.claude/skills/r</code> by <code>install.sh</code>, when a new session
+    starts, then <code>/plugin</code> lists <code>r@skills-dir</code> and <code>/r:git-commit</code>
+    resolves.</p>
+    <p class="gwt"><b>The install copies rather than symlinks, and that is what makes this
+    requirement ordinary rather than risky.</b> A <code>&lt;skill-name&gt;</code> entry at the
+    personal location "can be a symlink to a directory elsewhere on disk. Claude Code follows the
+    symlink and reads <code>SKILL.md</code> from the target directory"
+    <span class="tag">[verified: skills docs, read 2026-07-30]</span> — but nothing states that
+    <code>@skills-dir</code> <em>plugin</em> discovery follows a symlinked entry to find
+    <code>.claude-plugin/plugin.json</code>, and the marketplace symlink rules do not apply, because a
     skills-directory plugin is "discovered in place rather than copied into the plugin cache"
-    <span class="tag">[verified: plugins-reference, read 2026-07-30]</span>. Carried as
-    <span class="rid">R-10</span>.</p>
+    <span class="tag">[verified: plugins-reference, read 2026-07-30]</span>. A real directory holding
+    the manifest is the documented case and needs no such assumption. The cost moves to
+    <span class="rid">ADR-11</span>'s consequence — two copies, and a publish step.</p>
   </div>
 
   <div class="req">
@@ -851,15 +854,24 @@ waiting points
 
   <div class="req">
     <p><span class="rid">FR-6</span> <span class="must">must</span> — The pack <b>shall</b> provide an
-    install script that clones or updates the repo, links it as <code>~/.claude/skills/r</code>,
+    install script that clones or updates the repo, <b>copies its payload into</b>
+    <code>~/.claude/skills/r</code> overwriting what is there,
     provisions the mandatory prerequisites of <span class="rid">FR-21</span>, removes the superseded
     global guard registration per <span class="rid">FR-20</span>, and reports the next required
     action.</p>
     <p class="gwt">Given a machine with git and Claude Code, when the script runs on a clean machine,
-    then the repo is present at its working location, <code>~/.claude/skills/r</code> resolves to it,
-    every mandatory prerequisite reports present, and the script prints that a session restart is
-    required; when it runs over an existing install, then it updates and prints that
+    then the repo is present at its working location, <code>~/.claude/skills/r</code> holds a copy of
+    the payload, every mandatory prerequisite reports present, and the script prints that a session
+    restart is required; when it runs over an existing install, then it overwrites and prints that
     <code>/reload-plugins</code> is required for non-<code>SKILL.md</code> changes.</p>
+    <p class="gwt">Only the payload is copied — <code>.claude-plugin/</code>, <code>skills/</code>,
+    <code>agents/</code>, <code>hooks/</code> and <code>check-prereqs.sh</code>. <code>docs/</code>,
+    <code>tools/</code>, <code>validate.sh</code> and <code>.git/</code> stay in the repo: the install
+    needs what Claude Code loads and nothing else.</p>
+    <p class="gwt">Because the copy deletes anything at the destination that the repo does not have,
+    the script <b>shall</b> refuse to run when <code>~/.claude/skills/r</code> exists and is not a
+    previous install of this pack — a wrong <code>CLAUDE_SKILLS_DIR</code>, or a directory that
+    happens to share the name, must not be silently erased.</p>
     <p class="gwt">The script no longer merely clones and prints — <span class="rid">FR-21</span> makes
     it run package-manager commands, which is a deliberate reversal of an earlier control and is carried
     as <span class="rid">R-12</span>.</p>
@@ -1092,9 +1104,10 @@ waiting points
     <span class="tag">[verified: post-task-review/scripts/guard-workflow.py, read 2026-07-30]</span>.
     Retaining the two originals in the allow-list is what keeps <span class="rid">FR-14</span>'s
     permanent dual-run honest — both copies stay runnable.</p>
-    <p class="gwt">Symlinked installs are safe here without special handling: the guard already calls
-    <code>os.path.realpath()</code> on both the allow-list entries and the incoming
-    <code>scriptPath</code>, so both sides collapse to the same real path.</p>
+    <p class="gwt">Because the install copies (<span class="rid">ADR-11</span>),
+    <code>$CLAUDE_PLUGIN_ROOT</code> is already a real directory and needs no special handling. The
+    guard's existing <code>os.path.realpath()</code> calls on both the allow-list entries and the
+    incoming <code>scriptPath</code> remain correct either way.</p>
     <p class="gwt">The install script <b>shall</b> remove the superseded global registration at
     <code>~/.claude/settings.json</code>, because a guard registered outside the pack would keep
     blocking the packed copies no matter what the packed guard permits.</p>
@@ -1157,11 +1170,11 @@ waiting points
       <thead><tr><th>id</th><th>Target</th><th>Measured how</th><th>Confidence</th></tr></thead>
       <tbody>
         <tr><td class="rid">NFR-1</td><td>Always-on listing cost &le; 16,000 characters (&asymp;4,000 tokens) across all fifteen descriptions</td><td>Sum of <code>min(len(description), 1536)</code>; measured at 15,186 today</td><td><span class="tag">[verified: measured 2026-07-30]</span></td></tr>
-        <tr><td class="rid">NFR-2</td><td><b>Repo install</b> — clone plus symlink completes in one command and under 60 seconds on a 20 Mbit link for a 1,257 KB repo. Scope is the repo only; prerequisite provisioning is <span class="rid">NFR-8</span></td><td>Time <code>git clone</code> plus <code>ln -s</code> end to end</td><td><span class="tag">[assumption]</span> — size is measured, transfer time is not</td></tr>
-        <tr><td class="rid">NFR-3</td><td>A <code>SKILL.md</code> edit takes effect with no restart; any other component change needs exactly one <code>/reload-plugins</code></td><td>Documented behaviour, confirmed by observation after packing</td><td><span class="tag">[verified: plugins-reference, read 2026-07-30]</span></td></tr>
+        <tr><td class="rid">NFR-2</td><td><b>Repo install</b> — clone plus copy completes in one command and under 60 seconds on a 20 Mbit link for a 1,257 KB repo. Scope is the repo only; prerequisite provisioning is <span class="rid">NFR-8</span></td><td>Time <code>git clone</code> plus the <code>rsync</code> of the payload end to end</td><td><span class="tag">[assumption]</span> — size is measured, transfer time is not</td></tr>
+        <tr><td class="rid">NFR-3</td><td>A <code>SKILL.md</code> edit <b>to the installed copy</b> takes effect with no restart; any other component change needs exactly one <code>/reload-plugins</code>. <b>An edit in the working clone takes effect only once <code>./install.sh</code> copies it across</b> — that publish step is what the copy install costs, and it is the whole of <span class="rid">R-10</span> as now written</td><td>Documented behaviour, confirmed by observation after packing</td><td><span class="tag">[verified: plugins-reference, read 2026-07-30]</span></td></tr>
         <tr><td class="rid">NFR-4</td><td>Repository size &le; 2 MB, of which vendored third-party material &le; 50%</td><td><code>du</code>; today 1,257 KB with 380 KB (30%) vendored</td><td><span class="tag">[verified: measured 2026-07-30]</span></td></tr>
         <tr><td class="rid">NFR-5</td><td>Rename correctness: 100% of the 309 references rewritten, 0 of the 369 prose occurrences altered</td><td>Diff line count against the pattern-bounded inventory</td><td><span class="tag">[verified: measured 2026-07-30]</span></td></tr>
-        <tr><td class="rid">NFR-6</td><td>Backup and restore: the pack is fully recoverable from the git remote alone, with no local state to preserve. Uninstalling is removing the symlink — the working clone survives, so an uninstall is never a data loss</td><td>Remove the <code>~/.claude/skills/r</code> symlink, re-run the install script, confirm fifteen skills resolve</td><td><span class="tag">[verified: plugins-reference — nothing is copied into a plugin cache, read 2026-07-30]</span></td></tr>
+        <tr><td class="rid">NFR-6</td><td>Backup and restore: the pack is fully recoverable from the git remote alone, with no local state to preserve. Uninstalling is <code>rm -rf ~/.claude/skills/r</code> — the working clone survives, so an uninstall is never a data loss</td><td>Remove <code>~/.claude/skills/r</code>, re-run the install script, confirm fifteen skills resolve</td><td><span class="tag">[verified: plugins-reference — nothing is copied into a plugin cache, read 2026-07-30]</span></td></tr>
         <tr><td class="rid">NFR-7</td><td>Availability and cost: not applicable — no service, no runtime, no hosted component</td><td>—</td><td><span class="tag">[assumption]</span> stated so its absence is deliberate rather than forgotten</td></tr>
         <tr><td class="rid">NFR-8</td><td><b>Prerequisite provisioning</b> (<span class="rid">FR-21</span>) — a cold run installs three Homebrew formulae and an npm package that downloads a browser engine. <b>No target is stated</b>, because none was measured</td><td>Time <code>install.sh</code> on a machine with none of the prerequisites present, separating the Homebrew phase from the <code>agent-browser install</code> phase. Until that is run, the only honest statement is "minutes, not seconds"</td><td><span class="tag">[not measured]</span> — deliberately unquantified rather than guessed; this is why <span class="rid">NFR-2</span> was narrowed to the repo alone, since its 60-second claim silently became false once the installer began provisioning</td></tr>
       </tbody>
@@ -1574,12 +1587,12 @@ waiting points
     <table>
       <thead><tr><th>Command</th><th>When</th><th>Effect</th></tr></thead>
       <tbody>
-        <tr><td><code>./install.sh</code></td><td>New machine, or to update</td><td>Clones or pulls the repo, symlinks it as <code>~/.claude/skills/r</code>, provisions mandatory prerequisites (<span class="rid">FR-21</span>), removes the superseded global guard registration (<span class="rid">FR-20</span>), prints the follow-up. Accepts <code>--dry-run</code> and <code>--no-deps</code>.</td></tr>
+        <tr><td><code>./install.sh</code></td><td>New machine, or to update</td><td>Clones or pulls the repo, copies its payload into <code>~/.claude/skills/r</code> overwriting what is there, provisions mandatory prerequisites (<span class="rid">FR-21</span>), removes the superseded global guard registration (<span class="rid">FR-20</span>), prints the follow-up. Accepts <code>--dry-run</code> and <code>--no-deps</code>.</td></tr>
         <tr><td><code>./check-prereqs.sh</code></td><td>Before first use, or when a step reports skipped</td><td>Reports every prerequisite as mandatory or optional and prints install lines for anything missing. Non-zero only on a missing mandatory one (<span class="rid">FR-15</span>).</td></tr>
         <tr><td><code>/reload-plugins</code></td><td>After changing <code>agents/</code>, <code>hooks/</code>, <code>.mcp.json</code></td><td>Re-reads plugin components. <b>Not needed</b> for <code>SKILL.md</code> edits, which are live.</td></tr>
-        <tr><td><code>claude --plugin-dir &lt;repo&gt;</code></td><td><b>Before</b> the first install, and while developing</td><td>Loads the pack for one session without installing anything, so the manifest, namespace and layout can be proven before a symlink exists. This is the first half of <span class="rid">R-10</span>'s check. Repeat the flag to load several plugins; a local copy also takes precedence over a same-named installed plugin, so the pack can be tested against an existing install.</td></tr>
-        <tr><td><code>/plugin</code></td><td>To verify after installing</td><td>Should list <code>r@skills-dir</code>. If absent <b>and</b> <code>--plugin-dir</code> worked, symlinked plugin discovery is the cause (<span class="rid">R-10</span>); if absent under both, <code>plugin.json</code> is malformed (<span class="rid">R-5</span>). That is the whole reason for running the two in order.</td></tr>
-        <tr><td><code>rm ~/.claude/skills/r</code></td><td>To uninstall</td><td>Removes the symlink; the working clone survives. "There is no <code>uninstall</code> step because nothing was installed from a marketplace." <span class="tag">[verified: plugins-reference, read 2026-07-30]</span> Prerequisites installed by <span class="rid">FR-21</span> are <b>not</b> removed — they are ordinary tools that may predate the pack.</td></tr>
+        <tr><td><code>claude --plugin-dir &lt;repo&gt;</code></td><td><b>Before</b> the first install, and while developing</td><td>Loads the pack for one session without installing anything, so the manifest, namespace and layout can be proven before anything is copied. It is still worth running first: it separates a manifest that does not parse from a copy that never landed, which after installing present identically as a namespace that is simply not there. Repeat the flag to load several plugins; a local copy also takes precedence over a same-named installed plugin, so the pack can be tested against an existing install.</td></tr>
+        <tr><td><code>/plugin</code></td><td>To verify after installing</td><td>Should list <code>r@skills-dir</code>. If absent <b>and</b> <code>--plugin-dir</code> worked, the copy never landed — check <code>~/.claude/skills/r/.claude-plugin/plugin.json</code> exists; if absent under both, <code>plugin.json</code> is malformed (<span class="rid">R-5</span>). That is the whole reason for running the two in order.</td></tr>
+        <tr><td><code>rm -rf ~/.claude/skills/r</code></td><td>To uninstall</td><td>Removes the installed copy; the working clone survives. "There is no <code>uninstall</code> step because nothing was installed from a marketplace." <span class="tag">[verified: plugins-reference, read 2026-07-30]</span> Prerequisites installed by <span class="rid">FR-21</span> are <b>not</b> removed — they are ordinary tools that may predate the pack.</td></tr>
       </tbody>
     </table>
   </div>
@@ -1644,7 +1657,7 @@ waiting points
         <tr><td>Dangling reference</td><td>Model tries to invoke a name that does not resolve; degrades mid-run</td><td>Reference inventory check (<span class="rid">FR-9</span>)</td><td>Hard build failure unless classified bundled or documented-external</td></tr>
         <tr><td>Missing <b>mandatory</b> prerequisite</td><td>A review step reports success without having run</td><td>Per-skill guard at point of use, plus <code>check-prereqs.sh</code> up front (<span class="rid">FR-15</span>)</td><td>Stop and name the missing dependency and the fix</td></tr>
         <tr><td>Missing <b>optional</b> prerequisite (codex)</td><td>Nothing — the step would otherwise vanish from the report without comment</td><td>Wrapper exit 3, surfaced as a skipped result (<span class="rid">FR-22</span>)</td><td>Continue the run, record the step as <b>skipped</b>, name the plugin and how to add it. <b>Never</b> substitute a model-written review — a skipped step reported as a review is worse than no review at all.</td></tr>
-        <tr><td>Symlinked plugin not discovered</td><td>Namespace absent, exactly like a malformed manifest — indistinguishable from it without testing</td><td><code>claude --plugin-dir</code> loads the pack but <code>claude plugin list</code> omits <code>r@skills-dir</code> after symlinking. Either check alone is ambiguous; the pair is not (<span class="rid">R-10</span>)</td><td>Clone in place at <code>~/.claude/skills/r</code> instead of symlinking</td></tr>
+        <tr><td><b>Installed copy is stale</b> — the working clone was edited and never published</td><td>Nothing. The edit simply has no effect, which reads as the pack being broken rather than as a copy that was never made</td><td><code>diff -r &lt;repo&gt; ~/.claude/skills/r</code>. Also the pair in order: <code>claude --plugin-dir &lt;repo&gt;</code> shows the edited behaviour while the installed pack does not</td><td>Re-run <code>./install.sh</code>. Publish only that way; never edit the installed copy, or the next install destroys the edit (<span class="rid">R-10</span>)</td></tr>
         <tr><td>Packed workflow blocked by the guard</td><td><code>Workflow</code> call refused; <code>task-review</code> and <code>task-run</code> cannot run <b>or be built</b></td><td>Guard writes <code>BLOCKED:</code> to stderr naming the path</td><td>Allow-list built from <code>$CLAUDE_PLUGIN_ROOT</code> plus both originals, global registration removed (<span class="rid">FR-20</span>)</td></tr>
         <tr><td><b>Guard over-matches documentation</b> — any file quoting a guarded pipeline name in its declared form is refused, including prose and the rename script's own output</td><td>An edit to an ordinary <code>.md</code> file is blocked, which reads as a tooling fault rather than a policy</td><td><b>Observed while writing this spec:</b> an edit to <code>interview-notes.md</code> was blocked</td><td>Narrow the match to actual workflow scripts (<span class="rid">FR-20</span>); until then, avoid the quoted form in prose</td></tr>
         <tr><td>Stale duplicate loaded during dual-run</td><td>Edits appear not to take effect</td><td>Two entries with the same behaviour under different names</td><td>Close the dual-run window; delete the fifteen originals</td></tr>
@@ -1752,7 +1765,7 @@ waiting points
           <td>Project scope (<code>&lt;repo&gt;/.claude/skills/</code>)</td>
           <td><b>Better:</b> loads in every project with no trust dialog; no dependence on which directory Claude Code started in. <b>Worse:</b> the listing cost is paid in every session in every project (<span class="rid">R-7</span>), and the skills are not versioned alongside any project that uses them.</td>
           <td>Wanting a project to pin a specific pack revision</td>
-          <td><code>~/.claude/skills/r</code> resolves to the pack; <code>/plugin</code> shows it in an unrelated project. <b>Amended 2026-07-30:</b> the scope decision stands unchanged; the mechanism is now clone-to-a-working-directory plus a symlink at that path, rather than cloning in place. That keeps the repo where the maintainer actually works on it, makes uninstall a symlink removal that cannot lose the clone (<span class="rid">NFR-6</span>), and adds one unverified dependency — <span class="rid">R-10</span>.</td>
+          <td><code>~/.claude/skills/r</code> resolves to the pack; <code>/plugin</code> shows it in an unrelated project. <b>Amended twice on 2026-07-30.</b> The scope decision stands unchanged throughout; only the mechanism moved. First from cloning in place to clone-to-a-working-directory plus a <em>symlink</em>, to keep the repo where the maintainer actually works on it. Then from that symlink to a <b>copy</b>, because symlinked <em>plugin</em> discovery is documented neither way and fails identically to a malformed manifest, which made it the highest-rated risk in this spec for something no feature needed. A real directory holding <code>.claude-plugin/plugin.json</code> is the documented case, so <code>install.sh</code> copies the payload in and the risk disappears. The repo still lives where the maintainer works, and uninstall is still <code>rm -rf</code> on a directory that is not the clone (<span class="rid">NFR-6</span>). <b>Better:</b> the load-bearing assumption is gone. <b>Worse:</b> the clone and the install are now two copies, so publishing takes a step and a stale install is possible — the residual cost, carried as the rewritten <span class="rid">R-10</span>. Rejected alternatives: cloning directly into <code>~/.claude/skills/r</code>, which puts the working tree inside the Claude configuration directory; and keeping the symlink, which trades a real publish step for an undocumented behaviour that fails silently.</td>
         </tr>
         <tr>
           <td class="rid">ADR-12</td>
@@ -2001,16 +2014,21 @@ waiting points
     <table>
       <thead><tr><th>Environment</th><th>Is</th><th>Purpose</th></tr></thead>
       <tbody>
-        <tr><td><b>Authoring</b></td><td><code>~/.claude/skills/r</code> — the working clone <em>is</em> the installed pack</td><td>Daily editing. There is no separate dev copy, which is the point: edits apply where they are made.</td></tr>
+        <tr><td><b>Authoring</b></td><td>The working clone, wherever the maintainer keeps it</td><td>Daily editing. This is the only copy that is ever edited.</td></tr>
+        <tr><td><b>Installed</b></td><td><code>~/.claude/skills/r</code> — a copy of the payload, written by <code>./install.sh</code></td><td>What Claude Code actually loads. Never edited directly: the next install overwrites it.</td></tr>
         <tr><td><b>Published</b></td><td>The git remote, <code>main</code></td><td>What another machine clones</td></tr>
         <tr><td><b>Scratch verification</b></td><td>A throwaway clone at another path</td><td>The manual release gate — proves a clean clone loads, without disturbing the working copy</td></tr>
       </tbody>
     </table>
   </div>
   <p>
-    The authoring environment being the live install is unusual and worth stating clearly: there is no
-    promotion step, and an uncommitted local edit is a real change to the maintainer's tooling that
-    exists nowhere else. <code>git status</code> is therefore part of the workflow, not hygiene.
+    <b>Authoring and installed are separate copies, and that is the one thing to keep straight.</b>
+    An earlier draft had them as the same directory, so an edit applied where it was made; the copy
+    install (<span class="rid">ADR-11</span>) buys away a load-bearing assumption and charges a
+    publish step for it. Edit the clone, run <code>./install.sh</code>, and never edit
+    <code>~/.claude/skills/r</code> — the next install overwrites it. An uncommitted local edit is
+    still a real change to the maintainer's tooling that exists nowhere else, so
+    <code>git status</code> remains part of the workflow rather than hygiene.
   </p>
   <h3>Release</h3>
   <ol>
@@ -2043,7 +2061,7 @@ waiting points
       <tbody>
         <tr><td>1</td><td><b>Sanity scan.</b> Check all 82 files for secrets, tokens, internal hostnames and absolute home paths. The repo starts private, so this is a check rather than a gate — the gate is step 7.</td><td>n/a</td><td>Every hit is triaged or waived deliberately</td></tr>
         <tr><td>2</td><td><b>Build the pack in a new repo.</b> Copy the 15 skills and 8 agents, rename directories per <span class="rid">BR-2</span>, rewrite the 309 references per <span class="rid">BR-3</span>, normalise frontmatter and drop <code>version:</code>, fix <code>run-task</code>'s over-cap description and <code>spec-to-todo</code>'s invalid YAML, <b>author eval suites for the thirteen skills that lack them</b> (<span class="rid">FR-11</span>), add <code>plugin.json</code>, <code>.gitignore</code>, <code>install.sh</code>, the pre-push script (<span class="rid">FR-17</span>), README, LICENSE.</td><td>Yes — nothing outside the new repo is touched</td><td>The pre-push script exits zero</td></tr>
-        <tr><td>3</td><td><b>Expand.</b> Clone to <code>~/.claude/skills/r</code>. Both the flat skills and the pack are now installed. Restart the session.</td><td>Yes — <code>rm -rf</code></td><td><code>/plugin</code> lists <code>r@skills-dir</code>; all 15 <code>/r:</code> commands resolve; the old <code>/commit</code> still works</td></tr>
+        <tr><td>3</td><td><b>Expand.</b> Run <code>./install.sh</code>, which copies the pack into <code>~/.claude/skills/r</code>. Both the flat skills and the pack are now installed. Restart the session.</td><td>Yes — <code>rm -rf ~/.claude/skills/r</code></td><td><code>/plugin</code> lists <code>r@skills-dir</code>; all 15 <code>/r:</code> commands resolve; the old <code>/commit</code> still works</td></tr>
         <tr><td>4</td><td><b>Adopt the <code>/r:</code> names.</b> Use them in preference to the old ones and exercise each skill at least once from the pack.</td><td>Yes — the old names never stop working</td><td>Each of the 15 has run from the pack at least once with no regression</td></tr>
         <tr><td>5</td><td><b>Hold the invariant, permanently.</b> There is no contract step: the originals stay (<span class="rid">ADR-13</span>). From here the only rule that matters is <b>edits go to the pack, never to an original</b>, enforced by the drift check in <span class="rid">FR-17</span>.</td><td>n/a — nothing is destroyed, so there is nothing to undo</td><td>The drift check reports no original differing from its twin beyond the rename</td></tr>
         <tr><td>6</td><td><b>Second machine.</b> Run <code>install.sh</code> elsewhere and confirm the pack loads from scratch.</td><td>Yes</td><td>15 skills resolve on a machine that never had the flat skills</td></tr>
@@ -2073,7 +2091,7 @@ waiting points
       <thead><tr><th>Failure at step</th><th>Rollback</th><th>Cost</th></tr></thead>
       <tbody>
         <tr><td>2 &mdash; build is wrong</td><td>Discard the new repo</td><td>Zero. Nothing outside it changed.</td></tr>
-        <tr><td>3 &mdash; pack does not load</td><td><code>rm ~/.claude/skills/r</code> (the symlink only), restart. If the manifest parses but the namespace is absent, the cause is <span class="rid">R-10</span> — re-point the path at a real directory rather than a link before concluding the manifest is at fault.</td><td>Minutes, and the clone survives. Flat skills untouched throughout.</td></tr>
+        <tr><td>3 &mdash; pack does not load</td><td><code>rm -rf ~/.claude/skills/r</code>, restart. The clone is a separate copy, so this cannot touch it. If the manifest parses under <code>claude --plugin-dir</code> but the namespace is absent after installing, the copy never landed — check that <code>~/.claude/skills/r/.claude-plugin/plugin.json</code> exists before concluding the manifest is at fault.</td><td>Minutes, and the clone survives. Flat skills untouched throughout.</td></tr>
         <tr><td>4 &mdash; a packed skill misbehaves</td><td>Keep using the flat original under its old name while fixing the pack</td><td>Low, and it stays low indefinitely — this is what permanent coexistence buys.</td></tr>
         <tr><td>5 &mdash; an edit landed in the wrong copy</td><td>Move it to the packed copy; revert the original</td><td>Low if the drift check catches it, unbounded if it doesn't — the change quietly exists under one name only.</td></tr>
         <tr><td>7 &mdash; something sensitive went public</td><td><b>None that works.</b> Rotate whatever leaked and treat it as disclosed.</td><td><b>Highest, and unrecoverable.</b> This is the only irreversible step in the whole rollout, which is why the scan gates it.</td></tr>
@@ -2216,7 +2234,7 @@ waiting points
     <table>
       <thead><tr><th>Assumption</th><th>Why</th><th>Breaks if wrong</th><th>Confirm by</th></tr></thead>
       <tbody>
-        <tr><td><code>@skills-dir</code> plugin discovery <b>follows a symlinked entry</b> to find <code>.claude-plugin/plugin.json</code></td><td>Symlinked <em>skill</em> entries are documented and two are in use on this machine; plugin discovery through one is not documented either way, and the marketplace symlink rules do not apply because a skills-dir plugin is never copied into the cache</td><td><span class="rid">FR-1</span> fails outright — no manifest read, no <code>r</code> namespace, and fifteen skills either absent or colliding with the originals. This is <span class="rid">R-10</span>, the highest-rated risk in the spec</td><td><code>claude plugin list</code> on the first install, <b>before</b> any rename work. Fallback: clone in place</td></tr>
+        <tr><td>The maintainer publishes only through <code>./install.sh</code>, and never edits <code>~/.claude/skills/r</code> directly</td><td>This assumption did not exist while the install was a symlink, where the two were one directory. The copy install creates it, and nothing enforces it</td><td>An edit to the installed copy is destroyed by the next install, silently. An edit to the clone that is never published looks like the pack is broken</td><td><code>diff -r &lt;repo&gt; ~/.claude/skills/r</code> whenever a change appears not to have taken effect. This replaces the symlinked-discovery assumption the earlier draft carried, which the copy install removes outright</td></tr>
         <tr><td><code>agent-browser</code> is provisioned by the installer rather than vendored into the pack</td><td>Its skill file is a 2.8 KB discovery stub, so vendoring would copy a pointer while the real dependency — the CLI and a browser engine — still needed installing. Vendoring would also add 925 characters to the always-on listing (<span class="rid">NFR-1</span>: 15,186 &rarr; 16,111), pull in <span class="rid">ADR-9</span> licence work, and create a second copy beside the existing symlink</td><td>A machine where npm-global installs are unavailable gets no UI verification, and <span class="rid">FR-21</span> needs a second route</td><td>Stated as a decision the user can overrule in one line; confirm on the first install where <code>agent-browser</code> was not already present</td></tr>
         <tr><td>The skills-directory plugin mechanism stays as documented</td><td>Read from the current docs this session</td><td>The whole distribution choice fails and the pack falls back to a marketplace plugin (<span class="rid">ADR-1</span>)</td><td>Re-read the plugins reference at each Claude Code minor upgrade</td></tr>
         <tr><td>Personal scope is the right scope</td><td>Loads everywhere, no trust gate</td><td>A project needing a pinned pack revision cannot have one</td><td>First time a project wants version pinning</td></tr>

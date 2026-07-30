@@ -153,7 +153,7 @@
 
 <div class="stage" id="stage">
 <svg viewBox="0 0 1560 980" preserveAspectRatio="xMidYMid meet" aria-labelledby="arch-title">
-  <title id="arch-title">Architecture of the skill pack: a git repository symlinked into a Claude Code skills directory, discovered as the plugin named r, exposing fifteen namespaced skills that dispatch eight bundled agents, ship a workflow-guard hook, and depend on a mandatory tier of external tooling plus one optional plugin.</title>
+  <title id="arch-title">Architecture of the skill pack: a git repository copied into a Claude Code skills directory, discovered as the plugin named r, exposing fifteen namespaced skills that dispatch eight bundled agents, ship a workflow-guard hook, and depend on a mandatory tier of external tooling plus one optional plugin.</title>
   <defs>
     <marker id="a-mut" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" style="fill: var(--muted)"/>
@@ -234,7 +234,7 @@
   <g class="node" data-k="install" tabindex="0" role="button">
     <rect x="62" y="290" width="246" height="80"/>
     <text class="t" x="84" y="320">install.sh</text>
-    <text class="m" x="84" y="342">symlink → ~/.claude/skills/r</text>
+    <text class="m" x="84" y="342">copy → ~/.claude/skills/r</text>
     <text class="m" x="84" y="360">also provisions mandatory deps</text>
   </g>
   <g class="node gate" data-k="manifest" tabindex="0" role="button">
@@ -403,7 +403,7 @@
 <script>
 const DETAIL = {
   remote:    { t:"git remote", m:"external · the published pack", b:"The only distribution channel. No marketplace entry, no plugin catalogue, no npm package. Because there is no marketplace, there is also <b>no way to declare a dependency</b> on another plugin — which is why the <code>codex</code> requirement can only live in the README." },
-  install:   { t:"install.sh", m:"clone · link · provision", b:"Clones on a fresh machine, pulls on an existing one, links the result as <code>~/.claude/skills/r</code>, installs the mandatory prerequisites, and removes the superseded global guard registration. Then it prints what to do next: restart the session for a first install, <code>/reload-plugins</code> if anything outside a <code>SKILL.md</code> changed. It still never executes packed code — what it now runs is <code>brew</code> and <code>npm</code>, each command echoed first, with <code>--dry-run</code> and <code>--no-deps</code> available.<br><br><b>Before running it at all</b>, <code>claude --plugin-dir &lt;repo&gt;</code> loads the pack for one session without installing anything — the cheapest way to prove the manifest and namespace work before a symlink is involved." },
+  install:   { t:"install.sh", m:"clone · copy · provision", b:"Clones on a fresh machine, pulls on an existing one, copies the payload into <code>~/.claude/skills/r</code> overwriting what is there, installs the mandatory prerequisites, and removes the superseded global guard registration. Then it prints what to do next: restart the session for a first install, <code>/reload-plugins</code> if anything outside a <code>SKILL.md</code> changed. It still never executes packed code — what it now runs is <code>brew</code> and <code>npm</code>, each command echoed first, with <code>--dry-run</code> and <code>--no-deps</code> available.<br><br><b>Before running it at all</b>, <code>claude --plugin-dir &lt;repo&gt;</code> loads the pack for one session without installing anything — the cheapest way to prove the manifest and namespace work before anything is copied." },
   manifest:  { t:"plugin.json", m:"the gate · required for discovery", b:"<b>This one file decides whether anything works.</b> Present and valid, the directory becomes plugin <code>r</code> and fifteen commands appear. Malformed, and the folder degrades to a plain skills directory — every <code>/r:</code> command vanishes with no error, no warning, and nothing in autocomplete. <code>/plugin</code> not listing <code>r@skills-dir</code> is the only reliable signal." },
   skills:    { t:"skills/", m:"15 directories, flat", b:"One directory per skill, exactly two levels below the repo root. No category folders — the domain-first names do the grouping instead, in the one place grouping is visible: the alphabetically sorted <code>/</code> menu. The directory name <i>is</i> the skill name, so a rename is a move, not a frontmatter edit." },
   agents:    { t:"agents/", m:"8 subagent definitions", b:"Not skills — dispatchable workers with their own context and tools. They ship with the pack because <code>task-review</code> dispatches four bug-hunters and <code>task-run</code> needs the build runners; without them the review fan-out has nothing to dispatch to on a fresh machine." },
@@ -435,11 +435,11 @@ const FLOWS = {
     edges: ["e-clone","e-write","e-man-hooks","e-read","e-ns","e-list"],
     nodes: ["remote","install","manifest","hooks","loader","namespace","listing"],
     steps: [
-      "<code>./install.sh</code> clones the remote to a working directory and links it as <code>~/.claude/skills/r</code> — 82 files, 1,257 KB",
+      "<code>./install.sh</code> clones the remote to a working directory and copies the payload into <code>~/.claude/skills/r</code> — 82 files, 1,257 KB. The clone and the install are two copies: edit the clone, re-run the script to publish",
       "It provisions the mandatory prerequisites, then removes the superseded global guard registration — leave that in place and the packed pipelines stay blocked",
       "Nothing loads yet. Skills-directory plugins are discovered on the <b>next</b> session, never mid-session",
       "On restart the loader reads <code>plugin.json</code>, registers namespace <code>r</code>, and lists 15 descriptions",
-      "Verify in two steps: <code>claude --plugin-dir &lt;repo&gt;</code> proves the manifest and namespace without installing anything, then <code>/plugin</code> must show <code>r@skills-dir</code> after linking. Run alone, either check confounds a broken manifest with a symlink that was not followed"
+      "Verify in two steps: <code>claude --plugin-dir &lt;repo&gt;</code> proves the manifest and namespace without installing anything, then <code>/plugin</code> must show <code>r@skills-dir</code> after installing. Run alone, either check confounds a broken manifest with a copy that never landed"
     ]
   },
   routing: {

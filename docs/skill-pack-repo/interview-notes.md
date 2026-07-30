@@ -9,7 +9,7 @@ status: generated
 
 - users-and-job: answered — one maintainer, their own machine; today the 15 skills are loose directories
   under `~/.claude/skills/` with no namespace, no repo and no way to move them to a second machine
-- core-flow: answered — clone → symlink → restart → `/r:<skill>` resolves; the pack is read at session
+- core-flow: answered — clone → copy → restart → `/r:<skill>` resolves; the pack is read at session
   start and never installed in the package-manager sense (`ADR-1`)
 - scale: **n/a** — 15 markdown skills + 8 agent files read from disk at session start. No throughput,
   no concurrency, no growth curve, no capacity dimension. The one quantity that genuinely constrains
@@ -188,6 +188,7 @@ lookups; one of those came back **false**, which is what this round was actually
   unchanged, mechanism refined. Symlinked *skill* entries are documented and two are already in use here;
   symlinked *plugin* discovery is not documented either way → `R-10`, the spec's highest-rated risk,
   confirmable in one command at first install.
+  - **Superseded at implementation (round 5, below): the install copies instead.**
 - **Research fan-out** — user chose to **keep it as recorded**. The honesty note stands verbatim.
 
 **Then the user pushed back: "we didn't discuss about external dependencies as codex and local scan
@@ -250,6 +251,71 @@ plugin root, **or inline in plugin.json**". Both are valid, so this was a choice
 `FR-20` now names `hooks/hooks.json` and says why — keeping `plugin.json` to identity alone, so that the
 file `R-5` calls the single point of failure does not also carry executable wiring whose syntax errors
 would take the namespace down with it.
+
+### Round 5 (implementation)
+
+One decision from the user, and five things the build found that the spec had wrong or missing.
+
+- **Install shape, again — the pack is COPIED, not symlinked.** User: "the git repo shouldnt be
+  symlinked; install should copy/rewrite the skils". The rename and reference rewrite still happen once
+  at build time; `install.sh` is a pure copy that overwrites. `ADR-11` amended a second time.
+  - This **deletes `R-10`**, which was the highest-rated risk in the spec, and it deletes it rather
+    than mitigating it: a plain directory holding `.claude-plugin/plugin.json` is the documented
+    skills-dir case, so the undocumented behaviour is simply no longer relied on.
+  - It also **resolves process note 10** — the pack now uses no symlinks anywhere, so the prior-art
+    rejection of a symlink farm no longer sits next to a symlink install.
+  - What it costs is §14's "the working clone *is* the installed pack", which was true only while the
+    two were one directory. They are now two copies, so publishing takes a step and a stale install is
+    possible. `R-10` was **rewritten in place** to carry exactly that, keeping the id count at 63 with
+    no gaps.
+
+**Found by building it, not by reading:**
+
+1. **The bounded rewrite was not bounded enough, three times over.** `BR-3`'s four patterns are right in
+   principle and wrong as literally specified. `/name` matched `.claude/skills/post-task-review/` (a
+   path, `FR-19`'s job) and English "or" slashes — `compact/refactor/reorganize`, `branch/commit/PR`.
+   `` `name` `` rewrote the Conventional Commit **type** list in `git-commit/SKILL.md`, whose literal
+   text is "`refactor` — code change that neither fixes a bug nor adds a feature". And in `.mjs` files a
+   JS **regex literal** opens with `/`, so `assert.match(p, /code-quality did NOT run/)` became
+   `/r:code-quality did NOT run/` while the workflow text it matches stayed bare — a test that still
+   ran and no longer checked anything. All three are now excluded by rule. **`R-1` was real, and the
+   thing that caught it was reading the report and running the packed tests, not the rewrite passing.**
+2. **The reference counts in the spec do not reproduce.** `FR-4`/`NFR-5` assert exactly 309 rewrites and
+   369 untouched prose occurrences; measuring the actual tree gives 778 raw and 368 pattern-bounded
+   across 56 files, and the build applies **318**. The spec's figures came from a narrower file set.
+   Asserting them would fail on a correct build, so the validator checks the invariant that cannot be
+   satisfied by accident — **zero un-prefixed references survive anywhere in the pack** — and reports
+   the prose counts for the `R-1` hand review instead of asserting them.
+3. **`${CLAUDE_PLUGIN_ROOT}` does not reach inside a workflow script.** It substitutes in skill markdown
+   and in `allowed-tools` Bash rules. The 12 absolute paths in the two `*.workflow.js` files sit in bash
+   strings handed to subagents, where nothing would expand it. `FR-19` says to use the variable and does
+   not say this. The pack root is passed as `args.packRoot` from the SKILL.md that invokes the workflow
+   — markdown, so the placeholder resolves there — and the script falls back to the literal placeholder
+   rather than an empty string, because an empty root turns every sibling path into a plausible-looking
+   `/skills/…` that points nowhere.
+4. **`FR-19` has a third case the spec does not name.** Beyond self and cross references there are
+   *project-relative* paths — `.claude/skills/test-app/…`, the target project's generated skill, not an
+   install path. Rewriting those would be a bug. And `create-test-app`'s template becomes a
+   **project-local** skill, where `${CLAUDE_PLUGIN_ROOT}` does not resolve at all, so it carries a
+   `{{WTD_PATH}}` placeholder the generator substitutes — the same mechanism it already uses for
+   `{{CREDS_PATH}}`.
+5. **A dangling reference nobody had noticed.** `agents/bug-hunter.md` points at `/find-bug`, which has
+   never existed — the skill is `find-bugs`. `FR-9` allows none, and the validator found it.
+
+**Decided while implementing, not asked:**
+
+- The **`R-4` drift check cannot work as specified.** "Diff each original against its packed twin, only
+  the name and its references differing" fails immediately, because v1 deliberately changes more than
+  the rename — `FR-7`, `FR-8`, `FR-10`, `FR-13`, `FR-16`, `FR-19`, `FR-20`, `FR-22`. It hashes the flat
+  originals against a baseline taken at build time instead, which detects what `R-4` actually is: an
+  edit that landed in the wrong copy.
+- **`build-pack.py` is a one-shot.** It regenerates `skills/` from the originals, so re-running it would
+  destroy everything the pack owns and the originals do not — the thirteen new eval suites, first. It
+  refuses to run over an existing `skills/` without `--force`. The pack is the source after the first
+  build, which is what §6 already says.
+- **Bare old names in log strings are left alone.** `task-review` logs `local-scan BLOCKED` and prefixes
+  its logs with `post-task-review:`. Those are prose under `BR-3`, and `ADR-12` keeps prose out of the
+  rename diff. Cosmetic, and deliberate.
 
 ## Rename table — 15 skills, domain-first
 
@@ -368,7 +434,9 @@ Recorded because it is the most useful thing in this file for anyone reviewing h
    had read them. The lesson generalises: before requiring a behaviour, check whether the code already
    has it, or the spec sends a builder to re-implement something and call it new.
 10. **A rejected option came back as the chosen mechanism.** The prior-art table dismissed a "symlink
-    farm" as fragile, and round 4 then adopted a symlink install. The two are genuinely different — one
+    farm" as fragile, and round 4 then adopted a symlink install. **Resolved in round 5 by dropping
+    symlinks altogether**, but the lesson survives the resolution, because it is what made the
+    contradiction visible in the first place. The two were genuinely different — one
     link to the pack root versus fifteen links bypassing the manifest — but the spec said neither until
     the contradiction was noticed and written down. Prior-art verdicts need re-reading whenever a
     decision moves.
