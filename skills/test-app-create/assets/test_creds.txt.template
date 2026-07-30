@@ -1,0 +1,10 @@
+# test_creds.txt — credentials for /test-app (git-ignored; never commit real secrets)
+# Owned by the test-app skill. The skill reads accounts from here and appends new
+# ones (asked from you at run time) so future runs are unattended.
+#
+# Format: one account per line as  role,email,password  (add columns the app needs).
+# Use disposable/test accounts only — these get used for create/delete flows.
+#
+# Examples (replace with real test accounts):
+# admin,admin@test.local,ChangeMe123!
+# user,user@test.local,ChangeMe123!

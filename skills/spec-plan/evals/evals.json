@@ -1,0 +1,165 @@
+{
+  "skill_name": "spec-to-todo",
+  "notes": "Fixtures are real spec.html files produced by /r:spec-brainstorm, kept in brainstorm-workspace/iteration-1. Each run points the skill at one and checks the resulting todo.md. Mechanical assertions are checked by scripts/check_todo.py --spec <the spec>; the rest are judgment. The skill must not re-decide anything the spec already settled.",
+  "evals": [
+    {
+      "id": 0,
+      "name": "enterprise-spec-to-plan",
+      "prompt": "/r:spec-plan docs/fraud-detection-platform/spec.html",
+      "fixture": "../../brainstorm-workspace/iteration-1/enterprise-antifraud/with_skill/outputs/docs/fraud-detection-platform",
+      "expected_output": "todo.md beside the spec. 18-35 phases grouped under named milestones, 10-18 in v1. Every FR in the spec reaches a phase. Phases touching money, auth, persistence or concurrency carry a Risk line. Unknowns whose mitigation is 'investigate', and any non-engineering work, appear under '## Resolve first' with an owner and the phase they block \u2014 not as numbered phases.",
+      "assertions": [
+        {
+          "id": "location",
+          "text": "Writes docs/<topic>/todo.md beside the spec, never a root todo.md",
+          "check": "script"
+        },
+        {
+          "id": "coverage",
+          "text": "Every FR- id in the spec is named by at least one phase",
+          "check": "script"
+        },
+        {
+          "id": "no_invented",
+          "text": "Cites no requirement id the spec doesn't define",
+          "check": "script"
+        },
+        {
+          "id": "counts",
+          "text": "18-35 total phases, 10-18 in v1, grouped under named milestones"
+        },
+        {
+          "id": "numbering",
+          "text": "Numbering starts at 1, gap-free, continuous across v1 and Advanced",
+          "check": "script"
+        },
+        {
+          "id": "done_when",
+          "text": "Every phase's Done when names a runnable command or observable response",
+          "check": "script"
+        },
+        {
+          "id": "risk_lines",
+          "text": "Phases touching money, auth, persistence, concurrency or security carry a Risk line",
+          "check": "script"
+        },
+        {
+          "id": "spike",
+          "text": "Unknowns and non-engineering work appear in an unnumbered '## Resolve first' section, never as a numbered phase"
+        },
+        {
+          "id": "no_redesign",
+          "text": "Does not re-decide the stack or invent requirements the spec doesn't contain"
+        },
+        {
+          "id": "sizing",
+          "text": "No phase exceeds 12 checklist items",
+          "check": "script"
+        },
+        {
+          "id": "buildable",
+          "text": "Every numbered phase is work a coding agent can branch, implement and open a PR for",
+          "check": "script"
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "name": "small-spec-to-plan",
+      "prompt": "/r:spec-plan docs/plant-watering-tracker/spec.html",
+      "fixture": "../../brainstorm-workspace/iteration-1/small-plant-tracker/with_skill/outputs/docs/plant-watering-tracker",
+      "expected_output": "A short plan: 3-6 phases, 3-5 in v1. No spike unless the spec names a real high/high unknown. No Files lines required, since the codebase doesn't exist yet.",
+      "assertions": [
+        {
+          "id": "location",
+          "text": "Writes todo.md beside the spec",
+          "check": "script"
+        },
+        {
+          "id": "counts",
+          "text": "3-6 total phases, 3-5 in v1 \u2014 proportionate to a weekend project"
+        },
+        {
+          "id": "coverage",
+          "text": "Every FR- id in the spec is named by at least one phase",
+          "check": "script"
+        },
+        {
+          "id": "done_when",
+          "text": "Every phase's Done when names a runnable command",
+          "check": "script"
+        },
+        {
+          "id": "no_ceremony",
+          "text": "No 'Resolve first' entries invented, no milestone grouping, no Risk lines on phases that don't warrant them"
+        },
+        {
+          "id": "vertical",
+          "text": "Phases are vertical slices leaving the app runnable, not horizontal layers"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "existing-codebase-plan",
+      "prompt": "/r:spec-plan docs/returns-refunds/spec.html",
+      "fixture": "../../brainstorm-workspace/iteration-1/feature-returns-refunds/with_skill/outputs/wholesale-orders",
+      "expected_output": "Reads the repo before writing phases. Every phase carries a Files line naming real existing paths. Migrations start at V2 because V1__init.sql is already applied. Respects the outbox pattern and the no-comments convention from CLAUDE.md.",
+      "assertions": [
+        {
+          "id": "location",
+          "text": "Writes docs/returns-refunds/todo.md inside the repo",
+          "check": "script"
+        },
+        {
+          "id": "files_lines",
+          "text": "Every phase carries a Files line, since the codebase already exists"
+        },
+        {
+          "id": "real_paths",
+          "text": "Named files either exist in the repo or are created by an earlier phase",
+          "check": "script"
+        },
+        {
+          "id": "migration",
+          "text": "New migrations start at V2 and never edit V1__init.sql"
+        },
+        {
+          "id": "coverage",
+          "text": "Every FR- id in the spec reaches a phase",
+          "check": "script"
+        },
+        {
+          "id": "risk_lines",
+          "text": "Money and persistence phases carry a Risk line for /r:task-run tiering",
+          "check": "script"
+        },
+        {
+          "id": "conventions",
+          "text": "Honours the repo's CLAUDE.md rules (outbox, append-only Flyway, no code comments)"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "no-spec-present",
+      "prompt": "make a todo for the payments rewrite",
+      "fixture": null,
+      "expected_output": "Finds no spec, says so, and points at /r:spec-brainstorm rather than inventing a spec to plan against. Writes no files.",
+      "assertions": [
+        {
+          "id": "no_invention",
+          "text": "Does not invent a specification to plan against"
+        },
+        {
+          "id": "no_files",
+          "text": "Writes no todo.md"
+        },
+        {
+          "id": "handoff",
+          "text": "Points at /r:spec-brainstorm to produce a spec first"
+        }
+      ]
+    }
+  ]
+}

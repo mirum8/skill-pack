@@ -1,0 +1,1356 @@
+// =============================================================================
+// run-task (implement half) — PROTOTYPE Workflow (deterministic orchestration)
+//
+// This encodes /r:task-run Steps 0 – 4 as a hardcoded subagent graph: resolve the
+// task source, map the code, plan it on Opus at xhigh, have Codex challenge the plan,
+// implement it test-first through domain subagents, and drive the build green.
+// It STOPS after the build, leaving the uncommitted diff on the feature branch
+// and returning a handoff. Steps 5 (review) and 6 (finish) are the CALLER's.
+//
+// WHY THIS IS A WORKFLOW AND NOT A SUBAGENT
+//   Claude Code 2.1.217 removed the `Agent` tool from subagents (verified: a
+//   general-purpose subagent's tool list is Agent,Bash,Edit,Read,Skill,ToolSearch,
+//   Write on 2.1.216 and loses `Agent` on 2.1.217+). run-task IS its subagents —
+//   the explorers, the Opus planner, the Codex plan reviewer, the domain
+//   implementers, the build runner — so run-task nested inside a subagent can no
+//   longer fan out at all. It would degrade to one context and still report success.
+//   A Workflow script runs in the main thread and spawns every agent ITSELF, so the
+//   fan-out survives while the CALLER's context only ever sees the returned handoff.
+//   That is the same "move the fan-out up one level" fix post-task-review.workflow.js
+//   already applies to the find-bugs hunters.
+//
+// SINGLE ENCODING — deliberately NOT a mirror of prose.
+//   post-task-review carries two engines (script + prose Steps 0-9) and pays a
+//   lockstep tax for it. This one does not, and must not grow one: a context with
+//   no `Workflow` tool also has no `Agent` tool, so there is nothing a prose
+//   fallback could actually orchestrate. SKILL.md Steps 1-4 DELEGATE here; they do
+//   not restate the graph. Change the pipeline HERE.
+//
+// TESTS: tests/control-flow.test.mjs executes this script with agent()/parallel() stubbed and
+//   asserts the branches — what stops the run, what is retried, what reaches the handoff. Run it
+//   after every edit here:
+//     node --test <pack>/skills/task-run/tests/control-flow.test.mjs
+//
+// HOW TO RUN (from a real project repo root, main thread):
+//   Workflow({ scriptPath: "${CLAUDE_PLUGIN_ROOT}/skills/task-run/task-run-implement.workflow.js",
+//              args: { packRoot: "${CLAUDE_PLUGIN_ROOT}", ...
+//              args: { source: "#42", profile: "full", base: "main" } })
+// args: { source: string (REQUIRED — "#42" | "#42 #61" (a group of issues that
+//                 one change fixes) | "todo.md / Phase 3" | free text),
+//         profile?: "light"|"standard"|"full" (omitted => classified here),
+//         base?: string (omitted => current branch) }
+//   Multiple issue refs in `source` ("#42 #61") are one GROUPED task: every issue
+//   is fetched, their acceptance criteria merge into criteria[], and the branch
+//   is issues-42-61-<slug>. The caller (e.g. /r:gh-issues-fix) closes all of them.
+// returns: { branch, base, profile, profileReason, profileForced, profileEscalated,
+//            uiTouched, taskIntent, planPath, criteria,
+//            buildGreen: true | 'n/a' (no build tool — NEVER a silent true),
+//            planReview: { ran, passes, raised, applied[], dropped[] },
+//            testEvidence: string[] (what each test did BEFORE and after the change, as observed
+//                          by the implementer — a green-before test is a regression guard, not
+//                          proof the fix works; carry it into the PR body) }
+//       or { stopped: <reason>, ... } when the run cannot honestly continue. `branch` is always a
+//   real feature branch: a run that could not leave `base` stops (branch-not-created) rather than
+//   handing back branch === base.
+//   profileForced says whether the tier came from the caller's --light/--standard/--full
+//   or from this script's own classification. The caller uses it to decide whether to
+//   pass `profile` on to /r:task-review: a FORCED tier is the user's word and travels;
+//   a CLASSIFIED one was a guess made before any code existed, so it is dropped and
+//   post-task-review re-classifies from the real diff it is about to review.
+// =============================================================================
+
+export const meta = {
+  name: 'run-task-implement',
+  description: 'Deterministic run-task Steps 0-4 at one of three tiers (light | standard | full): resolve source + classify the tier -> Explore fan-out -> plan (brief in light, Opus xhigh otherwise) -> Codex plan review in full only (bounded re-review) -> TDD implement via domain subagents -> bounded build loop. Stops after a green build and returns the handoff for the caller to review and finish.',
+  phases: [
+    { title: 'Source',      detail: 'resolve task + criteria + tier + build tool' },
+    { title: 'Explore',     detail: 'read-only fan-out over the change surface', model: 'sonnet' },
+    { title: 'Plan',        detail: 'Opus xhigh planner, written to .task-plans/', model: 'opus' },
+    { title: 'Plan-review', detail: 'Codex challenge + one bounded re-review' },
+    { title: 'Implement',   detail: 'branch + test-first domain subagents' },
+    { title: 'Build',       detail: 'build with tests, bounded retry' },
+  ],
+}
+
+// The pack root arrives from the caller, because ${CLAUDE_PLUGIN_ROOT} is
+// substituted in skill markdown but not inside a workflow script the Workflow
+// tool executes (FR-19). The SKILL.md invocation always passes it.
+// The fallback is the placeholder itself, never an empty string: `args` may
+// legitimately arrive as a bare source string, and an empty root would turn
+// every sibling path into a plausible-looking /skills/... that silently points
+// nowhere. Left as the placeholder it either expands or fails loudly.
+const PACK = (args && typeof args === 'object' && args.packRoot) || '${CLAUDE_PLUGIN_ROOT}'
+
+
+// ----------------------------------------------------------------- schemas ---
+const SOURCE = {
+  type: 'object', additionalProperties: false,
+  required: ['kind', 'slug', 'branch', 'base', 'taskIntent', 'criteria', 'profile',
+             'profileReason', 'uiTouched', 'hasBackend', 'hasFrontend', 'buildTool',
+             'exploreAspects', 'planPath', 'planStatus', 'branchExists'],
+  properties: {
+    kind: { type: 'string', enum: ['issue', 'todo', 'text'] },
+    slug: { type: 'string' },
+    branch: { type: 'string' },          // issue-<n>-<slug> | issues-<n1>-<n2>-<slug> | phase-<slug> | task-<slug>
+    base: { type: 'string' },            // branch to return to / merge into later
+    taskIntent: { type: 'string' },      // 1-3 sentences — threaded into every fixer downstream
+    criteria: { type: 'array', items: { type: 'string' } },
+    profile: { type: 'string', enum: ['light', 'standard', 'full'] },
+    // One sentence naming the deciding factor. Without it the two classification gates are
+    // indistinguishable after the fact, and "why is everything full?" has no answer but a guess.
+    profileReason: { type: 'string' },
+    uiTouched: { type: 'boolean' },
+    hasBackend: { type: 'boolean' },
+    hasFrontend: { type: 'boolean' },
+    buildTool: { type: 'string', enum: ['maven', 'gradle', 'none'] },
+    buildCmd: { type: 'string' },        // CLEAN certifying build — used ONCE
+    buildCmdFast: { type: 'string' },    // incremental — every rebuild after that
+    runnerAgent: { type: 'string' },     // maven-build-runner | gradle-build-runner
+    // 1 aspect for light, 2 for standard, 2-3 for full. Each becomes one read-only Explore agent.
+    exploreAspects: { type: 'array', items: { type: 'string' } },
+    planPath: { type: 'string' },
+    planStatus: { type: 'string', enum: ['none', 'reviewing', 'implementing', 'done'] },
+    branchExists: { type: 'boolean' },
+    blockedReason: { type: 'string' },   // e.g. gh missing/unauthenticated, source unreadable
+  },
+}
+// The five surfaces Phase 0's tier tree already names (see the classifier prompt below). The
+// explorer escalation and the classifier must recognise the SAME set, or Phase 1 escalates on
+// things Phase 0 would have called "standard" — which is what made almost every run reach full.
+const RISK_SURFACES = ['auth', 'money', 'persistence', 'concurrency', 'security']
+// There is deliberately NO schema for the explorers either, and for the same reason there is none
+// for the planner below — measured, on three separate runs. The brief is a 6-9k-char markdown
+// document, and a tool call that large followed by a SECOND parameter serializes malformed often
+// enough to matter: the parser folds the closing tags and the whole riskFlags parameter INTO
+// `brief`, so riskFlags is genuinely absent from the parsed input and validation rejects it with
+// "must have required property 'riskFlags'". The explorer then rebuilds the same oversized payload
+// and fails identically until the StructuredOutput retry cap (5) throws — the rejection looks like
+// a disobedient model and is nothing of the kind, which is why the prompt was never the fix.
+//
+// Worse than the throw, and the reason this is not merely a cost problem: one explorer escaped the
+// cap by probing with {"brief":"test","riskFlags":[]}, which VALIDATES. The planner was handed the
+// word "test" as one of its three code maps, and that explorer's empty riskFlags counted as a real
+// "no risk here" vote in the escalation gate below. Nothing logged it.
+//
+// A schema-less agent returns its final text verbatim, so the document never round-trips through
+// JSON at all. The one structured field left — the risk flags, which gate the tier — rides out on
+// a single trailer line parsed here. That is a far smaller thing to get right than an 8k-char JSON
+// string, and when the trailer is missing the brief still survives; only the flags are lost, and
+// loudly.
+const RISKFLAGS_MARKER = 'RISKFLAGS:'
+// A brief this short is not a brief. It is the shape an explorer returns once it has given up —
+// "test", "done", an apology — and the old `b.brief` truthiness check let exactly that through to
+// the planner. Returning null here instead routes it back through reliable()'s re-dispatch, which
+// is what recovered the failed slice on the run that exposed this.
+const MIN_BRIEF_CHARS = 400
+// The surface stays an ENUM by way of the countedFlag filter below rather than by way of a schema.
+// That was always where it mattered: when this was schema-checked free text an explorer reporting
+// "business-logic branching" (true of nearly every change) escalated the run anyway, and the gate
+// is what stopped counting it.
+const parseExplore = (raw) => {
+  if (typeof raw !== 'string') return null
+  const at = raw.lastIndexOf(RISKFLAGS_MARKER)
+  const brief = (at === -1 ? raw : raw.slice(0, at)).trim()
+  if (brief.length < MIN_BRIEF_CHARS) return null
+  let riskFlags = []
+  let flagsSeen = at !== -1
+  if (flagsSeen) {
+    const tail = raw.slice(at + RISKFLAGS_MARKER.length).trim()
+    // No array at all is a legitimate empty answer ("RISKFLAGS: none"). An array that is there but
+    // does not parse — truncated, half-escaped — is not: that is a lost signal, and it says so
+    // rather than passing as "no risk here", which is the read that made the original bug silent.
+    const s = tail.indexOf('[')
+    if (s !== -1) {
+      const e = tail.lastIndexOf(']')
+      let parsed = null
+      if (e > s) { try { parsed = JSON.parse(tail.slice(s, e + 1)) } catch { parsed = null } }
+      if (Array.isArray(parsed)) riskFlags = parsed
+      else flagsSeen = false
+    }
+  }
+  return { brief, riskFlags, flagsSeen }
+}
+// There is deliberately NO schema for the planner. It used to return {planMarkdown: string} —
+// a single field wrapping a ~250-line markdown document, which is the largest structured payload
+// in the run and the one most likely to fail escaping. Observed on a real run: the planner blew
+// the StructuredOutput retry cap (5 failed calls) and the THROW killed the whole workflow before
+// anything was written. A schema-less agent returns its final text verbatim, so the document
+// never has to survive a round-trip through JSON at all. The cost is that nothing structurally
+// forbids a preamble line; the prompts ask for none, and a stray one is visible in the plan file
+// rather than fatal. That trade is the point.
+const WROTE = {
+  type: 'object', additionalProperties: false,
+  required: ['written', 'path'],
+  properties: {
+    written: { type: 'boolean' }, path: { type: 'string' }, note: { type: 'string' },
+  },
+}
+// The second opinion on WROTE.written, and deliberately the smallest schema in the file: it asks
+// for what `tail -1` printed and nothing else, so the check that rescues a plan cannot itself
+// fail on a payload the way the step it is checking did.
+const PLAN_ON_DISK = {
+  type: 'object', additionalProperties: false,
+  required: ['exists'],
+  properties: { exists: { type: 'boolean' }, lastLine: { type: 'string' } },
+}
+const REVIEW = {
+  type: 'object', additionalProperties: false,
+  required: ['ran', 'findings'],
+  properties: {
+    // false => the REAL Codex did not run. Step 2 has no fallback reviewer, so this
+    // flag is the difference between "the plan survived a critique" and "nothing
+    // reviewed the plan". Never let findings:[] alone stand in for a clean review.
+    ran: { type: 'boolean' },
+    findings: {
+      type: 'array',
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['severity', 'rubric', 'what'],
+        properties: {
+          severity: { type: 'string', enum: ['major', 'minor'] },
+          rubric: { type: 'string' },   // coverage | grounding | test-adequacy | simplicity | risk
+          what: { type: 'string' },
+        },
+      },
+    },
+    note: { type: 'string' },
+  },
+}
+// One judge, one finding. Splitting the triage this way is what took it off the critical path:
+// judging N findings used to be a single serial agent that re-derived the whole code map before it
+// could answer the first one.
+const VERDICT = {
+  type: 'object', additionalProperties: false,
+  required: ['real', 'why'],
+  properties: {
+    real: { type: 'boolean' },
+    why: { type: 'string' },   // the evidence, as file:LINE — this becomes the dismissal reason
+    fix: { type: 'string' },   // what the plan should say instead; only meaningful when real
+    // Does applying THIS fix change the approach, rather than a detail? It decides whether Codex
+    // gets a second pass over the rewritten plan, so it belongs to the agent that actually read
+    // the code and wrote the fix — not to the editor downstream, which sees only a fix list and
+    // runs at the lowest depth in this phase. A flag that gates a review has to be set by
+    // whoever has the evidence for it.
+    changesApproach: { type: 'boolean' },
+  },
+}
+// The editor decides nothing: it applies fixes the judges already stated. `dropped` and
+// `approachChanged` are both gone from the schema because both are the judges' call now, and the
+// script derives them from the verdicts — an audit trail nobody has to remember to echo back.
+const PLANFIX = {
+  type: 'object', additionalProperties: false,
+  required: ['applied'],
+  properties: {
+    applied: { type: 'array', items: { type: 'string' } },
+  },
+}
+const IMPL = {
+  type: 'object', additionalProperties: false,
+  required: ['done', 'summary'],
+  properties: {
+    done: { type: 'boolean' },
+    summary: { type: 'string' },
+    filesChanged: { type: 'array', items: { type: 'string' } },
+    blockedOn: { type: 'string' }, // set when the plan looked wrong — surfaced, never worked around
+    // One line per test written: "<test> — before: RED|GREEN (<the failure, or 'passed on
+    // unmodified code'>) — after: GREEN". Red-before-green used to be asserted in the plan and
+    // never checked: a plan claimed its tests would fail first when several already passed, and
+    // only the full-tier Codex plan review caught it. A test that passed before the change is a
+    // regression guard, which is fine — but it must be LABELLED one, because a suite of green
+    // guards proves nothing about the fix. Asking for the observed result makes the claim
+    // falsifiable at the point where it can actually be observed: after running the test.
+    testEvidence: { type: 'array', items: { type: 'string' } },
+  },
+}
+const BRANCH = {
+  type: 'object', additionalProperties: false,
+  required: ['onBranch'],
+  properties: { onBranch: { type: 'string' }, note: { type: 'string' } },
+}
+const BUILD = {
+  type: 'object', additionalProperties: false,
+  required: ['green'],
+  properties: {
+    green: { type: 'boolean' },              // true ONLY on a fully clean build
+    failures: { type: 'string' },
+    inScopeFailures: { type: 'string' },     // in code THIS run changed -> ours to fix
+    preExistingFailures: { type: 'string' }, // already red on base -> NEVER ours to fix
+  },
+}
+
+// --------------------------------------------------------------- helpers -----
+// The subagent-flow contract in code: a null return means the agent died or was
+// skipped. Re-dispatch up to 2 extra times, then hand back a blocked sentinel
+// instead of hanging or silently dropping the step. Nothing is ever polled.
+//
+// A dead agent USUALLY resolves null, but it can also THROW — a StructuredOutput retry cap and an
+// exhausted token budget both surface as a rejected promise. Untrapped, that ends the whole
+// script: observed on a real run, the planner blew the cap and a 6-agent workflow died with
+// `TelemetrySafeError` before writing anything, because this await was bare. A throw is the same
+// event as a null return — the step produced nothing — so it gets the same bounded re-dispatch
+// rather than taking the run down with it. This also restores the retries for reliable() calls
+// nested inside parallel(): parallel converts a thrown thunk to null, which used to swallow the
+// throw one level ABOVE this loop, costing the step all three attempts.
+async function reliable(label, phaseName, run) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    let r = null
+    try { r = await run(attempt) }
+    catch (e) { log(`${label}: threw on attempt ${attempt}/3 — ${String(e && e.message || e).slice(0, 200)}`) }
+    if (r !== null && r !== undefined) return r
+    log(`${label}: no usable result (attempt ${attempt}/3) — ${attempt < 3 ? 're-dispatching' : 'surfacing as BLOCKED'}`)
+  }
+  return { blocked: true, label }
+}
+// Blocked = the agent DIED (agent() resolved null/undefined), the runner gave up (the
+// reliable() sentinel), or the subagent said its tool never ran. The null case matters even
+// though most calls here go through reliable(): `parallel()` resolves a thrown thunk to null,
+// so `impls.every(blocked)` used to be FALSE when every implementer died — and the run went on
+// to build code nobody wrote. Every call site treats blocked() as "this track is bad".
+const blocked = (x) => !x || !!(x.blocked || x.ran === false)
+
+// A `*`-tools type: it has Skill/Bash/Read/Write/Edit but NOT `Agent` — no agent
+// spawned from this script can fan out beneath itself. Every fan-out is therefore
+// expressed here, in the script, as parallel()/loops.
+const GP = { agentType: 'general-purpose' }
+const MECHANICAL = { effort: 'low' }    // runs git / writes a file — nothing to judge
+// The scribe steps: copy a given document to disk, flip one header line, run one fixed command.
+// No judgement, so they do not need the session's model — but they are not `low` either: the
+// plan file is reproduced VERBATIM from the prompt, and a paraphrased or truncated plan silently
+// degrades the Codex review and every implementer that reads it.
+const SCRIBE = { model: 'sonnet', effort: 'medium' }
+// The stats sink appends counts to a JSONL file. It used to share SCRIBE, but it has none of the
+// property that makes SCRIBE `medium`: nothing is reproduced verbatim, so there is nothing to
+// truncate or paraphrase. Keep the cheap model, drop the effort — post-task-review's identical
+// sink already runs mechanical.
+const SINK = { model: 'sonnet', effort: 'low' }
+const BUILD_RUN = { effort: 'medium' }  // runs the build, but classifies failures
+// Phase 0 reads gh/git into a schema; the one real judgement is the tier. Keep the inherited
+// model — the tier is now a three-way tree decided on calibration examples, which needs more
+// discrimination than the old binary did, and an unsure answer no longer lands on "full" but on
+// "standard", so a weak classifier's mistakes go BOTH ways: the expensive direction is now
+// under-rating, which ships an unchallenged approach rather than merely costing time. Drop the
+// inherited xhigh though — it buys nothing on what is otherwise transcription.
+const SOURCE_RUN = { effort: 'medium' }
+// The Codex agent shells out and collects the run; Codex does the reviewing. Its own reasoning
+// adds nothing to the critique. Not `low`, though: this agent owns the background-collection
+// protocol that produced false blocks on #82/#55, and that is the wrong place to save 20s.
+const CODEX_RUN = { effort: 'medium' }
+// Exploration is read-and-map work — extract files/conventions/tests, not judgement — so it
+// runs on a cheaper/faster tier than the inherited main-loop model. medium (not low) because
+// the one consequential call an explorer makes is riskFlags, which gates the light->FULL
+// escalation below; medium leaves it enough budget to spot auth/money/migration/concurrency.
+const EXPLORE_RUN = { model: 'sonnet', effort: 'medium' }
+// The plan is the highest-leverage artifact in the run, so the standard/full planner gets the most
+// capable model at maximum reasoning effort — the inverse of the explorers. agent() exposes a real
+// effort lever here (the raw Agent tool does not), so depth is dialed in, not just asked for.
+const PLAN_RUN = { model: 'opus', effort: 'xhigh' }
+// The LIGHT-tier planner writes a brief for a change that, by the tier's own definition, cannot
+// alter behavior. It shared PLAN_RUN because both are "the plan", but maximum reasoning effort on
+// a brief buys nothing — and the tier is not load-bearing on its own: the explorers' risk flags
+// escalate light->FULL the moment they see auth, money, migrations or concurrency, so a
+// misclassified task never actually gets planned here. Same model, one tier down.
+const PLAN_LIGHT_RUN = { model: 'opus', effort: 'high' }
+// The implementers were the one track that pinned nothing, so their depth came from the SESSION —
+// xhigh when entered through /r:task-run (whose frontmatter sets it), but whatever the caller
+// happened to be running at when this script is called directly, which SKILL.md explicitly invites
+// callers like /r:gh-issues-fix to do. The same workflow wrote code at a different depth depending on
+// the entry point, silently. Pin it instead: `high` is a real floor for work that follows a plan
+// built at opus/xhigh, challenged by Codex, and re-read afterwards by /r:task-review. The model
+// is named here too — the two specialized types already declare opus, so this only lifts the
+// `general` fallback to match them rather than letting it inherit the session's model.
+const IMPL_RUN = { model: 'opus', effort: 'high' }
+// Triage used to be ONE agent at xhigh that judged every finding and rewrote the plan — 11 minutes
+// and 122k tokens on a measured run, most of it re-deriving a code map the explorers had already
+// produced. It is now split, and the two halves want different depths.
+//
+// A judge answers ONE narrow question — does this finding hold against the real code — with the
+// briefs already in hand, so `high` is depth where it counts without the context that made the old
+// step slow. It is no longer the last word either: a dismissal is re-read by Codex in pass 2 (the
+// dismissedAll branch below) and the diff is re-read by /r:task-review, which is what the old
+// "no reviewer after it" argument for xhigh was defending against.
+const JUDGE_RUN = { effort: 'high' }
+// The editor applies fixes that are already written down and flips one header line. There is no
+// judgement left in it except "did this change the approach".
+const EDIT_RUN = { effort: 'medium' }
+
+// ================================================================ pipeline ===
+// Tolerant arg parsing. The Workflow tool passes `args` VERBATIM and its docs ask callers for a
+// real JSON value — but in practice they hand over a JSON *string* almost every time (across the
+// local transcript history: 0 object args, 39 string ones). A string silently reads back as
+// `undefined` for every option, so options don't fail loudly, they just stop existing.
+// Parse defensively, and never let a malformed arg take the run down:
+//   - valid JSON object  -> use it
+//   - array / number / other JSON scalar -> {}, because those can't be an options bag
+//   - not JSON at all    -> treat it as the task source. `source` is the only required arg
+//                           here, so a bare "#81" is unambiguous — recovering it beats
+//                           throwing a SyntaxError that kills an otherwise fine run.
+const opts = (() => {
+  if (typeof args === 'string') {
+    try {
+      const v = JSON.parse(args)
+      return v && typeof v === 'object' && !Array.isArray(v) ? v : {}
+    } catch { return { source: args } }
+  }
+  return args && typeof args === 'object' && !Array.isArray(args) ? args : {}
+})()
+const rawSource = typeof opts.source === 'string' ? opts.source.trim() : ''
+if (!rawSource) {
+  log('run-task-implement: no `source` in args — nothing to run')
+  return { stopped: 'no-source', detail: 'args.source is required ("#42" | "todo.md / Phase 3" | free-text task)' }
+}
+const TIERS = ['light', 'standard', 'full']
+const forcedProfile = TIERS.includes(opts.profile) ? opts.profile : null
+
+// --- Dry-run affordance: classify and stop -----------------------------------
+// `classifyOnly` runs Phases 0 and 1 and returns the tier decision instead of planning. It exists
+// because the tier is the one output of this script that is worth checking against REAL tasks
+// before trusting it — the classifier tree and the escalation gate are prompt-and-enum judgements,
+// and a control-flow test with stubbed agents can prove the branches without saying a word about
+// whether the tier that comes back is the right one. Everything it runs is read-only: no branch,
+// no plan file, no commit.
+//
+// `repo` names the directory the agents should work in, for the case where the classification is
+// being checked from OUTSIDE the target repo. It is honored only under classifyOnly: the later
+// phases (branch, plan file, build, implementers) all assume the process cwd is the repo root, so
+// a `repo` that silently applied to a real run would scatter half the work into the wrong tree.
+const classifyOnly = !!opts.classifyOnly
+const repoDir = classifyOnly && typeof opts.repo === 'string' && opts.repo.trim() ? opts.repo.trim() : null
+if (opts.repo && !classifyOnly) log('run-task-implement: ignoring `repo` — it is only honored under classifyOnly')
+const inRepo = repoDir
+  ? `\n   WORK IN THE REPOSITORY AT ${repoDir}. cd there first; every git/gh/file command below is
+   relative to it, and nothing outside it is yours to read or touch.\n`
+  : ''
+// `sourceModel` pins the classifier's model for a dry run so the same issues can be classified by
+// two models and the tiers compared. It is the honest way to settle "would a cheaper model do?" —
+// the argument at SOURCE_RUN is a prediction, and this is what turns it into a measurement.
+// classifyOnly-only, for the same reason `repo` is: a real run that quietly classified on a
+// different model than the one the comment reasons about would make the reasoning unfalsifiable.
+const sourceModel = classifyOnly && typeof opts.sourceModel === 'string' && opts.sourceModel.trim()
+  ? opts.sourceModel.trim() : null
+if (sourceModel) log(`run-task-implement: classifier pinned to model "${sourceModel}" for this dry run`)
+
+// --- Phase 0: resolve the source, the tier, and the build tool ---------------
+// One agent, because these are all cheap repo reads that share context: reading the
+// issue tells you the risk surface, which decides the tier, which decides how many
+// explorers Phase 1 spawns. Splitting it would cost round-trips and buy nothing.
+phase('Source')
+const src = await reliable('source', 'Source', () => agent(
+  `You are /r:task-run Steps 0 and 0.5 for this task source: ${JSON.stringify(rawSource)}
+${inRepo}
+   1. IDENTIFY THE SOURCE, in this order:
+      - GitHub issue(s) — one ref ("#42", "42", an issue URL) OR SEVERAL refs in the string
+        ("#42 #61", "42 61"), which is one GROUPED task: several issues that a single change
+        is meant to fix together. FIRST check \`command -v gh >/dev/null && gh auth status\`.
+        If gh is missing or unauthenticated, set blockedReason and STOP — never scrape a fallback.
+        Then \`gh issue view <n> --json title,body,labels,comments\` for EACH ref. kind="issue".
+        * One ref  -> branch="issue-<n>-<short-slug>".
+        * Several   -> branch="issues-<n1>-<n2>[-…]-<short-slug>", the slug naming the shared fix.
+      - Todo phase (a markdown path + a phase id, or "next phase"): read the file, locate the
+        phase block; "next phase" = the first phase with unchecked "- [ ]" items.
+        kind="todo", branch="phase-<slug>".
+      - Free text: the argument IS the task; there is no source to fetch. kind="text",
+        branch="task-<slug>". If the input is contentless or genuinely ambiguous (no file, no
+        issue, no described work), set blockedReason — there is no task to run.
+   2. ACCEPTANCE CRITERIA -> criteria[]. For an issue or a phase, take the checklist/bullets that
+      describe "done". For a GROUP of issues, merge every issue's criteria into the one criteria[],
+      each prefixed with its number ("#42: …") so the planner and implementers can tell which
+      issue each requirement belongs to — the fix is done only when EVERY grouped issue's criteria
+      are met. For free text there are none written: leave criteria empty — deriving them is the
+      planner's job — but still write taskIntent.
+   3. taskIntent: 1-3 sentences on what this task sets out to do. It is threaded into every
+      downstream implementer and (via the handoff) into the review, so a fixer cannot "fix"
+      something the task did on purpose. Write it even when criteria are empty. For a group, state
+      the shared change and name the issues it resolves.
+   4. TIER (${forcedProfile ? `FORCED to "${forcedProfile}" by the caller — return exactly that, and still write profileReason` : 'classify it'}):
+      Classify the CHANGE this task will make — not the subsystem it lives in. Almost every file
+      worth editing sits near a query, a permission check or some money math; what decides the
+      tier is whether THIS change adds or alters one of them. Work the tree in order:
+
+        a. Can the change alter behavior for any real input?         no  -> "light"
+        b. Does it need a design decision — a new or changed approach, several seams, a data
+           model or a contract — OR does it add or alter auth/permissions, money/pricing/tax
+           math, persistence (a query, schema, migration or index), concurrency/locking, or
+           anything security-sensitive?                              no  -> "standard"
+        c. otherwise                                                     -> "full"
+
+      Calibrate on these, both directions:
+        light    — a log message or level, even in PaymentService; renaming a private method; a
+                   constant/config VALUE tweak; formatting; a copyright-year bump; a cosmetic
+                   template/CSS change; a DTO field that is only serialized.
+        standard — a two-line null check added to a validator; a bug fix inside one existing
+                   method; a new field plus its mapping; a new endpoint over a service that
+                   already does the work.
+        full     — a migration, new index or schema change; anything that alters an
+                   auth/permission decision or money math; a change spanning several seams; a
+                   new module or a public-API contract.
+      Scary wording alone does not force "full" (a copyright-year bump in a payment template is
+      light); "small" wording alone does not earn "light" (a one-line auth-role change is full).
+
+      When you are unsure, answer "standard" — it keeps a real Codex read of the diff, the real
+      /security-review, doc-drift checking, static analysis, build+tests and a Codex read of the
+      final diff, and gives up the plan review, the three find-bugs pattern hunters and the
+      polish passes. The plan review is what "full" is really for. "full" is a claim that the
+      APPROACH needs challenging before code is written, not a shrug. The one case that IS a
+      shrug: if after reading the source you still cannot say roughly WHICH LINES will change,
+      you have not scoped the task — answer "full" and say so in profileReason.
+   4b. profileReason: one sentence naming the deciding factor ("adds a migration", "log-level
+      change only, no behavior", "unscoped — the issue names no files"). This is logged and
+      carried to the caller, so a wrong tier can be traced to a reason instead of re-guessed.
+   5. uiTouched: will this touch a frontend file (*.html/templates, *.css, *.js, static/**,
+      templates/**)? Also set hasBackend / hasFrontend for implementer routing.
+   6. BUILD TOOL from the repo root — return BOTH commands. buildCmd is the CLEAN certifying
+      build used exactly ONCE; buildCmdFast is the incremental rebuild used every time after.
+      maven -> "mvn clean install" / "mvn install", runnerAgent "maven-build-runner".
+      gradle -> "./gradlew clean build" / "./gradlew build", runnerAgent "gradle-build-runner".
+      neither -> buildTool "none".
+   7. base: the CURRENT branch (\`git branch --show-current\`)${opts.base ? `, unless it differs from the caller's stated base ${JSON.stringify(opts.base)} — then return that one` : ''}.
+   8. RESUME STATE: planPath = ".task-plans/<slug>.md". Report planStatus from its "status:"
+      header if the file exists (else "none"), and branchExists from
+      \`git rev-parse --verify <branch>\`. Do NOT create the branch or the plan file here.
+   9. exploreAspects: the different aspects of the codebase that must be mapped before planning,
+      one short instruction each, along the change's NATURAL SEAMS (e.g. "persistence + data model
+      + migrations", "the web/UI layer + templates", "the closest existing feature + its tests").
+      Scale to the surface, not to your confidence: exactly 1 for "light"; 2 for "standard"; for
+      "full", 2 when the work sits inside one subsystem and 3 when it spans several. Never more
+      than 3 — beyond that the explorers overlap and return the same files twice.`,
+  { label: 'source', phase: 'Source', schema: SOURCE, ...GP, ...SOURCE_RUN, ...(sourceModel ? { model: sourceModel } : {}) }))
+
+if (blocked(src)) return { stopped: 'source-unresolved' }
+if (src.blockedReason) {
+  log(`run-task-implement: cannot start — ${src.blockedReason}`)
+  return { stopped: 'source-blocked', detail: src.blockedReason }
+}
+let profile = forcedProfile || (TIERS.includes(src.profile) ? src.profile : 'full')
+let profileEscalated = false
+const planPath = src.planPath || `.task-plans/${src.slug}.md`
+log(`run-task-implement: ${src.kind} "${src.slug}" — tier ${profile} (${forcedProfile ? 'forced' : 'classified'}: ${src.profileReason || 'no reason given'}), base ${src.base}, branch ${src.branch}`)
+
+// --- Phase 1: map the code BEFORE planning it --------------------------------
+// Unconditional, in every tier. A planner that has not opened the code anchors its plan to
+// file:line references it INFERRED, and everything downstream inherits the mistake — the reuse
+// map points at utilities that don't do what it claims, and Codex burns its review on
+// corrections instead of on the approach.
+phase('Explore')
+const aspects = (src.exploreAspects || []).slice(0, 3)
+const askedAspects = aspects.length ? aspects : ['the files this task will touch, their conventions, and the tests that cover them']
+const briefs = await parallel(askedAspects
+  .map((aspect, i) => () => reliable(`explore#${i + 1}`, 'Explore', async () => parseExplore(await agent(
+    `Read-only exploration for this task: ${src.taskIntent}
+${inRepo}
+     Your slice: ${aspect}
+     Return a focused brief: the key files as path:LINE, the patterns and utilities already
+     there, the conventions the code follows, the existing tests that cover it, and the
+     constraints a change here must respect. Do not propose a design — map what EXISTS.
+
+     Write the brief as plain prose/markdown and nothing else — it is read verbatim by the planner,
+     so there is no JSON to escape and no wrapper to fill in. Your reply IS the brief.
+
+     Then end your reply with ONE final line, nothing after it:
+       RISKFLAGS: [{"surface": "...", "where": "path:LINE", "why": "..."}]
+     one entry per risk surface THIS TASK'S CHANGE will add or alter. There
+     are exactly five, and 'surface' must be one of them:
+       auth        — an authentication, authorization, permission or role decision
+       money       — pricing, tax, billing or any other money math
+       persistence — a query's semantics, a schema, a migration or an index
+       concurrency — locking, threading, async ordering, shared mutable state
+       security    — a secret or credential, crypto, deserialization, or input from outside the
+                     system that the change causes to be trusted
+     Give each a 'where' (path:LINE) and a 'why' saying how the change alters it.
+
+     Judge each against the task intent above: report a surface only if the change will MODIFY it
+     or alter its behavior. Do NOT list risk that merely exists nearby in the files you read —
+     money math in the same class as the log line being changed is not a flag, and neither is a
+     permission check the change only reads past. Nor are these flags at all: ordinary
+     business-logic branching, a read-only query the change does not alter, or an external call
+     the change merely calls through. Those are normal in almost every change, and a signal that
+     fires on almost every change carries no information.
+
+     Five named surfaces, and no sixth: if what worries you does not fit one of them, it belongs in
+     the brief, not here. "security" in particular is the four things listed above, not a mood — a
+     catch-all read of it fires on every change that touches a request, which is the same way the
+     old free-text version of this list stopped meaning anything.
+
+     This list escalates the run to the heaviest review tier — the one that stops to have its plan
+     challenged before code is written — so it should fire when the approach genuinely deserves
+     that and stay quiet otherwise. \`RISKFLAGS: []\` is a real and common answer: return it whenever
+     the change stays clear of all five surfaces above.`,
+    // The label carries the slice INDEX, not just its first 24 characters. Three explorers on one
+    // task routinely share an opening phrase ("Map the calculator…"), and when they do, three
+    // identical rows in the progress tree make the one that died unidentifiable.
+    { label: `explore#${i + 1}:${aspect.slice(0, 24)}`, phase: 'Explore', agentType: 'Explore', ...EXPLORE_RUN })))))
+
+const liveBriefs = briefs.filter((b) => b && !blocked(b) && b.brief)
+// Two accountings that used to be silent. A slice that came back unusable is a hole in the code map
+// the planner is about to design against, and a missing RISKFLAGS trailer is an escalation vote
+// that was never cast — neither is fatal, and both are things you want to read afterwards when the
+// plan turns out to have missed the seam nobody explored.
+if (liveBriefs.length < askedAspects.length) {
+  const lost = askedAspects.filter((_, i) => !(briefs[i] && !blocked(briefs[i]) && briefs[i].brief))
+  log(`run-task-implement: ${lost.length} of ${askedAspects.length} explorer slice(s) came back unusable — planning on a partial code map: ${lost.join(' | ').slice(0, 200)}`)
+}
+const flagless = liveBriefs.filter((b) => !b.flagsSeen)
+if (flagless.length) {
+  log(`run-task-implement: ${flagless.length} explorer(s) returned no parsable RISKFLAGS line — their risk surfaces did not vote in the tier decision`)
+}
+if (!liveBriefs.length) {
+  log('run-task-implement: every explorer came back blocked — refusing to plan against unread code')
+  return { stopped: 'explore-blocked' }
+}
+const briefText = liveBriefs.map((b, i) => `--- brief ${i + 1} ---\n${b.brief}`).join('\n\n')
+
+// Phase 0 classified from the task DESCRIPTION, before anyone had opened the code. Now someone
+// has. A riskFlag means the change itself adds or alters one of the five surfaces named in the
+// tree's "full" condition — so light and standard both escalate straight to full. Doing it here
+// as control flow rather than as a judgement the model must remember to re-make costs one
+// explorer to correct a guess before that guess propagates all the way to a PR.
+//
+// The filter on RISK_SURFACES is not belt-and-braces over the schema: it is where this gate says
+// what it counts. Anything an explorer reports outside the five is not a tier decision — the
+// planner still reads it in the brief, it just does not buy a Codex plan review.
+//
+// This overrides an explicit --light too, because the flag was typed with the same information
+// Phase 0 had (the task description) and the explorer has strictly more. The log says so plainly:
+// silently ignoring someone's flag is worse than overruling it out loud.
+// A flag must point AT something. `required` in the schema forces the three fields to exist, not
+// to contain evidence — observed on a real run: an explorer returned {surface:"security",
+// where:"a", why:"b"}, a placeholder that is indistinguishable from a finding as far as the gate is
+// concerned and would have bought a full Codex plan review on its own. Demanding that `where`
+// looks like a path is the cheapest check that a placeholder cannot pass and a real citation
+// always does.
+const looksLikeEvidence = (w) => typeof w === 'string' && w.trim().length >= 6 && /(\/|\.[A-Za-z]{2,})/.test(w)
+const countedFlag = (f) => !!f && RISK_SURFACES.includes(f.surface) && looksLikeEvidence(f.where)
+const allFlags = liveBriefs.flatMap((b) => b.riskFlags || [])
+const foundRisks = allFlags.filter(countedFlag)
+const ignoredFlags = allFlags.filter((f) => !countedFlag(f))
+if (ignoredFlags.length) {
+  log(`run-task-implement: ignored ${ignoredFlags.length} risk flag(s) with no usable surface or evidence: ${JSON.stringify(ignoredFlags).slice(0, 200)}`)
+}
+if (profile !== 'full' && foundRisks.length) {
+  const overridden = forcedProfile ? ` (overrides your --${forcedProfile})` : ''
+  const from = profile
+  profile = 'full'
+  profileEscalated = true
+  const named = foundRisks.slice(0, 3).map((f) => `${f.surface} at ${f.where} — ${f.why}`).join('; ')
+  log(`run-task-implement: re-classified ${from} -> FULL${overridden} — the change alters a risk surface: ${named}`)
+}
+
+// Dry run stops HERE — after the tier is settled, before the first thing that writes. Phase 2's
+// scribe creates .task-plans/, so returning any later would leave a file behind in a repo the
+// caller only asked to classify.
+if (classifyOnly) {
+  log(`run-task-implement: classifyOnly — ${src.kind} "${src.slug}" settled at ${profile}${profileEscalated ? ' (escalated)' : ''}`)
+  return {
+    classifyOnly: true,
+    source: rawSource,
+    kind: src.kind,
+    profile,
+    profileForced: !!forcedProfile,
+    profileEscalated,
+    // What Phase 0 decided from the description alone, kept next to the settled tier: the gap
+    // between the two IS the measurement — it says how often reading the code changes the answer.
+    profileFromDescription: src.profile,
+    profileReason: src.profileReason || '',
+    uiTouched: !!src.uiTouched,
+    explorers: aspects.length || 1,
+    exploreAspects: aspects,
+    riskFlags: foundRisks,
+    // Flags the explorers returned that the gate did NOT count — an unrecognised surface, or a
+    // `where` that cites nothing. Empty is the expected shape; a non-empty one is the early
+    // warning that the signal is drifting back toward "everything is risky".
+    riskFlagsIgnored: ignoredFlags,
+  }
+}
+
+// --- Phase 2: the plan -------------------------------------------------------
+// Resume: a plan already past review is not re-planned or re-reviewed.
+phase('Plan')
+const resuming = src.planStatus === 'implementing' || src.planStatus === 'done'
+if (resuming) log(`run-task-implement: resuming — ${planPath} is already at status "${src.planStatus}", skipping plan + plan-review`)
+
+const criteriaText = (src.criteria || []).length
+  ? (src.criteria || []).map((c) => `- ${c}`).join('\n')
+  : '(none written — DERIVE an explicit acceptance-criteria list from the task description FIRST, then plan against it)'
+
+// The plan is the last point where visual direction is still cheap to set: by the time an
+// implementer is writing a template it is choosing markup, not deciding how the page should look.
+// So when the change touches the UI, the planner reads the same `frontend-design` rubric that
+// post-task-review's visual half will later judge the finished pages against — otherwise the run
+// is graded on a bar the planner never saw. Both planners get it; a "cosmetic template change" is
+// exactly the light-tier task where design judgement is the whole job.
+const uiDesignNote = src.uiTouched
+  ? `
+       THIS TASK TOUCHES THE UI. Before you design that part, load the \`frontend-design\` skill
+       (Skill tool) and plan the visual work against it: layout and hierarchy, typography, spacing,
+       the states a real page needs (empty, loading, error), and responsive behaviour. Build on the
+       components, tokens and page structure the briefs found — a plan that starts a second visual
+       language inside the same app is the expensive kind of wrong. Write the design decisions you
+       made and why into the plan, so the implementer inherits direction instead of re-deciding it
+       from scratch, and so the reviewer can check the pages against a stated intent.`
+  : ''
+
+if (!resuming) {
+  let planMarkdown
+  // The full planner runs for standard as well as full. What standard gives up is the Codex
+  // REVIEW of the plan (Phase 3), not the thinking that produces it — a medium task still
+  // deserves a grounded plan, and a cheap plan would just push the cost into the implementers.
+  if (profile !== 'light') {
+    // Opus at xhigh (PLAN_RUN): the plan is the highest-leverage artifact in the run, so it gets
+    // the most capable model at maximum reasoning effort. It is still written and critiqued by
+    // DIFFERENT models — Codex reviews it in Phase 3 — so a single model never grades its own plan.
+    const plan = await reliable('planner', 'Plan', () => agent(
+      `Plan this task at MAXIMUM reasoning depth. You are read-only: return the plan, do not write it.
+
+       TASK (${src.kind}): ${rawSource}
+       INTENT: ${src.taskIntent}
+       ACCEPTANCE CRITERIA:
+       ${criteriaText}
+
+       The codebase has already been mapped for you — plan against THESE briefs, and re-open the
+       files yourself rather than inferring what they contain:
+       ${briefText}
+${uiDesignNote}
+       Reuse the existing patterns and utilities you find; do not invent new ones. Return the plan
+       as markdown with exactly these sections:
+       - Context — why this change, and the current state.
+       - Files to change and the approach — cite the real code you will touch as file:LINE.
+       - Reuse map — the existing utilities/services/patterns this builds on, each with a
+         file:LINE pointer. This is the evidence you explored rather than imagined.
+       - Assumptions & risks — what the plan takes for granted, and the genuinely risky spots
+         (migration, money math, concurrency, auth/permission, external calls). Unstated
+         assumptions are the ones that bite.
+       - Alternatives considered — ~2 approaches weighed, one line on why this one won. A single
+         planner locks onto its first idea; naming the roads not taken forces a real comparison.
+       - TDD test plan — the tests that come FIRST, each naming the behaviour or edge case it
+         locks, and each TAGGED with what it is expected to do against the CURRENT, unmodified
+         code:
+           [RED] it must FAIL today — say which assertion fails and why the current code cannot
+                 satisfy it. This is the tag that proves the change does something.
+           [GREEN] it passes today — a regression guard that locks behaviour the change must not
+                 break. A legitimate and common tag; it is only dishonest when it is labelled RED.
+         Tag by what the code does, not by what would look better. A plan that calls a green guard
+         a red gate produces a suite that appears to prove a fix while it only re-states existing
+         behaviour — and the implementer, who runs these tests before writing anything, will find
+         out anyway. If a criterion has no [RED] test behind it, say so explicitly in the coverage
+         contract and explain what does prove it instead.
+       - Verification steps — how to prove it works end to end.
+       - Coverage contract — one row per acceptance criterion:
+         criterion -> where it's implemented -> the test that proves it -> the verification step.
+         A criterion with no test behind it is not covered.
+
+       BEFORE YOU RETURN, DEEPEN ONCE: re-open the 3-5 files most critical to the approach you
+       just chose and pressure-test the draft against the real code. Does the approach actually
+       fit those files? Do the cited file:LINEs still say what you claim? Does any criterion's
+       coverage fall apart on a second read? Revise the plan to fix whatever that surfaces, THEN
+       return it. Codex reviews this next — it should see a plan that already survived one honest
+       second look, not a first draft.
+
+       YOUR ENTIRE FINAL MESSAGE IS THE PLAN. Return the markdown itself and nothing else — no
+       preamble, no "Here is the plan:", no closing remark, no fenced code block around the whole
+       document. What you return is copied to disk verbatim and is what Codex reviews and what the
+       implementers build from, so anything that is not plan text becomes a line in the plan.`,
+      { label: 'planner', phase: 'Plan', agentType: 'Plan', ...PLAN_RUN }))
+    if (blocked(plan) || typeof plan !== 'string' || !plan.trim()) return { stopped: 'planner-blocked' }
+    planMarkdown = plan.trim()
+  } else {
+    // Light tier: no Codex plan review, and the plan itself stays BRIEF — but it runs on the same
+    // Opus/xhigh planner (PLAN_RUN) and still carries a real coverage contract, so a light plan is
+    // a checkable contract rather than loose prose. The light saving is skipping the review pass,
+    // not cheapening the planner.
+    const lite = await reliable('plan-light', 'Plan', () => agent(
+      `Write a BRIEF implementation plan for this low-risk task. Keep it proportionate — this is
+       the light tier — but it must still be a contract, not prose.
+
+       TASK (${src.kind}): ${rawSource}
+       INTENT: ${src.taskIntent}
+       ACCEPTANCE CRITERIA:
+       ${criteriaText}
+       CODE BRIEF:
+       ${briefText}
+${uiDesignNote}
+       Return markdown with: Context; Files to change (cite file:LINE from the brief); TDD test
+       plan — the test that comes first, TAGGED [RED] (it must fail against the current code — say
+       which assertion fails) or [GREEN] (it passes today and guards existing behaviour); and a
+       Coverage contract — one row per criterion: criterion -> where it's implemented -> the test
+       that proves it. Tag honestly: the implementer runs these before writing code, so a green
+       guard mislabelled as a red gate is caught there anyway, having wasted the plan.
+
+       YOUR ENTIRE FINAL MESSAGE IS THE PLAN. Return the markdown itself and nothing else — no
+       preamble, no closing remark, no fenced code block around the whole document. What you
+       return is copied to disk verbatim, so anything that is not plan text becomes a line in the
+       plan.`,
+      { label: 'plan-light', phase: 'Plan', ...GP, ...PLAN_LIGHT_RUN }))
+    if (blocked(lite) || typeof lite !== 'string' || !lite.trim()) return { stopped: 'planner-blocked' }
+    planMarkdown = lite.trim()
+  }
+
+  // The planner is read-only and this script has no filesystem access, so a scribe agent puts
+  // the plan on disk. The file is the shared artifact for the Codex reviewer and the
+  // implementers — passing it by path is what keeps every downstream context lean.
+  //
+  // The one job here is a byte-for-byte copy, and it is the step most likely to fail QUIETLY:
+  // a scribe that re-wraps prose, "tidies" a heading or drops a section produces a perfectly
+  // well-formed plan file that no longer matches the plan Codex is about to review and the
+  // implementers are about to build. So the prompt asks for a quoted heredoc (the plan is full of
+  // backticks and file:LINE refs that an unquoted one would hand to the shell) and gives the
+  // scribe the ONE fact it cannot fake — the exact line count — to check its own work against.
+  const planLineCount = planMarkdown.split('\n').length
+  const wrote = await reliable('plan-write', 'Plan', () => agent(
+    `Write this plan to ${planPath} in the repo, prefixed with this status header:
+
+     status: ${profile === 'full' ? 'reviewing' : 'implementing'}   # reviewing -> implementing -> done
+     tier: ${profile}
+     source: ${src.kind === 'issue' ? `issue ${rawSource}` : rawSource}
+     base: ${src.base}
+
+     First \`mkdir -p .task-plans\` and make sure ".task-plans/" is listed in .gitignore — append
+     the line if it is missing. Plans are scratch space and are never committed. Do not edit any
+     other file.
+
+     COPY THE PLAN BODY BYTE FOR BYTE. You are a scribe, not an editor: no re-wrapping, no
+     reformatting or "tidying" of markdown, no fixing what looks like a typo, no summarising, no
+     eliding a long section with "..." — and never re-type it from memory. Reproduce every line,
+     including blank lines and indentation, in its original order. This exact text is what Codex
+     reviews and what the implementers build from, so a plan that is merely CLOSE to the original
+     is a plan that silently disagrees with the run around it.
+
+     Write it with a QUOTED heredoc so the shell expands nothing — the plan contains backticks,
+     \`$\` and file:LINE references, and an unquoted heredoc would execute them:
+       cat > ${planPath} <<'RUN_TASK_PLAN_EOF'
+       <header, blank line, then the plan body>
+       RUN_TASK_PLAN_EOF
+
+     THEN VERIFY, because a truncated copy looks like a successful one. Do NOT count lines by
+     hand — run the commands and read what they print:
+       tail -1 ${planPath}
+       tail -n +6 ${planPath} | wc -l
+
+     The FIRST is the check that matters: the last line of the file must be the last line of the
+     plan below. Truncation — the failure this step exists to catch — always changes it.
+
+     The second is a corroborating count: the plan body below is ${planLineCount} line(s), and
+     \`tail -n +6\` skips the 4 header lines and the blank line after them. If the last line is
+     right but the count is off by a line or two, the body is intact and the boundary arithmetic
+     is what disagrees — put both numbers in 'note' and still return written=true. Only return
+     written=false when the last line is WRONG or the file is missing: that is a real truncation,
+     and it is retried cheaply here. Returning written=false for an intact plan is not a safe
+     default — it throws away a document that cost the most expensive agent in the run to produce.
+
+     PLAN (${planLineCount} line(s)):
+     ${planMarkdown}`,
+    { label: 'plan-write', phase: 'Plan', schema: WROTE, ...GP, ...SCRIBE }))
+  // A self-reported failure is a claim about the disk, not the disk itself — so check the disk
+  // before throwing the plan away. Observed on a real run: the scribe wrote a complete 247-line
+  // plan, miscounted its own body by two lines against the header boundary, and returned
+  // written=false; the run stopped at 'plan-not-written', and RESUMING replayed that cached
+  // verdict, so the same good plan was discarded twice before a third full attempt rewrote it.
+  // Reading the file makes this step idempotent: whatever the scribe believes, a plan whose last
+  // line is the planner's last line is a plan, and a poisoned cache entry stops mattering.
+  if (blocked(wrote) || !wrote.written) {
+    const wantLast = planMarkdown.split('\n').pop().trim()
+    const onDisk = await reliable('plan-check', 'Plan', () => agent(
+      `Run \`tail -1 ${planPath}\` and report what it printed. Return exists=false if the file is
+       missing or empty. Do not write or edit anything — this is a read-only check on work another
+       agent already did.`,
+      { label: 'plan-check', phase: 'Plan', schema: PLAN_ON_DISK, ...GP, ...MECHANICAL }))
+    const intact = !blocked(onDisk) && onDisk.exists && (onDisk.lastLine || '').trim() === wantLast
+    if (!intact) return { stopped: 'plan-not-written' }
+    log(`run-task-implement: plan-write reported failure${wrote.note ? ` ("${String(wrote.note).slice(0, 120)}")` : ''} but ${planPath} ends on the planner's last line — the plan is intact, continuing`)
+  }
+}
+
+// --- Phase 3: Codex challenges the plan (full tier only) ---------------------
+// Before a line of code is written. There is no diff yet, so this reviews the plan DOCUMENT —
+// the adversarial-review run.sh script reviews a diff and is the wrong tool here.
+//
+// Runs on `general-purpose`, NOT `codex:codex-rescue`. The rescue type auto-loads
+// `codex-cli-runtime`, which makes it a one-shot forwarder and forbids `status`/`result` — so it
+// physically cannot obey the collect-the-backgrounded-run instruction below, and returns ran=false
+// on every review that outlives the 600s Bash cap. Observed on issues #82 and #55.
+//
+// Audit trail. Everything else in this pipeline refuses to let a track vanish quietly (`ran`
+// flags, blocked sentinels, the in-scope/pre-existing split) — the triage step used to be the
+// exception: it decided which Codex findings were real, edited the plan, and dropped both lists
+// on the floor. "Codex raised three majors and the triage dismissed all three" then looked
+// identical to "Codex found nothing". Carry the decisions out instead, so they can reach the
+// caller's PR body and a lazy triage has somewhere to show up.
+const planReview = { ran: false, passes: 0, raised: 0, applied: [], dropped: [] }
+if (!resuming && profile === 'full') {
+  phase('Plan-review')
+  const rubric = `Work through this fixed rubric and tag every finding major or minor:
+     1. Coverage — does every acceptance criterion map to a concrete implementation AND a test
+        that proves it? A criterion covered only in prose is a gap.
+     2. Grounding — do the cited file:LINE references and the Reuse map actually exist and behave
+        as the plan claims? A plan built on a misread of the code is the most expensive wrong.
+     3. Test adequacy — do the planned tests really pin the behaviour and its edge cases, or are
+        they shallow? Check every [RED] tag against the real code: a test tagged RED must be one
+        the CURRENT code genuinely fails. A green guard mislabelled as a red gate is a MAJOR
+        finding — it makes a suite look like it proved a fix when it only re-stated what the code
+        already did. Say which tag is wrong and what it should be.
+     4. Simplicity (YAGNI) — is anything over-built for needs that aren't here? Is there a simpler
+        approach that still satisfies every criterion?
+     5. Risk — are the risky spots (migration, money math, concurrency, auth, external calls)
+        called out and handled, or waved past?`
+
+  // Pass 2 used to be a COLD re-read: a fresh Codex process with no idea what it said the first
+  // time or what the triage did with it. That wastes the one thing a second pass is uniquely good
+  // for. The triage is the only judgement in this run with nothing reviewing it — it decides which
+  // of Codex's findings were real, edits the plan accordingly, and until now its dismissals were
+  // answerable by nobody but the human reading the PR much later. Handing pass 2 the delta makes
+  // Codex grade what happened to its OWN findings, and lets it re-raise a dismissal it still
+  // disagrees with. It is also cheaper than a cold re-read: the reviewer is checking a diff of
+  // decisions rather than re-deriving the whole critique.
+  const delta = (prior) => {
+    if (!prior) return ''
+    const applied = prior.applied || []
+    const dropped = prior.dropped || []
+    const bullets = (xs) => xs.map((x) => `       - ${x}`).join('\n')
+    // Two different situations reach a re-review, and telling Codex the wrong one wastes the pass.
+    // When the triage kept nothing, the plan in front of it is UNCHANGED — describing that as
+    // "revised in response" invites it to hunt for edits that do not exist, and the landed-fix
+    // check below has nothing to check.
+    const nothingApplied = !applied.length
+    const opening = nothingApplied
+      ? `THIS IS A RE-REVIEW, not a first look. You reviewed this plan once and the triage dismissed
+     EVERY finding you raised, so the plan in front of you is UNCHANGED. Your job is to adjudicate
+     those dismissals — not to re-derive the critique.`
+      : `THIS IS A RE-REVIEW, not a first look — you reviewed this plan once and it has since been
+     revised in response.`
+    const checks = []
+    if (!nothingApplied) checks.push(
+      `Did each accepted fix actually land in the plan, and does it address the finding rather
+        than its symptom? A fix recorded as applied but absent from the file — or one that rewords
+        the text around the problem and leaves the problem — is a MAJOR finding.`)
+    checks.push(
+      `Is each dismissal fair? Re-read the plan and judge the reason given on its merits. If it
+        holds, let the finding go and do not re-raise it — you do raise false positives, and a
+        reviewer that never accepts a correction is no more useful than one that never objects.
+        If it does not hold, re-raise the finding at its original severity and say why the stated
+        reason fails.`)
+    return `
+
+     ${opening}
+     Put everything below into the prompt you pass to Codex, and work ${checks.length > 1 ? 'these checks' : 'this check'} BEFORE
+     the rubric:
+
+     WHAT YOU RAISED LAST TIME:
+${bullets(prior.findings.map((f) => `[${f.severity}][${f.rubric}] ${f.what}`))}
+     ${applied.length ? `ACCEPTED and folded into the plan:\n${bullets(applied)}` : 'ACCEPTED: none — the triage applied nothing you raised.'}
+     ${dropped.length ? `DISMISSED as false positives, with the reason given:\n${bullets(dropped)}` : 'DISMISSED: none.'}
+
+${checks.map((c, i) => `     ${i + 1}. ${c}`).join('\n')}
+     Then apply the rubric to the ${nothingApplied ? 'plan' : 'revised plan'} for anything ${nothingApplied ? 'the first pass missed' : 'the rewrite newly broke'}.`
+  }
+
+  const askCodex = (pass, prior) => reliable(`codex-plan-review#${pass}`, 'Plan-review', () => agent(
+    `Run the REAL Codex over the PLAN FILE ${planPath} (not a diff) and challenge it.
+     Task source: ${rawSource}
+
+     Call the Codex companion DIRECTLY with Bash. Do NOT invoke the adversarial-review skill or
+     its run.sh: those review a git diff, and running one from a Codex-backed agent makes Codex
+     re-enter the wrapper that launches Codex, inside a read-only sandbox where it dies on mktemp.
+       C="$HOME/.claude/plugins/marketplaces/openai-codex/plugins/codex/scripts/codex-companion.mjs"
+       [ -f "$C" ] || C="$(ls -1d "$HOME"/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs | sort -V | tail -n1)"
+       node "$C" task --wait --effort medium "<the review prompt you build from the rubric below>"
+     Pass --wait so Codex runs in the FOREGROUND, --write=false — this is a review, not an edit —
+     and --effort medium, set explicitly so the depth is pinned rather than inherited from whatever
+     the CLI default happens to be. Medium is the right level for THIS job: the rubric below is a
+     fixed five-item checklist against a document and the code it cites, which is concrete checking
+     rather than open-ended reasoning. It is also what keeps the run inside the foreground window —
+     at high this step routinely ran 16-26 minutes and spilled into the background collection path
+     below, which is the slowest and most failure-prone way to get the same critique. ${rubric}${delta(prior)}
+
+     Set ran=true ONLY if the real Codex actually produced a critique. If the CLI is missing, the
+     job failed, or it timed out and moved to the background and you could not collect the
+     finished review, set ran=false — there is NO fallback reviewer here and no stand-in model is
+     acceptable, so a false "clean" is worse than an honest failure. A review longer than the
+     ~600s Bash cap WILL be moved to the background — that is expected, not a failure, and giving
+     up there is the single most common way this step reports a false block. You ARE permitted to
+     poll here: collect the run by polling the worker PID, then read the job record's "rendered"
+     field under ~/.claude/plugins/data/codex-openai-codex/state/*/jobs/*.json. Never poll for
+     output-size stability, because the log goes quiet for minutes mid-reasoning.`,
+    { label: `codex-plan-review#${pass}`, phase: 'Plan-review', schema: REVIEW, ...GP, ...CODEX_RUN }))
+
+  let review = await askCodex(1)
+  // Step 2 has no fallback: the plan is critiqued by the real Codex or not at all.
+  if (blocked(review)) {
+    log('run-task-implement: the Codex plan review could NOT run — stopping. No stand-in reviewer is acceptable here.')
+    return { stopped: 'codex-plan-review-unavailable', planPath, detail: (review && review.note) || '' }
+  }
+  planReview.ran = true
+
+  // Triage + apply, then ONE re-review — and only if the approach actually changed. The cap is
+  // the point: this catches a rewrite that opened a fresh hole, it does not loop until the plan
+  // is flawless. No approval gate — the run is autonomous, and the human reviews the final PR.
+  //
+  // Triage is a FAN-OUT, not one agent. It used to be a single xhigh agent handed nothing but the
+  // finding strings: to decide whether a finding held it re-opened every file the finding cited,
+  // re-deriving a code map the explorers had already built minutes earlier, then worked through the
+  // findings one after another. Measured: 11 minutes and 122k tokens, more than the Codex review it
+  // was triaging. Two things fix that, and they compose:
+  //   - each judge gets the EXPLORER BRIEFS, so it starts from the map instead of rebuilding it;
+  //   - the judges run in parallel, so the cost is the slowest single finding, not their sum.
+  // The editor that follows is then genuinely mechanical: every fix it applies is already written
+  // down by the judge that accepted it.
+  //
+  // The editor also flips the plan's status header, because it is already editing that exact file
+  // and a separate agent round-trip to change one line is pure latency. On the rare two-pass path
+  // the flip lands before the re-review, so an interrupt in that window resumes at implement on a
+  // plan that was reviewed once and triaged once — which is the same outcome the "re-review could
+  // not run" branch below already accepts.
+  let statusFlipped = false
+  for (let pass = 1; pass <= 2; pass++) {
+    if (!review.findings || !review.findings.length) {
+      log(`run-task-implement: plan review pass ${pass} — Codex raised nothing`)
+      break
+    }
+    planReview.passes = pass
+    planReview.raised += review.findings.length
+
+    const verdicts = await parallel(review.findings.map((f, i) => () =>
+      reliable(`judge#${pass}.${i + 1}`, 'Plan-review', () => agent(
+        `Judge ONE finding from Codex's review of the plan at ${planPath}. Decide whether it holds
+         against the real code, and nothing else — you are not editing the plan.
+
+         FINDING [${f.severity}][${f.rubric}]: ${f.what}
+
+         The codebase was already mapped for this task. Start from these briefs and open only what
+         you still need to confirm — the finding cites specific code, so check THAT:
+         ${briefText}
+
+         Read the relevant part of ${planPath} and the code it points at. Then:
+         - real=true if the finding holds. Put the evidence in 'why' as file:LINE, and in 'fix'
+           write what the plan should say instead — concretely enough that someone editing the plan
+           can apply it without re-doing your reading.
+         - real=false if it does not. 'why' is then the dismissal reason, and it is answerable:
+           Codex may be shown it and given a chance to push back, so give the evidence that
+           convinced you rather than an assertion.
+         Codex raises real problems and false positives both. Judge this one on what the code
+         actually says.
+
+         When real=true, also set changesApproach: does applying YOUR fix send the plan down a
+         different route — a different design, a different seam, a different data flow — or does it
+         adjust a detail? Adding a test, correcting a file:LINE citation, tightening wording or
+         filling a coverage gap is a detail. Set it true only for the first kind: it costs the run
+         a second full Codex review of the rewritten plan, which is worth paying when the plan
+         really did change shape and is pure delay when it did not.`,
+        { label: `judge#${pass}.${i + 1}`, phase: 'Plan-review', schema: VERDICT, ...GP, ...JUDGE_RUN }))))
+
+    // A judge that died is UNJUDGED — not dismissed. Silently dropping it would let a finding
+    // disappear because an agent fell over, which is the failure mode every other track here is
+    // built to refuse. It goes to the editor as an explicit "decide on the plan text alone".
+    const accepted = [], rejected = [], unjudged = []
+    review.findings.forEach((f, i) => {
+      const v = verdicts[i]
+      if (blocked(v) || typeof v.real !== 'boolean') unjudged.push(f)
+      else if (v.real) accepted.push({ f, fix: v.fix || v.why, changesApproach: !!v.changesApproach })
+      else rejected.push(`${f.what} — ${v.why}`)
+    })
+    planReview.dropped.push(...rejected)
+    log(`run-task-implement: plan review pass ${pass} — ${review.findings.length} finding(s): ${accepted.length} real, ${rejected.length} dismissed${unjudged.length ? `, ${unjudged.length} UNJUDGED (judge died)` : ''}`)
+    if (rejected.length) log(`  dismissed as not-real: ${rejected.join(' | ')}`)
+
+    let applied = []
+    // Derived from the judges, not reported by the editor. Deliberately NOT gated on Codex's
+    // `major` tag: severity is Codex's guess about the FINDING, while this is the judge's read of
+    // the FIX it just wrote, which is the better-informed of the two. Gating the informed signal
+    // behind the less informed one would be backwards.
+    const approachChanged = accepted.some((a) => a.changesApproach)
+    if (accepted.length || unjudged.length) {
+      const fix = await reliable(`plan-fix#${pass}`, 'Plan-review', () => agent(
+        `Apply these accepted plan-review findings to ${planPath}. The judging is done — each fix
+         below was already checked against the code, so your job is to fold it into the plan, not
+         to re-litigate it.
+
+         ACCEPTED — apply each one:
+         ${accepted.map(({ f, fix }) => `- [${f.severity}][${f.rubric}] ${f.what}\n           FIX: ${fix}`).join('\n')}
+         ${unjudged.length ? `\n         NOT JUDGED — the judge agent died before it could check these. Decide each on the
+         plan text alone: apply it if the plan plainly has the problem, otherwise leave it and say
+         so. Do not go read the whole codebase to settle them.
+         ${unjudged.map((f) => `- [${f.severity}][${f.rubric}] ${f.what}`).join('\n')}` : ''}
+
+         Edit ONLY the plan file. Fold each fix into the relevant section and, when one changes the
+         APPROACH rather than a detail, add a short "Plan review changes" note so the decision stays
+         auditable and can be carried into the PR body later.
+         Record in 'applied' what actually landed, in the plan's own words.
+
+         In the same edit, set the "status:" header at the top of the file to "implementing" — the
+         plan leaves review here, and you are already writing this file.`,
+        { label: `plan-fix#${pass}`, phase: 'Plan-review', schema: PLANFIX, ...GP, ...EDIT_RUN }))
+      if (blocked(fix)) {
+        log(`run-task-implement: plan-fix pass ${pass} BLOCKED — ${accepted.length} accepted${unjudged.length ? ` + ${unjudged.length} unjudged` : ''} finding(s) went unapplied; proceeding on the unrevised plan`)
+        break
+      }
+      statusFlipped = true
+      applied = fix.applied || []
+      planReview.applied.push(...applied)
+      // The judges accepted N findings; the editor reported applying M. They can legitimately
+      // differ — a fix is sometimes already in the plan — but the gap should be visible rather
+      // than inferred from two numbers nobody prints.
+      if (applied.length !== accepted.length + unjudged.length) {
+        log(`  note: ${accepted.length + unjudged.length} finding(s) went to the editor, ${applied.length} recorded as applied`)
+      }
+    }
+    // The one shape worth calling out by name: a triage that kept nothing. It may well be
+    // right — Codex does raise false positives — but it leaves the plan exactly as the planner
+    // wrote it while still counting as "reviewed", so it should be visible rather than inferred.
+    if (!accepted.length && rejected.length && !unjudged.length) {
+      log(`run-task-implement: plan review pass ${pass} dismissed EVERY finding — the plan is unchanged by the review`)
+    }
+    // Two things buy the one re-review, and only one of them involves a revised plan:
+    //   approachChanged — a judge says the fix it accepted sent the plan down a different route,
+    //                     so the rewrite needs a look.
+    //   dismissedAll    — the judges kept NOTHING. The plan is untouched and the review has in
+    //                     effect been overruled by the party it was reviewing, with no reviewer
+    //                     after it. That is the shape most worth one adjudication: it is exactly
+    //                     as likely to mean "Codex raised five false positives" as "the triage
+    //                     talked itself out of five real ones", and nothing downstream can tell
+    //                     the two apart — the plan reads identically either way.
+    const dismissedAll = !accepted.length && !unjudged.length && rejected.length > 0
+    if ((!approachChanged && !dismissedAll) || pass === 2) break
+    log(approachChanged
+      ? 'run-task-implement: an accepted fix changed the approach — one re-review of the revised plan'
+      : 'run-task-implement: the triage kept none of the findings — one re-review to adjudicate the dismissals')
+    // Carry pass 1's findings AND what the triage did with them: the re-review checks the fixes
+    // landed and the dismissals were fair, instead of re-deriving the critique from scratch.
+    const again = await askCodex(2, { findings: review.findings, applied, dropped: rejected })
+    if (blocked(again)) {
+      log('run-task-implement: the plan re-review could not run — proceeding on the revised plan (it was already reviewed once)')
+      break
+    }
+    review = again
+  }
+
+  // Only when no editor ran is the header still at "reviewing" and worth its own agent: Codex
+  // raised nothing, the judges dismissed everything (so there was nothing to apply), or the editor
+  // was blocked. The all-dismissed case is why this stays cheap — flipping one header line is the
+  // entire remaining job there, and it belongs to a sonnet scribe rather than to an editor agent
+  // spawned with an empty worklist.
+  if (!statusFlipped) {
+    await agent(`Set the "status:" header in ${planPath} to "implementing". Change nothing else.`,
+      { label: 'plan-status', phase: 'Plan-review', schema: WROTE, ...GP, ...SCRIBE })
+  }
+}
+
+// --- Phase 4: implement, test-first -----------------------------------------
+phase('Implement')
+// Creating the feature branch is the explicit opt-in that overrides the global
+// "never create a branch unless asked" rule — /r:task-run always runs on one.
+//
+// The branch is the run's unit of work: the caller merges it into base and closes the issue on
+// it. A run that quietly STAYS on base breaks both ends — the diff lands on main, and the caller
+// then tries to merge main into main. That happened (issue #90: handoff {branch:'main',
+// base:'main'}, buildGreen:true, an otherwise normal-looking result) because nothing here checked
+// WHICH branch came back: BRANCH.onBranch is a plain string, so an agent that failed to check out
+// and honestly reported "main" passed the only test there was (non-empty). Two guards close it — a branch name
+// that is missing or equal to base never reaches the agent, and a result equal to base is retried
+// once and then STOPS the run. `branch === base` is not a degraded success; it is a failed step.
+const branchPrefix = src.kind === 'todo' ? 'phase' : src.kind === 'text' ? 'task' : 'issue'
+const srcSlug = (src.slug || '').trim()
+let wantBranch = (src.branch || '').trim()
+if (!wantBranch || wantBranch === src.base) {
+  if (!srcSlug) {
+    log(`run-task-implement: Phase 0 returned no usable branch name (branch=${JSON.stringify(src.branch)}, base=${src.base}) and no slug to build one from — stopping rather than working on ${src.base}`)
+    return { stopped: 'branch-name-missing', base: src.base, planPath }
+  }
+  const derived = srcSlug.startsWith(`${branchPrefix}-`) ? srcSlug : `${branchPrefix}-${srcSlug}`
+  log(`run-task-implement: unusable branch name from Phase 0 (${JSON.stringify(src.branch)}) — using "${derived}" instead; this run must not do its work on ${src.base}`)
+  wantBranch = derived
+}
+let br = null
+for (let attempt = 1; attempt <= 2; attempt++) {
+  br = await reliable(attempt === 1 ? 'branch' : 'branch-retry', 'Implement', () => agent(
+    `Put the repo on the feature branch ${wantBranch}, based on ${src.base}.
+     ${src.branchExists
+       ? 'The branch ALREADY EXISTS (this is a resume): just check it out, keep any work on it, and do NOT reset or rebase it.'
+       : `Create it off ${src.base} — \`git checkout -b ${wantBranch} ${src.base}\`.`}
+     ${attempt === 1 ? '' : `The previous attempt ended on ${src.base}, i.e. the checkout did NOT happen. Run it again and READ ITS EXIT STATUS: if it fails, put the git error in 'note' rather than reporting whichever branch you happen to be on.`}
+     Commit nothing. Then run \`git rev-parse --abbrev-ref HEAD\` and return its EXACT output as
+     onBranch — the branch the repo is REALLY on now, never the name you intended to create.`,
+    { label: attempt === 1 ? 'branch' : 'branch-retry', phase: 'Implement', schema: BRANCH, ...GP, ...MECHANICAL }))
+  if (blocked(br) || !br.onBranch) break
+  if (String(br.onBranch).trim() !== src.base) break
+  log(`run-task-implement: the branch step came back on ${src.base} — the feature branch was not created (attempt ${attempt}/2)`)
+}
+if (blocked(br) || !br.onBranch) return { stopped: 'branch-failed', planPath }
+const onBranch = String(br.onBranch).trim()
+if (onBranch === src.base) {
+  log(`run-task-implement: still on ${src.base} after 2 attempts — stopping. Implementing here would put the whole task on ${src.base} and leave the caller merging ${src.base} into itself.`)
+  return { stopped: 'branch-not-created', base: src.base, wanted: wantBranch, detail: br.note || '', planPath }
+}
+if (onBranch !== wantBranch) log(`run-task-implement: on "${onBranch}", not the requested "${wantBranch}" — continuing (it is a feature branch, not ${src.base}), but the caller merges what the handoff names`)
+
+// Route by area, and split only when the work genuinely spans both — one subagent per area, in
+// parallel, each owning a disjoint slice. A subagent handed only "build your slice" will happily
+// build the WRONG thing, so every brief carries the plan path, the slice boundary, the criteria,
+// and the house rules.
+const areas = []
+if (src.hasBackend) areas.push({ label: 'backend', agentType: 'java-backend-developer', slice: 'the backend code (*.java / *.kt) and its tests' })
+if (src.hasFrontend) areas.push({ label: 'frontend', agentType: 'htmx-thymeleaf-dev', slice: 'the templates, HTMX wiring, and frontend assets' })
+if (!areas.length) areas.push({ label: 'general', agentType: 'general-purpose', slice: 'everything the plan calls for' })
+
+const implBrief = (a) => `Implement your slice of the plan at ${planPath}. READ THAT FILE FIRST — it holds
+   the Context, the acceptance criteria, and the TDD test plan, so you build what the plan intends
+   rather than your own reinterpretation.
+
+   YOUR SLICE: ${a.slice}
+   ${areas.length > 1 ? `ANOTHER subagent owns ${areas.filter((o) => o.label !== a.label).map((o) => o.slice).join(' and ')} — stay out of it; do not duplicate or collide.` : ''}
+   INTENT: ${src.taskIntent}
+   ACCEPTANCE CRITERIA your slice must satisfy:
+   ${criteriaText}
+
+   - WRITE THE TESTS FIRST, per the plan's TDD test plan — load the \`write-tests\` skill
+     (Skill tool) so they match house style — then implement until they pass.
+   - RUN each new test BEFORE you write any production code, and record what you SAW in
+     \`testEvidence\`, one line per test: "<test> — before: RED (<the assertion that failed>) —
+     after: GREEN". Red-before-green is something you observe, not something the plan can promise:
+     a plan that tags a test [RED] can simply be wrong about what the current code does.
+     - A [RED] test that PASSES on unmodified code is a signal, not a formality. Work out why:
+       usually the test is too weak to reach the bug (strengthen it until it genuinely fails), and
+       sometimes the behaviour already exists (then re-tag it [GREEN] regression guard in your
+       evidence and summary, and say so). Never leave it silently labelled RED.
+     - A [GREEN] guard is expected to pass before AND after — record it as such. If one turns red
+       after your change, you broke something the plan meant to protect.
+   - Reuse the existing patterns and utilities the plan's Reuse map points at; do not invent new
+     ones. Match the surrounding code: no new comments or Javadocs, @Builder on data classes with
+     more than 3 fields.
+   - No scope creep beyond the plan.
+   - Leave EVERYTHING UNCOMMITTED in the working tree. The whole task lands as ONE commit at the
+     very end, after the review — so the reviewer reads the work before any of it is committed.
+   - If the plan looks WRONG or blocked, stop and set blockedOn instead of silently deviating. A
+     subagent quietly "improving" on the plan is how a run ends up contradicting its own intent.`
+
+const impls = await parallel(areas.map((a) => () =>
+  reliable(`implement:${a.label}`, 'Implement', () => agent(
+    implBrief(a), { label: `implement:${a.label}`, phase: 'Implement', schema: IMPL, agentType: a.agentType, ...IMPL_RUN }))))
+
+const stuck = impls.filter((r) => r && r.blockedOn).map((r) => r.blockedOn)
+if (stuck.length) {
+  log(`run-task-implement: an implementer says the plan is wrong or blocked — surfacing instead of working around it`)
+  return { stopped: 'implement-blocked', detail: stuck.join(' | '), branch: onBranch, base: src.base, planPath }
+}
+if (impls.every((r) => blocked(r))) return { stopped: 'implement-blocked', branch: onBranch, base: src.base, planPath }
+
+// --- Phase 5: drive the build green -----------------------------------------
+// Bounded: "loop until green" is unbounded, and an unfixable build would grind forever.
+phase('Build')
+// 'n/a' — not `true` — when the project has no build tool this pipeline knows how to run.
+// Initialising to true meant a non-JVM project handed the caller a handoff claiming a green
+// build that never ran, and the PR body then reported it as passing. post-task-review already
+// reports 'n/a' for the same case; the two now agree. Only ever true | false | 'n/a'.
+let buildGreen = 'n/a'
+if (src.buildTool !== 'none') {
+  buildGreen = false
+  const changed = impls.flatMap((r) => (r && r.filesChanged) || []).join(', ')
+  const staleRule = `If any source file was DELETED or RENAMED since the last build, run \`${src.buildCmd}\` instead — a removed source can leave a stale .class behind that would let a broken build pass.`
+  // A retry only has to re-check a surgical fix to code THIS run wrote, and the modules that code
+  // lives in are known by then. On a multi-module reactor, rebuilding everything to re-run one
+  // module's tests is most of what a retry costs. `-pl <mods> -am` still builds every upstream
+  // dependency, so the fix compiles against the same graph; what it cannot see is a DOWNSTREAM
+  // module the change broke — and that is caught by the review's own full build before anything
+  // merges, which is the gate that actually matters. The i === 1 baseline is NEVER scoped: it is
+  // the clean build this whole run certifies against, and the caller hands it on as `buildGreen`.
+  const scopeRule = src.buildTool === 'maven'
+    ? `Scope it: add \`-pl <the modules holding the changed files> -am\` so the reactor rebuilds those modules and their upstream dependencies rather than the whole project. If you cannot map the changed files to modules confidently, or the project is single-module, run it unscoped.`
+    : `Scope it: run \`:<module>:build\` for the modules holding the changed files rather than the root build. If you cannot map the changed files to modules confidently, or the project is single-module, run it unscoped.`
+  for (let i = 1; i <= 3; i++) {
+    const b = await agent(
+      `Run the build \`${i === 1 ? src.buildCmd : src.buildCmdFast}\` via the ${src.runnerAgent} agent.
+       ${i === 1 ? "This is the run's one clean build — it establishes the baseline." : `${staleRule} ${scopeRule}`}
+       green=true ONLY on a fully clean success (BUILD SUCCESS / BUILD SUCCESSFUL, exit 0, zero
+       failures). The green bar is NEVER relaxed. If red, CLASSIFY every failure:
+       - inScopeFailures: compile errors or test failures in code THIS run changed
+         (changed files: ${changed || 'derive from git diff'}). Ours to fix.
+       - preExistingFailures: failures UNRELATED to this work — a test or class the change never
+         touched, the kind that already fails on ${src.base}. List the failing class names.
+         These are NEVER ours to fix and never a reason to weaken a test.
+       Put a short combined log in 'failures'.`,
+      { label: `build#${i}`, phase: 'Build', schema: BUILD, agentType: src.runnerAgent, ...BUILD_RUN })
+    if (b && b.green) { buildGreen = true; break }
+    const inScope = b && b.inScopeFailures && b.inScopeFailures.trim()
+    if (!inScope) {
+      log('run-task-implement: build RED from PRE-EXISTING failures only — not fixing them, surfacing to the user')
+      return { stopped: 'build-red-preexisting', preExisting: (b && b.preExistingFailures) || (b && b.failures) || 'unknown',
+               branch: onBranch, base: src.base, planPath }
+    }
+    if (i < 3) await agent(
+      `The build is red from failures THIS change caused. Fix ONLY these, surgically, and do NOT
+       touch any pre-existing or out-of-scope test or class to force a pass:
+       ${inScope}
+       Intent (do not undo it): ${src.taskIntent}
+       Self-check by COMPILING, not by building: \`${src.buildTool === 'maven' ? 'mvn -q test-compile' : './gradlew -q testClasses'}\` plus the one
+       test you touched. Do not run the full suite — this loop rebuilds and re-runs it the moment
+       you return, and that is what proves the failures are gone.`,
+      // IMPL_RUN for the same reason the implementers carry it: this is the same domain agent,
+      // editing the code they just wrote. Left unpinned it took its depth from the entry point.
+      { label: `build-fix#${i}`, phase: 'Build', agentType: areas[0].agentType, ...IMPL_RUN })
+  }
+  if (!buildGreen) {
+    log('run-task-implement: in-scope build still RED after 3 attempts — stopping and surfacing to the user')
+    return { stopped: 'build-red', branch: onBranch, base: src.base, planPath }
+  }
+}
+
+// --- Handoff -----------------------------------------------------------------
+// Steps 5 (post-task-review) and 6 (finish) belong to the CALLER, which runs them in its own
+// main thread — post-task-review's canonical engine is a Workflow, and a Workflow call nested
+// inside this script's agents would not be reachable.
+log(`run-task-implement: done — green build on ${onBranch}, diff left uncommitted for review`)
+
+// --- Stats sink: the implement half's row (BEST EFFORT) ----------------------
+// The review's sink records which track found what; this records the OTHER unmeasured thing —
+// how tiers get chosen and whether the plan review earns its slot. `profileEscalated` says how
+// often the description-based guess was wrong, and applied/dropped says whether Codex's plan
+// findings ever survive triage. Same rules as the review sink: it can never fail the run, and it
+// carries counts, not text (the one free-text field, profileReason, is what makes a tier
+// auditable later, and record-run.py drops it first if the row runs long).
+const statsRow = {
+  kind: 'implement',
+  source: src.kind,
+  profile,
+  profileForced: !!forcedProfile,
+  profileEscalated,
+  profileReason: (src.profileReason || '').slice(0, 200),
+  explorers: aspects.length || 1,
+  uiTouched: !!src.uiTouched,
+  buildGreen,
+  planReviewRan: !!(planReview && planReview.ran),
+  planApplied: (planReview && planReview.applied || []).length,
+  planDropped: (planReview && planReview.dropped || []).length,
+}
+await agent(
+  `Record one line of run statistics. This is bookkeeping — if anything goes wrong, say so and
+   return; do NOT retry and do NOT treat it as a failure of the run. Run exactly this from the
+   repo root, then return the script's stderr line verbatim:
+
+   python3 "${PACK}/skills/task-review/scripts/record-run.py" <<'RTI_STATS_JSON'
+${JSON.stringify(statsRow)}
+RTI_STATS_JSON
+
+   The script always exits 0 by design; its stderr says whether the row was recorded.`,
+  { label: 'stats', phase: 'Build', ...GP, ...SINK })
+
+return {
+  branch: onBranch,
+  base: src.base,
+  profile,
+  profileReason: src.profileReason || '',
+  // Forced => the user's word, and it travels to the review. Classified => a guess made before
+  // any code existed, which post-task-review can beat by classifying from the actual diff.
+  profileForced: !!forcedProfile,
+  profileEscalated,
+  uiTouched: !!src.uiTouched,
+  taskIntent: src.taskIntent,
+  planPath,
+  criteria: src.criteria || [],
+  buildGreen,
+  // What the plan review actually decided. `ran:false` means the tier was below full (or this was a
+  // resume), NOT that Codex came back clean — a blocked Codex stops the run outright above.
+  // The caller carries `applied` into the PR body; `dropped` is there so a dismissal can be
+  // questioned instead of disappearing.
+  planReview,
+  implemented: impls.filter((r) => r && r.summary).map((r) => r.summary),
+  // What the implementers OBSERVED when they ran each test before/after the change — the evidence
+  // behind "test-first", rather than the plan's claim about it. Carry it into the PR body: a test
+  // that was green before the change is a regression guard, not proof the fix works.
+  testEvidence: impls.flatMap((r) => (r && r.testEvidence) || []),
+}

@@ -1,0 +1,156 @@
+You are testing the deployed {{APP_NAME}} app. Your goal: verify that recent changes work correctly — functionally, in the UI, and against the security/authorization rules — and report concrete pass/fail results.
+
+## What to Test
+
+{WHAT_TO_TEST}
+
+## App URL
+
+`{{BASE_URL}}` — {{RUN_MODEL}}. Hitting this URL exercises the same process `{{HEALTH_CHECK_CMD}}` shows, so logs and HTTP behavior stay in sync.{{#IF_COMPOSE}} **If the parent gave you a different base URL** (set in `TEST_APP_BASE_URL` or stated in the task above), use **that** instead — it is this worktree's isolated ephemeral stack. `{{BASE_URL}}` is only the default for the main working tree.{{/IF_COMPOSE}}
+
+## Prerequisites
+
+Confirm the app is up before testing:
+
+    {{HEALTH_CHECK_CMD}}
+
+If it's down or unhealthy, stop and tell the parent agent — do not start or deploy it yourself. {{REBUILD_NOTE}}
+
+## Credentials
+
+Read accounts from `{{CREDS_PATH}}` (skill-owned, git-ignored). {{AUTH_MODEL}}.
+
+{{ROUTES_BLOCK}}
+
+If a flow needs a role/account that is **not** in `{{CREDS_PATH}}`, stop and ask the parent agent for it — then append it to `{{CREDS_PATH}}` in the same format so future runs are unattended. Never hard-code secrets into test scripts; read them from the file at run time.
+
+## Allowed Tools
+
+- `{{HTTP_TOOL_NAME}}` — HTTP/API checks. {{CURL_FORBIDDEN_NOTE}}
+{{#IF_E2E_HELPER}}- the project's in-repo end-to-end helper (see below) — full user-journey / chat-style checks.
+{{/IF_E2E_HELPER}}- **python e2e scripts** under `{{E2E_DIR}}/` — persist real flows here (a `requests.Session` that logs in once and reuses the cookie/token). Re-use and extend existing scripts instead of writing throwaway one-liners.
+- the **`/agent-browser` skill** (invoke via the Skill tool) — UI verification: navigate, snapshot, click, fill, screenshot.
+- `{{LOGS_CMD}}` — log inspection.
+{{#IF_EXTRA_SERVICES}}- {{EXTRA_SERVICES}}
+{{/IF_EXTRA_SERVICES}}
+
+## Tools
+
+### `{{HTTP_TOOL_NAME}}`
+
+{{HTTP_TOOL_BLOCK}}
+
+### Login
+
+{{LOGIN_EXAMPLE}}
+
+{{#IF_E2E_HELPER}}{{E2E_HELPER_BLOCK}}
+
+{{/IF_E2E_HELPER}}### python e2e scripts
+
+Save reusable flows under `{{E2E_DIR}}/` and run them with `python3`. A good script logs in once, then asserts each step; keep credentials out of the source by reading `{{CREDS_PATH}}`. Example shape:
+
+    # {{E2E_DIR}}/test_widgets.py
+    import requests, sys
+    BASE = "{{BASE_URL}}"
+    s = requests.Session()
+    # ...log in (see the Login section), then:
+    r = s.get(f"{BASE}/api/widgets")
+    assert r.status_code == 200, (r.status_code, r.text[:300])
+    print("OK widgets list")
+
+{{#IF_UI}}### `/agent-browser` (UI)
+
+Invoke the `agent-browser` skill for UI work:
+
+    agent-browser open {{BASE_URL}}/
+    agent-browser snapshot -i          # interactive elements with @e1, @e2 refs
+    agent-browser click @e1
+    agent-browser fill @e2 "text"
+    agent-browser screenshot           # capture for failure reports + UI/UX review
+    agent-browser console              # read browser console errors (or check the snapshot)
+
+Re-snapshot after navigation or HTMX swaps — refs change.
+
+Screenshot each changed page at three viewports so responsive breakage shows up:
+
+    agent-browser screenshot                       # desktop (default)
+    agent-browser set viewport 768 1024            # tablet (iPad portrait)
+    agent-browser screenshot page-tablet.png
+    agent-browser set device "iPhone 14"           # mobile (~390x844)
+    agent-browser screenshot page-mobile.png
+    agent-browser set viewport 1280 800            # reset back to desktop
+
+{{/IF_UI}}### Logs
+
+    {{LOGS_CMD}} --tail 50
+    {{LOGS_CMD}} --since 5m
+    {{LOGS_CMD}} --since 5m | grep -E "ERROR|WARN|Exception"
+
+## Workflow
+
+1. {{HEALTH_CHECK_CMD}} — abort with a clear message if the app isn't healthy.
+2. Run / extend the python e2e scripts and `{{HTTP_TOOL_NAME}}` probes for the change.
+{{#IF_UI}}3. If UI is in scope, drive the affected pages via `/agent-browser` and run the UI/UX-defect pass.
+{{/IF_UI}}4. Run the security & authorization pass for any protected route the change touches.
+5. Tail logs since the test started and grep for `ERROR` / stack traces.
+6. Report (see format below).
+
+{{#IF_UI}}## UI/UX correctness
+
+When UI is in scope this pass is mandatory. On each changed page, via `/agent-browser` screenshot + snapshot, confirm:
+- No broken layout: no element overflow, no unexpected horizontal scroll, no overlapping/clipped content.
+- No unstyled or missing elements (e.g. a raw-HTML flash, a button with no styling, an empty region where content should be).
+- Form controls have visible labels; images have alt text.
+- No raw framework error page (stack trace, "Whitelabel Error", template error) rendered to the user.
+- No JS errors in the browser console; no 404s on css/js/img assets.
+- **Responsive (tablet + mobile):** re-check the changed page at the tablet (`set viewport 768 1024`) and mobile (`set device "iPhone 14"`) viewports — no horizontal scroll/overflow at narrow widths, nav/menu collapses correctly instead of clipping, content reflows to a single column rather than being cut off, tap targets aren't cramped/overlapping. Attach the per-viewport screenshot for any responsive defect.
+Attach a screenshot for any defect.
+
+{{/IF_UI}}## Security & authorization pass
+
+For any protected route the change touches:
+- **No creds** → the route redirects to login / returns 401 / 403 (never 200 with protected data).
+- **Wrong role** → 403 (a non-admin must not reach an admin route, etc.).
+- **Right role** → the expected 2xx.
+{{#IF_IDOR}}- **IDOR** — logged in as user A, request user B's (or another tenant's) resource by id → 403/404, never another user's data.
+{{/IF_IDOR}}- **Negative-path / input validation** — malformed or missing fields return a clean 4xx, never a 500 or a response body that leaks a stack trace.
+- **Security headers + CSRF** — check the expected response headers (CSP / X-Frame-Options / HSTS where configured); confirm a state-changing POST without a valid CSRF token is rejected (when the app uses CSRF).
+{{#IF_RATELIMIT}}- **Login rate-limiting** — repeated bad logins get throttled/locked rather than accepted indefinitely.
+{{/IF_RATELIMIT}}
+
+{{#IF_I18N}}## Localization
+
+If the change is user-visible, load the changed UI in each configured locale and confirm it renders translated text with no missing keys (no bare keys / `???msg???` markers, no fallback-to-key).
+
+{{/IF_I18N}}## Pass/Fail Criteria
+
+A check **passes** when all of these hold:
+- HTTP responses match the expected status (2xx for success, 3xx for intended redirects; 4xx only when the test asserts an error/authorization case).
+- Response bodies / rendered HTML contain the expected fields/values.
+{{#IF_UI}}- UI snapshots show the expected text and interactive elements, with no UI/UX defects.
+{{/IF_UI}}- Security assertions hold (unauthorized access blocked, wrong role blocked, no stack-trace leaks).
+- No new `ERROR`-level log entries appeared during the test window.
+
+A check **fails** if any of the above is wrong, the request times out, or the page renders a generic error.
+
+## Failure Capture
+
+Capture evidence before moving on — the parent agent needs concrete data:
+- HTTP: the exact command (or e2e script + line), status code, response body (truncated if huge).
+{{#IF_UI}}- UI: an `agent-browser screenshot` and the latest `snapshot -i` text.
+{{/IF_UI}}- Logs: `{{LOGS_CMD}} --since <test-start>` filtered to `ERROR`/exceptions.
+
+## Test Hygiene
+
+- Prefer a fresh/disposable account for any flow that mutates state; clean up what you create when practical.
+- Don't delete seeded accounts or run destructive admin actions unless that's literally what's being tested.
+
+## Report Format
+
+Reply to the parent agent with:
+
+1. **Summary** — one line: `N passed, M failed`.
+2. **Per-check results** — for each: name, pass/fail, evidence (status code, key field, screenshot path, log line, or e2e script path).
+3. **Anomalies** — anything weird that wasn't directly tested but looks broken (slow responses, unexpected warnings).
+4. **Suggested follow-ups** — only if a failure points at a specific file or area worth investigating next.

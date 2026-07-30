@@ -1,0 +1,46 @@
+{
+  "skill_name": "local-scan",
+  "evals": [
+    {
+      "id": 0,
+      "name": "diff-scope-fix",
+      "prompt": "The sonar server is crawling again today. I just added a few classes to this shop project on my current branch — can you run a local static analysis on just my changes (no sonar server) and fix whatever it flags? The project is a plain Maven project at the current working directory.",
+      "expected_output": "Runs the local-scan orchestrator scoped to the git diff (UserRepository.java, PaymentService.java, OrderUtil.java), surfaces the planted findings (SQL injection, weak MD5 hash, hardcoded secret, == string comparison, empty catch, unused variable, complex method), and fixes them in the source files. Does not touch the committed clean baseline. Does not invent findings beyond what the tools report.",
+      "files": [],
+      "assertions": [
+        "Ran the real analyzers (orchestrator or pmd/spotbugs/semgrep CLIs); findings.json present",
+        "Scope respected: only the three new classes changed, not the committed baseline",
+        "SQL injection fixed with a parameterized PreparedStatement",
+        "Weak MD5 hashing replaced with a strong algorithm",
+        "== String comparison replaced with .equals()",
+        "No fabricated findings beyond actual tool output"
+      ]
+    },
+    {
+      "id": 1,
+      "name": "all-scope",
+      "prompt": "/r:code-scan ALL — go over the whole shop project with the local analyzers (pmd, spotbugs, semgrep) instead of the SonarQube server and fix the issues you find.",
+      "expected_output": "Runs the orchestrator with --scope all over the whole project, reports findings across all classes, and fixes them. Mentions which tools ran (and any that were skipped because not installed).",
+      "files": [],
+      "assertions": [
+        "Used whole-project scope (--scope all), not just the diff",
+        "Ran all three analyzers and named which ran; findings across multiple classes",
+        "Fixed SQL injection, weak MD5, and == comparison at minimum",
+        "No fabricated findings; findings.json present"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "scoped-class-security",
+      "prompt": "Can you locally scan PaymentService for security and bug issues without using the sonar server, and fix what you find? Keep it scoped to that class.",
+      "expected_output": "Runs the orchestrator filtered to PaymentService (--filter PaymentService), reports its findings (weak MD5 hashing, hardcoded API secret, == string comparison), fixes them, and does not modify the other classes.",
+      "files": [],
+      "assertions": [
+        "Scoped to PaymentService (--filter PaymentService)",
+        "Fix touches ONLY PaymentService.java, not the other classes",
+        "Fixed weak MD5 and == comparison (ideally flags hardcoded secret)",
+        "Ran the real analyzers; findings.json present"
+      ]
+    }
+  ]
+}
