@@ -223,6 +223,25 @@ def check_agents():
         if a not in corpus:
             fail("ADR-6", f"agent {a} is dispatched by no packed skill — it is orphaned "
                           "and should be dropped rather than shipped")
+        # An agent's frontmatter has to parse for the same reason a skill's does,
+        # and it fails harder: `claude plugin validate` reports that an agent with
+        # unparsable frontmatter "loads with empty metadata (all frontmatter
+        # fields silently dropped)", so its name, tools and model are gone and
+        # FR-5's promise that the agent resolves rather than failing as unknown
+        # does not hold. Two shipped agents had exactly this defect.
+        fm, _ = frontmatter(os.path.join(adir, a + ".md"))
+        if fm is None:
+            fail("FR-5", f"agents/{a}.md has no frontmatter block")
+            continue
+        try:
+            data = yaml.safe_load(fm) or {}
+        except yaml.YAMLError as e:
+            fail("FR-5", f"agents/{a}.md frontmatter is not valid YAML "
+                         f"({str(e).splitlines()[0]}) — every field is silently dropped at runtime")
+            continue
+        if data.get("name") != a:
+            fail("FR-5", f"agents/{a}.md declares name {data.get('name')!r}, which does not "
+                         "match its filename — dispatch resolves by name")
 
 
 # --- FR-11 ------------------------------------------------------------------

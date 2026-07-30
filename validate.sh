@@ -26,6 +26,21 @@ for t in skills/task-run/tests/control-flow.test.mjs skills/task-review/tests/co
 done
 
 echo
+echo "==> plugin manifest (claude plugin validate)"
+if command -v claude >/dev/null 2>&1; then
+  # Catches things no local check can: it is the loader's own view of the pack.
+  # It is what found two agents whose frontmatter silently dropped every field.
+  if out=$(claude plugin validate . 2>&1) && ! grep -qi 'validation failed' <<<"$out"; then
+    printf '  %s\n' "$(grep -E '✔|✘' <<<"$out" | head -1)"
+  else
+    rc=1
+    sed 's/^/  /' <<<"$out"
+  fi
+else
+  echo "  skipped — the claude CLI is not on PATH"
+fi
+
+echo
 echo "==> workflow guard"
 if out=$(bash hooks/tests/guard.test.sh 2>&1); then
   printf '  ✓ %s\n' "$(tail -1 <<<"$out" | tr -s ' ')"

@@ -25,6 +25,8 @@ import shutil
 import sys
 import textwrap
 
+import yaml
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rename_rules as R  # noqa: E402
 
@@ -512,9 +514,47 @@ def build(source_root, report):
         text, hits = R.rewrite_refs(text)
         for o, n in hits.items():
             report.append((f"agents/{a}.md", f"{n}x reference", f"{o} -> {R.qualified(o)}"))
+        fixed = normalise_agent_frontmatter(text, a)
+        if fixed != text:
+            report.append((f"agents/{a}.md", "frontmatter", "quoted an unparsable description"))
+            text = fixed
         open(os.path.join(REPO, "agents", a + ".md"), "w", encoding="utf-8").write(text)
 
     return prose_before, prose_after, self_refs, cross_refs
+
+
+def normalise_agent_frontmatter(text, name):
+    """Agents get the same correctness fix as skills (FR-7 in spirit).
+
+    maven-build-runner and gradle-build-runner carry an unquoted description
+    containing `user: "run maven clean install"`, which is not valid YAML. The
+    consequence is not cosmetic: `claude plugin validate` reports that such an
+    agent "loads with empty metadata (all frontmatter fields silently dropped)",
+    so its name, tools and model are lost and FR-5's promise that the agent
+    resolves rather than failing as unknown does not hold. The other six agents
+    already double-quote their descriptions; this makes those two match.
+    """
+    if not text.startswith("---\n"):
+        return text
+    end = text.find("\n---\n", 3)
+    if end == -1:
+        return text
+    fm, body = text[4:end + 1], text[end + 5:]
+    try:
+        yaml.safe_load(fm)
+        return text
+    except yaml.YAMLError:
+        pass
+    out = []
+    for line in fm.splitlines():
+        if line.startswith("description:") and not line[12:].lstrip().startswith(('"', "'", ">", "|")):
+            value = line[12:].strip().replace("\\", "\\\\").replace('"', '\\"')
+            out.append(f'description: "{value}"')
+        else:
+            out.append(line)
+    fixed = "---\n" + "\n".join(out) + "\n---\n" + body
+    yaml.safe_load(fixed[4:fixed.find("\n---\n", 3) + 1])   # must parse now, or fail loudly
+    return fixed
 
 
 def insert_preamble(text, label):
