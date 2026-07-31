@@ -39,10 +39,10 @@ predate the pack.
 
 ### It copies, it does not symlink
 
-The install is a copy, so **this repository and the installed pack are two
-separate copies**. Edit here, then re-run `./install.sh` to publish. A `SKILL.md`
-edit is live in the current session once copied; anything else — `agents/`,
-`hooks/`, `.mcp.json` — needs one `/reload-plugins`.
+**This repository and the installed pack are two separate copies.** Edit here,
+then re-run `./install.sh` to publish. A `SKILL.md` edit is live in the current
+session once copied; anything else — `agents/`, `hooks/`, `.mcp.json` — needs one
+`/reload-plugins`.
 
 A plain directory holding `.claude-plugin/plugin.json` is the documented
 skills-directory case. Whether plugin discovery follows a *symlinked* entry is
@@ -67,16 +67,20 @@ pack does not rely on it.
 | `/r:test-app-create` | scaffold a project-local `/test-app` for the detected stack |
 | `/r:git-commit` | group the working tree into logical Conventional Commits |
 | `/r:claudemd-compact` | compact and de-stale a CLAUDE.md hierarchy |
-| `/r:claudemd-patch` | insert the standard rule blocks and the write-tests hook |
+| `/r:claudemd-patch` | insert the standard rule blocks and the test-writing hook |
 
 Names are domain-first (`<domain>-<action>`, at most three kebab segments) so the
 alphabetically sorted `/` menu groups the families: `claudemd-*`, `code-*`,
 `spec-*`, `task-*`.
 
-Three skills carry `disable-model-invocation: true` — `task-run`, `task-review`
-and `gh-issues-fix` all say in their own text that they must never fire on their
-own, and the frontmatter enforces it rather than trusting the prose. Every skill
-can still be invoked by name.
+`task-run`, `task-review` and `gh-issues-fix` carry
+`disable-model-invocation: true` — each says in its own text that it must never
+fire on its own, and the frontmatter enforces that rather than trusting the
+prose. They stay invocable by name; they just will not auto-load, and they do not
+appear in the model's own list of skills.
+
+The eight agents in `agents/` are what the review fan-out dispatches to — four
+bug hunters, two build runners, and two stack-specific implementers.
 
 ## Prerequisites
 
@@ -117,92 +121,82 @@ floors, because no lower bound was tested: `pmd` 7.26.0 · `spotbugs` 4.10.2 ·
 ## Maintaining it
 
 ```sh
-./validate.sh            # run before every push — static checks + both test suites + the guard
+./validate.sh            # run before every push
 ./install.sh             # publish repo edits into ~/.claude/skills/r
 ```
 
-There is no CI. `validate.sh` runs the same checks a workflow file would have:
-the manifest parses with `name == "r"`, fifteen skill directories exactly two
-levels deep, names matching the map, every frontmatter valid YAML, no description
-over the 1,536-char cap, the total listing cost under 16,000, no `version:` key,
-no un-prefixed reference to an old skill name, no dangling reference, every
-bundled agent dispatched by some packed skill, an eval suite per skill with both
-a trigger and a neighbour-exclusion case, no absolute path into a skill
-directory, no tracked build artefacts, and no two descriptions that open with
-nearly the same sentence. Each runs in well under a second. The residual risk is
-that a script has to be remembered.
+There is no CI, so `validate.sh` is the whole gate. It checks that the manifest
+parses with `name == "r"`, fifteen skill directories sit exactly two levels deep,
+every frontmatter is valid YAML with a `description` under the 1,536-character
+cap, the total listing cost stays under 16,000, no skill name is referenced
+without its `r:` prefix, no reference dangles, every bundled agent is dispatched
+by some skill, every skill has an eval suite with both case kinds, no absolute
+path points into a skill directory, no build artefact is tracked, and no two
+descriptions open with nearly the same sentence. Then it runs the two workflow
+test suites, `claude plugin validate`, the guard's behaviour tests, and the
+installer's. The whole run is a few seconds; `SKIP_INSTALL_TEST=1` drops the
+slowest part.
 
-### The originals are gone
+### Layout
 
-The fifteen flat skills under `~/.claude/skills/` ran alongside the pack until it
-was installed and all fifteen resolved, then they were archived and deleted. The
-pack is the only copy: `/r:git-commit` runs, `/commit` resolves to nothing.
+```
+.claude-plugin/plugin.json   identity and namespace — nothing else
+skills/<name>/               SKILL.md, plus references/ scripts/ tests/ evals/
+agents/<name>.md             the eight the skills dispatch
+hooks/                       hooks.json + the workflow-immutability guard
+tools/                       build and validation scripts, not shipped
+docs/skill-pack-repo/        the design write-up, not shipped
+```
 
-That was a reversal. The design said keep both forever, which made "an edit
-landed in the wrong copy" a permanent exposure — the one thing a dual-run cannot
-protect you from, because both copies keep working and only one of them has your
-change. Deleting closes it outright rather than policing it.
+`install.sh` copies only `.claude-plugin/`, `skills/`, `agents/`, `hooks/` and
+`check-prereqs.sh`. Everything else stays in the repo.
 
-What it costs is the free rollback. Falling back to an old name used to be typing
-the old name; it is now a restore:
+### Paths inside skills
+
+Nothing may hard-code an install location. A skill referring to its own files
+uses `${CLAUDE_SKILL_DIR}`; a skill referring to another's uses
+`${CLAUDE_PLUGIN_ROOT}/skills/<name>`. The two are not interchangeable —
+`${CLAUDE_SKILL_DIR}` is the skill's own subdirectory and cannot reach a sibling.
+
+Neither placeholder is substituted inside a `*.workflow.js` that the `Workflow`
+tool executes, so those receive the pack root as `args.packRoot`, passed from the
+`SKILL.md` that invokes them. `validate.sh` fails if an absolute path reappears.
+
+### The workflow guard
+
+`hooks/guard-workflow.py` keeps the `task-review` and `task-run` pipelines
+immutable: a forked copy of either cannot be run or written, whether as a
+`scriptPath`, an inline script, or a `Write`/`Edit` that would create one. Its
+allow-list is built at run time from `$CLAUDE_PLUGIN_ROOT`, so it travels with the
+pack, and it matches only real workflow scripts — prose that merely quotes a
+guarded pipeline name is left alone.
+
+`hooks/tests/guard.test.sh` covers both halves: the canonical pipelines run, forks
+do not.
+
+### Eval suites
+
+Every skill has `evals/evals.json` with at least one **trigger** case and one
+**neighbour-exclusion** case. They need a model, so run them deliberately — after
+editing any description, and before a release — rather than on every push.
+
+They are the only instrument the pack has for its most likely failure. The router
+is a model reading prose, so a description that drifts until it stops triggering
+looks exactly like a skill nobody needed. A failing neighbour-exclusion case means
+that skill is mis-routing right now.
+
+### Rollback
+
+The pack is the only copy of these skills on this machine. If one turns out to be
+wrong, fix it here and re-run `./install.sh`. The pre-pack versions are archived
+under `~/.claude-backups/`:
 
 ```sh
 tar -xzf ~/.claude-backups/claude-skills-<stamp>.tar.gz -C ~/.claude
 ```
 
-That archive holds the whole of `~/.claude/skills`, `agents/` and
-`settings.json`, and it was verified by extracting it and diffing against the
-live tree before anything was deleted.
-
-`validate.sh` still runs the drift check, and it has two honest outcomes: all
-fifteen originals gone means the cut-over happened and it says so; some still
-present means they are checked against a hash taken when the pack was built.
-A *partial* deletion is a failure, because a half-present twin is exactly the
-ambiguous state the check exists to catch. Refresh the baseline deliberately,
-never as a side effect: `./validate.sh --refresh-drift-baseline`.
-
-### Eval suites
-
-Every skill has `evals/evals.json` with at least one **trigger** case and one
-**neighbour-exclusion** case. They need a model, so they are run deliberately —
-after editing any description, and before a release — not on every push. A
-failing neighbour-exclusion case means that skill is mis-routing right now.
-
-They are the only instrument the pack has for its most likely failure. The router
-is a model reading prose, so a description that drifts until it stops triggering
-looks exactly like a skill nobody needed — and because the flat twins stay
-installed, every packed description competes with its own twin in the listing.
-
-## How it is built
-
-`skills/` and `agents/` were generated once from the flat originals by
-`tools/build-pack.py`, which applies the rename map, the bounded reference
-rewrite and the path de-absolutisation. **The pack is the source now** — the
-builder refuses to run over an existing `skills/` without `--force`, because a
-rebuild would discard everything the pack owns that the originals do not.
-
-The reference rewrite is bounded to four shapes (`/name`, `` `name` ``,
-`Skill(name)`, and a `subagent_type`/`agentType`/`skill` key). That bound is the
-whole design: `commit` appears about a hundred times in these files and
-`refactor` about forty, almost always as English. Three classes of false rewrite
-got through the first pass and were caught by hand review and by the packed
-tests — English "or" slashes (`compact/refactor/reorganize`), backticked
-`` `refactor` `` in a Conventional Commit type list, and JS regex literals in
-test assertions. All three are now excluded by rule, not by exception list.
-
-Absolute paths resolve through substituted variables: `${CLAUDE_SKILL_DIR}` for a
-skill's own files, `${CLAUDE_PLUGIN_ROOT}/skills/<name>` for a sibling's. The two
-are not interchangeable — `${CLAUDE_SKILL_DIR}` is the skill's own subdirectory
-and cannot reach a sibling. Neither is substituted inside a `*.workflow.js` the
-`Workflow` tool executes, so those take the pack root as `args.packRoot`, passed
-from the SKILL.md that invokes them.
-
-`hooks/guard-workflow.py` keeps the two pipelines immutable: a forked
-`task-review` or `task-run` script cannot be run or written. Its allow-list is
-built at run time from `$CLAUDE_PLUGIN_ROOT` plus the two flat originals, and it
-matches only files that are actually workflow scripts — an earlier version
-matched by content alone and blocked an edit to a prose document that merely
-quoted the guarded names.
+That archive holds `~/.claude/skills`, `agents/` and `settings.json` as they were
+before the pack was installed.
 
 ## Provenance
 
@@ -212,7 +206,6 @@ citations stay valid. Its `LICENSE`, `CODE_OF_CONDUCT.md` and `SECURITY.md` are
 preserved verbatim.
 
 The design is written up in `docs/skill-pack-repo/` — `spec.html`,
-`architecture.html`, and the interview notes that record how the decisions were
-reached, including the ones that were wrong first.
+`architecture.html`, and the interview notes behind them.
 
 Everything else: MIT, see `LICENSE`.
