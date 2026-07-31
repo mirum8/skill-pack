@@ -50,6 +50,19 @@ else
 fi
 
 echo
+echo "==> install.sh"
+# ~9s, the only slow step here — it installs the pack eight times over. Skip it
+# with SKIP_INSTALL_TEST=1 when iterating on something else.
+if [[ -n ${SKIP_INSTALL_TEST:-} ]]; then
+  echo "  skipped (SKIP_INSTALL_TEST)"
+elif out=$(bash tests/install.test.sh 2>&1); then
+  printf '  ✓ %s\n' "$(tail -1 <<<"$out" | tr -s ' ')"
+else
+  rc=1
+  grep -E '^  FAIL|^     |passed,' <<<"$out" | sed 's/^/  /'
+fi
+
+echo
 if (( rc )); then
   echo "NOT ready to push."
 else
