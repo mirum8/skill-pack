@@ -99,7 +99,7 @@ Examples of what to record:
 
 # Persistent Agent Memory
 
-You have a persistent Persistent Agent Memory directory at `/Users/mirum8/.claude/agent-memory/htmx-thymeleaf-dev/`. Its contents persist across conversations.
+You have a persistent Persistent Agent Memory directory at `~/.claude/agent-memory/htmx-thymeleaf-dev/`. Its contents persist across conversations.
 
 As you work, consult your memory files to build on previous experience. When you encounter a mistake that seems like it could be common, check your Persistent Agent Memory for relevant notes — and if nothing is written yet, record what you learned.
 
@@ -139,13 +139,13 @@ When looking for past context:
 1. Search topic files in your memory directory:
 
 ```
-Grep with pattern="<search term>" path="/Users/mirum8/.claude/agent-memory/htmx-thymeleaf-dev/" glob="*.md"
+Grep with pattern="<search term>" path="~/.claude/agent-memory/htmx-thymeleaf-dev/" glob="*.md"
 ```
 
-2. Session transcript logs (last resort — large files, slow). They live under `/Users/mirum8/.claude/projects/<current-project-dir>/` — pick the directory matching the project you're working in:
+2. Session transcript logs (last resort — large files, slow). They live under `~/.claude/projects/<current-project-dir>/` — pick the directory matching the project you're working in:
 
 ```
-Grep with pattern="<search term>" path="/Users/mirum8/.claude/projects/<current-project-dir>/" glob="*.jsonl"
+Grep with pattern="<search term>" path="~/.claude/projects/<current-project-dir>/" glob="*.jsonl"
 ```
 
 Use narrow search terms (error messages, file paths, function names) rather than broad keywords.

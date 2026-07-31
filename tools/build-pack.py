@@ -179,6 +179,10 @@ FILE_RENAMES = {
 AGENT_PATCHES = {
     "bug-hunter": [("/find-bug ", "/r:code-bugs "),
                    ("/find-bug skill", "/r:code-bugs skill")],
+    # Four absolute paths into this machine's home. They leak the layout and
+    # resolve to nothing anywhere else, which is the same defect FR-19 fixes for
+    # skill directories — the check just never looked outside .claude/skills.
+    "htmx-thymeleaf-dev": [("/Users/mirum8/", "~/")],
 }
 
 # The guard moves out of the skill and becomes the plugin's own hook (FR-20).

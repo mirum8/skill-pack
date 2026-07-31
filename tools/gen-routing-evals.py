@@ -153,7 +153,7 @@ CASES = {
     ),
 }
 
-REPO = "/Users/mirum8/projects/skill-pack"
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 for skill, (tp, texp, nb, np_, nexp) in CASES.items():
     d = os.path.join(REPO, "skills", skill, "evals")
     path = os.path.join(d, "evals.json")

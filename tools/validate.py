@@ -280,6 +280,34 @@ def check_artifacts():
 
 # --- FR-19 ------------------------------------------------------------------
 ABS = re.compile(r'(\$HOME|~)"?/\.claude/skills/[A-Za-z0-9_-]')
+# Any path into a specific machine's home. Narrower checks miss these: an agent
+# shipped four `/Users/<name>/.claude/agent-memory/...` paths, which the
+# .claude/skills check above had no reason to look at. They leak one machine's
+# layout and resolve to nothing on any other.
+HOMEDIR = re.compile(r'/(?:Users|home)/[a-z][a-z0-9._-]*/')
+
+
+def check_home_paths():
+    for path in tracked_files():
+        rel = os.path.relpath(path, REPO)
+        if rel.startswith("docs/") or rel == "tools/build-pack.py":
+            continue    # the design write-up, and the patch table that fixes them
+        try:
+            text = open(path, encoding="utf-8").read()
+        except (UnicodeDecodeError, OSError):
+            continue
+        for m in HOMEDIR.finditer(text):
+            fail("FR-19", f"{rel} hard-codes an absolute home path ({m.group(0)}…). It leaks one "
+                          "machine's layout and resolves to nothing on any other — use ~/ instead")
+
+
+def tracked_files():
+    try:
+        out = subprocess.run(["git", "ls-files"], cwd=REPO, capture_output=True,
+                             text=True, check=True).stdout.split()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return []
+    return [os.path.join(REPO, f) for f in out]
 
 
 def check_paths():
@@ -437,6 +465,7 @@ def main():
     check_evals()
     check_artifacts()
     check_paths()
+    check_home_paths()
     check_vendored()
     check_near_duplicates()
     check_drift(args.source, args.refresh_drift_baseline)
