@@ -321,10 +321,23 @@ def drift_hashes(source_root):
 
 
 def check_drift(source_root, refresh):
-    """The pack and the fifteen flat originals both live forever (ADR-13), so the
-    one rule that matters is that edits go to the pack. This detects the edit
-    that went to the wrong copy: it hashes the originals and compares against the
-    baseline taken when the pack was built."""
+    """R-4 is the risk that an edit lands in a flat original instead of the pack.
+
+    ADR-13 said the originals live forever, which is what made that risk
+    permanent. **That decision was reversed on 2026-07-31: the originals were
+    backed up and deleted.** So this check now has two valid outcomes, and only
+    one of them is still a warning:
+
+      * every original gone  -> the cut-over happened, R-4 is closed, nothing to
+        compare. The pack is the only copy, which is what the risk wanted.
+      * some original present -> a partial cut-over, or a machine that never
+        deleted them. Those are still checked against the baseline, because
+        while a twin exists an edit can still land in it.
+
+    A wholesale deletion is therefore reported, not failed. Reporting it as 79
+    failures — one per file — is what this did before the reversal, and it would
+    make the pre-push script useless rather than informative.
+    """
     path = os.path.join(REPO, "tools", "drift-baseline.json")
     if not os.path.isdir(os.path.join(source_root, "skills")):
         NOTES.append("R-4 drift check skipped: the flat originals are not on this machine")
@@ -335,6 +348,19 @@ def check_drift(source_root, refresh):
         NOTES.append(f"R-4 drift baseline written: {len(now)} files")
         return
     base = json.load(open(path))
+
+    surviving = sorted(o for o in R.RENAME
+                       if os.path.isdir(os.path.join(source_root, "skills", o)))
+    if not surviving:
+        NOTES.append("R-4 closed: all fifteen flat originals are gone, so the pack is the only "
+                     "copy and an edit can no longer land in the wrong one")
+        return
+    if len(surviving) < len(R.RENAME):
+        NOTES.append(f"R-4 partial cut-over: {len(surviving)} of {len(R.RENAME)} flat originals "
+                     f"still installed ({', '.join(surviving)}) — those are still checked")
+
+    live = {o + "/" for o in surviving}
+    scoped = {rel: h for rel, h in base.items() if any(rel.startswith(p) for p in live)}
     for rel, h in sorted(now.items()):
         if rel not in base:
             fail("R-4", f"a new file appeared in the flat original {rel} — the pack is the "
@@ -343,8 +369,9 @@ def check_drift(source_root, refresh):
             fail("R-4", f"the flat original {rel} has changed since the pack was built. An edit "
                         "went to the wrong copy: it works under the old name and is missing "
                         "under the new one.")
-    for rel in sorted(set(base) - set(now)):
-        fail("R-4", f"the flat original {rel} was deleted; ADR-13 keeps both copies forever")
+    for rel in sorted(set(scoped) - set(now)):
+        fail("R-4", f"{rel} was deleted from a flat original that is otherwise still installed — "
+                    "delete the whole skill or none of it, so its state is unambiguous")
 
 
 # --- §16 --------------------------------------------------------------------

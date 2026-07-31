@@ -15,10 +15,18 @@ REAL_HOME=$HOME
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 pass=0; fail=0
 
-# Snapshot the real home before anything runs, so the last two cases can prove
-# it was untouched by comparison rather than by assertion.
+# Snapshot the real home before anything runs, so the last cases can prove it
+# was untouched by comparison rather than by assertion. The pack may legitimately
+# be installed there, so what is asserted is "unchanged", never "absent" — an
+# earlier version asserted absence and started failing the moment the pack was
+# installed for real, which is the check being wrong, not the suite.
 cp "$REAL_HOME/.claude/settings.json" "$TMP/settings-before" 2>/dev/null || : > "$TMP/settings-before"
 BAKS_BEFORE=$(ls "$REAL_HOME/.claude/" 2>/dev/null | grep -c 'settings.json.bak-')
+realpack() {
+  [[ -d "$REAL_HOME/.claude/skills/r" ]] || { echo absent; return; }
+  find "$REAL_HOME/.claude/skills/r" -type f -exec shasum -a 256 {} + | sort | shasum -a 256
+}
+PACK_BEFORE=$(realpack)
 
 ok()   { pass=$((pass + 1)); printf '  ok   %s\n' "$1"; }
 bad()  { fail=$((fail + 1)); printf '  FAIL %s\n     %s\n' "$1" "${2:-}"; }
@@ -26,12 +34,30 @@ is()   { [[ "$2" == "$3" ]] && ok "$1" || bad "$1" "got '$2', wanted '$3'"; }
 has()  { [[ -e "$2" ]] && ok "$1" || bad "$1" "missing: $2"; }
 hasnt(){ [[ ! -e "$2" ]] && ok "$1" || bad "$1" "should not exist: $2"; }
 
-# A fresh scratch home, seeded with the real settings.json so the guard
-# deregistration has something to find.
+# A fresh scratch home whose settings.json ALWAYS carries the guard registration
+# and at least one unrelated hook, so the deregistration cases are deterministic.
+# Seeding it from the real settings.json alone was a mistake: once the real
+# install had removed the registration, four checks silently stopped running and
+# a mutant that skipped deregistration entirely went uncaught.
 newhome() {
   local h="$TMP/home$1"
   rm -rf "$h"; mkdir -p "$h/.claude/skills"
-  [[ -f "$REAL_HOME/.claude/settings.json" ]] && cp "$REAL_HOME/.claude/settings.json" "$h/.claude/"
+  python3 - "$REAL_HOME/.claude/settings.json" "$h/.claude/settings.json" <<'PY'
+import json, sys
+try:
+    cfg = json.load(open(sys.argv[1]))
+except Exception:
+    cfg = {}
+hooks = cfg.setdefault("hooks", {})
+hooks.setdefault("Stop", []).append(
+    {"matcher": "*", "hooks": [{"type": "command", "command": "echo unrelated-hook"}]})
+hooks.setdefault("PreToolUse", []).append({
+    "matcher": "Workflow|Write|Edit",
+    "hooks": [{"type": "command",
+               "command": 'python3 "$HOME/.claude/skills/post-task-review/scripts/guard-workflow.py"',
+               "timeout": 10}]})
+json.dump(cfg, open(sys.argv[2], "w"), indent=2)
+PY
   echo "$h"
 }
 run() { local h=$1; shift; HOME="$h" bash "$REPO/install.sh" "$@" 2>&1; }
@@ -40,14 +66,15 @@ echo "install.sh"
 
 # --- 1. --dry-run executes nothing ------------------------------------------
 H=$(newhome dry)
+cp "$H/.claude/settings.json" "$TMP/seeded-settings"   # what it looked like going in
 out=$(run "$H" --dry-run)
 hasnt "--dry-run creates nothing"                  "$H/.claude/skills/r"
 is    "--dry-run says so"                          "$(grep -c 'was a --dry-run' <<<"$out")" 1
 is    "--dry-run still echoes the copy commands"   "$(grep -c 'rsync\|cp -R' <<<"$out")" 5
-if [[ -f "$H/.claude/settings.json" ]]; then
-  is  "--dry-run leaves settings.json alone" \
-      "$(cmp -s "$H/.claude/settings.json" "$REAL_HOME/.claude/settings.json" && echo same)" same
-fi
+is    "--dry-run leaves settings.json alone" \
+      "$(cmp -s "$H/.claude/settings.json" "$TMP/seeded-settings" && echo same || echo CHANGED)" same
+is    "--dry-run writes no backup" \
+      "$(ls "$H/.claude/" | grep -c 'settings.json.bak-')" 0
 
 # --- 2. a fresh install -----------------------------------------------------
 H=$(newhome fresh)
@@ -76,20 +103,16 @@ is   "--no-deps runs no brew"                      "$(grep -c '\$ brew' <<<"$out
 is   "--no-deps runs no npm"                       "$(grep -c '\$ npm' <<<"$out")" 0
 
 # --- 5. the guard deregistration (FR-20) ------------------------------------
-if grep -q 'guard-workflow.py' "$REAL_HOME/.claude/settings.json" 2>/dev/null; then
-  is "the global guard registration is removed" \
-     "$(grep -c 'post-task-review/scripts/guard-workflow.py' "$H/.claude/settings.json")" 0
-  is "a backup is written first" \
-     "$(ls "$H/.claude/" | grep -c 'settings.json.bak-')" 1
-  is "settings.json is still valid JSON" \
-     "$(python3 -c "import json;json.load(open('$H/.claude/settings.json'));print('ok')")" ok
-  is "the other hooks survive" \
-     "$(python3 -c "
-import json; h=json.load(open('$H/.claude/settings.json')).get('hooks',{})
-print(sum(len(e.get('hooks',[])) for v in h.values() for e in v) > 5)")" True
-else
-  printf '  skip the guard-deregistration cases — no global registration to remove\n'
-fi
+is "the global guard registration is removed" \
+   "$(grep -c 'post-task-review/scripts/guard-workflow.py' "$H/.claude/settings.json")" 0
+is "a backup is written first" \
+   "$(ls "$H/.claude/" | grep -c 'settings.json.bak-')" 1
+is "the backup still has the registration" \
+   "$(grep -c 'post-task-review/scripts/guard-workflow.py' "$H"/.claude/settings.json.bak-*)" 1
+is "settings.json is still valid JSON" \
+   "$(python3 -c "import json;json.load(open('$H/.claude/settings.json'));print('ok')")" ok
+is "the unrelated hook survives" \
+   "$(grep -c 'unrelated-hook' "$H/.claude/settings.json")" 1
 
 # --- 6. re-running updates in place -----------------------------------------
 out=$(run "$H" --no-deps)
@@ -189,7 +212,7 @@ import json;print(json.dumps({'tool_name':'Workflow','tool_input':{'script':open
 is   "the installed guard refuses an inline fork"  "$rcx" 2
 
 # --- 13. the real home was never touched ------------------------------------
-hasnt "the real ~/.claude/skills/r was not created" "$REAL_HOME/.claude/skills/r"
+is   "the real ~/.claude/skills/r is untouched" "$(realpack)" "$PACK_BEFORE"
 is   "the real settings.json is byte-for-byte unchanged" \
      "$(cmp -s "$TMP/settings-before" "$REAL_HOME/.claude/settings.json" && echo same || echo CHANGED)" same
 is   "no stray backup was left in the real home" \

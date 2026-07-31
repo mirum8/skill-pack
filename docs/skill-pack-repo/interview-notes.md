@@ -302,6 +302,27 @@ One decision from the user, and five things the build found that the spec had wr
 5. **A dangling reference nobody had noticed.** `agents/bug-hunter.md` points at `/find-bug`, which has
    never existed — the skill is `find-bugs`. `FR-9` allows none, and the validator found it.
 
+**Cut-over (same day, after the install):** the user asked for the flat originals to be removed once
+they were backed up. That **reverses `ADR-13`** — the round-3 decision to keep both copies permanently,
+which I argued against once, conceded, and recorded as `R-4` at severity H precisely because the
+exposure never closed. It closes now.
+
+- `~/.claude/skills` (all 55 dirs), `~/.claude/agents` and `settings.json` were archived to
+  `~/.claude-backups/`, and the archive was **verified by extracting it and diffing against the live
+  tree** before anything was deleted — including that the two symlinked entries stayed symlinks.
+- Only the **15 packed** skills were deleted. The other 40 are not in the pack; deleting those would
+  lose them outright.
+- Directly observed afterwards: `/r:` resolves all fifteen with the originals gone, `/commit` resolves
+  to nothing, `claude plugin list` still shows `r@skills-dir`.
+- **The dual-run is what made this safe**, which is worth recording in favour of a decision I had
+  argued against: the pack ran beside the originals until it demonstrably worked, so the cut-over was
+  a decision made on a working machine rather than a bet. The right criticism of `ADR-13` was never
+  "dual-run is wrong", it was "permanent is wrong" — and permanent is what got reversed.
+- `FR-17`'s drift check was built entirely on `ADR-13` and failed **79 times**, once per deleted file,
+  the moment the originals went. It now treats a wholesale deletion as the cut-over having happened
+  and reports `R-4` closed; a *partial* deletion is still a failure, because a half-present twin is
+  exactly the ambiguous state the check exists to catch.
+
 **Decided while implementing, not asked:**
 
 - The **`R-4` drift check cannot work as specified.** "Diff each original against its packed twin, only

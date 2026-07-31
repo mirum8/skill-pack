@@ -297,18 +297,19 @@
           </tr>
           <tr>
             <td class="rid">R-4</td>
-            <td><b>Permanent</b> dual-run: every packed skill exists twice under two names — flat
-                <code>~/.claude/skills/commit</code> and packed <code>/r:git-commit</code> — for as
-                long as the pack lives. An edit made to the wrong copy is lost work with no error, and
-                the descriptions of both are in the listing, so the model can route to either.</td>
-            <td class="sev sev-h">H</td>
-            <td>Edits appear not to take effect; duplicated descriptions compete for the same task</td>
-            <td><b>Accepted risk</b> (<span class="rid">ADR-13</span>) — the originals are never
-                deleted, by decision. Mitigated by one rule: <b>only the pack is ever edited.</b>
-                <span class="rid">FR-17</span>'s pre-push script reports any original that has drifted
-                from its packed twin beyond the rename itself.</td>
-            <td>The first edit that lands in a flat original, or the first observed mis-route between a
-                pair</td>
+            <td><b>CLOSED 2026-07-31.</b> The dual-run was to be permanent: every packed skill
+                existing twice, so an edit to the wrong copy was lost work with no error and both
+                descriptions competed in the listing. The originals were backed up and deleted
+                (<span class="rid">ADR-13</span>, reversed), so there is no second copy to edit and no
+                duplicate description to route to.</td>
+            <td class="sev">closed</td>
+            <td>Was: edits appear not to take effect; duplicated descriptions compete for the same
+                task. Neither is reachable now.</td>
+            <td>Closed by removal rather than mitigated. What remains is the ordinary risk of having
+                one copy: if a packed skill is wrong, the fix is the pack, and the only fallback is
+                the verified archive under <code>~/.claude-backups/</code>.</td>
+            <td>Reopens only if a second copy is ever installed again — a per-project checkout, or a
+                restore from the archive left in place</td>
           </tr>
           <tr>
             <td class="rid">R-5</td>
@@ -494,7 +495,7 @@
         <tr><td>Vendoring a copy of <code>test-app</code></td><td>Never for a generic pack: it is generated per project by <code>test-app-create</code> and a vendored copy would carry one repo's stack assumptions everywhere</td></tr>
         <tr><td>Rewriting any skill's behaviour or prompt logic</td><td>After the pack ships and the rename is proven; behaviour changes and a 309-reference rename must not land in the same diff</td></tr>
         <tr><td>CI validation on push</td><td>The first load failure that reaches a second machine (<span class="rid">R-5</span>). Replaced by a local pre-push script, <span class="rid">FR-17</span>.</td></tr>
-        <tr><td>Deleting the fifteen original flat skills</td><td><b>Never, by decision</b> (<span class="rid">ADR-13</span>). Both copies coexist permanently; the cost is <span class="rid">R-4</span>.</td></tr>
+        <tr><td>Deleting the fifteen original flat skills</td><td><b>Done 2026-07-31 — no longer a non-goal.</b> It was "never, by decision" (<span class="rid">ADR-13</span>); the user reversed that once the pack was installed and proven, after a verified backup. <span class="rid">R-4</span> is closed as a result.</td></tr>
         <tr><td>Making the repository public in v1</td><td>When the pack is proven in daily use. The flip is gated on the secret audit, not on a date.</td></tr>
         <tr><td>Multi-user or team distribution, access control, telemetry</td><td>A second person installs the pack</td></tr>
       </tbody>
@@ -950,16 +951,30 @@ waiting points
   </div>
 
   <div class="req">
-    <p><span class="rid">FR-14</span> <span class="must">must</span> — The fifteen original flat skills
-    <b>shall</b> remain installed and functional under their old names <b>permanently</b>. There is no
-    cut-over and no deletion step.</p>
-    <p class="gwt">Given both installed, when the user types <code>/commit</code>, then the flat skill
-    runs; when they type <code>/r:git-commit</code>, then the packed skill runs; and neither shadows the
-    other.</p>
-    <p class="gwt">Because both sets stay forever, the operating rule is not a schedule but an
-    invariant: <b>only the packed copy is ever edited.</b> <span class="rid">FR-17</span>'s script
-    reports any original that has drifted from its packed twin beyond the rename itself, which is the
-    only defence against <span class="rid">R-4</span>.</p>
+    <p><span class="rid">FR-14</span> <span class="must">must</span>
+    <span class="tag">[amended 2026-07-31]</span> — <b>Before</b> the fifteen flat originals are
+    deleted, the pack <b>shall</b> be installed and every one of the fifteen <b>shall</b> resolve
+    under its <code>/r:</code> name, and the originals <b>shall</b> be archived to a verified backup.
+    <b>Until then they shall remain installed and functional under their old names.</b></p>
+    <p class="gwt">This requirement originally said <b>permanently</b>, with no cut-over and no
+    deletion step (<span class="rid">ADR-13</span>). The user reversed that on 2026-07-31 once the
+    pack was installed and proven, so what the requirement now states is the precondition the
+    cut-over actually had to meet — which is the part that was load-bearing.</p>
+    <p class="gwt">The dual-run did its job before it ended. It is what made the cut-over safe to do at
+    all: the pack ran alongside the originals until <code>/plugin</code> listed
+    <code>r@skills-dir</code>, all fifteen resolved, and the fifteen-versus-fifteen comparison could be
+    made on a live machine rather than argued about.</p>
+    <p class="gwt">Given the originals deleted, when the user types <code>/commit</code>, then nothing
+    resolves; when they type <code>/r:git-commit</code>, then the packed skill runs. The requirement
+    that survives is the one that always mattered: <b>only the packed copy is ever edited</b> — now
+    trivially true, because there is no other copy. <span class="rid">R-4</span> is closed by the same
+    act, and <span class="rid">FR-17</span>'s drift check reports it closed rather than failing once
+    per missing file.</p>
+    <p class="gwt">What the reversal costs is the rollback this requirement existed to provide. Falling
+    back to an old name is no longer free: it means restoring from
+    <code>~/.claude-backups/</code>. That is a real archive, verified by extracting it and diffing
+    against the live tree before anything was deleted, but it is a restore step where there used to be
+    none.</p>
   </div>
 
   <div class="req">
@@ -1777,11 +1792,11 @@ waiting points
         </tr>
         <tr>
           <td class="rid">ADR-13</td>
-          <td><b>Keep both copies permanently.</b> The fifteen flat originals are never deleted</td>
-          <td>Delete at cut-over after a one-week dual-run · delete each original as its twin is proven</td>
-          <td><b>Better:</b> rollout has no point of no return at all, so rollback stays trivial forever and the old names keep working for muscle memory. <b>Worse:</b> every skill exists twice under two names for good, both descriptions sit in the listing competing for the same task, and an edit to the wrong copy is lost silently — <span class="rid">R-4</span>, now rated H rather than M because the exposure never closes.</td>
-          <td>The first edit that lands in a flat original, or the first observed mis-route between a pair</td>
-          <td><span class="rid">FR-17</span>'s drift check: each original is compared against its packed twin, and any difference beyond the rename is reported. <b>Accepted risk</b> — recommended against once, decided by the user, not re-litigated.</td>
+          <td><b>Reversed 2026-07-31 — the cut-over happened.</b> The decision was to keep both copies permanently and never delete the fifteen flat originals. Once the pack was installed and proven on this machine, the user cut over: the originals were backed up and deleted, and the pack is now the only copy</td>
+          <td>Keep both forever (the original decision) · delete at cut-over after a one-week dual-run · delete each original as its twin is proven</td>
+          <td><b>Better:</b> <span class="rid">R-4</span> is closed rather than accepted — one copy cannot be edited in the wrong place, and one description per task stops the pack competing with its own twin in the listing. <b>Worse:</b> rollback stops being free. It was "type the old name"; it is now "restore from <code>~/.claude-backups/</code>". <b>What the dual-run bought</b> was the evidence to make this safe: the pack ran beside the originals until <code>/plugin</code> listed it and all fifteen resolved, so the cut-over was a decision made on a working machine rather than an argument</td>
+          <td>A packed skill turning out to be wrong in a way the flat original was not — the only case where the backup has to come back</td>
+          <td>Both directly observed: with the originals deleted, <code>/r:</code> still resolves all fifteen and <code>/commit</code> resolves to nothing. <span class="rid">FR-17</span>'s drift check now reports <span class="rid">R-4</span> closed instead of failing once per missing file. <b>Recommended against once when it was first proposed, decided the other way by the user, and then reversed by the user too — recorded both times rather than re-argued.</b></td>
         </tr>
         <tr>
           <td class="rid">ADR-14</td>
@@ -2063,7 +2078,7 @@ waiting points
         <tr><td>2</td><td><b>Build the pack in a new repo.</b> Copy the 15 skills and 8 agents, rename directories per <span class="rid">BR-2</span>, rewrite the 309 references per <span class="rid">BR-3</span>, normalise frontmatter and drop <code>version:</code>, fix <code>run-task</code>'s over-cap description and <code>spec-to-todo</code>'s invalid YAML, <b>author eval suites for the thirteen skills that lack them</b> (<span class="rid">FR-11</span>), add <code>plugin.json</code>, <code>.gitignore</code>, <code>install.sh</code>, the pre-push script (<span class="rid">FR-17</span>), README, LICENSE.</td><td>Yes — nothing outside the new repo is touched</td><td>The pre-push script exits zero</td></tr>
         <tr><td>3</td><td><b>Expand.</b> Run <code>./install.sh</code>, which copies the pack into <code>~/.claude/skills/r</code>. Both the flat skills and the pack are now installed. Restart the session.</td><td>Yes — <code>rm -rf ~/.claude/skills/r</code></td><td><code>/plugin</code> lists <code>r@skills-dir</code>; all 15 <code>/r:</code> commands resolve; the old <code>/commit</code> still works</td></tr>
         <tr><td>4</td><td><b>Adopt the <code>/r:</code> names.</b> Use them in preference to the old ones and exercise each skill at least once from the pack.</td><td>Yes — the old names never stop working</td><td>Each of the 15 has run from the pack at least once with no regression</td></tr>
-        <tr><td>5</td><td><b>Hold the invariant, permanently.</b> There is no contract step: the originals stay (<span class="rid">ADR-13</span>). From here the only rule that matters is <b>edits go to the pack, never to an original</b>, enforced by the drift check in <span class="rid">FR-17</span>.</td><td>n/a — nothing is destroyed, so there is nothing to undo</td><td>The drift check reports no original differing from its twin beyond the rename</td></tr>
+        <tr><td>5</td><td><b>Contract — done 2026-07-31.</b> The plan had no contract step, because <span class="rid">ADR-13</span> kept the originals forever. Once the pack was installed and all fifteen resolved, the user reversed that: the whole of <code>~/.claude/skills</code> plus <code>agents/</code> and <code>settings.json</code> was archived to <code>~/.claude-backups/</code> and <b>verified by extracting it and diffing against the live tree</b>, then the fifteen flat originals were deleted. The other forty skills were untouched. <b>Edits go to the pack</b> is now true by construction rather than by discipline.</td><td>Yes, but no longer free — restoring from the archive rather than typing the old name</td><td><code>/r:</code> resolves all fifteen with the originals gone; <code>/commit</code> resolves to nothing; <span class="rid">FR-17</span> reports <span class="rid">R-4</span> closed</td></tr>
         <tr><td>6</td><td><b>Second machine.</b> Run <code>install.sh</code> elsewhere and confirm the pack loads from scratch.</td><td>Yes</td><td>15 skills resolve on a machine that never had the flat skills</td></tr>
         <tr><td>7</td><td><b class="star">Public flip — the one irreversible step.</b> Change the repository to public.</td><td><b>No.</b> Anything already fetched or indexed stays fetched. Making it private again does not unpublish it.</td><td>The step-1 scan has been re-run and is clean, and the README states the pack installs at personal scope with no trust gate</td></tr>
       </tbody>

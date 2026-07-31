@@ -132,21 +132,34 @@ directory, no tracked build artefacts, and no two descriptions that open with
 nearly the same sentence. Each runs in well under a second. The residual risk is
 that a script has to be remembered.
 
-### The originals stay, forever
+### The originals are gone
 
-The fifteen flat skills under `~/.claude/skills/` are never deleted. `/commit`
-runs the flat one, `/r:git-commit` runs the packed one, and neither shadows the
-other. There is no cut-over, so rollback stays trivial indefinitely.
+The fifteen flat skills under `~/.claude/skills/` ran alongside the pack until it
+was installed and all fifteen resolved, then they were archived and deleted. The
+pack is the only copy: `/r:git-commit` runs, `/commit` resolves to nothing.
 
-The cost is that everything exists twice, and one rule holds it together:
-**edits go to the pack, never to an original.** `validate.sh` compares each flat
-original against a hash taken when the pack was built and names any that changed
-— an edit that landed in the wrong copy is not lost at a cut-over, because there
-is no cut-over. It just sits there, working under the old name and missing under
-the new one, which is harder to notice than losing it outright.
+That was a reversal. The design said keep both forever, which made "an edit
+landed in the wrong copy" a permanent exposure — the one thing a dual-run cannot
+protect you from, because both copies keep working and only one of them has your
+change. Deleting closes it outright rather than policing it.
 
-Refresh the baseline deliberately, never as a side effect:
-`./validate.sh --refresh-drift-baseline`.
+What it costs is the free rollback. Falling back to an old name used to be typing
+the old name; it is now a restore:
+
+```sh
+tar -xzf ~/.claude-backups/claude-skills-<stamp>.tar.gz -C ~/.claude
+```
+
+That archive holds the whole of `~/.claude/skills`, `agents/` and
+`settings.json`, and it was verified by extracting it and diffing against the
+live tree before anything was deleted.
+
+`validate.sh` still runs the drift check, and it has two honest outcomes: all
+fifteen originals gone means the cut-over happened and it says so; some still
+present means they are checked against a hash taken when the pack was built.
+A *partial* deletion is a failure, because a half-present twin is exactly the
+ambiguous state the check exists to catch. Refresh the baseline deliberately,
+never as a side effect: `./validate.sh --refresh-drift-baseline`.
 
 ### Eval suites
 
