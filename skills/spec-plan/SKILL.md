@@ -2,8 +2,8 @@
 description: >-
   Turn an existing written specification into a phased implementation plan (todo.md) that
   /r:task-run can execute one phase per session. Reads a spec — docs/<topic>/spec.html from
-  /r:spec-brainstorm, or any spec markdown or design doc you point at — extracts its requirements,
-  architecture and risks, and writes phases with stable ids, real file paths, and a runnable "done
+  /r:spec-brainstorm, or any spec markdown or design doc you point at — extracts its user stories,
+  structure and risks, and writes phases with stable numbering, real file paths, and a runnable "done
   when" check. Stack-agnostic: it follows whatever the spec already decided. Use when the user
   says "turn this spec into a plan", "phase this out", "break the spec into tasks", "make a todo
   from the spec", "what's the build order", "/r:spec-plan", or right after /r:spec-brainstorm
@@ -16,7 +16,7 @@ effort: high
 # Spec to todo
 
 Read a specification, write `todo.md` next to it. The spec already made the decisions — your job is build
-order, not design. If you find yourself inventing a requirement, stop and put it in Open questions instead.
+order, not design. If you find yourself inventing a story, stop and put it in Open questions instead.
 
 ## Step 1 — find and read the spec
 
@@ -27,14 +27,15 @@ If nothing exists, say so and point at `/r:spec-brainstorm` rather than inventin
 
 Read it in full and pull out:
 
-- **Requirements** with their ids (`FR-n`, `NFR-n`). These become the traceability spine.
-- **The architecture and stack**, with versions. You follow it; you don't re-decide it.
-- **The data model** — every entity needs a migration somewhere in the plan.
-- **Interfaces** — every endpoint, command or screen needs a phase that builds it.
-- **Risks** (`R-n`) — any whose mitigation is "investigate" goes to `## Resolve first`, not a phase.
-- **The v1 line** — which capabilities are must-have versus deferred.
-- **Depth** — the spec's header says small, standard or enterprise. If it doesn't, infer from its size and say
-  which you assumed.
+- **User stories, by name.** In a spec from `/r:spec-brainstorm` these are the `<h3>` headings inside the User
+  stories section, and the name is the handle — carry it verbatim. In some other document they may be numbered
+  requirements or a capability list; take whatever that document uses as its unit of scope and say which. These
+  become the traceability spine.
+- **The modules and the stack**, with versions. You follow them; you don't re-decide them.
+- **The domain model** — every entity needs a migration somewhere in the plan.
+- **The API** — every endpoint, command or screen needs a phase that builds it.
+- **Risks** — any whose mitigation is "investigate" goes to `## Resolve first`, not a phase.
+- **The v1 line** — which stories ship first and which are deferred.
 
 **In an existing codebase, read the code too** before writing any phase: build files for real dependency
 versions, the migration folder for the real schema, the package layout, `CLAUDE.md`, and two existing tests to
@@ -54,19 +55,18 @@ Size each phase to one focused session: **5–12 checklist items, roughly ≤400
 slices.** A session has finite context; a phase that overflows it loses the thread and ends half-done. If a
 phase sprawls across many subsystems, split it. If it's one trivial edit, fold it into a neighbour.
 
-| | small | standard | enterprise |
-|---|---|---|---|
-| Total phases | 3–6 | 8–15 | 18–35, grouped under named milestones |
-| Phases in v1 | 3–5 | 5–10 | 10–18 |
+**The story count sets the size, not a band you pick.** Roughly one to two phases per story, plus what the
+stories don't cover on their own — the first schema, the deployment, the seams between modules. Past about 20
+phases, group them under named milestones so the list stays readable.
 
-If the spec's confirmed v1 doesn't fit its band, say so in one line and name the phase you'd push to v2. Don't
-silently oversize phases to make the count work, and don't overrule what the spec says the user confirmed.
+If v1 comes out much larger than the rest of the plan, say so in one line and name the phase you'd push to v2.
+Don't silently oversize phases to make a count work, and don't overrule what the spec says the user confirmed.
 
 ## Step 3 — write the phases
 
 ```markdown
 ### Phase 4 — Idempotent payout webhook
-**Implements:** FR-7, FR-8, NFR-2
+**Implements:** Accept a payout webhook · Replay a payout safely
 **Files:** `payments/src/main/java/.../PayoutWebhookController.java` (new) ·
           `.../PayoutService.java` (modify) · `db/migration/V7__payout_idempotency.sql` (new)
 **Risk:** money + persistence → run with `--full`
@@ -77,8 +77,10 @@ silently oversize phases to make the count work, and don't overrule what the spe
 `curl -X POST /webhooks/payout -H 'Idempotency-Key: k1'` returns the same `payoutId`.
 ```
 
-- **Implements** — required. Every `FR` in the spec maps to at least one phase, and every phase names at least
-  one requirement. This is what keeps the spec and the plan one artefact instead of two that drift.
+- **Implements** — required, and **story names verbatim**, separated by ` · `. Every story in the spec maps to at
+  least one phase, and every phase names at least one story. Exact strings: `check_todo.py` matches them against
+  the spec, so a paraphrased or reworded name reads as a story with no phase. This is what keeps the spec and
+  the plan one artefact instead of two that drift.
 - **Done when** — required. A runnable command or an observable response. "The feature works" is not a check.
   If you can't write a command, the phase is too vague to start.
 - **Files** — required when the codebase already exists, where real paths save the implementer its first ten
@@ -112,7 +114,7 @@ fails; an unknown disguised as a build phase is how an agent wastes a session.
 ```markdown
 ## Resolve first
 - **Debezium against RDS** — can it read our instance, or do we need a polling fallback?
-  Owner: platform. Blocks: Phase 4. Timebox: one afternoon. Output: a paragraph in the spec's Key decisions.
+  Owner: platform. Blocks: Phase 4. Timebox: one afternoon. Output: a line in the spec's Risks & assumptions.
 ```
 
 Then group the phases under two headings: **v1 (MVP)** is the smallest run delivering a usable end-to-end
@@ -125,8 +127,8 @@ restarting at the Advanced heading makes "Phase 3" ambiguous and gets the wrong 
 python3 <this skill>/scripts/check_todo.py docs/<topic>/todo.md --spec docs/<topic>/spec.html
 ```
 
-Fix everything it reports, then re-run. It catches requirements with no phase, phases with no requirement,
-missing "done when", oversized phases, numbering gaps, and files referenced before they're created.
+Fix everything it reports, then re-run. It catches stories with no phase, phases with no story, missing "done
+when", oversized phases, numbering gaps, and files referenced before they're created.
 
 Then four judgments a script can't make:
 
@@ -172,7 +174,7 @@ Everything else in the template is for the human and the implementer's head star
 ```markdown
 # [Project/Feature Name] — Implementation Plan
 
-Spec: `spec.html` · Status: draft · Depth: standard
+Spec: `spec.html` · Status: draft
 Each phase is scoped to roughly one Claude Code session. Phases 1–7 deliver v1.
 Everything under "Resolve first" needs a person, not `/r:task-run`.
 
@@ -183,7 +185,7 @@ Everything under "Resolve first" needs a person, not `/r:task-run`.
 ## v1 (MVP)
 
 ### Phase 1 — [short goal]
-**Implements:** FR-1, FR-2
+**Implements:** [story name] · [story name]
 - [ ] [concrete task]
 **Done when:** [runnable check]
 
@@ -194,7 +196,8 @@ Everything under "Resolve first" needs a person, not `/r:task-run`.
 
 ## Never do this
 
-- Never invent a requirement the spec doesn't contain. Put it in Open questions and say so.
+- Never invent a story the spec doesn't contain, and never reword one. Put anything missing in Open questions
+  and say so.
 - Never re-decide the stack. The spec chose it.
 - Never write a root `todo.md`.
 - Never write a phase whose "done when" nobody can run.

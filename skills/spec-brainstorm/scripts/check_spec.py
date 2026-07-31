@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Check a generated spec.html / architecture.html pair for the defects a read-through misses.
+"""Check a generated spec.html for the defects a read-through misses.
 
     python3 check_spec.py docs/<topic>/
 
 Exit 0 when clean, 1 when anything is reported. Every check here is mechanical; judgment
-calls (is this proportionate? does the domain section explain the domain?) stay with the model.
+calls (is this proportionate? does the domain model explain the domain?) stay with the model.
 """
 import html
 import re
@@ -18,9 +18,18 @@ PLACEHOLDERS = [(r"\bTBD\b", True), (r"\bTODO\b(?!\.md)", True), (r"\bFIXME\b", 
                 (r"<your[- ]", False), (r"\[insert\b", False)]
 FILLER = ["robust", "seamless", "leverage", "cutting-edge", "best practices", "as needed",
           "streamline", "state-of-the-art", "world-class"]
+TECH = ["PostgreSQL", "Postgres", "MySQL", "SQLite", "Redis", "Kafka", "RabbitMQ", "Node", "Python",
+        "Java", "Spring Boot", "Django", "Flask", "FastAPI", "React", "Vue", "Nginx", "Caddy",
+        "Docker", "Kubernetes", "Terraform"]
 TAG = re.compile(r"\[(verified|likely|unverified|assumption)\b([^\]]*)\]", re.I)
 FILEISH = re.compile(r"\b[\w][\w./-]*\.(?:java|kt|kts|py|ts|tsx|js|jsx|sql|go|rb|rs|cs|php|"
                      r"yaml|yml|xml|json|gradle|toml|md|html|css|tf|proto)\b(:\d+)?")
+
+# The document's ceiling: modules, technologies, stories, API. Anything below it belongs to
+# /r:spec-plan or /r:task-run, and its arrival is what turns a design doc into a bad schema.
+BELOW_CEILING = [(r"\bVARCHAR\s*\(", "column types"), (r"\bNOT NULL\b", "column constraints"),
+                 (r"\bCREATE\s+(TABLE|INDEX)\b", "DDL"), (r"\bALTER\s+TABLE\b", "DDL"),
+                 (r"\bPhase\s+\d+\s*[—–:-]", "build phases")]
 
 
 def strip(h):
@@ -29,93 +38,125 @@ def strip(h):
     return html.unescape(re.sub(r"<[^>]+>", " ", h))
 
 
+def section(t, *words):
+    """The HTML between the <h2> matching `words` and the next <h2>.
+
+    Words are tried in priority order, not document order: "Scope edges" must not win the
+    v1 lookup just because it appears above "The v1 line"."""
+    heads = [(m.start(), m.end(), strip(m.group(1)).lower()) for m in
+             re.finditer(r"<h2\b[^>]*>(.*?)</h2>", t, re.S | re.I)]
+    for w in words:
+        for i, (_, end, title) in enumerate(heads):
+            if w in title:
+                nxt = heads[i + 1][0] if i + 1 < len(heads) else len(t)
+                return t[end:nxt]
+    return ""
+
+
+def check_stories(t, out):
+    """Story names are the handle /r:spec-plan builds phases against, so they have to be
+    findable and each has to say when it is done."""
+    blk = section(t, "user stor", "stories")
+    if not blk:
+        out("spec.html", "no 'User stories' section — /r:spec-plan has nothing to build phases "
+                         "against, and the v1 line has nothing to name")
+        return []
+
+    names = [strip(m.group(1)).strip() for m in re.finditer(r"<h3\b[^>]*>(.*?)</h3>", blk, re.S | re.I)]
+    if not names:
+        out("spec.html", "User stories section has no <h3> story names — each story is an <h3> "
+                         "whose text is its handle. See sections.md §5")
+        return []
+
+    dupes = sorted({n for n in names if names.count(n) > 1})
+    if dupes:
+        out("spec.html", f"duplicate story name(s): {', '.join(dupes)} — a name is a handle and "
+                         f"must be unique, or an Implements: line points at two things")
+
+    # Each story's block runs to the next <h3>. Acceptance criteria are what make it checkable.
+    starts = [m.start() for m in re.finditer(r"<h3\b", blk, re.I)] + [len(blk)]
+    for name, a, b in zip(names, starts, starts[1:]):
+        body = strip(blk[a:b])
+        if not (re.search(r"\bgiven\b", body, re.I) and re.search(r"\bthen\b", body, re.I)):
+            out("spec.html", f"story '{name}' has no acceptance criteria — every story carries "
+                             f"Given/When/Then, or it is a wish")
+    return names
+
+
+def check_v1(t, names, out):
+    blk = section(t, "v1", "scope")
+    if not blk:
+        out("spec.html", "no v1 section — say which stories ship first; /r:spec-plan has nothing "
+                         "to order phases against without it")
+        return
+    prose = strip(blk)
+    named = [n for n in names if n and n.lower() in prose.lower()]
+    if names and not named:
+        out("spec.html", "the v1 section names no story — it must say which stories ship first "
+                         "and which are deferred, by name")
+    # A name in the v1 line that no story defines is a phase pointing at nothing.
+    quoted = {strip(m.group(1)).strip() for m in re.finditer(r"<(?:strong|b|code)\b[^>]*>(.*?)</(?:strong|b|code)>",
+                                                             blk, re.S | re.I)}
+    unknown = sorted(q for q in quoted if len(q) > 8 and q not in names
+                     and not re.search(r"\d", q) and " " in q)
+    if unknown:
+        out("spec.html", f"v1 section names something no story defines: {', '.join(unknown[:4])} "
+                         f"— every name here matches a story <h3> exactly")
+
+
 def check_tags(prose, lines, out):
-    """research.md §3: every third-party claim carries exactly one confidence tag. The tags are a
-    convention rather than a slot, so they degrade as the document grows — which is what this counts."""
+    """research.md §3: under --explain every third-party claim carries exactly one confidence
+    tag. Tags are a convention rather than a slot, so they degrade as the document grows."""
     tags = [(m.group(1).lower(), m.group(2)) for m in TAG.finditer(prose)]
-    cites_third_parties = re.search(r"prior art|candidates|comparison matrix", prose, re.I)
+    if not tags:
+        out("spec.html", "research ran but the document carries no confidence tags — every price, "
+                         "limit, version or third-party claim carries one of [verified: <url>, read "
+                         "<date>] / [likely: …] / [unverified] / [assumption]. See research.md §3")
+        return
+    if lines > 800 and len(tags) < 5:
+        out("spec.html", f"only {len(tags)} confidence tag(s) in a {lines}-line document — the "
+                         f"tagging almost certainly stopped partway; re-check every section that "
+                         f"names a product")
 
-    if cites_third_parties and not tags:
-        out("spec.html", "no confidence tags anywhere — every price, limit, version or third-party claim "
-                         "carries one of [verified: <url>, read <date>] / [likely: …] / [unverified] / "
-                         "[assumption]. See research.md §3")
-    elif tags and lines > 800 and len(tags) < 5:
-        out("spec.html", f"only {len(tags)} confidence tag(s) in a {lines}-line spec — the tagging almost "
-                         f"certainly stopped partway; re-check every section that names a product")
-
-    # research.md §3: [verified: <url>, read <date>]. A bare domain is a fine citation, a product name
-    # is not — enumerating TLDs loses, so accept any dotted host-or-path shape.
     sourced = re.compile(r"https?://|\b[\w-]+\.[a-z]{2,}(?:\.[a-z]{2,})*(?:/|\b)", re.I)
     verified = [r for k, r in tags if k == "verified"]
     unsourced = [r for r in verified if not sourced.search(r)]
     undated = [r for r in verified if sourced.search(r) and not re.search(r"\d{4}-\d{2}-\d{2}", r)]
     if unsourced:
         out("spec.html", f"{len(unsourced)} [verified …] tag(s) name no source, e.g. "
-                         f"[verified{unsourced[0][:60]}] — verified means you fetched a url this session; "
-                         f"downgrade to [likely: …] if you didn't")
+                         f"[verified{unsourced[0][:60]}] — verified means you fetched a url this "
+                         f"session; downgrade to [likely: …] if you didn't")
     if undated:
         out("spec.html", f"{len(undated)} [verified …] tag(s) have a url but no read date, e.g. "
-                         f"[verified{undated[0][:60]}] — the date is what tells a reader the price or limit "
-                         f"has since moved")
+                         f"[verified{undated[0][:60]}] — the date is what tells a reader the price "
+                         f"or limit has since moved")
     if [r for k, r in tags if k == "likely" and len(r.strip(" :—-")) < 3]:
         out("spec.html", "[likely] with no stated inference — write [likely: <what you reasoned from>]")
 
 
-def check_requirements(prose, ids, out):
-    """The v1 line and the FR ids are the contract with /r:spec-plan: it orders phases against them."""
-    if not re.search(r"\bv1\b", prose, re.I):
-        out("spec.html", "no v1 line — say which FR ids are must-have for a first working version; "
-                         "/r:spec-plan has nothing to order phases against without it")
-
-    # A requirement is *stated* in EARS form, so 'shall' follows its id. An id that never has one is
-    # referenced (in the v1 line, a traceability row, a diagram) but defined nowhere.
-    stated = {m.group(1) for m in re.finditer(r"\bFR-(\d+)\b", prose)
-              if re.search(r"\bshall\b", prose[m.end():m.end() + 300], re.I)}
-    dangling = sorted(set(ids.get("FR", [])) - stated, key=int)
-    if ids.get("FR") and dangling:
-        out("spec.html", f"{', '.join('FR-' + d for d in dangling)}: no requirement stated with 'shall' — "
-                         f"either the id is referenced (v1 line, traceability, a diagram) but defined nowhere, "
-                         f"or the requirement is not in EARS form. See spec-sections.md §9")
-
-    # interview.md §9: an open question without a default is a decision nobody can make later. The
-    # mandated field name settles it for a whole table at once — a column header sits above its rows,
-    # not beside them, so only fall back to per-id proximity when the field name is absent entirely.
-    oqs = {m.group(1) for m in re.finditer(r"\bOQ-(\d+)\b", prose)}
-    if oqs and not re.search(r"default if unanswered", prose, re.I):
-        defaulted = {m.group(1) for m in re.finditer(r"\bOQ-(\d+)\b", prose)
-                     if re.search(r"default", prose[m.end():m.end() + 400], re.I)}
-        undefaulted = sorted(oqs - defaulted, key=int)
-        if undefaulted:
-            out("spec.html", f"open question(s) with no default: "
-                             f"{', '.join('OQ-' + q for q in undefaulted)} — every open question carries a "
-                             f"'Default if unanswered', or it is a decision nobody can make later")
-
-
 def check_codebase_facts(t, out):
-    """interview.md §6: no claim about the existing system enters the spec without a path:line citation."""
+    """interview.md §7: no claim about the existing system enters the document without path:line."""
     blk = re.search(r"Codebase facts(.*?)(?=<h[123]\b|\Z)", t, re.S | re.I)
     if not blk:
         return
     hits = FILEISH.findall(strip(blk.group(1)))
     cited = [h for h in hits if h]
     if len(hits) >= 4 and len(cited) * 2 < len(hits):
-        out("spec.html", f"Codebase facts cites {len(hits)} file(s) but only {len(cited)} with a line number — "
-                         f"a claim about existing code needs path:line, or it is an open question, not a fact")
+        out("spec.html", f"Codebase facts cites {len(hits)} file(s) but only {len(cited)} with a "
+                         f"line number — a claim about existing code needs path:line, or it is an "
+                         f"open question, not a fact")
 
 
-def check_spec(t, out):
+def check_spec(t, explained, out):
     if not t:
-        return
+        return []
     prose = strip(t)
 
     if re.search(r"<script\b", t, re.I):
-        out("spec.html", "contains a <script> — the spec is static; interactivity belongs in architecture.html")
-    for bad in ("html.dark", "localStorage", "themeToggle"):
+        out("spec.html", "contains a <script> — the document is static and must print")
+    for bad in ("html.dark", "localStorage"):
         if bad in t:
-            out("spec.html", f"contains `{bad}` — the spec is light-mode only")
-    for v in re.findall(r"--(?:bg|ink|body|muted|line-soft|surface2|zone|zone-line)\b", t):
-        out("spec.html", f"uses the diagram palette name `--{v}` — use the document names here")
-        break
+            out("spec.html", f"contains `{bad}` — the document is light-mode only, with no script")
 
     for pat, cased in PLACEHOLDERS:
         for m in re.finditer(pat, prose, 0 if cased else re.I):
@@ -127,97 +168,35 @@ def check_spec(t, out):
         if n:
             out("spec.html", f"filler word '{w}' x{n} — replace with a number, a name, or a decision")
 
-    if not re.search(r'href="architecture\.html"', t):
-        out("spec.html", "does not link to architecture.html")
-    for m in re.finditer(r'href="(\./|\.\./|file://|/)[^"]*"', t):
-        out("spec.html", f"non-relative cross-link {m.group(0)} — use a bare filename")
+    for pat, what in BELOW_CEILING:
+        if re.search(pat, prose, re.I):
+            out("spec.html", f"{what} in the document — that is below its ceiling; modules, "
+                             f"technologies, stories and the API are as low as this goes")
+
+    # This is one self-contained file. Any local link is dead or points at something unwritten.
+    for m in re.finditer(r'href="(?!https?:|mailto:|#)([^"]+)"', t):
+        out("spec.html", f"local link href=\"{m.group(1)}\" — spec.html is the only file; there is "
+                         f"nothing beside it to link to")
         break
 
-    # A technology used by the design should carry a version. Require 2+ mentions so a
-    # technology named once as a rejected alternative isn't flagged.
-    for tech in ["PostgreSQL", "Postgres", "MySQL", "SQLite", "Redis", "Kafka", "Node", "Python", "Java",
-                 "Spring Boot", "Django", "Flask", "React", "Nginx", "Caddy", "Docker"]:
+    # A technology the design uses should carry a version. Require 2+ mentions so a technology
+    # named once as a rejected alternative isn't flagged.
+    for tech in TECH:
         if len(re.findall(rf"\b{tech}\b", prose)) >= 2 and not re.search(rf"\b{tech}\b[^.\n]{{0,24}}\d", prose):
             out("spec.html", f"'{tech}' is used but never versioned — pin it")
 
-    ids = {}
-    for pre in ("FR", "NFR", "ADR", "BR", "R", "OQ"):
-        ids[pre] = sorted(set(re.findall(rf"\b{pre}-(\d+)\b", prose)))
-    if not ids["FR"]:
-        out("spec.html", "no FR- requirement ids found — the todo and the tests have nothing to point at")
-    # Only a real leading zero is padding. FR-9 next to FR-10 is just counting past nine.
-    for pre in ids:
-        if re.search(rf"\b{pre}-0\d", prose):
-            out("spec.html", f"{pre}- ids are zero-padded ({pre}-07) — use the bare form ({pre}-7)")
-
-    check_tags(prose, t.count("\n") + 1, out)
-    check_requirements(prose, ids, out)
+    names = check_stories(t, out)
+    check_v1(t, names, out)
     check_codebase_facts(t, out)
-    return ids
+    if explained:
+        check_tags(prose, t.count("\n") + 1, out)
+    return names
 
 
-def check_arch(t, out):
-    if not t:
-        return
-    for name, ok in (("html.dark block", re.search(r"html\.dark\s*\{", t)),
-                     ("theme toggle", "themeToggle" in t),
-                     ("localStorage persistence", "localStorage" in t)):
-        if not ok:
-            out("architecture.html", f"missing {name}")
-    si, ti = t.find("<script"), t.find("<style")
-    if si == -1 or (ti != -1 and si > ti):
-        out("architecture.html", "theme script must come before <style> in <head>, or the page flashes white")
-    if re.search(r"--ivory|--gray-\d", t):
-        out("architecture.html", "uses document palette names (--ivory/--gray-*) — use the diagram names")
-
-    m = re.search(r"<svg\b.*?</svg>", t, re.S)
-    if not m:
-        out("architecture.html", "no inline <svg>")
-        return
-    svg = m.group(0)
-
-    n = len(re.findall(r"(?<!&)#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3,4})(?![0-9a-zA-Z-])", svg))
-    if n:
-        out("architecture.html", f"{n} hard-coded hex colour(s) inside the <svg> — the diagram won't follow the theme")
-    if re.search(r'fill="var\(--', svg):
-        out("architecture.html", 'fill="var(--…)" does not resolve — write style="fill: var(--…)"')
-
-    # Scope to the animated rule: the dasharray that matters is the one on the .lit edge,
-    # not the dashed zone border or the .edge.dash variant.
-    lit = re.search(r"\.lit\s*\{[^}]*\}", t, re.S)
-    da = re.search(r"stroke-dasharray:\s*(\d+)\s+(\d+)", lit.group(0)) if lit else None
-    do = re.search(r"stroke-dashoffset:\s*-(\d+)", t)
-    if da and do and int(da.group(1)) + int(da.group(2)) != int(do.group(1)):
-        out("architecture.html", f"marching ants stutter: lit-edge dash {da.group(1)}+{da.group(2)} "
-                                 f"must equal dashoffset {do.group(1)}")
-
-    svg_ids = set(re.findall(r'id="(e-[^"]+)"', svg))
-    data_ks = set(re.findall(r'data-k="([^"]+)"', svg))
-    fe, fn = set(), set()
-    fl = re.search(r"FLOWS\s*=\s*\{(.*?)\n\s*\};", t, re.S)
-    if fl:
-        for b in re.findall(r"edges:\s*\[(.*?)\]", fl.group(1), re.S):
-            fe |= set(re.findall(r'"([^"]+)"', b))
-        for b in re.findall(r"nodes:\s*\[(.*?)\]", fl.group(1), re.S):
-            fn |= set(re.findall(r'"([^"]+)"', b))
-    dk = set()
-    dt = re.search(r"DETAIL\s*=\s*\{(.*?)\n\s*\};", t, re.S)
-    if dt:
-        dk = set(re.findall(r"^\s*([A-Za-z0-9_]+)\s*:", dt.group(1), re.M))
-    if fe - svg_ids:
-        out("architecture.html", f"FLOWS edge ids not in the SVG (they light nothing, silently): {sorted(fe - svg_ids)}")
-    if fn - data_ks:
-        out("architecture.html", f"FLOWS node keys with no data-k: {sorted(fn - data_ks)}")
-    if data_ks - dk:
-        out("architecture.html", f"nodes with no DETAIL entry (clicking does nothing): {sorted(data_ks - dk)}")
-
-
-BASE_ROWS = ["users-and-job", "core-flow", "scale", "data", "stack-and-constraints",
-             "distribution", "anti-scope", "v1-line"]
-DEPTH_ROWS = {"standard": ["integrations", "failure-behaviour", "operations", "rollout"],
-              "enterprise": ["integrations", "failure-behaviour", "operations", "rollout",
-                             "regulator", "retention-and-residency", "audit", "cutover", "on-call"]}
-
+BASE_ROWS = ["users-and-job", "core-flow", "process", "domain-model", "scale", "anti-scope",
+             "boundaries", "api", "stack-and-constraints", "integrations", "failure-behaviour",
+             "stories-and-v1"]
+EXPLAIN_ROWS = ["actors", "vocabulary"]
 
 # A row is settled by one of these. The first four say someone or something told you, and each
 # owes an evidence clause; `assumed` says you decided it, which is honest and still unfinished.
@@ -234,26 +213,34 @@ def split_row(rest):
     return m.group(1).lower(), m.group(3).strip()
 
 
-def check_interview(t, ids, out):
+def check_interview(t, out):
     """The interview ends on coverage or an explicit stop — never on a question count.
     So this checks the coverage ledger, not how many questions were asked."""
     if not t:
         out("interview-notes.md", "missing — no record of what was covered or assumed")
-        return
-    m = re.search(r"^depth:\s*(\w+)", t, re.M)
-    depth = m.group(1).lower() if m else "standard"
-    expected = BASE_ROWS + DEPTH_ROWS.get(depth, [])
+        return False
+
+    m = re.search(r"^mode:\s*(\w+)", t, re.M)
+    explained = bool(m) and m.group(1).lower() == "explain"
+    m = re.search(r"^scope:\s*([\w-]+)", t, re.M)
+    scope = m.group(1).lower() if m else "new-service"
+
+    expected = list(BASE_ROWS)
+    if explained:
+        expected += EXPLAIN_ROWS
+    if scope != "new-service":
+        expected.append("rollout")
 
     block = re.search(r"^##\s*Coverage\s*$(.*?)(?=^##\s|\Z)", t, re.M | re.S)
     if not block:
         out("interview-notes.md", "no '## Coverage' block — nothing records which floor rows were covered")
-        return
+        return explained
     rows = {r: split_row(rest) for r, rest in
             re.findall(r"^\s*-\s*([a-z0-9-]+)\s*:\s*(.+?)\s*$", block.group(1), re.M)}
 
     missing = [r for r in expected if r not in rows]
     if missing:
-        out("interview-notes.md", f"coverage rows never recorded at {depth} depth: {', '.join(missing)}")
+        out("interview-notes.md", f"coverage rows never recorded: {', '.join(missing)}")
 
     answers = re.search(r"^##\s*Answers\s*$(.*?)(?=^##\s|\Z)", t, re.M | re.S)
     answers = answers.group(1).lower() if answers else ""
@@ -266,15 +253,15 @@ def check_interview(t, ids, out):
     for r, (verdict, evidence) in sorted(rows.items()):
         if verdict not in EVIDENCED + UNSETTLED:
             out("interview-notes.md",
-                f"row '{r}' has an unrecognised verdict '{verdict}' — use answered | repo | research | "
-                f"n/a | assumed | open")
+                f"row '{r}' has an unrecognised verdict '{verdict}' — use answered | repo | "
+                f"research | n/a | assumed | open")
         elif verdict in EVIDENCED and len(evidence) < 8 and not traced(r):
             unevidenced.append(f"{r} ({verdict})")
     if unevidenced:
         out("interview-notes.md",
             f"nothing records how these rows were settled — no evidence on the row, nothing under "
-            f"## Answers: {', '.join(unevidenced)}. Write the evidence after a dash (their answer, a "
-            f"path:line, the source, or why it doesn't apply), or mark the row 'assumed' so "
+            f"## Answers: {', '.join(unevidenced)}. Write the evidence after a dash (their answer, "
+            f"a path:line, the source, or why it doesn't apply), or mark the row 'assumed' so "
             f"/r:spec-brainstorm --continue knows to offer the decision back")
 
     status = re.search(r"^status:\s*([\w-]+)", t, re.M)
@@ -282,15 +269,19 @@ def check_interview(t, ids, out):
     unfinished = sorted(r for r, (v, _) in rows.items() if v in UNSETTLED)
     if unfinished and status not in ("generated-partial", "interviewing"):
         out("interview-notes.md",
-            f"rows still open or assumed ({', '.join(unfinished)}) but status is '{status or 'unset'}' — set "
-            f"status: generated-partial so /r:spec-brainstorm --continue can find this, or settle the rows")
+            f"rows still open or assumed ({', '.join(unfinished)}) but status is "
+            f"'{status or 'unset'}' — set status: generated-partial so /r:spec-brainstorm "
+            f"--continue can find this, or settle the rows")
 
-    oq = len({n for n in re.findall(r"\bOQ-(\d+)\b", t)} | set((ids or {}).get("OQ", [])))
-    answerable = len([r for r, (v, _) in rows.items() if v in EVIDENCED])
-    if oq and answerable and oq > max(2, answerable // 2):
+    oq = len(re.findall(r"^\s*-\s", re.search(r"^##\s*Open questions\s*$(.*?)(?=^##\s|\Z)", t,
+                                              re.M | re.S).group(1), re.M)) \
+        if re.search(r"^##\s*Open questions\s*$", t, re.M) else 0
+    settled = len([r for r, (v, _) in rows.items() if v in EVIDENCED])
+    if oq and settled and oq > max(2, settled // 2):
         out("interview-notes.md",
-            f"{oq} open questions against {answerable} covered rows — anything the user could answer "
-            f"in one line belongs in the interview, not the open-questions table")
+            f"{oq} open questions against {settled} settled rows — anything the user could answer "
+            f"in one line belongs in the interview, not the open-questions list")
+    return explained
 
 
 def main():
@@ -308,14 +299,12 @@ def main():
         p = d / n
         return p.read_text(encoding="utf-8", errors="replace") if p.exists() else ""
 
-    spec, arch = read("spec.html"), read("architecture.html")
+    spec = read("spec.html")
     if not spec:
         out("spec.html", "missing")
 
-    ids = check_spec(spec, out)
-    if arch:
-        check_arch(arch, out)
-    check_interview(read("interview-notes.md"), ids, out)
+    explained = check_interview(read("interview-notes.md"), out)
+    check_spec(spec, explained, out)
 
     if not problems:
         print(f"clean — {d}")

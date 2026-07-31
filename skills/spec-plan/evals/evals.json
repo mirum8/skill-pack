@@ -16,7 +16,7 @@
         },
         {
           "id": "coverage",
-          "text": "Every FR- id in the spec is named by at least one phase",
+          "text": "Every user story in the spec is named verbatim by at least one phase",
           "check": "script"
         },
         {
@@ -81,7 +81,7 @@
         },
         {
           "id": "coverage",
-          "text": "Every FR- id in the spec is named by at least one phase",
+          "text": "Every user story in the spec is named verbatim by at least one phase",
           "check": "script"
         },
         {
@@ -126,7 +126,7 @@
         },
         {
           "id": "coverage",
-          "text": "Every FR- id in the spec reaches a phase",
+          "text": "Every user story in the spec reaches a phase, named verbatim",
           "check": "script"
         },
         {

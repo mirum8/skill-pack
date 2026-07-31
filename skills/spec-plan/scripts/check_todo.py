@@ -3,7 +3,7 @@
 
     python3 check_todo.py docs/<topic>/todo.md [--spec docs/<topic>/spec.html]
 
-With --spec, also checks that every requirement in the spec reaches a phase.
+With --spec, also checks that every user story in the spec reaches a phase.
 Exit 0 when clean, 1 when anything is reported.
 """
 import html
@@ -26,14 +26,26 @@ NOT_BUILDABLE = [
 ]
 
 
-def spec_requirements(p):
+def strip(t):
+    t = re.sub(r"<script\b.*?</script>", " ", t, flags=re.S | re.I)
+    t = re.sub(r"<style\b.*?</style>", " ", t, flags=re.S | re.I)
+    return html.unescape(re.sub(r"<[^>]+>", " ", t))
+
+
+def spec_stories(p):
+    """Story names are the <h3> headings inside the spec's User stories section, and a phase's
+    Implements: line carries them verbatim. Returns None when there is no spec to check against."""
     if not p or not p.exists():
         return None
     t = p.read_text(encoding="utf-8", errors="replace")
-    t = re.sub(r"<script\b.*?</script>", " ", t, flags=re.S | re.I)
-    t = re.sub(r"<style\b.*?</style>", " ", t, flags=re.S | re.I)
-    prose = html.unescape(re.sub(r"<[^>]+>", " ", t))
-    return sorted(set(re.findall(r"\bFR-\d+\b", prose)), key=lambda s: int(s.split("-")[1]))
+    heads = [(m.start(), m.end(), strip(m.group(1)).lower()) for m in
+             re.finditer(r"<h2\b[^>]*>(.*?)</h2>", t, re.S | re.I)]
+    for i, (_, end, title) in enumerate(heads):
+        if "user stor" in title or "stories" in title:
+            nxt = heads[i + 1][0] if i + 1 < len(heads) else len(t)
+            return [" ".join(strip(m.group(1)).split())
+                    for m in re.finditer(r"<h3\b[^>]*>(.*?)</h3>", t[end:nxt], re.S | re.I)]
+    return []
 
 
 def main():
@@ -92,7 +104,7 @@ def main():
             if not re.search(r"`[^`]+`|\b(?:curl|mvn|npm|pytest|go test|gradle|docker|psql)\b", body):
                 out(f"{title}: 'Done when' names no runnable command or observable response")
         if "**Implements:**" not in b:
-            out(f"{title}: no 'Implements' line — nothing ties it to a requirement")
+            out(f"{title}: no 'Implements' line — nothing ties it to a story")
 
         for v in VAGUE:
             if re.search(rf"\b{re.escape(v)}\b", b, re.I):
@@ -118,17 +130,24 @@ def main():
                 f"/r:task-run will under-tier it")
 
     # --- traceability -----------------------------------------------------------
-    reqs = spec_requirements(spec_p)
-    if reqs is None:
-        out(f"note: no spec found next to {todo_p.name} — requirement coverage not checked")
-    elif reqs:
-        covered = set(re.findall(r"\bFR-\d+\b", t))
-        missing = [r for r in reqs if r not in covered]
+    # Implements: lines carry story names verbatim, separated by " · ". Matching is exact
+    # because a paraphrase is indistinguishable from a story nobody planned.
+    stories = spec_stories(spec_p)
+    if stories is None:
+        out(f"note: no spec found next to {todo_p.name} — story coverage not checked")
+    elif not stories:
+        out("note: the spec has no User stories section with <h3> names — story coverage not checked")
+    else:
+        cited = set()
+        for line in re.findall(r"^\*\*Implements:\*\*\s*(.+)$", t, re.M):
+            cited |= {" ".join(n.split()) for n in re.split(r"\s*[·;]\s*|\s*,\s(?=[A-Z])", line) if n.strip()}
+        missing = [s for s in stories if s not in cited]
         if missing:
-            out(f"requirements in the spec with no phase: {', '.join(missing)}")
-        extra = sorted(covered - set(reqs), key=lambda s: int(s.split("-")[1]))
+            out(f"stories in the spec with no phase: {', '.join(missing)}")
+        extra = sorted(cited - set(stories))
         if extra:
-            out(f"phases cite requirements the spec doesn't define: {', '.join(extra)}")
+            out(f"phases cite stories the spec doesn't define (check for a reworded name): "
+                f"{', '.join(extra)}")
 
     if not problems:
         print(f"clean — {todo_p} ({len(blocks)} phases)")

@@ -61,7 +61,7 @@ pack does not rely on it.
 | `/r:code-scan` | PMD + SpotBugs + Semgrep as local CLIs, then triage and fix |
 | `/r:code-adversarial` | the real Codex review, never an imitation of it |
 | `/r:code-refactor` | restructure behind a behaviour-locking test |
-| `/r:spec-brainstorm` | idea → `spec.html` + `architecture.html` |
+| `/r:spec-brainstorm` | idea → one `spec.html`: domain model, user stories, modules, stack, API |
 | `/r:spec-plan` | spec → phased `todo.md` with runnable done-when checks |
 | `/r:tests-write` | JVM test conventions; loads proactively on Java/Kotlin work |
 | `/r:test-app-create` | scaffold a project-local `/test-app` for the detected stack |
