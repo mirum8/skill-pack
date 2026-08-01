@@ -47,7 +47,7 @@ function baseSource(over = {}) {
     criteria: ['rejected import keeps the versions table'],
     profile: 'full', profileReason: 'rewrites the import error path', uiTouched: true,
     hasBackend: true, hasFrontend: false,
-    buildTool: 'maven', buildCmd: 'mvn clean install', buildCmdFast: 'mvn install',
+    buildTool: 'maven', buildCmd: 'mvn clean package', buildCmdFast: 'mvn package',
     runnerAgent: 'maven-build-runner',
     exploreAspects: ['controller + templates', 'existing tests'],
     planPath: '.task-plans/issue-81-import.md', planStatus: 'none', branchExists: false,
@@ -87,12 +87,17 @@ async function run({ source = baseSource(), riskFlags = [], review, planfix, ver
     // Only reached when plan-write reported failure: the run checks the disk before believing it.
     if (l === 'plan-check') return { exists: true, lastLine: PLAN_TEXT.split('\n').pop() }
     if (l.startsWith('codex-plan-review')) { codexPass++; return typeof review === 'function' ? review(codexPass) : review }
-    // `judge#<pass>.<i>` — one per finding, in parallel. The stub can answer per finding, so a
-    // test can accept one and dismiss another the way a real triage does.
+    // `judge#<pass>.<batch>:<rubric>` — findings are BATCHED by rubric and one agent returns a
+    // verdict per finding. The stub recovers which findings its batch holds by reading the
+    // numbered list out of the prompt (every test finding is literally named "finding K"), so a
+    // `verdict(pass, i)` stub still answers per finding exactly as it did per agent.
     if (l.startsWith('judge#')) {
-      const [p, i] = l.slice('judge#'.length).split('.').map(Number)
-      if (typeof verdict === 'function') return verdict(p, i)
-      return verdict === undefined ? { real: true, why: 'holds', fix: `fix for finding ${i}` } : verdict
+      const p = Number(l.slice('judge#'.length).split('.')[0])
+      const items = [...prompt.matchAll(/^\s*(\d+)\. \[[^\]]*\]\[[^\]]*\] finding (\d+)/gm)]
+        .map((m) => ({ n: Number(m[1]), i: Number(m[2]) }))
+      const one = (i) => typeof verdict === 'function' ? verdict(p, i)
+        : (verdict === undefined ? { real: true, why: 'holds', fix: `fix for finding ${i}` } : verdict)
+      return { verdicts: items.map(({ n, i }) => ({ n, ...one(i) })) }
     }
     // `plan-fix#N` — the pass number comes off the label, so a function stub can answer
     // differently on the re-review without the harness holding extra state.
@@ -134,33 +139,78 @@ test('full tier: mixed triage reaches the handoff with the plan-review audit tra
   assert.deepEqual(out.planReview.dropped, ['finding 2 — misreads the template, the fragment is re-rendered'])
 })
 
-test('each finding gets its own judge, and the judges get the explorer briefs', async () => {
-  // The regression this locks: triage used to be ONE agent handed nothing but the finding strings,
-  // so it re-read the codebase to answer the first one and worked through the rest serially.
-  const { counts, prompts, optsBy } = await run({
+test('every finding is judged, in rubric batches, and the judges get the explorer briefs', async () => {
+  // Two regressions in one. Triage used to be ONE agent handed nothing but the finding strings, so
+  // it re-read the codebase to answer the first one and worked through the rest serially — hence
+  // the briefs. Then it became one agent PER finding, which at a measured ~24 findings a run was
+  // ~24 cold contexts re-reading the same plan and the same files. Findings that share a rubric are
+  // checked the same way, so they now share a reader — and still get separate verdicts.
+  const { out, counts, prompts, optsBy } = await run({
     review: { ran: true, findings: F(3) }, planfix: OK_FIX, verdict: MIXED,
   })
-  for (const i of [1, 2, 3]) assert.equal(counts[`judge#1.${i}`], 1, `finding ${i} must be judged`)
-  assert.equal(counts['judge#1.4'], undefined)
-  assert.match(prompts['judge#1.1'], /AdminRatesController\.java:167 returns the fragment/,
+  const judges = Object.keys(counts).filter((l) => l.startsWith('judge#'))
+  assert.deepEqual(judges, ['judge#1.1:coverage'], 'one rubric, one batch — not one agent per finding')
+  const p = prompts['judge#1.1:coverage']
+  assert.match(p, /AdminRatesController\.java:167 returns the fragment/,
     'a judge that starts without the briefs will re-derive them')
-  assert.match(prompts['judge#1.1'], /FINDING \[major\]\[coverage\]: finding 1/)
-  assert.doesNotMatch(prompts['judge#1.1'], /finding 2/, 'one judge, one finding')
-  assert.equal(optsBy['judge#1.1'].effort, 'high')
+  for (const i of [1, 2, 3]) assert.match(p, new RegExp(`\\[coverage\\] finding ${i}`), `finding ${i} must be judged`)
+  assert.match(p, /Read that code ONCE and answer all of them from it/)
+  assert.match(p, /Do not let one finding's verdict carry the others/,
+    'the batch is the unit of dispatch, never of judgement')
+  assert.equal(optsBy['judge#1.1:coverage'].effort, 'high', 'batching must not buy depth back')
+  // Each finding still lands on its own side of the ledger.
+  assert.deepEqual(out.planReview.applied, OK_FIX.applied)
+  assert.equal(out.planReview.dropped.length, 2, 'findings 2 and 3 were dismissed individually')
   // The editor is handed the fix the judge already wrote, so it never re-does the reading.
   assert.match(prompts['plan-fix#1'], /FIX: add the empty-file test/)
 })
 
-test('a judge that dies leaves the finding UNJUDGED, never quietly dismissed', async () => {
+test('a rubric with more findings than one reader can hold is split, not swallowed', async () => {
+  // The failure mode batching could reintroduce: twelve findings of one rubric handed to a single
+  // agent is the serial triage this fan-out replaced.
+  const findings = Array.from({ length: 12 }, (_, i) =>
+    ({ severity: 'minor', rubric: 'coverage', what: `finding ${i + 1}` }))
+  const { counts } = await run({ review: { ran: true, findings }, planfix: OK_FIX })
+  const judges = Object.keys(counts).filter((l) => l.startsWith('judge#'))
+  assert.equal(judges.length, 3, '12 findings at 5 per batch = 3 batches')
+})
+
+test('findings are grouped by rubric, so one batch is one kind of check', async () => {
+  const findings = [
+    { severity: 'major', rubric: 'coverage', what: 'finding 1' },
+    { severity: 'minor', rubric: 'grounding', what: 'finding 2' },
+    { severity: 'minor', rubric: 'grounding', what: 'finding 3' },
+  ]
+  const { counts, prompts } = await run({ review: { ran: true, findings }, planfix: OK_FIX })
+  const judges = Object.keys(counts).filter((l) => l.startsWith('judge#')).sort()
+  assert.deepEqual(judges, ['judge#1.1:coverage', 'judge#1.2:grounding'])
+  assert.doesNotMatch(prompts['judge#1.1:coverage'], /finding 2/)
+  assert.match(prompts['judge#1.2:grounding'], /finding 3/)
+})
+
+test('a judge batch that dies leaves its findings UNJUDGED, never quietly dismissed', async () => {
   const { out, counts, prompts, logText } = await run({
     review: { ran: true, findings: F(1) }, planfix: OK_FIX,
     overrides: { 'judge#1.1': null },
   })
-  assert.equal(counts['judge#1.1'], 3, 'reliable() retries a dead judge, bounded at 3')
+  assert.equal(counts['judge#1.1:coverage'], 3, 'reliable() retries a dead judge, bounded at 3')
   assert.deepEqual(out.planReview.dropped, [], 'a dead agent is not a dismissal')
   assert.match(logText, /1 UNJUDGED/)
   assert.match(prompts['plan-fix#1'], /NOT JUDGED/, 'the editor must still see it')
   assert.equal(out.stopped, undefined)
+})
+
+test('a batch that answers only some of its findings leaves the rest UNJUDGED', async () => {
+  // The new failure shape batching introduces: a partial verdict array. A finding whose 'n' never
+  // came back must be treated exactly like one whose judge died — never as dismissed.
+  const { out, prompts, logText } = await run({
+    review: { ran: true, findings: F(3) }, planfix: OK_FIX,
+    overrides: { 'judge#1.1': { verdicts: [{ n: 1, real: false, why: 'fp' }] } },
+  })
+  assert.deepEqual(out.planReview.dropped, ['finding 1 — fp'])
+  assert.match(logText, /2 UNJUDGED/)
+  assert.match(prompts['plan-fix#1'], /finding 2/)
+  assert.match(prompts['plan-fix#1'], /finding 3/)
 })
 
 test('a triage that dismisses EVERY finding is logged, and buys one adjudication re-review', async () => {
@@ -236,7 +286,7 @@ test('the scribe steps pin sonnet, so a copy job never costs the session model',
 test('the stats sink is cheaper than a scribe — it reproduces nothing', async () => {
   const { counts, optsBy } = await run({ review: { ran: true, findings: [] } })
   assert.equal(counts['stats'], 1)
-  assert.equal(optsBy['stats'].model, 'sonnet')
+  assert.equal(optsBy['stats'].model, 'haiku')
   assert.equal(optsBy['stats'].effort, 'low')
 })
 
@@ -608,7 +658,7 @@ test('the baseline build is clean, full-reactor, and never scoped', async () => 
     review: OK_REVIEW, planfix: OK_FIX,
     build: (n) => ({ green: n > 1, inScopeFailures: n === 1 ? 'RateSheetImportTest' : '' }),
   })
-  assert.match(prompts['build#1'], /Run the build `mvn clean install`/)
+  assert.match(prompts['build#1'], /Run the build `mvn clean package`/)
   assert.doesNotMatch(prompts['build#1'], /-pl /)
 })
 
@@ -617,7 +667,7 @@ test('a build RETRY is incremental and scoped to the changed modules', async () 
     review: OK_REVIEW, planfix: OK_FIX,
     build: (n) => ({ green: n > 1, inScopeFailures: n === 1 ? 'RateSheetImportTest' : '' }),
   })
-  assert.match(prompts['build#2'], /Run the build `mvn install`/)
+  assert.match(prompts['build#2'], /Run the build `mvn package`/)
   assert.match(prompts['build#2'], /-pl <the modules holding the changed files> -am/)
   assert.match(prompts['build#2'], /single-module, run it unscoped/)  // the escape hatch
 })
@@ -876,6 +926,38 @@ test('the planner is dispatched with NO schema — the plan never round-trips th
   assert.equal(optsBy['planner'].agentType, 'Plan', 'still the architect type, just unschema-d')
 })
 
+test('the planner CANNOT write — the file lands via a separate sandboxed scribe', async () => {
+  // The invariant, not a style preference. At full tier the whole premise is that Codex challenges
+  // the plan BEFORE any code exists, and nothing downstream could catch a planner that jumped the
+  // gun: the plan review reads the plan FILE, not the working tree, and the first `git diff` anyone
+  // looks at is after the implementers have run. The `Plan` type has no Edit/Write tool and its
+  // built-in system prompt bans redirect operators and heredocs outright, so "don't write code" is
+  // structural here rather than a sentence in a prompt that nothing verifies.
+  const { optsBy, prompts } = await run({ review: OK_REVIEW, planfix: OK_FIX })
+  assert.equal(optsBy['planner'].agentType, 'Plan')
+  assert.equal(optsBy['plan-light'], undefined)
+  assert.match(prompts['planner'], /You are read-only: return the plan, do not write it/)
+  // The write is its own step, on a cheap type that only ever touches the plan file.
+  assert.equal(optsBy['plan-write'].model, 'sonnet')
+  assert.match(prompts['plan-write'], /Do not edit any\s+other file/)
+})
+
+test('the LIGHT planner is general-purpose, and that is only safe because light has no plan review', async () => {
+  // Worth stating rather than assuming: the structural read-only guarantee covers the standard/full
+  // planner, not this one — `plan-light` has always run on a `*`-tools type. It happens to be the
+  // tier where it does not matter: light runs no Codex plan review, so there is no "challenge the
+  // approach before code exists" premise for an early write to violate, and the tier's own
+  // definition is a change that cannot alter behavior. If a plan review is ever added at light,
+  // this is the line that has to move first.
+  const { optsBy, prompts, counts } = await run({
+    source: baseSource({ profile: 'light', uiTouched: false }),
+  })
+  assert.equal(optsBy['plan-light'].agentType, 'general-purpose')
+  assert.equal(counts['plan-write'], 1, 'the write is still a separate step, not folded in')
+  assert.match(prompts['plan-light'], /YOUR ENTIRE FINAL MESSAGE IS THE PLAN/,
+    'it is told to return the plan, not to write it')
+})
+
 test('the light-tier planner is schema-less too', async () => {
   const { optsBy } = await run({ source: baseSource({ profile: 'light', uiTouched: false }) })
   assert.equal(optsBy['plan-light'].schema, undefined)
@@ -981,4 +1063,46 @@ test('the explorer label carries its slice index, so the one that died is identi
   const { counts } = await run({ review: OK_REVIEW, planfix: OK_FIX })
   assert.equal(counts['explore#1:controller + templates'], 1)
   assert.equal(counts['explore#2:existing tests'], 1)
+})
+
+// ------------------------------------------- model tiers, not just effort ---
+// These pinned `effort` but not MODEL, so a step marked "nothing to judge" still ran on whatever
+// the session was on. The split: what only echoes a command runs cheapest; the git step does not,
+// because it has to report reality rather than its own intent.
+
+test('the pure command-runners run on haiku', async () => {
+  const { optsBy } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    overrides: { 'plan-write': { written: false, path: '.task-plans/x.md' } },
+  })
+  for (const l of ['plan-check', 'stats']) {
+    assert.equal(optsBy[l].model, 'haiku', `${l} runs one fixed command and reports its output`)
+  }
+})
+
+test('the branch step is sonnet, NOT the echo tier', async () => {
+  // It must report the branch the repo is REALLY on, not the one it was asked to create — the
+  // distinction issue #90 turned on. The equality-vs-base guard catches a wrong answer, but a model
+  // likelier to echo its own intent leans on that guard harder than it should.
+  const { optsBy } = await run({ review: OK_REVIEW, planfix: OK_FIX })
+  assert.equal(optsBy['branch'].model, 'sonnet')
+  assert.equal(optsBy['branch'].effort, 'low', 'cheap, just not the cheapest')
+})
+
+test('the plan scribe stays sonnet/medium — it transcribes a document verbatim', async () => {
+  // The one cheap step that is NOT an echo: a paraphrased or truncated plan silently degrades the
+  // Codex review and every implementer that reads it.
+  const { optsBy } = await run({ review: OK_REVIEW, planfix: OK_FIX })
+  assert.equal(optsBy['plan-write'].model, 'sonnet')
+  assert.equal(optsBy['plan-write'].effort, 'medium')
+})
+
+test('every judging track still keeps its own model and depth', async () => {
+  const { optsBy } = await run({ review: OK_REVIEW, planfix: OK_FIX, verdict: MIXED })
+  assert.equal(optsBy['planner'].model, 'opus')
+  assert.equal(optsBy['planner'].effort, 'xhigh')
+  assert.equal(optsBy['implement:backend'].model, 'opus')
+  for (const l of ['source', 'judge#1.1:coverage', 'plan-fix#1', 'build#1']) {
+    assert.equal(optsBy[l].model, undefined, `${l} classifies — it must not be down-tiered`)
+  }
 })

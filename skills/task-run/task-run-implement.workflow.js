@@ -178,6 +178,17 @@ const parseExplore = (raw) => {
 // never has to survive a round-trip through JSON at all. The cost is that nothing structurally
 // forbids a preamble line; the prompts ask for none, and a stray one is visible in the plan file
 // rather than fatal. That trade is the point.
+//
+// WHY THE PLANNER DOES NOT WRITE ITS OWN FILE, though that would save this whole round trip.
+// The `Plan` agent type is read-only by CONSTRUCTION — it has no Edit/Write tool, and its built-in
+// system prompt bans the mechanism a self-writing planner would need outright: "Using redirect
+// operators (>, >>, |) or heredocs to write to files" and "Running ANY commands that change system
+// state". Pointing it at a `cat > … <<'EOF'` would set its system prompt against its task prompt on
+// the one instruction that matters. The alternative is a planner on a `*`-tools type, and that
+// trades a STRUCTURAL guarantee for a sentence: at full tier the entire premise is that Codex
+// challenges the plan BEFORE any code exists, and nothing downstream could catch a violation —
+// the plan review reads the plan file, not the working tree, and the first `git diff` anyone looks
+// at is after the implementers have run. So the write stays a separate, cheap, sandboxed step.
 const WROTE = {
   type: 'object', additionalProperties: false,
   required: ['written', 'path'],
@@ -216,22 +227,41 @@ const REVIEW = {
     note: { type: 'string' },
   },
 }
-// One judge, one finding. Splitting the triage this way is what took it off the critical path:
-// judging N findings used to be a single serial agent that re-derived the whole code map before it
-// could answer the first one.
-const VERDICT = {
+// One judge, a BATCH of findings that share a rubric — with one verdict returned per finding.
+//
+// Two rounds of this. Triage began as a single xhigh agent that judged every finding and rewrote
+// the plan: 11 minutes and 122k tokens on a measured run, most of it re-deriving a code map the
+// explorers had already produced. Splitting it one-agent-per-finding fixed that, and then became
+// the widest fan-out in the pipeline — ~24 cold contexts per run, two waves deep at a cap of 16,
+// each re-reading the plan and reopening the same files to answer one question. Batching by rubric
+// keeps the parallelism and stops paying for the duplicated reading: the findings grouped together
+// are the ones checked against the same code in the same way.
+//
+// The batch is the unit of DISPATCH, never of judgement — hence an array of verdicts keyed back to
+// each finding, rather than one verdict for the group.
+const VERDICTS = {
   type: 'object', additionalProperties: false,
-  required: ['real', 'why'],
+  required: ['verdicts'],
   properties: {
-    real: { type: 'boolean' },
-    why: { type: 'string' },   // the evidence, as file:LINE — this becomes the dismissal reason
-    fix: { type: 'string' },   // what the plan should say instead; only meaningful when real
-    // Does applying THIS fix change the approach, rather than a detail? It decides whether Codex
-    // gets a second pass over the rewritten plan, so it belongs to the agent that actually read
-    // the code and wrote the fix — not to the editor downstream, which sees only a fix list and
-    // runs at the lowest depth in this phase. A flag that gates a review has to be set by
-    // whoever has the evidence for it.
-    changesApproach: { type: 'boolean' },
+    verdicts: {
+      type: 'array',
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['n', 'real', 'why'],
+        properties: {
+          n: { type: 'integer' },    // which finding in the batch, 1-based, as listed in the prompt
+          real: { type: 'boolean' },
+          why: { type: 'string' },   // the evidence, as file:LINE — this becomes the dismissal reason
+          fix: { type: 'string' },   // what the plan should say instead; only meaningful when real
+          // Does applying THIS fix change the approach, rather than a detail? It decides whether
+          // Codex gets a second pass over the rewritten plan, so it belongs to the agent that
+          // actually read the code and wrote the fix — not to the editor downstream, which sees
+          // only a fix list and runs at the lowest depth in this phase. A flag that gates a review
+          // has to be set by whoever has the evidence for it.
+          changesApproach: { type: 'boolean' },
+        },
+      },
+    },
   },
 }
 // The editor decides nothing: it applies fixes the judges already stated. `dropped` and
@@ -312,7 +342,15 @@ const blocked = (x) => !x || !!(x.blocked || x.ran === false)
 // spawned from this script can fan out beneath itself. Every fan-out is therefore
 // expressed here, in the script, as parallel()/loops.
 const GP = { agentType: 'general-purpose' }
-const MECHANICAL = { effort: 'low' }    // runs git / writes a file — nothing to judge
+// Run one fixed command and report what it printed. There is no branch, no classification and no
+// prose in the output — the comparison that uses it happens in THIS script, not in the agent — so
+// the cheapest model is the right one. Effort is moot at this tier and stays low for clarity.
+const ECHO = { model: 'haiku', effort: 'low' }
+// Runs git and reports the result. Cheap, but NOT the echo tier: the branch step has to report the
+// branch the repo is REALLY on rather than the one it was asked to create, which is exactly the
+// distinction issue #90 turned on. The equality-vs-base guard below catches a wrong answer, but a
+// model that is likelier to echo its own intent leans on that guard harder than it should.
+const MECHANICAL = { model: 'sonnet', effort: 'low' }
 // The scribe steps: copy a given document to disk, flip one header line, run one fixed command.
 // No judgement, so they do not need the session's model — but they are not `low` either: the
 // plan file is reproduced VERBATIM from the prompt, and a paraphrased or truncated plan silently
@@ -320,9 +358,9 @@ const MECHANICAL = { effort: 'low' }    // runs git / writes a file — nothing 
 const SCRIBE = { model: 'sonnet', effort: 'medium' }
 // The stats sink appends counts to a JSONL file. It used to share SCRIBE, but it has none of the
 // property that makes SCRIBE `medium`: nothing is reproduced verbatim, so there is nothing to
-// truncate or paraphrase. Keep the cheap model, drop the effort — post-task-review's identical
-// sink already runs mechanical.
-const SINK = { model: 'sonnet', effort: 'low' }
+// truncate or paraphrase. It is a heredoc handed to `python3` — the echo tier, and by design it
+// can never fail the run, so it is the cheapest thing here to get wrong.
+const SINK = ECHO
 const BUILD_RUN = { effort: 'medium' }  // runs the build, but classifies failures
 // Phase 0 reads gh/git into a schema; the one real judgement is the tier. Keep the inherited
 // model — the tier is now a three-way tree decided on calibration examples, which needs more
@@ -500,9 +538,14 @@ ${inRepo}
       templates/**)? Also set hasBackend / hasFrontend for implementer routing.
    6. BUILD TOOL from the repo root — return BOTH commands. buildCmd is the CLEAN certifying
       build used exactly ONCE; buildCmdFast is the incremental rebuild used every time after.
-      maven -> "mvn clean install" / "mvn install", runnerAgent "maven-build-runner".
+      maven -> "mvn clean package" / "mvn package", runnerAgent "maven-build-runner".
       gradle -> "./gradlew clean build" / "./gradlew build", runnerAgent "gradle-build-runner".
       neither -> buildTool "none".
+      NOT \`install\`: a multi-module reactor resolves inter-module dependencies within the same
+      session, so writing every module into ~/.m2 buys this run nothing and costs the whole
+      install phase. /r:task-review certifies the same tree with \`package\`, and the caller hands
+      THIS build's result to it as \`baselineBuilt\` — the two pipelines used to disagree about
+      what the certifying build even was, for no stated reason.
    7. base: the CURRENT branch (\`git branch --show-current\`)${opts.base ? `, unless it differs from the caller's stated base ${JSON.stringify(opts.base)} — then return that one` : ''}.
    8. RESUME STATE: planPath = ".task-plans/<slug>.md". Report planStatus from its "status:"
       header if the file exists (else "none"), and branchExists from
@@ -660,6 +703,61 @@ if (classifyOnly) {
     riskFlagsIgnored: ignoredFlags,
   }
 }
+
+// --- The feature branch, started EARLY and collected at Phase 4 --------------
+// Creating the feature branch is the explicit opt-in that overrides the global "never create a
+// branch unless asked" rule — /r:task-run always runs on one.
+//
+// It depends on nothing the plan or its review produces, only on Phase 0's branch/base, yet it used
+// to sit between the plan editor and the implementers — a whole serial agent round trip on the
+// critical path to run one `git checkout -b`. Start it here instead and collect it below. What it
+// overlaps with is the plan scribe writing `.task-plans/<slug>.md` and appending to `.gitignore`,
+// which is safe in both directions: `git checkout -b <new> <base>` moves HEAD to the same commit
+// and therefore does not touch the working tree at all. On a RESUME the checkout is a real one that
+// could, but a resume skips planning entirely, so nothing runs alongside it.
+//
+// The branch is the run's unit of work: the caller merges it into base and closes the issue on it.
+// A run that quietly STAYS on base breaks both ends — the diff lands on main, and the caller then
+// tries to merge main into main. That happened (issue #90: handoff {branch:'main', base:'main'},
+// buildGreen:true, an otherwise normal-looking result) because nothing checked WHICH branch came
+// back: BRANCH.onBranch is a plain string, so an agent that failed to check out and honestly
+// reported "main" passed the only test there was (non-empty). Two guards close it — a branch name
+// that is missing or equal to base never reaches the agent, and a result equal to base is retried
+// once and then STOPS the run. `branch === base` is not a degraded success; it is a failed step.
+const branchPrefix = src.kind === 'todo' ? 'phase' : src.kind === 'text' ? 'task' : 'issue'
+const srcSlug = (src.slug || '').trim()
+let wantBranch = (src.branch || '').trim()
+if (!wantBranch || wantBranch === src.base) {
+  if (srcSlug) {
+    wantBranch = srcSlug.startsWith(`${branchPrefix}-`) ? srcSlug : `${branchPrefix}-${srcSlug}`
+    log(`run-task-implement: unusable branch name from Phase 0 (${JSON.stringify(src.branch)}) — using "${wantBranch}" instead; this run must not do its work on ${src.base}`)
+  } else {
+    wantBranch = ''
+    log(`run-task-implement: Phase 0 returned no usable branch name (branch=${JSON.stringify(src.branch)}, base=${src.base}) and no slug to build one from`)
+  }
+}
+// Deliberately NOT awaited here. `reliable()` traps throws and returns a sentinel, so this cannot
+// reject; the .catch is belt-and-braces, because an unhandled rejection from a floating promise
+// would take the whole script down rather than the step.
+const branchP = !wantBranch ? null : (async () => {
+  let br = null
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    br = await reliable(attempt === 1 ? 'branch' : 'branch-retry', 'Implement', () => agent(
+      `Put the repo on the feature branch ${wantBranch}, based on ${src.base}.
+       ${src.branchExists
+         ? 'The branch ALREADY EXISTS (this is a resume): just check it out, keep any work on it, and do NOT reset or rebase it.'
+         : `Create it off ${src.base} — \`git checkout -b ${wantBranch} ${src.base}\`.`}
+       ${attempt === 1 ? '' : `The previous attempt ended on ${src.base}, i.e. the checkout did NOT happen. Run it again and READ ITS EXIT STATUS: if it fails, put the git error in 'note' rather than reporting whichever branch you happen to be on.`}
+       Commit nothing, and do not touch any file — another agent may be writing the plan while you
+       run. Then run \`git rev-parse --abbrev-ref HEAD\` and return its EXACT output as onBranch —
+       the branch the repo is REALLY on now, never the name you intended to create.`,
+      { label: attempt === 1 ? 'branch' : 'branch-retry', phase: 'Implement', schema: BRANCH, ...GP, ...MECHANICAL }))
+    if (blocked(br) || !br.onBranch) break
+    if (String(br.onBranch).trim() !== src.base) break
+    log(`run-task-implement: the branch step came back on ${src.base} — the feature branch was not created (attempt ${attempt}/2)`)
+  }
+  return br
+})().catch(() => null)
 
 // --- Phase 2: the plan -------------------------------------------------------
 // Resume: a plan already past review is not re-planned or re-reviewed.
@@ -851,7 +949,7 @@ ${uiDesignNote}
       `Run \`tail -1 ${planPath}\` and report what it printed. Return exists=false if the file is
        missing or empty. Do not write or edit anything — this is a read-only check on work another
        agent already did.`,
-      { label: 'plan-check', phase: 'Plan', schema: PLAN_ON_DISK, ...GP, ...MECHANICAL }))
+      { label: 'plan-check', phase: 'Plan', schema: PLAN_ON_DISK, ...GP, ...ECHO }))
     const intact = !blocked(onDisk) && onDisk.exists && (onDisk.lastLine || '').trim() === wantLast
     if (!intact) return { stopped: 'plan-not-written' }
     log(`run-task-implement: plan-write reported failure${wrote.note ? ` ("${String(wrote.note).slice(0, 120)}")` : ''} but ${planPath} ends on the planner's last line — the plan is intact, continuing`)
@@ -1006,26 +1104,55 @@ ${checks.map((c, i) => `     ${i + 1}. ${c}`).join('\n')}
     planReview.passes = pass
     planReview.raised += review.findings.length
 
-    const verdicts = await parallel(review.findings.map((f, i) => () =>
-      reliable(`judge#${pass}.${i + 1}`, 'Plan-review', () => agent(
-        `Judge ONE finding from Codex's review of the plan at ${planPath}. Decide whether it holds
-         against the real code, and nothing else — you are not editing the plan.
+    // BATCHED, not one agent per finding. Judging is genuine work — does this hold against the
+    // real code — but the unit of work is the CODE a finding cites, not the finding itself, and a
+    // measured ~24 findings per run meant ~24 cold contexts each re-reading the plan and reopening
+    // the same files, two waves deep at a concurrency cap of 16. Grouping by rubric puts the
+    // findings that are checked the same way in front of one reader: every `grounding` item is
+    // "does the cited file:LINE say what the plan claims", every `coverage` item is a walk of the
+    // same criteria table. One context read then serves the whole group.
+    //
+    // What this deliberately does NOT do is judge less. Every finding still gets its own verdict,
+    // its own evidence and its own changesApproach flag; a batch that dies leaves its findings
+    // UNJUDGED exactly as a dead single judge did. Depth stays at JUDGE_RUN.
+    const CHUNK = 5
+    const batches = []
+    for (const rubric of [...new Set(review.findings.map((f) => f.rubric || 'other'))]) {
+      const group = review.findings.filter((f) => (f.rubric || 'other') === rubric)
+      // A rubric that ran long is split rather than allowed to swallow the pass: one reader with
+      // twelve findings is back to being the serial step this replaced.
+      for (let i = 0; i < group.length; i += CHUNK) batches.push({ rubric, items: group.slice(i, i + CHUNK) })
+    }
+    log(`run-task-implement: plan review pass ${pass} — judging ${review.findings.length} finding(s) in ${batches.length} batch(es) by rubric`)
 
-         FINDING [${f.severity}][${f.rubric}]: ${f.what}
+    const batchVerdicts = await parallel(batches.map((b, bi) => () =>
+      reliable(`judge#${pass}.${bi + 1}:${b.rubric}`, 'Plan-review', () => agent(
+        `Judge ${b.items.length === 1 ? 'ONE finding' : `these ${b.items.length} findings`} from Codex's review of the plan at ${planPath}. Decide whether each
+         holds against the real code, and nothing else — you are not editing the plan.
+
+         They all come from the same rubric (${b.rubric}), so they are checked the same way and
+         largely against the same code. Read that code ONCE and answer all of them from it; do not
+         restart your reading for each.
+
+         FINDINGS:
+${b.items.map((f, n) => `         ${n + 1}. [${f.severity}][${f.rubric}] ${f.what}`).join('\n')}
 
          The codebase was already mapped for this task. Start from these briefs and open only what
-         you still need to confirm — the finding cites specific code, so check THAT:
+         you still need to confirm — each finding cites specific code, so check THAT:
          ${briefText}
 
-         Read the relevant part of ${planPath} and the code it points at. Then:
+         Read the relevant parts of ${planPath} and the code they point at. Return one verdict per
+         finding, with 'n' set to its number above — every finding gets its own verdict, even when
+         several turn out to share a cause:
          - real=true if the finding holds. Put the evidence in 'why' as file:LINE, and in 'fix'
            write what the plan should say instead — concretely enough that someone editing the plan
            can apply it without re-doing your reading.
          - real=false if it does not. 'why' is then the dismissal reason, and it is answerable:
            Codex may be shown it and given a chance to push back, so give the evidence that
            convinced you rather than an assertion.
-         Codex raises real problems and false positives both. Judge this one on what the code
-         actually says.
+         Codex raises real problems and false positives both. Judge each on what the code actually
+         says. Do not let one finding's verdict carry the others: a batch returned all-real or
+         all-false without separate evidence is the failure this grouping has to avoid.
 
          When real=true, also set changesApproach: does applying YOUR fix send the plan down a
          different route — a different design, a different seam, a different data flow — or does it
@@ -1033,15 +1160,28 @@ ${checks.map((c, i) => `     ${i + 1}. ${c}`).join('\n')}
          filling a coverage gap is a detail. Set it true only for the first kind: it costs the run
          a second full Codex review of the rewritten plan, which is worth paying when the plan
          really did change shape and is pure delay when it did not.`,
-        { label: `judge#${pass}.${i + 1}`, phase: 'Plan-review', schema: VERDICT, ...GP, ...JUDGE_RUN }))))
+        { label: `judge#${pass}.${bi + 1}:${b.rubric}`, phase: 'Plan-review', schema: VERDICTS, ...GP, ...JUDGE_RUN }))))
+
+    // Flatten back to one verdict per finding, in the original order. A missing 'n' — a batch that
+    // answered four of its five — leaves that finding with no verdict, which the UNJUDGED branch
+    // below then handles exactly as it handles a dead judge.
+    const verdicts = new Map()
+    batches.forEach((b, bi) => {
+      const r = batchVerdicts[bi]
+      if (blocked(r) || !Array.isArray(r.verdicts)) return
+      for (const v of r.verdicts) {
+        const f = b.items[Number(v.n) - 1]
+        if (f) verdicts.set(f, v)
+      }
+    })
 
     // A judge that died is UNJUDGED — not dismissed. Silently dropping it would let a finding
     // disappear because an agent fell over, which is the failure mode every other track here is
     // built to refuse. It goes to the editor as an explicit "decide on the plan text alone".
     const accepted = [], rejected = [], unjudged = []
-    review.findings.forEach((f, i) => {
-      const v = verdicts[i]
-      if (blocked(v) || typeof v.real !== 'boolean') unjudged.push(f)
+    review.findings.forEach((f) => {
+      const v = verdicts.get(f)
+      if (!v || typeof v.real !== 'boolean') unjudged.push(f)
       else if (v.real) accepted.push({ f, fix: v.fix || v.why, changesApproach: !!v.changesApproach })
       else rejected.push(`${f.what} — ${v.why}`)
     })
@@ -1133,44 +1273,14 @@ ${checks.map((c, i) => `     ${i + 1}. ${c}`).join('\n')}
 
 // --- Phase 4: implement, test-first -----------------------------------------
 phase('Implement')
-// Creating the feature branch is the explicit opt-in that overrides the global
-// "never create a branch unless asked" rule — /r:task-run always runs on one.
-//
-// The branch is the run's unit of work: the caller merges it into base and closes the issue on
-// it. A run that quietly STAYS on base breaks both ends — the diff lands on main, and the caller
-// then tries to merge main into main. That happened (issue #90: handoff {branch:'main',
-// base:'main'}, buildGreen:true, an otherwise normal-looking result) because nothing here checked
-// WHICH branch came back: BRANCH.onBranch is a plain string, so an agent that failed to check out
-// and honestly reported "main" passed the only test there was (non-empty). Two guards close it — a branch name
-// that is missing or equal to base never reaches the agent, and a result equal to base is retried
-// once and then STOPS the run. `branch === base` is not a degraded success; it is a failed step.
-const branchPrefix = src.kind === 'todo' ? 'phase' : src.kind === 'text' ? 'task' : 'issue'
-const srcSlug = (src.slug || '').trim()
-let wantBranch = (src.branch || '').trim()
-if (!wantBranch || wantBranch === src.base) {
-  if (!srcSlug) {
-    log(`run-task-implement: Phase 0 returned no usable branch name (branch=${JSON.stringify(src.branch)}, base=${src.base}) and no slug to build one from — stopping rather than working on ${src.base}`)
-    return { stopped: 'branch-name-missing', base: src.base, planPath }
-  }
-  const derived = srcSlug.startsWith(`${branchPrefix}-`) ? srcSlug : `${branchPrefix}-${srcSlug}`
-  log(`run-task-implement: unusable branch name from Phase 0 (${JSON.stringify(src.branch)}) — using "${derived}" instead; this run must not do its work on ${src.base}`)
-  wantBranch = derived
+// Collect the feature branch started back before Phase 2. Nothing below may run on base: the whole
+// point of the halt is that the diff would land on `main` and the finish step would then try to
+// merge `main` into itself. See the note at the dispatch site for the guards and for issue #90.
+if (!branchP) {
+  log(`run-task-implement: no usable feature-branch name — stopping rather than working on ${src.base}`)
+  return { stopped: 'branch-name-missing', base: src.base, planPath }
 }
-let br = null
-for (let attempt = 1; attempt <= 2; attempt++) {
-  br = await reliable(attempt === 1 ? 'branch' : 'branch-retry', 'Implement', () => agent(
-    `Put the repo on the feature branch ${wantBranch}, based on ${src.base}.
-     ${src.branchExists
-       ? 'The branch ALREADY EXISTS (this is a resume): just check it out, keep any work on it, and do NOT reset or rebase it.'
-       : `Create it off ${src.base} — \`git checkout -b ${wantBranch} ${src.base}\`.`}
-     ${attempt === 1 ? '' : `The previous attempt ended on ${src.base}, i.e. the checkout did NOT happen. Run it again and READ ITS EXIT STATUS: if it fails, put the git error in 'note' rather than reporting whichever branch you happen to be on.`}
-     Commit nothing. Then run \`git rev-parse --abbrev-ref HEAD\` and return its EXACT output as
-     onBranch — the branch the repo is REALLY on now, never the name you intended to create.`,
-    { label: attempt === 1 ? 'branch' : 'branch-retry', phase: 'Implement', schema: BRANCH, ...GP, ...MECHANICAL }))
-  if (blocked(br) || !br.onBranch) break
-  if (String(br.onBranch).trim() !== src.base) break
-  log(`run-task-implement: the branch step came back on ${src.base} — the feature branch was not created (attempt ${attempt}/2)`)
-}
+const br = await branchP
 if (blocked(br) || !br.onBranch) return { stopped: 'branch-failed', planPath }
 const onBranch = String(br.onBranch).trim()
 if (onBranch === src.base) {
