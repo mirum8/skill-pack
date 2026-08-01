@@ -835,16 +835,21 @@ test('REGRESSION: local-scan computes its own branch-wide class list, not the Ph
 
 test('a JSON-string arg is parsed, so deferCommit is not silently lost', async () => {
   const { prompts } = await run({
-    args: JSON.stringify({ deferCommit: true, profile: 'full' }),
+    args: JSON.stringify({ deferCommit: true, profile: 'full', packRoot: '/pack' }),
     overrides: { 'fix-triage': { correctness: [], readability: ['A.java:1 extract a method'], docDrift: [] } },
   })
   assert.match(prompts['fix-readability'], /WITHOUT committing/)
 })
 
-test('a malformed arg falls back to defaults instead of killing the review', async () => {
+test('a malformed arg is survived, then halts cleanly on the missing pack root', async () => {
+  // The property being locked is that a SyntaxError never takes the review down — the parser
+  // still falls back to {}. What CHANGED is what happens next: with no packRoot recoverable there
+  // is no run.sh, no deploy helper, no reference files, so the run stops instead of dispatching
+  // agents at paths under "/". The old "run with defaults is strictly better" reasoning quietly
+  // assumed PACK had a working fallback, and it never did.
   const { out } = await run({ args: 'not json at all {{{' })
-  assert.equal(out.reviewed, true)
-  assert.equal(out.profile, 'full')
+  assert.equal(out.stopped, 'no-pack-root')
+  assert.equal(out.reviewed, undefined)
 })
 
 // ------------------------------------------- end-verify is retried, not merely reported ---
@@ -1058,4 +1063,34 @@ test('every judging track still inherits the session model', async () => {
                    'fix-triage-readability', 'fix-correctness', 'local-scan']) {
     assert.equal(opts[l].model, undefined, `${l} forms an opinion — it must not be down-tiered`)
   }
+})
+
+// ------------------------------------------------ locating the pack itself ---
+// REPRODUCES: a run whose every tool path resolved to `/skills/...` because
+// ${CLAUDE_PLUGIN_ROOT} is substituted in skill MARKDOWN, never inside a workflow script and
+// never in a subagent's shell. Seven paths come off PACK — both Codex tracks, deploy, teardown,
+// the hunters' reference files and the stats sink — and only the sink reports its own stderr, so
+// that is the one that told us.
+
+test('args as a JSON STRING still resolves the pack root', async () => {
+  // The case that actually bites: PACK is computed from the RAW args, hundreds of lines before the
+  // tolerant parser every other option goes through — and callers hand over a JSON string almost
+  // every time (0 object args vs 39 string ones across the stored history). A string fails
+  // `typeof args === 'object'`, so packRoot went missing even when the caller passed it.
+  const { prompts } = await run({ args: '{"packRoot":"/pack","profile":"standard"}' })
+  assert.match(prompts['codex'], /\/pack\/skills\/code-adversarial\/scripts\/run\.sh/)
+  assert.doesNotMatch(prompts['codex'], /CLAUDE_PLUGIN_ROOT/,
+    'an unsubstituted placeholder reaches a shell as the empty string')
+})
+
+test('no usable pack root is a HALT, not a run with seven broken paths', async () => {
+  const { out, counts } = await run({ args: '{"profile":"standard"}' })
+  assert.equal(out.stopped, 'no-pack-root')
+  assert.equal(counts['triage'], undefined, 'nothing may run before the tools can be located')
+})
+
+test('the literal placeholder is treated as absent, not as a path', async () => {
+  // A caller that copy-pasted the invocation out of the markdown without substitution.
+  const { out } = await run({ args: JSON.stringify({ packRoot: '${CLAUDE_PLUGIN_ROOT}' }) })
+  assert.equal(out.stopped, 'no-pack-root')
 })

@@ -72,7 +72,6 @@ export const meta = {
 // legitimately arrive as a bare source string, and an empty root would turn
 // every sibling path into a plausible-looking /skills/... that silently points
 // nowhere. Left as the placeholder it either expands or fails loudly.
-const PACK = (args && typeof args === 'object' && args.packRoot) || '${CLAUDE_PLUGIN_ROOT}'
 
 
 // ----------------------------------------------------------------- schemas ---
@@ -309,7 +308,9 @@ const RAN_CLAUSE = `
 // are the most expensive.
 const PATTERN_HUNT = { effort: 'high' }
 const DOC_HUNT = { effort: 'medium' }
-const REFS = `${PACK}/skills/code-bugs/references`
+// A function, not a constant: PACK is resolved after the arg parser below, and this is only
+// ever evaluated inside hunterPrompt() at dispatch time — long after that.
+const refsDir = () => `${PACK}/skills/code-bugs/references`
 // `concurrency` and `silent-failures` used to be two separate hunters. They are one now, and the
 // reason is how fan-out is billed: every extra subagent is a fresh context that re-reads the diff
 // and the surrounding source from scratch, and with no shared prefix it re-writes its whole cache
@@ -361,7 +362,7 @@ const hunterPrompt = (h, scope) => {
   }
   if (h.label === 'docs') {
     return `You are the DOCUMENTATION-CONSISTENCY hunter of a parallel bug scan over ${scope}.
-     Read ${REFS}/${h.ref} for what to look for. Run in DIFF mode: compare only the changed
+     Read ${refsDir()}/${h.ref} for what to look for. Run in DIFF mode: compare only the changed
      code against the project's written intent — spec.md/spec.html, todo.md, docs/*,
      DESIGN.md/ui-design.md, the **/CLAUDE.md hierarchy incl. nested module rules, README/ARCHITECTURE —
      and report divergences plus violations of stated CLAUDE.md rules. Use category
@@ -374,7 +375,7 @@ const hunterPrompt = (h, scope) => {
   // hunters pays the diff-reading cost once). Read them all, then hunt every category in one
   // pass over the same diff — the files are separate lists of failure shapes, not separate jobs.
   const refs = Array.isArray(h.ref) ? h.ref : [h.ref]
-  const refList = refs.map((r) => `${REFS}/${r}`).join(' and ')
+  const refList = refs.map((r) => `${refsDir()}/${r}`).join(' and ')
   return `Read ${refList} — those are the patterns you own; read ${refs.length > 1 ? 'those files' : 'only that file'}
      and no other reference file.${refs.length > 1
        ? ` They are two lists of failure shapes for ONE hunt: make a single pass over the diff
@@ -515,6 +516,39 @@ const opts = (() => {
   }
   return args && typeof args === 'object' && !Array.isArray(args) ? args : {}
 })()
+
+// --- Where the pack lives, and why this is a HALT ----------------------------
+// Seven things hang off this: both Codex tracks (run.sh), the deploy and teardown helpers, the
+// hunters' reference files, and the stats sink. It has to come from the CALLER, because
+// ${CLAUDE_PLUGIN_ROOT} is substituted in skill MARKDOWN and nowhere else — not inside a workflow
+// script the Workflow tool executes, and not in a subagent's shell, where the variable is unset and
+// bash expands it to the empty string.
+//
+// It used to be read off the RAW `args`, above the tolerant parser: `(args && typeof args ===
+// 'object' && args.packRoot)`. Callers hand over a JSON *string* almost every time — 0 object args
+// against 39 string ones across the stored history — and a string fails that typeof, so packRoot
+// went missing even when it WAS passed. Reading it from `opts` is the actual fix; everything below
+// is about failing honestly when it is genuinely absent.
+//
+// The old fallback was the placeholder itself, on the reasoning that it "either expands or fails
+// loudly". Neither half held. It does not expand, and it does not fail loudly: `python3
+// /skills/…/record-run.py` is a plain not-found, and the one track that surfaced it is the stats
+// sink — best-effort by design, so the row was lost in silence while every other path was equally
+// broken. A run that cannot locate its own tools must stop before it certifies anything.
+const PACK = (() => {
+  const p = typeof opts.packRoot === 'string' ? opts.packRoot.trim() : ''
+  // An unsubstituted placeholder is ABSENT, not a path — that is a caller who copied the
+  // invocation out of the markdown without the substitution happening.
+  return (!p || p.includes('CLAUDE_PLUGIN_ROOT')) ? '' : p
+})()
+if (!PACK) {
+  log('post-task-review: no usable `packRoot` in args — the pipeline cannot locate run.sh, the ' +
+      'worktree-deploy helper, the hunters\' reference files or the stats script. Stopping rather ' +
+      'than running with every tool path resolving under "/". Pass packRoot: "${CLAUDE_PLUGIN_ROOT}" ' +
+      'from the skill markdown, where that placeholder is actually substituted.')
+  return { stopped: 'no-pack-root' }
+}
+
 const scope = opts.scope === 'all' ? 'whole project' : 'the current git diff (working tree + staged)'
 // Ordered cheapest -> deepest. 'standard' exists because the gap between light and full was so
 // wide that every change able to alter behavior had to be routed to full, which made full the

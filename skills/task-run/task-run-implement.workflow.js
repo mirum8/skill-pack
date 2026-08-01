@@ -72,14 +72,6 @@ export const meta = {
   ],
 }
 
-// The pack root arrives from the caller, because ${CLAUDE_PLUGIN_ROOT} is
-// substituted in skill markdown but not inside a workflow script the Workflow
-// tool executes (FR-19). The SKILL.md invocation always passes it.
-// The fallback is the placeholder itself, never an empty string: `args` may
-// legitimately arrive as a bare source string, and an empty root would turn
-// every sibling path into a plausible-looking /skills/... that silently points
-// nowhere. Left as the placeholder it either expands or fails loudly.
-const PACK = (args && typeof args === 'object' && args.packRoot) || '${CLAUDE_PLUGIN_ROOT}'
 
 
 // ----------------------------------------------------------------- schemas ---
@@ -431,6 +423,34 @@ const opts = (() => {
   }
   return args && typeof args === 'object' && !Array.isArray(args) ? args : {}
 })()
+
+// --- Where the pack lives, and why this is a HALT ----------------------------
+// It has to come from the CALLER: ${CLAUDE_PLUGIN_ROOT} is substituted in skill MARKDOWN and
+// nowhere else — not inside a workflow script the Workflow tool executes (FR-19), and not in a
+// subagent's shell, where the variable is unset and bash expands it to the empty string.
+//
+// This used to be read off the RAW `args`, ABOVE the parser just above: `(args && typeof args ===
+// 'object' && args.packRoot)`. Callers hand over a JSON *string* almost every time — 0 object args
+// against 39 string ones across the stored history — and a string fails that typeof, so packRoot
+// went missing even when it WAS passed. Reading it from `opts` is the actual fix.
+//
+// The old fallback was the placeholder itself, on the reasoning that it "either expands or fails
+// loudly". Neither half held: it does not expand, and `python3 /skills/…/record-run.py` is a plain
+// not-found in the one step that is best-effort by design, so it failed in silence. Observed on a
+// real run of the sibling pipeline, where the same fallback broke seven tool paths at once.
+const PACK = (() => {
+  const p = typeof opts.packRoot === 'string' ? opts.packRoot.trim() : ''
+  // An unsubstituted placeholder is ABSENT, not a path.
+  return (!p || p.includes('CLAUDE_PLUGIN_ROOT')) ? '' : p
+})()
+if (!PACK) {
+  log('run-task-implement: no usable `packRoot` in args — the pipeline cannot locate the stats ' +
+      'script or any sibling tool. Stopping rather than running with tool paths resolving under ' +
+      '"/". Pass packRoot: "${CLAUDE_PLUGIN_ROOT}" from the skill markdown, where that placeholder ' +
+      'is actually substituted.')
+  return { stopped: 'no-pack-root' }
+}
+
 const rawSource = typeof opts.source === 'string' ? opts.source.trim() : ''
 if (!rawSource) {
   log('run-task-implement: no `source` in args — nothing to run')

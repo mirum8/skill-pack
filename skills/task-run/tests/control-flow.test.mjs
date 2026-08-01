@@ -804,16 +804,20 @@ test('REGRESSION: no build tool reports buildGreen "n/a", never a green build th
 
 test('a JSON-string arg is parsed, not silently read as undefined options', async () => {
   const { out } = await run({
-    args: JSON.stringify({ source: '#81', profile: 'light' }),
+    args: JSON.stringify({ source: '#81', profile: 'light', packRoot: '/pack' }),
     source: baseSource({ profile: 'light', exploreAspects: ['one'] }),
   })
   assert.equal(out.profile, 'light')
 })
 
-test('a bare non-JSON string arg is recovered as the task source', async () => {
+test('a bare non-JSON string arg is still recovered as the task source', async () => {
+  // The recovery still works — and the halt is what PROVES it. A caller handing over a bare "#81"
+  // has no way to also supply a packRoot, so such a run cannot locate its tools and stops. That it
+  // stops at 'no-pack-root' rather than 'no-source' is the evidence the string was read as the
+  // source: the parser did its job, and the error names the piece that is genuinely missing.
   const { out } = await run({ args: '#81', review: OK_REVIEW, planfix: OK_FIX })
-  assert.equal(out.stopped, undefined)
-  assert.equal(out.branch, 'issue-81-import')
+  assert.equal(out.stopped, 'no-pack-root')
+  assert.notEqual(out.stopped, 'no-source')
 })
 
 test('resume: a plan already at "implementing" skips planning and plan-review', async () => {
@@ -1106,3 +1110,30 @@ test('every judging track still keeps its own model and depth', async () => {
     assert.equal(optsBy[l].model, undefined, `${l} classifies — it must not be down-tiered`)
   }
 })
+
+// ------------------------------------------------ locating the pack itself ---
+// Same defect as task-review's: PACK is computed from the RAW args, hundreds of lines before the
+// tolerant parser every other option goes through — and callers hand over a JSON string almost
+// every time (0 object args vs 39 string ones across the stored history). ${CLAUDE_PLUGIN_ROOT} is
+// substituted in skill MARKDOWN, never inside a workflow script and never in a subagent's shell,
+// so the fallback reaches bash as the empty string and every tool path becomes `/skills/...`.
+
+test('args as a JSON STRING still resolves the pack root', async () => {
+  const { prompts } = await run({
+    args: '{"source":"#81","packRoot":"/pack"}', review: OK_REVIEW, planfix: OK_FIX,
+  })
+  assert.match(prompts['stats'], /\/pack\/skills\/task-review\/scripts\/record-run\.py/)
+  assert.doesNotMatch(prompts['stats'], /CLAUDE_PLUGIN_ROOT/)
+})
+
+test('no usable pack root is a HALT, not a run with broken tool paths', async () => {
+  const { out, counts } = await run({ args: '{"source":"#81"}' })
+  assert.equal(out.stopped, 'no-pack-root')
+  assert.equal(counts['source'], undefined, 'nothing may run before the tools can be located')
+})
+
+test('the literal placeholder is treated as absent, not as a path', async () => {
+  const { out } = await run({ args: JSON.stringify({ source: '#81', packRoot: '${CLAUDE_PLUGIN_ROOT}' }) })
+  assert.equal(out.stopped, 'no-pack-root')
+})
+

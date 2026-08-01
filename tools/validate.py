@@ -319,11 +319,30 @@ def check_paths():
                 continue   # the two flat originals in CANON are deliberate (FR-14)
             fail("FR-19", f"{rel} carries an absolute path into a skill directory "
                           f"({m.group(0)}…); it must resolve through a substituted variable")
-    wf = os.path.join(SKILLS, "task-review", "task-review.workflow.js")
-    if os.path.isfile(wf) and "|| '${CLAUDE_PLUGIN_ROOT}'" not in open(wf, encoding="utf-8").read():
-        fail("FR-19", "task-review.workflow.js no longer falls back to the ${CLAUDE_PLUGIN_ROOT} "
-                      "placeholder, so a run without args.packRoot would build /skills/... paths "
-                      "that point nowhere and look plausible")
+    # FR-19's pack-root rule, inverted by evidence. This used to REQUIRE the
+    # `|| '${CLAUDE_PLUGIN_ROOT}'` fallback, on the reasoning that without it a run missing
+    # args.packRoot would build /skills/... paths "that point nowhere and look plausible".
+    # That is exactly what the fallback itself produced: the placeholder is substituted in skill
+    # MARKDOWN only — never inside a workflow script, and never in a subagent's shell, where it is
+    # unset and bash expands it to the empty string. Observed on a real run: every one of
+    # task-review's seven PACK-derived paths resolved under "/", and only the stats sink said so,
+    # because it is the one step best-effort enough to swallow its own failure.
+    # So the rule now demands the opposite: resolve packRoot from the parsed options, and HALT when
+    # it is unusable. A pipeline that cannot locate its own tools must not certify anything.
+    for name, script in (("task-review", "task-review.workflow.js"),
+                         ("task-run", "task-run-implement.workflow.js")):
+        wf = os.path.join(SKILLS, name, script)
+        if not os.path.isfile(wf):
+            continue
+        text = open(wf, encoding="utf-8").read()
+        if "|| '${CLAUDE_PLUGIN_ROOT}'" in text:
+            fail("FR-19", f"{script} falls back to the literal ${{CLAUDE_PLUGIN_ROOT}} placeholder. "
+                          "It is not substituted inside a workflow script and reaches bash as the "
+                          "empty string, so every tool path resolves under '/'. Halt instead.")
+        if "stopped: 'no-pack-root'" not in text:
+            fail("FR-19", f"{script} does not halt on a missing/unusable packRoot. A run that "
+                          "cannot locate run.sh, the deploy helper or its reference files must "
+                          "stop rather than certify a review it never performed.")
 
 
 # --- FR-12 ------------------------------------------------------------------
