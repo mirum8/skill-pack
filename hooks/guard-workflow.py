@@ -42,18 +42,53 @@ GUARDED = ("post-task-review", "run-task-implement")
 NAME_DECL = re.compile(r"""name:\s*['"](?:%s)['"]""" % "|".join(GUARDED))
 META_DECL = re.compile(r"export\s+const\s+meta\s*=")
 
+# Where a pipeline script sits INSIDE a pack, relative to the pack root.
+PACK_RELATIVE = (
+    "skills/task-review/task-review.workflow.js",
+    "skills/task-run/task-run-implement.workflow.js",
+)
+
 PACK = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
 CANON = {
     os.path.realpath(os.path.expanduser(p))
     for p in (
-        os.path.join(PACK, "skills/task-review/task-review.workflow.js"),
-        os.path.join(PACK, "skills/task-run/task-run-implement.workflow.js"),
+        [os.path.join(PACK, rel) for rel in PACK_RELATIVE] if PACK else []
+    ) + [
         # The flat originals. FR-14 keeps them installed and working forever, so
         # an allow-list that dropped them would break the dual-run it promises.
         "~/.claude/skills/post-task-review/post-task-review.workflow.js",
         "~/.claude/skills/run-task/run-task-implement.workflow.js",
-    ) if p
+    ]
 }
+
+
+def in_a_copy_of_this_pack(rp):
+    """Is `rp` the canonical pipeline file of SOME copy of this pack?
+
+    $CLAUDE_PLUGIN_ROOT names the copy Claude Code loaded — the INSTALLED one.
+    The source checkout it was published from holds the same two files at the
+    same relative paths, and install.sh's own header calls that checkout the
+    place to edit them ("edit here, then re-run this script to publish"). Judging
+    only by the installed root therefore blocked maintenance at the one location
+    where maintenance happens, and said "forked pipeline" while doing it.
+
+    A copy is identified STRUCTURALLY, by the manifest two directories above the
+    script, never by where it happens to live. That keeps the property the guard
+    exists for: a stray `cp` of a pipeline into some other directory has no
+    manifest above it and is still refused, and so is a directory carrying
+    somebody else's plugin.
+    """
+    for rel in PACK_RELATIVE:
+        suffix = os.sep + rel.replace("/", os.sep)
+        if not rp.endswith(suffix):
+            continue
+        manifest = os.path.join(rp[: -len(suffix)], ".claude-plugin", "plugin.json")
+        try:
+            with open(manifest, encoding="utf-8") as f:
+                return json.load(f).get("name") == "r"
+        except (OSError, ValueError):
+            return False
+    return False
 
 
 def read(path):
@@ -113,8 +148,11 @@ def main():
         if not fp or not fp.endswith((".js", ".mjs")):
             sys.exit(0)          # only a script can be a forked pipeline
         rp = os.path.realpath(os.path.expanduser(fp))
-        if rp in CANON:
+        if rp in CANON or in_a_copy_of_this_pack(rp):
             sys.exit(0)          # maintaining a canonical file is allowed
+        # Deliberately NOT extended to the Workflow branch above: editing the
+        # source is maintenance, but RUNNING an uninstalled copy is the thing a
+        # fork does, and the two do not have to be relaxed together.
         new_content = ti.get("content") or ti.get("new_string") or ""
         if is_workflow(new_content) or is_workflow(read(rp)):
             block(f"{tool} {fp}")
