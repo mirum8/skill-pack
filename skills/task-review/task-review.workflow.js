@@ -52,7 +52,7 @@
 
 export const meta = {
   name: 'post-task-review',
-  description: 'Deterministic post-task review pipeline with light/standard/full tiers: triage+classify -> up-front review + fix (skipped in light; Codex --mode review + the security and docs hunters in standard; Codex adversarial + all 4 find-bugs hunters + code-quality in full) -> build -> local-scan (MANDATORY in every tier) -> end-verify (Codex --mode review everywhere; regression-only in full, over the final diff below it) -> UI (every tier, iff uiTouched): deploy once, then the functional and visual halves in parallel, with bounded loops and guaranteed teardown.',
+  description: 'Review the diff: find, fix once, build, scan, verify, UI',
   phases: [
     { title: 'Triage',     detail: 'classify diff + tier + detect build tool' },
     { title: 'Review',     detail: 'codex + hunters; all 5 hunters and code-quality in full' },

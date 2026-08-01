@@ -61,7 +61,7 @@
 
 export const meta = {
   name: 'run-task-implement',
-  description: 'Deterministic run-task Steps 0-4 at one of three tiers (light | standard | full): resolve source + classify the tier -> Explore fan-out -> plan (brief in light, Opus xhigh otherwise) -> Codex plan review in full only (bounded re-review) -> TDD implement via domain subagents -> bounded build loop. Stops after a green build and returns the handoff for the caller to review and finish.',
+  description: 'Steps 0-4: plan, Codex plan review, TDD implement, green build',
   phases: [
     { title: 'Source',      detail: 'resolve task + criteria + tier + build tool' },
     { title: 'Explore',     detail: 'read-only fan-out over the change surface', model: 'sonnet' },
