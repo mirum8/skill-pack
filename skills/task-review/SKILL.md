@@ -22,6 +22,8 @@ The single entry point for the user's post-task verification. It runs over the *
 
 The shape is **find everything → fix everything → verify once.** All analysis happens up front in one parallel pass, all fixes happen in one phase, and a single bounded end-verify at the close re-checks the code the fixes/refactor/scan wrote — so nothing the routine itself changed ships unreviewed, without re-running a full review after every step.
 
+**What runs off the critical path.** Three things are dispatched early or in parallel because nothing waits on them: the docker image **pre-warm** starts at Triage (it builds without starting anything, so it can only ever be a warm cache); the **docs hunter** runs outside the review join, because doc drift is a list handed to the user and never an auto-fix; and the **end-verify and the UI verification run together**, since one reads the git diff and the other drives a browser against a deployed image. That last one has a guard: if an end-verify fixer lands in a frontend file, the UI halves re-deploy and re-verify once, because what they looked at is then stale.
+
 ## How this runs — deterministic Workflow in the main thread, prose pipeline as the fallback
 
 This routine has **one definition** — the graph of Steps 0–9 — with **two execution engines**, chosen by *where you're running*. **In the main thread, run the deterministic `Workflow`.** When you can reach the `Workflow` tool (a direct `/r:task-review`, or a `/r:task-run` you invoked yourself in the main thread), run the pipeline as the prototype script — do not hand-execute the steps:
@@ -54,6 +56,7 @@ Pass `args` through when relevant:
 | `{ baselineBuilt: true }` | the caller *just* ran a clean green build in this working tree, so skip the run's own clean build. Pass **only** from a handoff reading `buildGreen: true` |
 | `{ deferCommit: true }` | the caller commits the whole task once at the end (e.g. `/r:task-run`), so the readability refactor lands in the working tree instead of as its own commit |
 | `{ taskIntent: "…" }` | 1–3 sentences on what the change set out to accomplish |
+| `{ planReviewed: true }` | Codex already reviewed the **plan** for this task, so `full`'s up-front pass runs `--mode review` instead of the adversarial one. Pass **only** from a handoff reading `planReview.ran: true` |
 | `{ profile: "light" \| "standard" \| "full" }`, `{ uiTouched: bool }` | force the tier / the UI gate |
 
 `taskIntent` is threaded into every fix subagent so it doesn't "fix" (undo) something intentional; `/r:task-run` passes it automatically. When it's omitted, Triage infers it from the diff and any `.task-plans/*.md` plan file, so a standalone `/r:task-review` still gets one.
@@ -72,10 +75,10 @@ The tier scales **depth**, never integrity. Phase 0 picks it from the diff by th
 
 | | light | standard | full |
 |---|---|---|---|
-| up-front Codex | – | `--mode review` | **adversarial** (challenges the approach) |
+| up-front Codex | – | `--mode review` | **adversarial**, or `--mode review` when `planReviewed` |
 | pattern hunters (`logic`, `runtime-and-failures`) | – | – | ✅ |
 | security hunter (real `/security-review`) | – | ✅ *if the diff has security surface* | ✅ *same gate* |
-| docs hunter (code/doc drift) | – | ✅ | ✅ |
+| docs hunter (code/doc drift) | – | ✅ *off the critical path* | ✅ *off the critical path* |
 | `/r:code-quality` (readability) | – | – | ✅ |
 | build + tests | ✅ | ✅ | ✅ |
 | `/r:code-scan` static analysis | ✅ | ✅ | ✅ |

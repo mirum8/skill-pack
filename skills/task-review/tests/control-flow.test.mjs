@@ -116,11 +116,12 @@ test('light tier skips the up-front fan-out but always end-verifies', async () =
   assert.match(logText, /light tier/)
 })
 
-test('standard tier runs Codex --mode review + the security and docs hunters only', async () => {
+test('standard tier runs Codex --mode review + the security hunter only', async () => {
   const { out, counts, prompts, logText } = await run({ args: { profile: 'standard' } })
   assert.equal(out.profile, 'standard')
-  // The two hunters a diff review cannot stand in for: the real /security-review, and the docs
-  // hunter that is the sole feed for the docDrift bucket.
+  // The one hunter a diff review cannot stand in for: the real /security-review. The docs hunter
+  // also runs at this tier, but outside the barrier — it feeds a list handed to the user, so
+  // nothing downstream waits on it.
   assert.equal(counts['find-bugs:security'], 1)
   assert.equal(counts['find-bugs:docs'], 1)
   // The pattern hunters are what standard trades for the Codex read.
@@ -142,12 +143,15 @@ test('standard tier runs Codex --mode review + the security and docs hunters onl
   assert.doesNotMatch(prompts['end-verify#1'], /ONLY Codex review/)
   // Nothing reviewed readability at this tier, so the bucket must stay empty rather than be
   // back-filled from the other reports — /r:code-refactor would otherwise chase unflagged code.
-  assert.match(prompts['fix-triage'], /code-quality did NOT run at this tier/)
-  assert.match(prompts['fix-triage'], /code-quality: \(not run at this tier\)/)
+  // Nothing reviewed readability at this tier, so no readability triage agent is spawned at all —
+  // an empty bucket needs no adjudicating, and an agent given one would fill it from the other
+  // reports and send /r:code-refactor after code no reviewer flagged.
+  assert.equal(counts['fix-triage-readability'], undefined)
+  assert.match(prompts['fix-triage'], /codex \(review\)/)
 })
 
 test('full tier keeps every hunter and the ADVERSARIAL codex — never the light reviewer', async () => {
-  const { counts, prompts } = await run() // baseTriage is full
+  const { counts, prompts } = await run() // baseTriage is full, and no plan review is certified
   for (const h of ['logic', 'runtime-and-failures', 'security', 'docs']) {
     assert.equal(counts[`find-bugs:${h}`], 1, `full must dispatch the ${h} hunter`)
   }
@@ -163,6 +167,33 @@ test('full tier keeps every hunter and the ADVERSARIAL codex — never the light
   // The two modes are different machines, and only the adversarial one challenges the approach.
   assert.doesNotMatch(prompts['codex'], /--mode review/)
   assert.match(prompts['codex'], /adversarial\/challenge review/)
+  // Both triage halves run at full, because both their inputs exist.
+  assert.equal(counts['fix-triage'], 1)
+  assert.equal(counts['fix-triage-readability'], 1)
+})
+
+test('a caller that already had Codex review the PLAN gets the lighter up-front pass', async () => {
+  // /r:task-run's full tier challenges the approach BEFORE any code exists — measured at ~24
+  // findings raised and ~20 folded in, every run. Challenging it again over the finished diff is
+  // the most duplicated expensive step in the chain, so the pass spends itself on the code instead.
+  // Every other full-tier track is untouched.
+  const { out, counts, prompts, logText } = await run({ args: { planReviewed: true } })
+  assert.equal(out.profile, 'full')
+  assert.match(prompts['codex'], /--mode review/)
+  assert.doesNotMatch(prompts['codex'], /adversarial\/challenge review/)
+  assert.match(logText, /already reviewed the PLAN/)
+  for (const h of ['logic', 'runtime-and-failures', 'security', 'docs']) {
+    assert.equal(counts[`find-bugs:${h}`], 1, `the ${h} hunter is unaffected`)
+  }
+  assert.equal(counts['code-quality'], 1)
+})
+
+test('planReviewed is fail-open — anything but an explicit true keeps the adversarial pass', async () => {
+  for (const v of [undefined, false, 'yes', 1]) {
+    const { prompts } = await run({ args: v === undefined ? {} : { planReviewed: v } })
+    assert.match(prompts['codex'], /adversarial\/challenge review/,
+      `planReviewed=${JSON.stringify(v)} must not buy the lighter pass`)
+  }
 })
 
 test('a track the tier never dispatched is not reported as blocked', async () => {
@@ -371,11 +402,35 @@ test('at standard the blocked track is named for what actually ran, not "find-bu
   // Reporting `r:code-bugs` blocked for a tier that never dispatched find-bugs tells the caller a
   // tool died when nothing did — and sends whoever reads the summary after the wrong failure.
   const { out, logText } = await run({
-    args: { profile: 'standard' }, overrides: { 'find-bugs:docs': null },
+    args: { profile: 'standard' }, overrides: { 'find-bugs:security': null },
   })
-  assert.ok(out.tracksBlocked.includes('security+docs hunters'))
+  assert.ok(out.tracksBlocked.includes('security hunter'))
   assert.ok(!out.tracksBlocked.includes('find-bugs'))
-  assert.match(logText, /security\+docs hunters: hunter\(s\) BLOCKED — docs/)
+  assert.match(logText, /security hunter: hunter\(s\) BLOCKED — security/)
+})
+
+test('the docs hunter is reported on its own, because it runs outside the barrier', async () => {
+  // It is still a dispatched track: a caller has to be able to see that nothing checked the change
+  // against the documentation. Being off the critical path is not the same as being optional.
+  const { out, logText } = await run({ overrides: { 'find-bugs:docs': null } })
+  assert.ok(out.tracksBlocked.includes('docs'))
+  assert.ok(!out.tracksBlocked.includes('find-bugs'), 'the blocking hunters were fine')
+  assert.match(logText, /docs hunter track BLOCKED/)
+  assert.match(logText, /coverage hole, not a clean bill/)
+})
+
+test('doc drift comes straight from the docs hunter, never through triage', async () => {
+  // It is a list handed to the USER — never a fix, never an input to the build — so routing it
+  // through a filter that cannot act on it only made the fix phase wait for it.
+  const { out, prompts } = await run({
+    overrides: {
+      'find-bugs:docs': { ran: true, findings: [
+        { file: 'README.md', line: 4, category: 'doc-drift', what: 'documents the old flag name' }] },
+    },
+  })
+  assert.deepEqual(out.docDrift, ['README.md:4 documents the old flag name'])
+  assert.doesNotMatch(prompts['fix-triage'], /docDrift/,
+    'correctness triage must not be handed a bucket it does not own')
 })
 
 // --------------------------------------------- the security hunter's own gate ---
@@ -414,15 +469,18 @@ test('a skipped security hunter is reported as a SKIP, never as coverage', async
   assert.match(prompts['fix-triage'], /skip, not a clean bill/)
 })
 
-test('at standard with no security surface, the blocked track is named "docs hunter"', async () => {
-  const { out, logText } = await run({
+test('at standard with no security surface, no hunter is dispatched inside the barrier', async () => {
+  // Both members of the standard set are gone — the security hunter by its own surface gate, the
+  // docs hunter because it never belonged to this barrier. The name has to say that plainly rather
+  // than report a tool failure.
+  const { out, counts, logText } = await run({
     args: { profile: 'standard' },
     triage: baseTriage({ securitySurface: false }),
-    overrides: { 'find-bugs:docs': null },
   })
-  assert.ok(out.tracksBlocked.includes('docs hunter'))
-  assert.ok(!out.tracksBlocked.includes('security+docs hunters'))
-  assert.match(logText, /docs hunter: hunter\(s\) BLOCKED — docs/)
+  assert.equal(counts['find-bugs:security'], undefined)
+  assert.equal(counts['find-bugs:docs'], 1, 'the docs hunter still runs, off the barrier')
+  assert.deepEqual(out.tracksBlocked, [])
+  assert.match(logText, /security hunter SKIPPED/)
 })
 
 test('the security hunter passes its scope to the skill and does not re-derive the diff', async () => {
@@ -857,4 +915,147 @@ test('FR-22: an absent codex plugin is reported skipped, and never as a clean re
   assert.ok(!out.tracksBlocked.includes('codex'), 'a skip is not a tool failure')
   assert.match(logText, /codex SKIPPED/)
   assert.match(logText, /NOT faked/)
+})
+
+// ------------------------- end-verify and the UI track share one barrier ---
+// They were serial and they are the two longest blocks in the pipeline (UI: median 542s, p90
+// 1150s; end-verify: up to two Codex passes each followed by a fixer). They read different
+// things — the git diff versus a deployed image — so they overlap, and everything that WRITES
+// waits for the join.
+
+const uiTriage = (over = {}) => baseTriage({
+  uiTouched: true, hasTestApp: true, hasFrontend: true, ...over,
+})
+const feFinding = {
+  file: 'src/main/resources/templates/rates.html', line: 10,
+  category: 'ui', what: 'the empty state renders the raw key', real: true,
+}
+
+test('the UI deploy starts before the end-verify has finished fixing', async () => {
+  // The lock on the overlap itself. In the old serial ordering the deploy came strictly after
+  // every end-verify pass AND its fixer; now it must not wait for them.
+  const { order } = await run({
+    triage: uiTriage(), args: { profile: 'light' },
+    overrides: { 'end-verify#1': { ran: true, findings: [finding()] } },
+  })
+  assert.ok(order.includes('ui-deploy'), 'the UI track must have run')
+  assert.ok(order.indexOf('ui-deploy') < order.indexOf('end-verify-fix#1'),
+    'the UI deploy must not wait on the end-verify fixer')
+})
+
+test('an end-verify fix in a FRONTEND file re-deploys and re-verifies once', async () => {
+  // The honesty cost of overlapping: the halves read an image built before that fix landed, so
+  // what they verified is stale. One more pass — never a loop — and the worst case is exactly
+  // the serial ordering this replaced.
+  const { counts, logText } = await run({
+    triage: uiTriage(), args: { profile: 'light' },
+    overrides: { 'end-verify#1': (n) => n === 1 ? { ran: true, findings: [feFinding] } : CLEAN },
+  })
+  assert.equal(counts['ui-deploy'], 2, 'the stale verdict must be re-taken')
+  assert.equal(counts['ui-functional'], 2)
+  assert.equal(counts['ui-visual'], 2)
+  assert.match(logText, /re-deploying and re-verifying once/)
+})
+
+test('an end-verify fix in a BACKEND file does not re-run the UI track', async () => {
+  // The common case, and the whole point of the overlap: end-verify fixes are overwhelmingly
+  // backend, and nothing about them changes what the browser saw.
+  const { counts, logText } = await run({
+    triage: uiTriage(), args: { profile: 'light' },
+    overrides: { 'end-verify#1': (n) => n === 1 ? { ran: true, findings: [finding()] } : CLEAN },
+  })
+  assert.equal(counts['ui-deploy'], 1)
+  assert.doesNotMatch(logText, /re-deploying and re-verifying/)
+})
+
+test('a DEAD end-verify fixer cannot trigger a re-verify — it changed nothing', async () => {
+  const { counts } = await run({
+    triage: uiTriage(), args: { profile: 'light' },
+    overrides: {
+      'end-verify#1': (n) => n === 1 ? { ran: true, findings: [feFinding] } : CLEAN,
+      'end-verify-fix#1': null,
+    },
+  })
+  assert.equal(counts['ui-deploy'], 1, 'no edit landed, so nothing the halves read went stale')
+})
+
+test('teardown still runs when a UI half dies inside the barrier', async () => {
+  // parallel() swallows a thrown thunk into a null, so a teardown nested inside the UI track
+  // would be skipped exactly when it is needed most. It lives in a finally around the barrier.
+  const { counts, logText } = await run({
+    triage: uiTriage(), overrides: { 'ui-visual': null },
+  })
+  assert.equal(counts['ui-teardown'], 1)
+  assert.match(logText, /UI half BLOCKED — ui-visual/)
+})
+
+test('teardown runs even when the deploy itself failed', async () => {
+  const { out, counts } = await run({
+    triage: uiTriage(), overrides: { 'ui-deploy': { ok: false, reason: 'port in use' } },
+  })
+  assert.equal(counts['ui-teardown'], 1)
+  assert.equal(counts['ui-functional'], undefined, 'nothing may test a stack that never came up')
+  assert.equal(out.ui.blocked, true)
+})
+
+test('no teardown agent is spawned when the UI track never ran', async () => {
+  const { counts } = await run() // backend-only diff: uiTouched false
+  assert.equal(counts['ui-teardown'], undefined)
+  assert.equal(counts['ui-prewarm'], undefined)
+})
+
+test('the docker pre-warm starts at triage, not alongside the end-verify', async () => {
+  // Started here it overlaps the review, the fix phase, the build and the scan as well — the
+  // deploy is 42% of the UI step's tool time and took over two minutes in 17 of 56 stored runs.
+  const { order, opts } = await run({ triage: uiTriage() })
+  assert.equal(opts['ui-prewarm'].phase, 'Triage')
+  assert.ok(order.indexOf('ui-prewarm') < order.indexOf('build#1'),
+    'the image build must be warming while the review and build run')
+})
+
+// ------------------------------------------- model tiers, not just effort ---
+// Both pipelines pinned `effort` almost everywhere and `model` almost nowhere, so an agent marked
+// "nothing to decide" still ran on whatever the session was on — through a /r:task-run chain, Opus,
+// to run one shell script. These lock the split: what only echoes a command runs cheapest, and
+// everything that classifies or composes stays where it is.
+
+test('the pure command-runners run on haiku', async () => {
+  const { opts } = await run({ triage: baseTriage({ uiTouched: true, hasTestApp: true, hasFrontend: true }) })
+  for (const l of ['ui-prewarm', 'ui-teardown', 'stats']) {
+    assert.equal(opts[l].model, 'haiku', `${l} runs one fixed command and reports its output`)
+    assert.equal(opts[l].effort, 'low')
+  }
+})
+
+test('the post-scan rebuild is sonnet — its in-scope call is already made for it', async () => {
+  // It is a build, but not a classifying one: the tree was fully green before local-scan ran, so
+  // any failure here is in-scope by construction and the prompt says so.
+  const { opts, prompts } = await run({
+    overrides: { 'local-scan': { status: 'ok', changedCode: true } },
+  })
+  assert.equal(opts['rebuild'].model, 'sonnet')
+  assert.match(prompts['rebuild'], /ANY failure here is a regression from local-scan's own self-fixes/)
+})
+
+test('the builds that DO classify keep the session model', async () => {
+  // in-scope vs pre-existing is load-bearing both ways: wrongly "in-scope" edits somebody else's
+  // failing test, wrongly "pre-existing" halts a run that should have proceeded.
+  const { opts } = await run({ triage: baseTriage({ uiTouched: true, hasTestApp: true }) })
+  assert.equal(opts['build#1'].model, undefined)
+  assert.equal(opts['ui-deploy'].model, undefined, 'it must tell a real failure from a slow start')
+})
+
+test('every judging track still inherits the session model', async () => {
+  const { opts } = await run({
+    overrides: {
+      'find-bugs:logic': { ran: true, findings: [finding()] },
+      'code-quality': { ran: true, findings: [finding('long method')] },
+      'fix-triage': { correctness: [{ item: `${CHANGED}:42 fix it`, source: 'logic' }] },
+      'fix-triage-readability': { readability: ['extract a method'] },
+    },
+  })
+  for (const l of ['find-bugs:logic', 'find-bugs:security', 'code-quality', 'fix-triage',
+                   'fix-triage-readability', 'fix-correctness', 'local-scan']) {
+    assert.equal(opts[l].model, undefined, `${l} forms an opinion — it must not be down-tiered`)
+  }
 })

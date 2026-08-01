@@ -127,9 +127,13 @@ const TRIAGE = {
 // reports it was handed already keyed by track, not inferring, and an open string field would
 // fill the stats sink with near-miss spellings that never aggregate.
 const FIX_SOURCES = ['codex', 'security', 'docs', 'logic', 'runtime-and-failures']
-const FIXLIST = {
+// Triage is SPLIT by bucket — one agent per bucket, in parallel — so each returns only its own.
+// The buckets never shared an input: correctness reads the hunter + codex reports, readability
+// reads only code-quality, and docDrift is not triaged at all any more (it comes straight from the
+// docs hunter, because it is a list handed to the user rather than a fix anyone applies).
+const CORRECTNESS_LIST = {
   type: 'object', additionalProperties: false,
-  required: ['correctness', 'readability', 'docDrift'],
+  required: ['correctness'],
   properties: {
     // {item, source} rather than a bare string: without the source, every downstream count is
     // "the review fixed 8 things" and no one can ever ask WHICH track found them — which is the
@@ -146,8 +150,13 @@ const FIXLIST = {
         },
       },
     },
+  },
+}
+const READABILITY_LIST = {
+  type: 'object', additionalProperties: false,
+  required: ['readability'],
+  properties: {
     readability: { type: 'array', items: { type: 'string' } }, // always /r:code-quality
-    docDrift: { type: 'array', items: { type: 'string' } },    // always the docs hunter
   },
 }
 const BUILD = {
@@ -445,8 +454,19 @@ async function hunterFanOut(scope, hunters, trackName) {
 // entered through the Skill tool. Called by scriptPath — which /r:gh-issues-fix does for every group
 // — nothing sets it, and these agents silently take the SESSION's effort instead. Pinning makes the
 // review's depth a property of the pipeline rather than of how it happened to be invoked.
-const MECHANICAL = { effort: 'low' }    // runs a script / fills a template — nothing to decide
+// Run one fixed command and report what it printed. No branch, no classification, no prose —
+// whatever decides anything about the result decides it in THIS script, not in the agent. These
+// pinned effort but not MODEL, so a step marked "nothing to decide" was still running whatever the
+// session was on; through a /r:task-run chain that is Opus, to run `worktree-deploy.sh teardown`.
+const ECHO = { model: 'haiku', effort: 'low' }
+// Cheap, but not the echo tier: it composes prose (a GitHub issue body) or has a fallback path to
+// choose between.
+const MECHANICAL = { model: 'sonnet', effort: 'low' }
 const BUILD_RUN = { effort: 'medium' }  // runs the build, but must classify in-scope vs pre-existing failures
+// The post-local-scan rebuild is a build too, but not a classifying one: the build was fully green
+// before local-scan ran, so the prompt can tell it that ANY failure here is in-scope by
+// construction. That is the whole judgement BUILD_RUN exists to protect, and it is already made.
+const REBUILD_RUN = { model: 'sonnet', effort: 'medium' }
 // The Codex tracks (`codex`, every `end-verify` pass) shell out to the real Codex CLI, wait, and
 // parse the report it produces. CODEX does the reviewing; the wrapper's own reasoning adds nothing
 // to the critique, and it was paying the top tier on every standard and full run plus up to two
@@ -622,6 +642,39 @@ const profile = TIERS.includes(opts.profile)
 const uiTouched = (typeof opts.uiTouched === 'boolean') ? opts.uiTouched : !!triage.uiTouched
 log(`post-task-review: tier=${profile}, uiTouched=${uiTouched} (${TIERS.includes(opts.profile) ? 'caller-set' : 'classified'})`)
 
+// --- Two things started HERE, because nothing on the critical path is waiting for them -------
+//
+// 1. The docker image pre-warm for the UI step. Measured over 59 stored UI runs the deploy is 42%
+//    of that step's tool time and took over two minutes in 17 of 56 runs (worst: 607s), all of it
+//    on the critical path at the very end. This used to start alongside the end-verify, which
+//    overlapped it with one phase; started here it overlaps the review, the fix phase, the build
+//    and the static scan as well. Build-only — nothing starts, so it cannot serve stale code, and
+//    a fixer editing a file below simply invalidates the layers that file touches, which the real
+//    deploy then rebuilds. The cache is an optimisation, never the artifact under test. The helper
+//    always exits 0 and Phase 7 never reads this result, so a failed pre-warm costs a cold build
+//    and nothing else.
+//
+// 2. The docs hunter. Its findings feed `docDrift`, which is a list handed to the USER — never a
+//    fix, never an input to the build. Keeping it inside the Review barrier meant the fix phase
+//    waited on a track whose output it does not consume.
+const uiWanted = uiTouched
+const prewarmP = (uiWanted && triage.hasTestApp)
+  ? agent(
+      `Run \`"${PACK}/skills/task-review/scripts/worktree-deploy.sh" prewarm\` from the
+       repo root and report its stderr line verbatim. It builds the app image WITHOUT starting
+       anything, to warm the docker layer cache for a deploy that happens later in this run.
+       It always exits 0 by design. Do NOT start containers, do NOT deploy, do NOT touch the repo,
+       and do NOT treat a skip or a failed build as a problem — a cold cache is slow, not wrong.`,
+      { label: 'ui-prewarm', phase: 'Triage', ...GP, ...ECHO }).catch(() => null)
+  : null
+
+const DOCS_HUNTER = HUNTERS.find((h) => h.label === 'docs')
+const docsP = profile === 'light' ? null
+  : reliable('find-bugs:docs', 'Review', () => agent(
+      hunterPrompt(DOCS_HUNTER, scope),
+      { label: 'find-bugs:docs', phase: 'Review', schema: FINDINGS,
+        agentType: DOCS_HUNTER.agentType, ...DOC_HUNT })).catch(() => null)
+
 // A fixer's self-check only has to prove the code COMPILES. The prompt used to say just "verify it
 // compiles" with no command, so a fixer could plausibly reach for the full clean build — a whole
 // hidden test-suite run, seconds before the pipeline runs the suite itself. Naming the cheap command
@@ -641,25 +694,40 @@ const noFullBuild = triage.buildTool === 'none' ? ''
 // Light: skip the fan-out entirely — the change cannot alter behavior, and a single Codex
 // --mode review pass over the final diff (Phase 6) is the review.
 // Standard: a real Codex read of the PRE-FIX diff (the lighter built-in reviewer, --mode review)
-// plus the two hunters that read of the diff cannot stand in for — the security hunter, which
-// invokes the real /security-review, and the docs hunter, whose code/doc drift is the sole feed
-// for the docDrift bucket. What standard trades away are the PATTERN hunters (logic, and
+// plus the one hunter a diff review cannot stand in for — the security hunter, which invokes the
+// real /security-review. What standard trades away are the PATTERN hunters (logic, and
 // runtime-and-failures = concurrency/performance + silent failures) and the code-quality pass, a
 // polish concern rather than a correctness one. The trade is an independent tool over the
 // LLM pattern-matchers; the coverage it costs is the performance-at-scale lens (N+1, unbounded
 // fetches, pool exhaustion), which /r:code-scan partly picks up and which a diff-scoped reviewer
 // is least likely to flag — worth knowing when reading a clean standard run.
 // Full: the strict ADVERSARIAL Codex review (it challenges the approach, not just the code) plus
-// all four hunters plus code-quality, so triage in Phase 2 sees the whole field.
+// the three blocking hunters plus code-quality, so triage in Phase 2 sees the whole field.
+// The DOCS hunter runs in both tiers but outside this barrier — see HUNTER_SET.
 // Build (Phase 4) and static analysis (Phase 5) run in EVERY tier.
 //
 // The two Codex modes are different machines, not two settings of one dial: `r:code-adversarial`
 // is a prompt-driven session that challenges design choices, `review` calls Codex's native
 // reviewer API, which fetches its own diff and HARD-ERRORS on trailing focus text. Never pass
 // focus text with the latter.
-const codexMode = profile === 'full' ? 'adversarial-review'
+//
+// The full tier's ADVERSARIAL pass has one more gate on it: `planReviewed`. /r:task-run's implement
+// half already runs a real Codex review of the PLAN at full tier, before a line of code exists —
+// measured across 9 stored implement runs it raised ~24 findings and folded ~20 of them in, every
+// time. Challenging the approach again over the finished diff is the most duplicated expensive step
+// in the chained pipeline, and it is the slowest kind of Codex run there is. So when the caller
+// certifies that the approach was already challenged, this pass drops to the built-in reviewer and
+// spends itself on the CODE instead. `=== true` is the fail-open: a caller that says nothing, or a
+// run-task whose tier was below full and therefore ran no plan review, still gets adversarial.
+const planReviewed = opts.planReviewed === true
+const codexMode = profile === 'full' ? (planReviewed ? 'review' : 'adversarial-review')
   : profile === 'standard' ? 'review'
   : null
+if (profile === 'full' && planReviewed) {
+  log('post-task-review: full tier, but the caller certifies Codex already reviewed the PLAN for ' +
+      'this task — the up-front pass runs --mode review over the diff rather than re-challenging an ' +
+      'approach that was challenged before it was built. Every other full-tier track is unchanged.')
+}
 const wantCodexUpfront = !!codexMode
 const wantQuality = profile === 'full'
 // Which hunters this tier dispatches, and what to CALL that track. At standard the track is not
@@ -673,18 +741,25 @@ const wantQuality = profile === 'full'
 // 19 dispatches, 0 findings, ~232k cache-write tokens each. `!== false` is the fail-open: only an
 // explicit "no security surface" from triage skips it, never a missing field.
 const securitySurface = triage.securitySurface !== false
+// The DOCS hunter is dispatched separately, below, and is deliberately not a member of this set.
+// It is the one finding track whose output the pipeline never acts on: doc drift resolves to
+// update-doc / update-code / confirm-intent, which is the USER's call, so its findings are
+// surfaced and never auto-fixed (measured: 0.00 fixes per run by construction, 3.9 items surfaced).
+// A track nothing downstream consumes has no business inside a barrier that the fix phase waits
+// on — it was holding up triage to deliver a list that goes straight to the caller.
 const HUNTER_SET = (profile === 'full'
   ? HUNTERS
-  : HUNTERS.filter((h) => h.label === 'security' || h.label === 'docs')
-).filter((h) => h.label !== 'security' || securitySurface)
+  : HUNTERS.filter((h) => h.label === 'security')
+).filter((h) => h.label !== 'docs')
+ .filter((h) => h.label !== 'security' || securitySurface)
 const hunterTrack = profile === 'full' ? 'find-bugs'
-  : securitySurface ? 'security+docs hunters' : 'docs hunter'
+  : securitySurface ? 'security hunter' : 'no hunters'
 if (!securitySurface && profile !== 'light') {
   log('post-task-review: security hunter SKIPPED — triage found no security surface in this diff ' +
       '(no auth/session, upload or file IO, new endpoint, SQL, crypto/secrets, untrusted parsing, ' +
       'raw template output or security config). Nothing was security-reviewed; this is a skip, not a clean bill.')
 }
-let codex, bugs, quality, fixList
+let codex, bugs, quality, docs, fixList
 let nothingToFix = true
 // Correctness fixes counted per finding track — the stats sink's whole reason to exist. Declared
 // out here because the light tier skips the block below entirely and the return still reads it.
@@ -743,58 +818,93 @@ for (const [name, r, ran] of [['codex', codex, wantCodexUpfront],
 }
 if (profile === 'standard') {
   log('post-task-review: standard tier — a Codex --mode review pass read the diff, alongside the ' +
-      'security hunter (the real /security-review) and the docs hunter. Skipped at this tier: the ' +
+      'security hunter (the real /security-review). The docs hunter ran too, off the barrier. Skipped at this tier: the ' +
       '/r:code-bugs pattern hunters (logic; runtime-and-failures = concurrency/performance + silent failures), the ' +
       'up-front codex ADVERSARIAL pass and /r:code-quality. A second Codex --mode review over the ' +
       'FINAL diff always runs below, and build/tests + local-scan are unchanged.')
 }
 
-// --- Phase 2: triage once into a bucketed fix-list ---------------------------
+// --- Phase 2: triage into a bucketed fix-list, SPLIT by bucket ---------------
+// One agent per bucket, in parallel, because the two buckets share nothing: correctness reads the
+// hunter + codex reports and decides what is a real defect; readability reads only code-quality and
+// decides what is a behavior-preserving clarity win. Merging them meant one serial agent swallowing
+// the full JSON of every report — the same shape as the plan-review triage that measured 11 minutes
+// and 122k tokens before it was split. The readability agent does not even exist below full, where
+// code-quality never runs.
+//
+// docDrift is no longer triaged at all: it comes straight from the docs hunter. Routing a list that
+// is only ever handed to the user through a filter that cannot act on it bought nothing, and it was
+// the reason the docs hunter had to finish before this phase could start.
 phase('Fix-triage')
-fixList = await reliable('fix-triage', 'Fix-triage', () => agent(
-  `You are Step 3 triage. REPORT-ONLY: do NOT edit, write, or run any code — your ONLY
-   output is the fix-list. Below are the review reports this tier produced — a report marked
-   "(not run at this tier)" is a deliberate tier decision, not a missing input to work around
-   (filter false positives using the intent of the change, stated below). Produce a fix-list in
-   three buckets:
-   - correctness: from the hunters + codex. Each item is {item, source}: 'item' is the
-     file:line + intended fix, and 'source' is the track that found it. Every finding below
-     already carries a "source" field — COPY it, don't re-derive it. When two tracks reported
-     the same defect, attribute it to the FIRST one listed here; when a finding somehow has no
-     source, use the report it came out of. Valid sources: ${FIX_SOURCES.join(' | ')}.
-     This is how the run records which track earns its keep, so a wrong label is worse than
-     a missing item — never guess one to make an entry look complete.
-   - readability: from code-quality — ONLY genuinely BEHAVIOR-PRESERVING clarity wins
-     (rename, extract method, dedup). If an item would change behavior (e.g. "replace the
-     loop with a stream that treats empty input differently"), it is NOT a readability item:
-     route it to correctness or drop it. /r:code-refactor's behavior-lock gate will refuse a
-     behavior-changing "readability" item, so don't hand it one.${wantQuality ? '' : `
-     >> code-quality did NOT run at this tier, so this bucket must come back EMPTY. Do not
-     mine the other reports for readability work to fill it — nothing reviewed readability,
-     and inventing items here would send /r:code-refactor after code no reviewer flagged.`}
-   - docDrift: the hunter findings whose category is 'doc-drift' — the docs hunter's
-     code/doc divergences. These are user decisions, not fixes: just list them, and keep
-     them OUT of correctness so nobody "fixes" a doc mismatch by changing the code.
-   A finding that contradicts the intent below is a false positive — drop it.
+const triageIntro = `You are Step 3 triage. REPORT-ONLY: do NOT edit, write, or run any code — your
+   ONLY output is your part of the fix-list. A report marked "(not run at this tier)" is a
+   deliberate tier decision, not a missing input to work around. A finding that contradicts the
+   intent below is a false positive — drop it.`
+
+const [correctnessList, readabilityList] = await parallel([
+  () => reliable('fix-triage', 'Fix-triage', () => agent(
+    `${triageIntro}
+
+   Produce the CORRECTNESS bucket only, from the hunter and codex reports below. Each item is
+   {item, source}: 'item' is the file:line + intended fix, and 'source' is the track that found it.
+   Every finding already carries a "source" field — COPY it, don't re-derive it. When two tracks
+   reported the same defect, attribute it to the FIRST one listed here; when a finding somehow has
+   no source, use the report it came out of. Valid sources: ${FIX_SOURCES.join(' | ')}.
+   This is how the run records which track earns its keep, so a wrong label is worse than a missing
+   item — never guess one to make an entry look complete.
+
+   Do NOT include readability or doc-drift items: another agent owns readability, and doc drift is
+   a user decision that must stay out of correctness so nobody "fixes" a doc mismatch by changing
+   the code.
    ${hunterTrack}: ${JSON.stringify(bugs)}
-   codex (${codexMode || 'not run at this tier'}): ${wantCodexUpfront ? JSON.stringify(codex) : '(not run at this tier)'}
-   code-quality: ${wantQuality ? JSON.stringify(quality) : '(not run at this tier)'}${intentBlock}`,
-  { label: 'fix-triage', schema: FIXLIST, agentType: 'Explore' } // read-only: no Edit/Write/NotebookEdit
-))
-// A dead triage used to read as `nothingToFix` — so every finding the three tracks just paid
-// for was dropped on the floor and the run reported `fixed: 0/0, reviewed: true`. Whether that
-// is a halt depends on whether there was anything to lose:
+   codex (${codexMode || 'not run at this tier'}): ${wantCodexUpfront ? JSON.stringify(codex) : '(not run at this tier)'}${intentBlock}`,
+    { label: 'fix-triage', schema: CORRECTNESS_LIST, agentType: 'Explore' })), // read-only: no Edit/Write
+  !wantQuality ? (() => undefined) : () => reliable('fix-triage-readability', 'Fix-triage', () => agent(
+    `${triageIntro}
+
+   Produce the READABILITY bucket only, from the code-quality report below — ONLY genuinely
+   BEHAVIOR-PRESERVING clarity wins (rename, extract method, dedup). If an item would change
+   behavior (e.g. "replace the loop with a stream that treats empty input differently"), it is NOT
+   a readability item: drop it and say so. /r:code-refactor's behavior-lock gate will refuse a
+   behavior-changing "readability" item, so don't hand it one. Another agent owns correctness.
+   code-quality: ${JSON.stringify(quality)}${intentBlock}`,
+    { label: 'fix-triage-readability', schema: READABILITY_LIST, agentType: 'Explore' })),
+])
+
+// docDrift, straight from the hunter that produces it. A blocked docs hunter loses the list and
+// says so — it can never be mistaken for "the docs agree with the code".
+docs = await docsP
+if (profile !== 'light' && blocked(docs)) {
+  log('post-task-review: the docs hunter track BLOCKED — no code/doc drift was checked. That is a ' +
+      'coverage hole, not a clean bill; the rest of the review proceeded.')
+}
+const docDrift = ((docs && docs.findings) || [])
+  .map((f) => `${f.file}:${f.line} ${f.what}`)
+
+// A dead triage used to read as `nothingToFix` — so every finding the tracks just paid for was
+// dropped on the floor and the run reported `fixed: 0/0, reviewed: true`. Whether that is a halt
+// depends on whether there was anything to lose:
 //   findings exist -> STOP. They were found, never triaged, never fixed; a caller must not merge.
 //   no findings    -> nothing was lost. Note it and carry on with an empty fix-list.
-if (blocked(fixList)) {
-  const raw = [codex, bugs, quality].flatMap((t) => (t && Array.isArray(t.findings)) ? t.findings : [])
+// Only the CORRECTNESS half can halt the run: a lost readability list costs polish, not soundness.
+if (blocked(correctnessList)) {
+  const raw = [codex, bugs].flatMap((t) => (t && Array.isArray(t.findings)) ? t.findings : [])
   if (raw.length) {
     log(`post-task-review: FIX-TRIAGE BLOCKED with ${raw.length} untriaged finding(s) — stopping rather than dropping them.`)
     return { stopped: 'fix-triage-blocked', rawFindings: raw }
   }
   log('post-task-review: fix-triage blocked, but no track reported a finding — nothing was lost; continuing with an empty fix-list.')
-  fixList = null // keeps the `fixList ? … : 0` reporting below honest
 }
+if (wantQuality && blocked(readabilityList)) {
+  log('post-task-review: the readability half of triage BLOCKED — code-quality findings went ' +
+      'unapplied; the correctness half is unaffected.')
+}
+const correctness = (!blocked(correctnessList) && Array.isArray(correctnessList.correctness))
+  ? correctnessList.correctness : []
+const readability = (readabilityList && !blocked(readabilityList) && Array.isArray(readabilityList.readability))
+  ? readabilityList.readability : []
+fixList = (correctness.length || readability.length || docDrift.length)
+  ? { correctness, readability, docDrift } : null
 // Triage returns correctness as {item, source}. Normalize defensively: a model that hands back
 // bare strings (an older schema, a degraded response) must still produce a fixable list rather
 // than a crash — the fix phase matters more than the attribution does.
@@ -976,7 +1086,7 @@ if (triage.buildTool !== 'none') {
         green=true ONLY on a fully clean success. The build was fully green before local-scan
         ran, so ANY failure here is a regression from local-scan's own self-fixes (in-scope) —
         report it; do not touch out-of-scope tests/code.`,
-        { label: 'rebuild', phase: 'Local-scan', schema: BUILD, agentType: triage.runnerAgent, ...BUILD_RUN })
+        { label: 'rebuild', phase: 'Local-scan', schema: BUILD, agentType: triage.runnerAgent, ...REBUILD_RUN })
       if (!rb || !rb.green) { log('post-task-review: rebuild after local-scan RED — stopping'); return { stopped: 'rebuild-red' } }
     } else {
       localScan = 'ok' // scanned clean, changed nothing — no rebuild owed
@@ -984,15 +1094,9 @@ if (triage.buildTool !== 'none') {
   }
 }
 
-// --- Phase 7 pre-warm: build the image WHILE the end-verify runs --------------
-// The UI gate is resolved here rather than at Phase 7 so the docker build can start early.
-// Measured over 59 stored UI runs: the deploy is 42% of the step's tool time, and it took over
-// two minutes in 17 of 56 runs (worst: 607s) — all of it on the critical path, after everything
-// else had finished. This warms the layer cache in parallel with the end-verify loop below.
-// Build-only: nothing starts, so it cannot serve stale code. A fixer editing a file down there
-// just invalidates the layers that file touches, which the real deploy then rebuilds — the cache
-// is an optimisation, never the artifact under test. The helper always exits 0 and Phase 7 never
-// reads this result, so a failed pre-warm costs a cold build and nothing else.
+// The UI gate. It is resolved much earlier now (right after the tier, alongside the docker
+// pre-warm) so the image build can start there — see the note at that dispatch site.
+//
 // The gate is `uiTouched` in EVERY tier, full included. It used to be `full || uiTouched`, and the
 // unconditional half was the most expensive unearned step in the pipeline: measured over 59 stored
 // runs this step ran a median of 542s (p90 1150s) with two thirds of that model time across ~86
@@ -1004,16 +1108,6 @@ if (triage.buildTool !== 'none') {
 // only when a frontend file changed; when none did, the static tracks (which `full` runs in full)
 // are what actually read the change. Tier still governs DEPTH everywhere else — this one step is
 // governed by whether there is anything new to look at.
-const uiWanted = uiTouched
-const prewarmP = (uiWanted && triage.hasTestApp)
-  ? agent(
-      `Run \`"${PACK}/skills/task-review/scripts/worktree-deploy.sh" prewarm\` from the
-       repo root and report its stderr line verbatim. It builds the app image WITHOUT starting
-       anything, to warm the docker layer cache for a deploy that happens later in this run.
-       It always exits 0 by design. Do NOT start containers, do NOT deploy, do NOT touch the repo,
-       and do NOT treat a skip or a failed build as a problem — a cold cache is slow, not wrong.`,
-      { label: 'ui-prewarm', phase: 'End-verify', ...GP, ...MECHANICAL })
-  : null
 
 // --- Phase 6: end-verify — bounded <=2 Codex passes over the FINAL diff -------
 // EVERY tier uses the SAME reviewer mode: Codex's lighter built-in reviewer (--mode review).
@@ -1040,8 +1134,13 @@ let endVerifyUnresolved = []
 // than only what Phase 2 triaged.
 let endVerifyFixed = 0
 if (!endVerifyWanted) log('post-task-review: end-verify skipped — no substantive changes since review')
-if (endVerifyWanted) {
-  phase('End-verify')
+// Frontend files an end-verify FIXER touched. It decides one thing after the barrier below: whether
+// the UI verification, which ran against an image built before those fixes landed, has to look
+// again. Derived from the findings the fixer was handed, so it costs no extra agent.
+const FRONTEND_FILE = /\.(html|htm|css|scss|sass|less|js|mjs|ts|tsx|jsx|vue|svelte)$|(^|\/)(templates|static|webapp|resources\/templates)\//i
+let endVerifyTouchedFrontend = false
+const endVerifyTrack = async () => {
+  if (!endVerifyWanted) return
   const fixAgent = triage.hasFrontend && !triage.hasBackend ? 'htmx-thymeleaf-dev' : 'java-backend-developer'
   // What pass 1 raised and what happened to it. Each pass shells out to `run.sh --mode review`,
   // which starts a FRESH Codex thread (lib/codex.mjs runAppServerReview: startThread, ephemeral) —
@@ -1145,6 +1244,10 @@ ${priorPass.findings.map(f => `         - ${f.file}:${f.line} [${f.category}] ${
       // separately from the up-front tracks because it answers a different question: how often
       // does the machine-written code from the fix/refactor/scan phase need fixing itself?
       fixedBySource['end-verify'] = (fixedBySource['end-verify'] || 0) + real.length
+      // The UI track is running alongside this one, against an image built BEFORE these edits.
+      // If a fix landed in a frontend file, what it verified is now stale — see the re-verify
+      // guard after the barrier.
+      if (real.some((f) => FRONTEND_FILE.test(String(f.file || '')))) endVerifyTouchedFrontend = true
     }
     // The next pass's only link to this one. Recorded AFTER the fixer so it carries whether the
     // edits actually happened — a dead fixer changes what re-finding these items means, and pass 2
@@ -1175,15 +1278,15 @@ ${priorPass.findings.map(f => `         - ${f.file}:${f.line} [${f.category}] ${
 // Both halves invoke the REAL /test-app on their own focused scope, each in its own isolated
 // agent-browser session (AGENT_BROWSER_SESSION), so two live browsers never share a page.
 let uiSummary = { skipped: true }
-if (uiWanted) {
-phase('UI')
+let ui = null
+let uiDead = []
 // The /test-app presence gate was answered back in Phase 0 (triage step 5b) — it is one `test -f`,
 // and spending a whole subagent round-trip on it put a needless hop on the critical path.
-if (triage.hasTestApp) {
-  let ui = null
-  let uiDead = []
-  try {
-    // try/finally is the structural version of "teardown on ANY exit path".
+// Deploy + both halves only. The teardown, the fixes and the issue filing all happen AFTER the
+// barrier below, because they must not race the end-verify's own fixers over the same files.
+const uiTrack = async () => {
+  if (!uiWanted || !triage.hasTestApp) return
+  {
     // Report-only agents, so they get the intent as focus (not the fixer "don't undo" block).
     const uiIntent = intent
       ? `\n       This change set out to: ${intent} — verify THAT works; treat an intentional design choice as a feature, not a defect.`
@@ -1304,15 +1407,39 @@ if (triage.hasTestApp) {
           ((p && p.findings) || []).map((f) => ({ ...f, lens: halves[i].label.replace('ui-', '') }))),
       }
     }
-  } finally {
-    // Retried, because a teardown that dies leaks the worktree's containers and volumes —
-    // and the next run in that worktree then collides with the stack this one left behind.
-    const td = await reliable('ui-teardown', 'UI', () => agent(
-      `Run \`"${PACK}/skills/task-review/scripts/worktree-deploy.sh" teardown\`
-      unconditionally (no-op in the main tree; tears down the ephemeral stack in a worktree).`,
-      { label: 'ui-teardown', phase: 'UI', ...GP, ...MECHANICAL }))
-    if (blocked(td)) log('post-task-review: UI teardown NOT confirmed — an ephemeral worktree stack may still be running; tear it down by hand with `worktree-deploy.sh teardown`.')
   }
+}
+
+// --- The barrier: end-verify and the UI track run TOGETHER --------------------
+// They were serial, and they are the two longest blocks in the pipeline: the UI step measured a
+// median of 542s (p90 1150s) and the end-verify is up to two Codex passes each followed by a fixer.
+// They also read different things — one reads the git diff, the other drives a browser against a
+// deployed image — and share nothing until their fixes land. So they overlap, and everything that
+// WRITES waits for the join: the UI fixes, the issue filing, and the teardown all happen below.
+//
+// The honesty cost, and the guard that pays it. The UI half verifies an image built before the
+// end-verify's fixers ran. When one of those fixers touched a frontend file, what the UI looked at
+// is stale — so it looks again, once. That case costs roughly what the old serial ordering cost
+// every time, which is the point: the worst case here is the previous behaviour, and the common
+// case (end-verify fixes are overwhelmingly backend) is the whole overlap.
+if (uiWanted && !triage.hasTestApp) {
+  log('post-task-review: the change touches the frontend but /test-app is not on disk — no UI ' +
+      'verification ran. Nothing looked at the rendered result; this is a gap, not a clean bill.')
+}
+if (!uiWanted) {
+  log(`post-task-review: no frontend change in this diff (${profile} tier) — skipping UI verification. ` +
+      `The static tracks read the change; there is no new rendered result to look at.`)
+}
+try {
+  await parallel([endVerifyTrack, uiTrack])
+
+  if (ui && ui.ran && endVerifyTouchedFrontend) {
+    log('post-task-review: an end-verify fix landed in a frontend file AFTER the UI halves read the ' +
+        'deployed image — re-deploying and re-verifying once so the UI verdict describes the code ' +
+        'that actually ships.')
+    await uiTrack()
+  }
+
   const findings = (ui && ui.findings) || []
   const minor = findings.filter(f => f.fixSize === 'minor')
   const major = findings.filter(f => f.fixSize === 'major')
@@ -1323,16 +1450,27 @@ if (triage.hasTestApp) {
     (preflight gh auth + a github remote; best-effort --label bug, retry without on failure). If gh
     is unusable, write a grouped HTML report under .claude/skills/test-app/bugs/ instead. Findings:
     ${JSON.stringify(major)}`, { label: 'ui-file-major', phase: 'UI', ...GP, ...MECHANICAL })
-  uiSummary = {
-    ran: ui && ui.ran, minorFixed: minor.length, majorFiled: major.length, blocked: blocked(ui),
-    // Which half fell over, so a "UI blocked" line in the stats store can be read without the
-    // transcript: a dead visual half and a dead functional half mean very different coverage.
-    blockedHalves: uiDead,
+  if (uiWanted && triage.hasTestApp) {
+    uiSummary = {
+      ran: ui && ui.ran, minorFixed: minor.length, majorFiled: major.length, blocked: blocked(ui),
+      // Which half fell over, so a "UI blocked" line in the stats store can be read without the
+      // transcript: a dead visual half and a dead functional half mean very different coverage.
+      blockedHalves: uiDead,
+    }
   }
-}
-} else {
-  log(`post-task-review: no frontend change in this diff (${profile} tier) — skipping UI verification. ` +
-      `The static tracks read the change; there is no new rendered result to look at.`)
+} finally {
+  // try/finally is the structural version of "teardown on ANY exit path". It sits out here rather
+  // than inside the UI track because the track now runs inside parallel(), which swallows a throw
+  // into a null — a teardown nested in there would be skipped exactly when it is needed most.
+  // Retried, because a teardown that dies leaks the worktree's containers and volumes, and the next
+  // run in that worktree then collides with the stack this one left behind.
+  if (uiWanted && triage.hasTestApp) {
+    const td = await reliable('ui-teardown', 'UI', () => agent(
+      `Run \`"${PACK}/skills/task-review/scripts/worktree-deploy.sh" teardown\`
+      unconditionally (no-op in the main tree; tears down the ephemeral stack in a worktree).`,
+      { label: 'ui-teardown', phase: 'UI', ...GP, ...ECHO }))
+    if (blocked(td)) log('post-task-review: UI teardown NOT confirmed — an ephemeral worktree stack may still be running; tear it down by hand with `worktree-deploy.sh teardown`.')
+  }
 }
 
 // --- Step 9 boundary: record learnings + compact CLAUDE.md (MAIN AGENT) -------
@@ -1351,8 +1489,12 @@ if (triage.hasTestApp) {
 // that forgot it would silently lose the run, which is the failure the sink exists to avoid.
 
 // ------------------------------------------------------------- consolidate ---
+// `docs` is listed in its own right now that it runs outside the Review barrier — it is still a
+// dispatched track, and a caller has to be able to see that nothing checked the change against the
+// documentation.
 const TRACKS = [['codex', codex, wantCodexUpfront],
                 [hunterTrack, bugs, profile !== 'light'],
+                ['docs', docs, profile !== 'light'],
                 ['code-quality', quality, wantQuality]]
 const tracksBlocked = TRACKS.filter(([, r, ran]) => ran && blocked(r)).map(([n]) => n)
 // Named separately from tracksBlocked so a caller can tell an absent optional prerequisite
@@ -1388,6 +1530,11 @@ const statsRow = {
   // often a RE-review of a diff that was already reviewed and fixed once — its findings are not
   // comparable to a first pass, and nothing inside this workflow can detect that on its own.
   invokedBy: opts.deferCommit ? 'run-task' : 'direct',
+  // Whether the up-front Codex ran adversarial or the lighter built-in reviewer. Without it, a
+  // `full` run whose approach was already challenged at plan time is indistinguishable in the store
+  // from one that got the strict pass — and `codex` fixes/run is exactly the number that would
+  // answer whether the down-mode was a good trade.
+  codexMode: codexMode || 'none',
   uiTouched,
   scope: opts.scope === 'all' ? 'all' : 'diff',
   tracksBlocked,
@@ -1412,7 +1559,10 @@ ${JSON.stringify(statsRow)}
 PTR_STATS_JSON
 
    The script always exits 0 by design; its stderr says whether the row was recorded.`,
-  { label: 'stats', phase: 'End-verify', ...GP, ...MECHANICAL })
+  // The echo tier: this appends one JSONL line and edits nothing, and by design it can never fail
+  // the run. run-task's identical sink is pinned the same way. It used to inherit whatever the
+  // caller was running at — for a /r:task-run chain, Opus, for a `python3 script <<EOF`.
+  { label: 'stats', phase: 'End-verify', ...GP, ...ECHO })
 
 return {
   reviewed: true,
