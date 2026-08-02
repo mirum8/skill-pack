@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 .DS_Store
 build-report.md
+
+# Claude Code worktrees — local scratch, never part of the pack
+.claude/worktrees/
