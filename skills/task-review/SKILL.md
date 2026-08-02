@@ -67,8 +67,10 @@ Pass `args` through when relevant:
 The tier scales **depth**, never integrity. Phase 0 picks it from the diff by three questions, in order:
 
 1. Can the change alter behavior for any real input? No → **light** (a getter, a constant, a log message, a rename, formatting, a comment, a cosmetic CSS tweak).
-2. Does it carry a design decision — a new or changed approach, several seams, a data model or contract — or touch auth/permissions, money/pricing/tax math, persistence (query, schema, migration, index), concurrency/locking, or security-sensitive code? No → **standard** (a bug fix inside one method, a null check, a new field plus its mapping, a new endpoint over an existing service).
+2. Does it carry a design decision — a new or changed approach, several seams, a data model or contract — or touch auth/permissions, money/pricing/tax math, persistence (a schema change, migration or index; locking or transaction semantics), concurrency/locking, or security-sensitive code? No → **standard** (a bug fix inside one method, a null check, a new field plus its mapping, a new endpoint over an existing service, a new read-only query over an existing table).
 3. Otherwise → **full**.
+
+**Read the persistence arm narrowly** — schema, migration, index, locking; what a revert can't undo. An ordinary read-only query or a repository method over an existing table is `standard`. Counting every query sends every feature in a JPA/ORM diff to `full`, and contradicts `standard`'s own examples, which are themselves queries.
 
 **When unsure, answer `standard`.** Scary wording alone doesn't force `full` (a copyright-year bump in a payment template is light); "small" alone doesn't earn `light` (a one-line auth-role change is full).
 

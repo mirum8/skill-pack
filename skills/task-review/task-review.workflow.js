@@ -603,14 +603,22 @@ const triage = await reliable('triage', 'Triage', () => agent(
         a. Can the change alter behavior for any real input?        no  -> 'light'
         b. Does it carry a design decision — a new/changed approach, several seams, a data model
            or a contract — OR does it add or alter auth/permissions, money/pricing/tax math,
-           persistence (query, schema, migration, index), concurrency/locking, or
+           persistence (a schema change, migration or index; locking or transaction semantics;
+           a query whose result shape callers depend on), concurrency/locking, or
            security-sensitive code (crypto, input parsing, file/network IO, deserialization,
            secrets, headers)?                                       no  -> 'standard'
         c. otherwise                                                    -> 'full'
+      READ THE PERSISTENCE ARM NARROWLY: schema, migration, index, locking — what you cannot
+      simply revert. An ordinary read-only query, a repository/port method over an existing
+      table, or a field plus its mapping is NOT that arm; it is 'standard'. Counting every
+      query sends every feature in a JPA/ORM diff to 'full' — measured over 52 real runs,
+      'standard' was chosen ZERO times.
       Calibrate: a getter, a constant/config VALUE tweak, a log message, a rename, formatting, a
       comment or a cosmetic template/CSS change is 'light'; a bug fix inside one method, a
-      two-line null check, a new field plus its mapping, a new endpoint over an existing service
-      is 'standard'; a migration, an auth-rule change, money math, or a change spanning several
+      two-line null check, a new field plus its mapping, a new endpoint over an existing service,
+      a new read-only query over an existing table plus what renders it
+      is 'standard'; a migration, an auth-rule change, money math, a read-modify-write that needs
+      a lock, or a change spanning several
       seams is 'full'. Scary wording alone doesn't force 'full' (a copyright-year bump in a
       template is light); "small" wording alone doesn't earn 'light' (a one-line auth-role change
       is full). When you are unsure, answer 'standard': it keeps a real Codex read of the diff

@@ -527,9 +527,17 @@ ${inRepo}
         a. Can the change alter behavior for any real input?         no  -> "light"
         b. Does it need a design decision — a new or changed approach, several seams, a data
            model or a contract — OR does it add or alter auth/permissions, money/pricing/tax
-           math, persistence (a query, schema, migration or index), concurrency/locking, or
+           math, persistence (a schema change, migration or index; locking or transaction
+           semantics; a query whose result shape callers depend on), concurrency/locking, or
            anything security-sensitive?                              no  -> "standard"
         c. otherwise                                                     -> "full"
+
+      READ THE PERSISTENCE ARM NARROWLY. It means schema, migration, index, locking — the
+      things you cannot simply revert. Adding an ordinary read-only query, a repository or
+      port method over a table that already exists, or a field and its mapping, is NOT this
+      arm; it is "standard". A tree that counts every query routes every feature in a
+      JPA/ORM codebase to "full", which is how the middle tier stops existing: measured over
+      52 real runs of this pipeline, "standard" was chosen ZERO times.
 
       Calibrate on these, both directions:
         light    — a log message or level, even in PaymentService; renaming a private method; a
@@ -537,10 +545,11 @@ ${inRepo}
                    template/CSS change; a DTO field that is only serialized.
         standard — a two-line null check added to a validator; a bug fix inside one existing
                    method; a new field plus its mapping; a new endpoint over a service that
-                   already does the work.
+                   already does the work; a new read-only query/repository method over an
+                   existing table, and the page or DTO that renders it.
         full     — a migration, new index or schema change; anything that alters an
                    auth/permission decision or money math; a change spanning several seams; a
-                   new module or a public-API contract.
+                   new module or a public-API contract; a read-modify-write that needs a lock.
       Scary wording alone does not force "full" (a copyright-year bump in a payment template is
       light); "small" wording alone does not earn "light" (a one-line auth-role change is full).
 
@@ -614,7 +623,11 @@ ${inRepo}
      are exactly five, and 'surface' must be one of them:
        auth        — an authentication, authorization, permission or role decision
        money       — pricing, tax, billing or any other money math
-       persistence — a query's semantics, a schema, a migration or an index
+       persistence — a schema change, a migration, an index, or transaction/locking semantics.
+                     ADDING a query, repository or port method over a table that already
+                     exists is NOT this surface — nor is a query you suspect may one day
+                     want an index. Altering what an EXISTING query returns to its callers
+                     IS. Name the schema object that must change, or do not flag it.
        concurrency — locking, threading, async ordering, shared mutable state
        security    — a secret or credential, crypto, deserialization, or input from outside the
                      system that the change causes to be trusted
