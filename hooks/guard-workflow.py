@@ -4,10 +4,9 @@
 Two pipelines are protected, each runnable ONLY from a canonical file:
   * task-review     -> <pack>/skills/task-review/task-review.workflow.js
   * task-run        -> <pack>/skills/task-run/task-run-implement.workflow.js
-plus the two flat originals under ~/.claude/skills, which stay installed and
-runnable for good (FR-14). Both pipelines carry the same contract — a
-per-session fork silently redefines what "reviewed" or "implemented" means — so
-both get the same protection. This hook blocks two things:
+Both pipelines carry the same contract — a per-session fork silently redefines
+what "reviewed" or "implemented" means — so both get the same protection. This
+hook blocks two things:
   1. Workflow invocations that would run a FORK of either — an inline script, or
      a scriptPath pointing at a copy anywhere other than a canonical file.
   2. Write/Edit calls that would CREATE such a fork.
@@ -49,16 +48,14 @@ PACK_RELATIVE = (
 )
 
 PACK = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
+# The allow-list used to also carry the two flat originals under ~/.claude/skills,
+# for FR-14's permanent dual-run. Those were deleted once the pack became the only
+# copy (validate.py now reports "R-4 closed"), so the entries named files that
+# cannot exist. Nothing is relaxed by dropping them: a path that isn't a canonical
+# pipeline is judged by its CONTENT, exactly as any other script is.
 CANON = {
-    os.path.realpath(os.path.expanduser(p))
-    for p in (
-        [os.path.join(PACK, rel) for rel in PACK_RELATIVE] if PACK else []
-    ) + [
-        # The flat originals. FR-14 keeps them installed and working forever, so
-        # an allow-list that dropped them would break the dual-run it promises.
-        "~/.claude/skills/post-task-review/post-task-review.workflow.js",
-        "~/.claude/skills/run-task/run-task-implement.workflow.js",
-    ]
+    os.path.realpath(os.path.expanduser(os.path.join(PACK, rel)))
+    for rel in (PACK_RELATIVE if PACK else ())
 }
 
 

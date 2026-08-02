@@ -1,4 +1,4 @@
-// Control-flow tests for post-task-review.workflow.js.
+// Control-flow tests for task-review.workflow.js.
 //
 // The script is pure orchestration — every side effect goes through agent()/parallel(), which
 // the runtime injects. So it can be executed here with those stubbed, and the BRANCHES can be

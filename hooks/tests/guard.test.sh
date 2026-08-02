@@ -3,10 +3,11 @@
 #
 #   bash hooks/tests/guard.test.sh
 #
-# Two of these cover the exact reasons the pack ships its own guard rather than
-# relying on the one registered globally: the flat originals must stay runnable
-# (FR-14's permanent dual-run), and prose that merely quotes a guarded pipeline
-# name must not be blocked (the over-match observed while the pack was specified).
+# One of these covers the exact reason the pack ships its own guard rather than
+# relying on the one registered globally: prose that merely quotes a guarded
+# pipeline name must not be blocked (the over-match observed while the pack was
+# being specified). The other reason — a run-time allow-list that follows the
+# pack — is covered by the two CLAUDE_PLUGIN_ROOT cases further down.
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 export CLAUDE_PLUGIN_ROOT="$PWD"
@@ -35,8 +36,6 @@ cp "$CANON" "$TMP/forked.workflow.js"
 
 check "the packed canonical workflow runs" \
   "$J;print(json.dumps({'tool_name':'Workflow','tool_input':{'scriptPath':'$CANON'}}))" 0
-check "the flat original still runs (FR-14)" \
-  "$J;print(json.dumps({'tool_name':'Workflow','tool_input':{'scriptPath':'~/.claude/skills/post-task-review/post-task-review.workflow.js'}}))" 0
 check "a fork run from elsewhere is refused" \
   "$J;print(json.dumps({'tool_name':'Workflow','tool_input':{'scriptPath':'$TMP/forked.workflow.js'}}))" 2
 check "writing a fork to a new path is refused" \

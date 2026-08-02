@@ -315,8 +315,6 @@ def check_paths():
         text = open(path, encoding="utf-8", errors="ignore").read()
         for m in ABS.finditer(text):
             rel = os.path.relpath(path, REPO)
-            if rel == "hooks/guard-workflow.py":
-                continue   # the two flat originals in CANON are deliberate (FR-14)
             fail("FR-19", f"{rel} carries an absolute path into a skill directory "
                           f"({m.group(0)}…); it must resolve through a substituted variable")
     # FR-19's pack-root rule, inverted by evidence. This used to REQUIRE the

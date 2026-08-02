@@ -93,7 +93,7 @@ There's a second reason these are pinned rather than inherited: **the frontmatte
 The full text of each lives in `references/prose-pipeline.md` (between Steps 8 and 9). These govern **both** engines:
 
 - **This routine never fires on its own — but it is reachable.** It runs on an explicit `/r:task-review`, or when `/r:task-run` reaches its post-task-review step and invokes it through the Skill tool. It does **not** run because a coding turn ended, a build went green, or a diff looked reviewable. This rule used to be frontmatter (`disable-model-invocation: true`), which was wrong: that flag doesn't distinguish "the model auto-loaded this" from "the model was told to run this", so it also blocked `/r:task-run`'s mandatory Step 5 — the pipeline's own caller could not reach it. The flag is gone and the rule is held here and in the description; don't restore it.
-- **The pipeline is immutable — never edit or fork it.** One pipeline, two encodings: the canonical `post-task-review.workflow.js`, and the prose Steps 0–9 in `references/prose-pipeline.md`. Run the workflow *only* from the canonical path — a `PreToolUse` hook blocks forked invocations, and on the prose path (which the hook can't reach) the immutability is on you. **The two encodings must change together**; editing one silently makes the engines diverge.
+- **The pipeline is immutable — never edit or fork it.** One pipeline, two encodings: the canonical `task-review.workflow.js`, and the prose Steps 0–9 in `references/prose-pipeline.md`. Run the workflow *only* from the canonical path — a `PreToolUse` hook blocks forked invocations, and on the prose path (which the hook can't reach) the immutability is on you. **The two encodings must change together**; editing one silently makes the engines diverge.
 - **The build invariant is GREEN, and it is never relaxed.** A red build — **including a `main` that was already red** — STOPS the routine and is surfaced. Never tolerate known failures, never add an "expected to fail" allowance, never touch out-of-scope tests to force green. The build→fix loop only fixes failures *this turn's change caused*.
 - **Real tools only.** Every step named after a tool runs that actual tool. If it can't, stop and say so; never substitute an LLM prompt that imitates a scanner, reviewer, or build.
 - **Missing prerequisite → STOP, don't skip.** *Genuinely absent* means blocked (none of `/r:code-scan`'s analyzers installed; Codex CLI missing, `run.sh` exit `3`). Distinct and fine to continue through with a visible note: only *some* analyzers installed, or a tool installed whose run failed transiently (exit `4` — the wrapper already retried).
@@ -107,9 +107,9 @@ The full text of each lives in `references/prose-pipeline.md` (between Steps 8 a
 
 | path | what it is | when to read it |
 |---|---|---|
-| `post-task-review.workflow.js` | the canonical pipeline | never by hand — run it via `Workflow` |
+| `task-review.workflow.js` | the canonical pipeline (the `meta.name` inside it keeps the pre-rename spelling — that string is what the guard hook matches) | never by hand — run it via `Workflow` |
 | `references/prose-pipeline.md` | Steps 0–9 in full + the non-negotiables verbatim | only on the fallback path (no `Workflow` tool), or when changing the pipeline |
 | `scripts/worktree-deploy.sh` | port/container isolation for the UI step across worktrees | called by Steps 8a/8c |
 | `scripts/record-run.py` · `scripts/review-stats.py` | the per-run stats row, and reading it back | Step 9c; `review-stats.py` any time you want the measured yield per track |
-| `scripts/guard-workflow.py` | `PreToolUse` hook that blocks forked invocations | never directly |
+| `${CLAUDE_PLUGIN_ROOT}/hooks/guard-workflow.py` | `PreToolUse` hook that blocks forked invocations — pack-level, not this skill's | never directly |
 | `tests/control-flow.test.mjs` | locks the workflow's control flow (`node --test`) | run it after any change to the pipeline |
