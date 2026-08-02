@@ -502,7 +502,65 @@ test('REGRESSION: a placeholder flag does not buy a full tier', async () => {
   assert.equal(out.profile, 'standard')
   assert.equal(out.profileEscalated, false)
   assert.equal(out.riskFlagsIgnored.length, 1)
-  assert.match(logText, /no usable surface or evidence/)
+  assert.match(logText, /no usable surface, no evidence, or a hedged why/)
+})
+
+test('a HEDGED why does not escalate, however real the file it cites', async () => {
+  // Observed on issue #73 across three different promptings of the explorer. The change was a
+  // read-only admin page over an existing table — Phase 0 correctly said 'standard' — and each
+  // time an explorer escalated it to full on a persistence flag that cited a REAL migration file
+  // while the why was conditional: "if the change adds one it is a new schema object", and
+  // earlier "likely requires a new index". `where` proves the explorer read something; only the
+  // `why` can say the change DOES anything to it. Rewording the prompt never removed this,
+  // because the fault is that the gate counted a hypothesis as a finding.
+  for (const why of [
+    'existing indexes only cover (actor_user_id, created_at), so if the change adds one it is a new schema object',
+    'adding the query likely requires a new index beyond the two existing composite ones',
+    'this may need a new column to record the basis',
+    'the listing could require a covering index',
+  ]) {
+    const { out, logText } = await run({
+      source: baseSource({ profile: 'standard', exploreAspects: ['the one seam'] }),
+      args: { source: '#73', classifyOnly: true },
+      riskFlags: [{ surface: 'persistence', where: 'db/migration/V63__audit_log.sql:11-12', why }],
+    })
+    assert.equal(out.profile, 'standard', `must not escalate on: ${why}`)
+    assert.equal(out.profileEscalated, false)
+    assert.equal(out.riskFlags.length, 0, 'a hedged flag is not a counted risk')
+    assert.equal(out.riskFlagsIgnored.length, 1, 'it is dropped VISIBLY, into riskFlagsIgnored')
+    assert.match(logText, /hedged why/, 'a dropped flag must be logged, never silent')
+  }
+})
+
+test('an ASSERTING persistence why still escalates', async () => {
+  // The other half of the pair: dropping hedged flags must not disarm the gate. These are the
+  // real flags from issues #122 and #31, which SHOULD buy a plan review — both assert what the
+  // change does rather than what it might need.
+  for (const why of [
+    'new V76+ migrations will add the versioned retention-matrix schema plus new expiry/hold columns',
+    'task requires a new invoice column recording the commission-base price, added without touching vehicle_option_id',
+  ]) {
+    const { out } = await run({
+      source: baseSource({ profile: 'standard', exploreAspects: ['the one seam'] }),
+      args: { source: '#122', classifyOnly: true },
+      riskFlags: [{ surface: 'persistence', where: 'jpa-adapter/src/main/resources/db/migration/V75.sql:1', why }],
+    })
+    assert.equal(out.profile, 'full', `must escalate on: ${why}`)
+    assert.equal(out.profileEscalated, true)
+    assert.equal(out.riskFlagsIgnored.length, 0)
+  }
+})
+
+test('a why that is missing or a placeholder is not evidence either', async () => {
+  for (const why of [undefined, '', 'b']) {
+    const { out } = await run({
+      source: baseSource({ profile: 'standard', exploreAspects: ['one'] }),
+      args: { source: '#81', classifyOnly: true },
+      riskFlags: [{ surface: 'auth', where: 'SecurityConfig.java:123', why }],
+    })
+    assert.equal(out.profile, 'standard', `an empty why must not escalate: ${JSON.stringify(why)}`)
+    assert.equal(out.riskFlagsIgnored.length, 1)
+  }
 })
 
 test('a real file:LINE citation still counts as evidence', async () => {

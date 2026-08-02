@@ -623,15 +623,15 @@ ${inRepo}
      are exactly five, and 'surface' must be one of them:
        auth        — an authentication, authorization, permission or role decision
        money       — pricing, tax, billing or any other money math
-       persistence — a schema change, a migration, an index, or transaction/locking semantics.
-                     ADDING a query, repository or port method over a table that already
-                     exists is NOT this surface — nor is a query you suspect may one day
-                     want an index. Altering what an EXISTING query returns to its callers
-                     IS. Name the schema object that must change, or do not flag it.
+       persistence — a query's semantics, a schema, a migration or an index
        concurrency — locking, threading, async ordering, shared mutable state
        security    — a secret or credential, crypto, deserialization, or input from outside the
                      system that the change causes to be trusted
      Give each a 'where' (path:LINE) and a 'why' saying how the change alters it.
+
+     State what the change DOES to the surface, not what it might need. "if the change adds an
+     index", "likely requires a new column" is work the plan has not decided on yet; a 'why'
+     written that way is dropped and does not escalate the run.
 
      Judge each against the task intent above: report a surface only if the change will MODIFY it
      or alter its behavior. Do NOT list risk that merely exists nearby in the files you read —
@@ -694,12 +694,31 @@ const briefText = liveBriefs.map((b, i) => `--- brief ${i + 1} ---\n${b.brief}`)
 // looks like a path is the cheapest check that a placeholder cannot pass and a real citation
 // always does.
 const looksLikeEvidence = (w) => typeof w === 'string' && w.trim().length >= 6 && /(\/|\.[A-Za-z]{2,})/.test(w)
-const countedFlag = (f) => !!f && RISK_SURFACES.includes(f.surface) && looksLikeEvidence(f.where)
+// A `where` that cites a real file proves the explorer READ something; it does not prove the
+// change DOES anything to it. Measured on issue #73: "existing indexes only cover (…), so IF the
+// change adds one it is a new schema object" cites a genuine migration file, passes the check
+// above, and buys a full Codex plan review for a maybe — an index the plan had not decided to
+// add. The same run under two other promptings produced "LIKELY requires a new index"; three
+// rewordings never removed it, because the fault is that the gate counts a hypothesis as a
+// finding, not that the sentence was phrased badly.
+//
+// So the `why` must ASSERT. Hedged flags do not escalate — they fall into ignoredFlags, which is
+// logged, so a wrongly-dropped one is visible rather than silent. Checked against every flag this
+// gate has really seen: it drops exactly the two speculative ones and keeps all of #122's
+// migration/purge/ShedLock flags and #31's money and column flags.
+//
+// Dropping is the safer direction here on purpose. An over-fire costs a full run on every task —
+// which is how the tier collapsed to "always full" in the first place — while a missed escalation
+// costs the plan review and the pattern hunters, and standard still runs the real Codex diff read,
+// /security-review, static analysis, build + tests and the Codex end-verify.
+const HEDGED = /\b(if|may|might|could|likely|possibly|potentially|perhaps|probably|suspect|assuming)\b/i
+const asserts = (w) => typeof w === 'string' && w.trim().length >= 6 && !HEDGED.test(w)
+const countedFlag = (f) => !!f && RISK_SURFACES.includes(f.surface) && looksLikeEvidence(f.where) && asserts(f.why)
 const allFlags = liveBriefs.flatMap((b) => b.riskFlags || [])
 const foundRisks = allFlags.filter(countedFlag)
 const ignoredFlags = allFlags.filter((f) => !countedFlag(f))
 if (ignoredFlags.length) {
-  log(`run-task-implement: ignored ${ignoredFlags.length} risk flag(s) with no usable surface or evidence: ${JSON.stringify(ignoredFlags).slice(0, 200)}`)
+  log(`run-task-implement: ignored ${ignoredFlags.length} risk flag(s) with no usable surface, no evidence, or a hedged why: ${JSON.stringify(ignoredFlags).slice(0, 200)}`)
 }
 if (profile !== 'full' && foundRisks.length) {
   const overridden = forcedProfile ? ` (overrides your --${forcedProfile})` : ''
