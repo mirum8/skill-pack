@@ -715,10 +715,48 @@ const HEDGED = /\b(if|may|might|could|likely|possibly|potentially|perhaps|probab
 const asserts = (w) => typeof w === 'string' && w.trim().length >= 6 && !HEDGED.test(w)
 const countedFlag = (f) => !!f && RISK_SURFACES.includes(f.surface) && looksLikeEvidence(f.where) && asserts(f.why)
 const allFlags = liveBriefs.flatMap((b) => b.riskFlags || [])
-const foundRisks = allFlags.filter(countedFlag)
 const ignoredFlags = allFlags.filter((f) => !countedFlag(f))
 if (ignoredFlags.length) {
   log(`run-task-implement: ignored ${ignoredFlags.length} risk flag(s) with no usable surface, no evidence, or a hedged why: ${JSON.stringify(ignoredFlags).slice(0, 200)}`)
+}
+
+// QUORUM. One well-formed flag used to escalate straight to full, which made a single
+// opportunistic flag decisive. Issue #73 — a read-only admin page Phase 0 correctly called
+// standard — escalated on FOUR consecutive runs, each time on a different rationale: two
+// speculative index claims (now dropped as hedged), then "the new route relies on the existing
+// /admin/** matcher" (which the prompt already forbids, since no auth decision changes), then
+// "bounding an unclamped limit changes the query's semantics". Each fix removed one rationale
+// and the next appeared. An explorer asked "does this touch any of five surfaces?" will find a
+// yes for anything non-trivial, so no wording makes a lone flag trustworthy.
+//
+// So a surface must be raised by TWO explorers before it moves the tier. The obvious objection
+// is that explorers get DISJOINT slices, so this asks two readers of different rooms to report
+// the same fire — a UI-slice explorer never sees a migration. Checked against every flag this
+// gate has really produced, it discriminates anyway: #122 got persistence from two slices (the
+// V75 migration and the purge semantics), #31 got money from three and persistence from two,
+// while #73's two flags sat on two different surfaces and neither reached two. Real risk shows
+// up from several angles; the opportunistic flag shows up once.
+//
+// Distinct EXPLORERS, not flags: one explorer listing three persistence flags is still one
+// reader, and counting flags would let it clear the bar alone.
+//
+// The light tier runs ONE explorer, where a quorum of two is unreachable — there a single flag
+// still escalates. That is the tier where a miss costs most (a change that read as trivial and
+// turns out to touch auth), and with one reader there is no second opinion to be had.
+const wellFormed = liveBriefs.map((b) => (b.riskFlags || []).filter(countedFlag))
+const votes = new Map()
+for (const flags of wellFormed) {
+  for (const surface of new Set(flags.map((f) => f.surface))) {
+    votes.set(surface, (votes.get(surface) || 0) + 1)
+  }
+}
+const quorum = liveBriefs.length > 1 ? 2 : 1
+const carried = new Set([...votes].filter(([, n]) => n >= quorum).map(([s]) => s))
+const foundRisks = wellFormed.flat().filter((f) => carried.has(f.surface))
+const shortOfQuorum = wellFormed.flat().filter((f) => !carried.has(f.surface))
+if (shortOfQuorum.length) {
+  const surfaces = [...new Set(shortOfQuorum.map((f) => f.surface))].join(', ')
+  log(`run-task-implement: ${shortOfQuorum.length} well-formed risk flag(s) short of quorum — ${surfaces} raised by only one of ${liveBriefs.length} explorers, so the tier is unchanged: ${JSON.stringify(shortOfQuorum).slice(0, 200)}`)
 }
 if (profile !== 'full' && foundRisks.length) {
   const overridden = forcedProfile ? ` (overrides your --${forcedProfile})` : ''
@@ -749,6 +787,10 @@ if (classifyOnly) {
     explorers: aspects.length || 1,
     exploreAspects: aspects,
     riskFlags: foundRisks,
+    // Well-formed flags that only ONE explorer raised. Not a defect and not silent: this is the
+    // number to watch if the gate ever looks too quiet, and the pair (this, riskFlags) is what
+    // says whether a quiet run was agreed or merely unwitnessed.
+    riskFlagsShortOfQuorum: shortOfQuorum,
     // Flags the explorers returned that the gate did NOT count — an unrecognised surface, or a
     // `where` that cites nothing. Empty is the expected shape; a non-empty one is the early
     // warning that the signal is drifting back toward "everything is risky".

@@ -551,6 +551,64 @@ test('an ASSERTING persistence why still escalates', async () => {
   }
 })
 
+const twoSeams = () => baseSource({ profile: 'standard', exploreAspects: ['persistence', 'the web layer'] })
+const PERSIST = { surface: 'persistence', where: 'db/migration/V75.sql:1', why: 'adds the retention schema and expiry columns' }
+const PURGE = { surface: 'persistence', where: 'core/PurgeExpiredArchivesService.java:22', why: 'changes the delete-then-remove-row semantics this purge relies on' }
+const AUTHF = { surface: 'auth', where: 'web/security/SecurityConfig.java:115', why: 'the new route is gated by the existing ADMIN matcher' }
+
+test('one explorer alone does not move the tier — a surface needs two', async () => {
+  // Issue #73 escalated on four consecutive runs, each on a DIFFERENT lone rationale. Its final
+  // shape is this: two explorers, two flags, two different surfaces, neither witnessed twice.
+  const { out, logText } = await run({
+    source: twoSeams(),
+    args: { source: '#73', classifyOnly: true },
+    overrides: { 'explore#1': exploreText([AUTHF]), 'explore#2': exploreText([PERSIST]) },
+  })
+  assert.equal(out.profile, 'standard', 'two lone flags on two surfaces must not escalate')
+  assert.equal(out.profileEscalated, false)
+  assert.equal(out.riskFlags.length, 0)
+  assert.equal(out.riskFlagsShortOfQuorum.length, 2, 'both are reported, not discarded')
+  assert.match(logText, /short of quorum/, 'a flag that did not carry must be logged')
+})
+
+test('two explorers on the SAME surface escalate', async () => {
+  // #122's real shape: the persistence slice saw the migration, the scheduled-jobs slice saw the
+  // purge semantics. Different files, different readers, same surface — that is agreement.
+  const { out } = await run({
+    source: twoSeams(),
+    args: { source: '#122', classifyOnly: true },
+    overrides: { 'explore#1': exploreText([PERSIST]), 'explore#2': exploreText([PURGE]) },
+  })
+  assert.equal(out.profile, 'full')
+  assert.equal(out.profileEscalated, true)
+  assert.equal(out.riskFlags.length, 2)
+  assert.equal(out.riskFlagsShortOfQuorum.length, 0)
+})
+
+test('one explorer cannot reach quorum by listing the same surface twice', async () => {
+  // Distinct EXPLORERS, not distinct flags — otherwise a single reader clears the bar alone.
+  const { out } = await run({
+    source: twoSeams(),
+    args: { source: '#73', classifyOnly: true },
+    overrides: { 'explore#1': exploreText([PERSIST, PURGE]), 'explore#2': exploreText([]) },
+  })
+  assert.equal(out.profile, 'standard', 'two flags from ONE reader are one opinion')
+  assert.equal(out.profileEscalated, false)
+  assert.equal(out.riskFlagsShortOfQuorum.length, 2)
+})
+
+test('the light tier runs one explorer, where a lone flag still escalates', async () => {
+  // A quorum of two is unreachable with a single reader, and light is where a miss costs most.
+  const { out } = await run({
+    source: baseSource({ profile: 'light', exploreAspects: ['the one seam'] }),
+    args: { source: '#81', classifyOnly: true },
+    riskFlags: [AUTHF],
+  })
+  assert.equal(out.profile, 'full', 'one explorer, one flag: no second opinion is available')
+  assert.equal(out.profileEscalated, true)
+  assert.equal(out.riskFlagsShortOfQuorum.length, 0)
+})
+
 test('a why that is missing or a placeholder is not evidence either', async () => {
   for (const why of [undefined, '', 'b']) {
     const { out } = await run({
