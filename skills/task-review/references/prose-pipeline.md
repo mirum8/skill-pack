@@ -19,7 +19,7 @@ other silently makes the two engines diverge.
 | 1 | Detect the build tool; answer the `/test-app` gate |
 | 2 | One parallel review pass (report-only): Codex, hunters, `/r:code-quality` |
 | 3 | Triage once, intent-aware, into a single fix-list |
-| 4 | Fix everything once: correctness → domain subagent, readability → `/r:code-refactor` |
+| 4 | Fix everything once, **serially**: correctness → domain subagent, *then* readability → `/r:code-refactor` |
 | 5 | Build with tests |
 | 6 | `/r:code-scan` on the changed classes, then rebuild if it wrote code |
 | 7 | End-verify: one bounded Codex review of the final diff |
@@ -201,6 +201,10 @@ If every bucket is empty, skip Step 4 and go straight to the build.
 
 One fix phase, the heavy work delegated so it stays out of your context. Apply the correctness fixes first, then the readability refactor on top.
 
+**4a and 4b are SERIAL — never launch them in the same turn.** This is the one place in the pipeline where two writers would be pointed at the same files, and it is not a style preference. Both lists come from reviews of the *same* diff, so a shared file is the common case rather than the tail. Two agents editing one file at once has three outcomes and only two of them are caught: a broken file fails the fixer's own self-check or the Step 5 green build. The third is silent — the refactorer writes a file from a read taken *before* the correctness fix landed, the fix vanishes, the build is still green, and the run reports it as fixed. Nothing downstream re-reads it, because the full-tier end-verify is framed regression-only and told to skip anything already triaged, which is exactly what a reverted triaged fix looks like. No "stay in your lane" wording in the two prompts can make concurrent writes to one file safe; only the ordering can. Correctness first is also the cheaper order on its own terms — refactoring code that is about to be surgically fixed is wasted work, and the separate readability commit in 4b is only an honest "behavior-locked" description once the fixes are already in.
+
+**Count only what a live fixer took.** If either subagent dies, the triaged list is what someone was *asked* to do, not what got done. Report that half as `0` fixed, name the lost items in the log, and don't credit the finding tracks for them in `fixedBySource` — a `fixed` count a caller merges on has to be earned. A dead readability refactor costs polish only; a dead correctness fixer means the defects are still in the tree.
+
 **4a — Correctness / security → a domain subagent.** Hand the correctness fix-list to a specialist: the list, the diff (`git diff`), and one or two sentences on what the change was meant to do (so it doesn't "fix" something intentional). Brief it as a **surgical fixer, not a feature builder**:
 
 - Fix **only** the listed items — the smallest diff that resolves each. No refactoring, renaming, or "improving" outside them.
@@ -209,7 +213,7 @@ One fix phase, the heavy work delegated so it stays out of your context. Apply t
 - **Self-check by compiling, not by building.** Give the fixer the cheap command — `mvn -q test-compile` or `./gradlew -q testClasses` — plus the one test it wrote test-first (`-Dtest=X` / `--tests X`), and tell it explicitly **not** to run the full build or the whole suite. Left vague ("verify it compiles"), a fixer reaches for `mvn clean package` and runs the entire suite seconds before Step 5 runs it again — a hidden duplicate test run per fixer, invisible because it happens inside a subagent. Nothing is verified less: compiling is all the self-check must prove, and Step 5 runs the suite immediately after. Don't add `-o` (offline) by default — fixers run *before* this run's first build, so on a fresh clone an uncached dependency makes it fail hard.
 - Return a short summary (files + one line each).
 
-Route by area: backend (`*.java`, `*.kt`) → **`java-backend-developer`**; Thymeleaf / HTMX / templates → **`htmx-thymeleaf-dev`**; spanning both → one subagent per area in parallel, each with its slice; no clear specialist → a general subagent.
+Route by area: backend (`*.java`, `*.kt`) → **`java-backend-developer`**; Thymeleaf / HTMX / templates → **`htmx-thymeleaf-dev`**; spanning both → one subagent per area in parallel, each with its slice; no clear specialist → a general subagent. That split is safe to overlap precisely because the slices are **disjoint files** — which is what 4a and 4b never are. Give each its file list explicitly; the moment two fixers could touch one file, run them one after the other.
 
 **4b — Readability wins → `/r:code-refactor`.** Apply the "worth-fixing" code-quality findings with the **`/r:code-refactor` skill**, not a domain subagent. `/r:code-refactor` is the right tool because a readability/idiom fix must change *form, not behavior*, and `/r:code-refactor` locks behavior with a test first, then refactors safely. Scope it to the **changed files only**, and — by default — have it land as **its own commit**, separate from the correctness fixes, so if a readability change turns out wrong it's one `git revert` and the end-verify can review it in isolation. **Exception — `deferCommit` mode** (the caller, e.g. `/r:task-run`, commits the whole task as one commit at the end): the refactor applies its changes **in the working tree without a separate commit**; they fold into the caller's single final commit. **Minor / optional** code-quality items are just listed for the user, never auto-applied (readability is partly taste; don't churn the diff).
 
@@ -418,7 +422,7 @@ python3 ${CLAUDE_SKILL_DIR}/scripts/record-run.py" <<'PTR_STATS_JSON'
 PTR_STATS_JSON
 ```
 
-`fixedBySource` is the payload — the per-track counts from Step 3's fix-list, plus `end-verify` for anything the Step 7 passes handed to a fixer. Everything else is the context needed to read it, since a track scores zero on a tier that never dispatched it.
+`fixedBySource` is the payload — the per-track counts from Step 3's fix-list, plus `end-verify` for anything the Step 7 passes handed to a fixer. In both cases a track is credited only when the fixer that received its finding actually **lived** (see Step 4): the number exists to retire a track on evidence, so it has to count fixes that happened, not assignments that were made. Everything else is the context needed to read it, since a track scores zero on a tier that never dispatched it.
 
 Two rules. **Counts, never finding text** — that keeps the row under the 4 KiB single-write limit, which is what makes parallel worktree runs safe to append to one file. And **it can never fail the run**: the script always exits `0`, and a row that doesn't get written is a lost row, not a failed review. Never retry it, never treat it as a blocked track.
 

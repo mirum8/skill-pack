@@ -798,6 +798,9 @@ let nothingToFix = true
 // Correctness fixes counted per finding track — the stats sink's whole reason to exist. Declared
 // out here because the light tier skips the block below entirely and the return still reads it.
 let fixedBySource = {}
+// Whether each Phase 3 fixer actually lived. Read only by the returned `fixed` counts, so a
+// triaged list handed to an agent that died is never reported as work this run completed.
+let fixApplied = { correctness: true, readability: true }
 if (profile !== 'light') {
 phase('Review')
 ;[codex, bugs, quality] = await parallel([
@@ -952,20 +955,34 @@ if (fixList && Array.isArray(fixList.correctness)) {
 }
 nothingToFix = !fixList ||
   (!fixList.correctness.length && !fixList.readability.length)
-// What each track cost and bought, for the stats sink. Counted from the TRIAGED list, not the
-// raw reports: a track whose findings were all judged false-positive contributed nothing, and
-// that is exactly the distinction worth recording.
-for (const c of (fixList && fixList.correctness) || []) {
-  fixedBySource[c.source] = (fixedBySource[c.source] || 0) + 1
-}
-
 // --- Phase 3: fix everything once (correctness first, then readability) ------
+// SERIAL, and the order is the point. These two ran in parallel() and are scoped to the SAME
+// files by construction — the correctness list and the code-quality report are both reviews of
+// one diff, so a shared file is the common case, not the tail. Two agents editing one file
+// concurrently has three outcomes and only two of them are caught: a broken file fails the
+// fixer's own self-check, or the Phase 4 green build. The third is silent — the refactorer
+// writes a file from a read taken BEFORE the correctness fix landed, the fix disappears, the
+// build is still green, and the run reports `fixed.correctness: N` for a fix that is no longer
+// in the tree. Nothing downstream re-reads it: the full-tier end-verify is framed regression-only
+// and told to skip anything already triaged, which is exactly what a reverted triaged fix looks
+// like. A `fixed` count a caller cannot trust is the one thing this routine must never produce,
+// and no prompt-level "stay in your lane" clause can make concurrent writes to one file safe.
+// Correctness first is also right on its own terms: refactoring code that is about to be
+// surgically fixed is wasted work, and with deferCommit:false the readability agent's
+// "behavior-locked, separate commit" is only an honest description once the fixes are already in.
 if (!nothingToFix) {
   phase('Fix')
-  const fixThunks = []
+  // Both were bare agent() calls inside parallel(), which converted a throw to null one level up.
+  // Awaiting them directly removes that trap, so it is restored here: a StructuredOutput cap or an
+  // exhausted budget in a FIXER must not end a run that still has the build, the scan and the
+  // end-verify to do. Deliberately not reliable() — a fixer that died has usually already written
+  // part of its diff, and re-dispatching it onto its own half-applied edits is worse than saying so.
+  const fix = (prompt, o) => agent(prompt, o).catch(() => null)
+  let correctnessFixed = true
+  let readabilityFixed = true
   if (fixList.correctness.length) {
     const agentType = triage.hasFrontend && !triage.hasBackend ? 'htmx-thymeleaf-dev' : 'java-backend-developer'
-    fixThunks.push(() => agent(
+    const fc = await fix(
       `Surgical fixer, not a feature builder. Fix ONLY these items — the smallest diff that
        resolves each; no refactoring, renaming, or "improving" outside them:
        ${fixList.correctness.map((c) => c.item).join('\n')}
@@ -979,15 +996,36 @@ if (!nothingToFix) {
          more than 3 fields, match the surrounding code.
        - ${selfCheckClause}${noFullBuild}
        - Return a short summary (files + one line each).${intentBlock}`,
-      { label: 'fix-correctness', phase: 'Fix', agentType, ...FIX_RUN }))
+      { label: 'fix-correctness', phase: 'Fix', agentType, ...FIX_RUN })
+    // Same rule the end-verify fixer already follows: only count what a live fixer took. A dead
+    // one used to leave `fixed.correctness` reporting the full triaged list, which is the same
+    // false-confidence failure the serialization above exists to prevent — arriving by a different
+    // route. The items stay visible in the log either way.
+    if (blocked(fc)) {
+      correctnessFixed = false
+      log(`post-task-review: the correctness fixer DIED — ${fixList.correctness.length} triaged item(s) were NOT fixed:\n` +
+          fixList.correctness.map((c) => `  - ${c.item}`).join('\n'))
+    } else {
+      // What each track cost and bought, for the stats sink. Counted from the TRIAGED list, not
+      // the raw reports: a track whose findings were all judged false-positive contributed
+      // nothing, and that is exactly the distinction worth recording. Credited HERE rather than
+      // at triage time so it cannot disagree with `fixed.correctness` — a track gets credit for
+      // a finding that was actually fixed, never for one handed to a fixer that died.
+      for (const c of fixList.correctness) fixedBySource[c.source] = (fixedBySource[c.source] || 0) + 1
+    }
   }
   if (fixList.readability.length) {
-    fixThunks.push(() => agent(
+    // Only now, and only into a tree the correctness fixer has finished writing.
+    const fr = await fix(
       `Invoke the /r:code-refactor skill on the changed files ONLY, applying these readability
        wins ${commitClause}:\n${fixList.readability.join('\n')}${intentBlock}`,
-      { label: 'fix-readability', phase: 'Fix', ...GP }))
+      { label: 'fix-readability', phase: 'Fix', ...GP })
+    if (blocked(fr)) {
+      readabilityFixed = false
+      log(`post-task-review: the readability refactor DIED — ${fixList.readability.length} clarity win(s) went unapplied. Polish only; correctness is unaffected.`)
+    }
   }
-  if (fixThunks.length) await parallel(fixThunks)
+  fixApplied = { correctness: correctnessFixed, readability: readabilityFixed }
 }
 } else {
   log('post-task-review: light tier — skipping the up-front codex + hunter + code-quality fan-out. ' +
@@ -1613,8 +1651,10 @@ return {
   // correctness = the triaged fix-list items + everything the end-verify handed to a fixer. The
   // second half used to be missing, so a run that found and fixed a defect at the end still
   // reported `correctness: 0` — a summary field that contradicted what the run had just done.
-  fixed: { correctness: (fixList ? fixList.correctness.length : 0) + endVerifyFixed,
-           readability: fixList ? fixList.readability.length : 0 },
+  // Each half is counted only when its fixer LIVED: a triaged list is what someone was asked to
+  // do, not what got done, and the whole value of this field is that a caller can merge on it.
+  fixed: { correctness: (fixList && fixApplied.correctness ? fixList.correctness.length : 0) + endVerifyFixed,
+           readability: fixList && fixApplied.readability ? fixList.readability.length : 0 },
   docDrift: fixList ? fixList.docDrift : [],
   build: buildGreen ? 'green' : (triage.buildTool === 'none' ? 'n/a' : 'red'),
   // ok | skipped (nothing JVM changed) | blocked (scan died/errored — NOT scanned) | n/a (no build tool).

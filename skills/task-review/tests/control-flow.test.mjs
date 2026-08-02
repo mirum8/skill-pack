@@ -553,6 +553,82 @@ test('end-verify fixes are attributed to end-verify', async () => {
   assert.equal(out.fixedBySource.codex, 1)
 })
 
+// --------------------------------------------------- Phase 3 writes one at a time ---
+// These two fixers are scoped to the SAME changed files by construction, and they ran inside
+// parallel(). The failure that motivated serializing them is silent by nature: the refactorer
+// writes a file from a read taken before the correctness fix landed, the fix is gone, the build
+// is still green, and the run reports it as fixed. Nothing downstream re-reads it — the full-tier
+// end-verify is framed regression-only and told to skip anything already triaged.
+
+const ONE_OF_EACH = {
+  correctness: [{ item: 'A.java:10 off-by-one', source: 'codex' }],
+  readability: ['A.java:1 extract a method'],
+  docDrift: [],
+}
+
+test('REGRESSION: the readability refactor never runs while the correctness fixer is still editing', async () => {
+  let readabilityStarted = false
+  let overlapped = null
+  const { counts, order } = await run({
+    overrides: {
+      // Hold the correctness fixer open across many microtask turns. Under parallel() both thunks
+      // were invoked before either resolved, so the readability agent would have been dispatched
+      // by the time this reads the flag. Serially it cannot have been.
+      'fix-correctness': async () => {
+        for (let i = 0; i < 20; i++) await Promise.resolve()
+        overlapped = readabilityStarted
+        return 'fixed 1 item'
+      },
+      'fix-readability': async () => { readabilityStarted = true; return 'refactored' },
+      'fix-triage': ONE_OF_EACH,
+    },
+  })
+  assert.equal(counts['fix-correctness'], 1)
+  assert.equal(counts['fix-readability'], 1)
+  assert.equal(overlapped, false, 'the readability refactor started while the correctness fixer still held the tree')
+  // Correctness first is also the cheaper order: refactoring code that is about to be surgically
+  // fixed is wasted work.
+  assert.ok(order.indexOf('fix-correctness') < order.indexOf('fix-readability'))
+})
+
+test('REGRESSION: a correctness fixer that DIES is not counted as work the run completed', async () => {
+  const { out, logText } = await run({
+    overrides: { 'fix-triage': { ...ONE_OF_EACH, readability: [] }, 'fix-correctness': null },
+  })
+  // The triaged list is what someone was ASKED to do. Reporting it as done is the same
+  // false-confidence failure serializing the fixers exists to prevent, by another route.
+  assert.equal(out.fixed.correctness, 0)
+  assert.deepEqual(out.fixedBySource, {})
+  assert.match(logText, /correctness fixer DIED/)
+  assert.match(logText, /off-by-one/)  // the lost items are named, not just counted
+})
+
+test('a readability refactor that dies costs polish only — correctness is unaffected', async () => {
+  const { out, logText } = await run({
+    overrides: { 'fix-triage': ONE_OF_EACH, 'fix-readability': null },
+  })
+  assert.equal(out.fixed.readability, 0)
+  assert.equal(out.fixed.correctness, 1)
+  assert.deepEqual(out.fixedBySource, { codex: 1 })
+  assert.match(logText, /readability refactor DIED/)
+})
+
+test('a fixer that THROWS does not end a run with the build, scan and end-verify still to do', async () => {
+  // parallel() used to convert a thrown thunk to null one level above these calls. Awaiting them
+  // directly removed that trap, so the catch is now explicit — without it a StructuredOutput cap
+  // in a fixer would take down a review that had not yet built, scanned or verified anything.
+  const { out } = await run({
+    overrides: {
+      'fix-triage': ONE_OF_EACH,
+      'fix-correctness': () => { throw new Error('structured-output retry cap') },
+    },
+  })
+  assert.equal(out.reviewed, true)
+  assert.equal(out.build, 'green')
+  assert.equal(out.localScan, 'ok')
+  assert.equal(out.fixed.correctness, 0)
+})
+
 test('the stats row is written once, with counts rather than finding text', async () => {
   const { counts, prompts } = await run()
   assert.equal(counts['stats'], 1)
