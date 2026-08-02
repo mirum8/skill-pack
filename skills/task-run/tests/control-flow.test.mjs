@@ -38,7 +38,20 @@ const PLAN_TEXT = '## Context\nfix it\n## Coverage contract\ncriterion -> test'
 // the brief is padded past MIN_BRIEF_CHARS (400) because anything shorter is now treated as a
 // failed explorer rather than a short one.
 const BRIEF_TEXT = 'AdminRatesController.java:167 returns the fragment. '.repeat(9)
-const exploreText = (riskFlags) => `${BRIEF_TEXT}\nRISKFLAGS: ${JSON.stringify(riskFlags)}`
+// Two trailers now: the frontend files the change touches (which can only turn the design phase
+// ON) and the risk surfaces (which can only escalate the tier). Both are parsed off the text, and
+// the parser bounds each one by the other so either order survives.
+const exploreText = (riskFlags, uiFiles = []) =>
+  `${BRIEF_TEXT}\nUIFILES: ${JSON.stringify(uiFiles)}\nRISKFLAGS: ${JSON.stringify(riskFlags)}`
+
+// The design agent is schema-LESS as well: it returns a markdown section with the intent on a
+// trailer line. Anything under MIN_DESIGN_CHARS (600) is treated as a gave-up answer, so the stub
+// is padded past it.
+const DESIGN_BODY = '## UI/UX design\n' +
+  '- States: empty, loading, error, no-permission all specified for the versions table.\n'.repeat(9)
+const DESIGN_INTENT = 'A dense admin table that keeps its rows visible when an import is rejected.'
+const designText = (intent = DESIGN_INTENT) =>
+  `${DESIGN_BODY}\nDESIGN-INTENT: ${intent}`
 
 function baseSource(over = {}) {
   return {
@@ -57,7 +70,8 @@ function baseSource(over = {}) {
 
 // `overrides` maps a label PREFIX to the value that label should return — or THROW, or a
 // function of the call count. Anything not overridden takes the happy-path default.
-async function run({ source = baseSource(), riskFlags = [], review, planfix, verdict,
+async function run({ source = baseSource(), riskFlags = [], uiFiles = [], design = designText(),
+                     review, planfix, verdict,
                      args = { source: '#81' }, overrides = {}, build } = {}) {
   const logs = []
   const prompts = {}
@@ -80,7 +94,9 @@ async function run({ source = baseSource(), riskFlags = [], review, planfix, ver
       return typeof val === 'function' ? val(counts[l]) : val
     }
     if (l === 'source') return source
-    if (l.startsWith('explore')) return exploreText(riskFlags)
+    if (l.startsWith('explore')) return exploreText(riskFlags, uiFiles)
+    // Schema-less, like the explorers and the planner — its reply IS the section.
+    if (l === 'ui-design') return design
     // The planner is schema-LESS — it returns its plan as plain text, so the stub does too.
     if (l === 'planner' || l === 'plan-light') return PLAN_TEXT
     if (l === 'plan-write' || l === 'plan-status') return { written: true, path: source.planPath }
@@ -313,7 +329,10 @@ test('plan-write gets the plan\'s real line count and a QUOTED heredoc to write 
   const lines = planMarkdown.split('\n').length
   assert.ok(lines > 1, 'the fixture must be multi-line for the count to mean anything')
 
+  // Backend-only, so the body IS the plan: the design-section case is covered separately, where
+  // what matters is that the count follows the COMBINED document.
   const { prompts } = await run({
+    source: baseSource({ uiTouched: false }),
     review: OK_REVIEW, planfix: OK_FIX, overrides: { planner: planMarkdown },
   })
   const p = prompts['plan-write']
@@ -378,9 +397,21 @@ test('classifyOnly returns the tier and writes nothing', async () => {
   // The pair is the measurement: the description said standard, the code said full.
   assert.equal(out.profileFromDescription, 'standard')
   assert.deepEqual(out.riskFlagsIgnored, [])
-  for (const l of ['planner', 'plan-write', 'branch', 'implement:backend', 'build#1', 'stats']) {
+  for (const l of ['ui-design', 'planner', 'plan-write', 'branch', 'implement:backend', 'build#1', 'stats']) {
     assert.equal(counts[l], undefined, `${l} must not run for a classification`)
   }
+})
+
+test('classifyOnly reports the settled uiTouched next to the guess it corrected', async () => {
+  const { out } = await run({
+    args: { source: '#81', classifyOnly: true },
+    source: baseSource({ uiTouched: false, exploreAspects: ['the one seam'] }),
+    uiFiles: ['templates/admin/rates.html', 'AdminRatesController.java'],
+  })
+  assert.equal(out.uiTouched, true)
+  assert.equal(out.uiFromDescription, false)   // the pair is the measurement, as with the tier
+  assert.equal(out.uiEscalated, true)
+  assert.deepEqual(out.uiFiles, ['templates/admin/rates.html'])  // the .java vote is not evidence
 })
 
 test('classifyOnly reports flags the gate ignored, so a drifting enum is visible', async () => {
@@ -446,28 +477,174 @@ test('standard tier: full planner, but no Codex plan review', async () => {
   assert.equal(out.planReview.ran, false)
 })
 
-test('a UI task sends the planner to the frontend-design skill, in every tier', async () => {
-  // The plan is the last cheap place to set visual direction, and post-task-review's visual half
-  // grades the finished pages against this same rubric — a planner that never read it is planning
-  // against an invisible bar.
-  const { prompts } = await run({ review: OK_REVIEW, planfix: OK_FIX })
-  assert.match(prompts['planner'], /THIS TASK TOUCHES THE UI/)
-  assert.match(prompts['planner'], /load the `frontend-design` skill/)
+test('a UI task gets its own design phase, and the plan is built around the section', async () => {
+  // The design used to be a paragraph inside the planner's prompt, competing with eight other
+  // sections. Now it is decided first, in its own agent, and lands in the plan file verbatim.
+  const { out, prompts, optsBy } = await run({ review: OK_REVIEW, planfix: OK_FIX })
+  assert.match(prompts['ui-design'], /load the `frontend-design` skill/)
+  assert.equal(optsBy['ui-design'].model, 'opus')
+  // The planner plans the IMPLEMENTATION of it and is told not to re-open it.
+  assert.match(prompts['planner'], /THE UI\/UX IS ALREADY DECIDED/)
+  assert.match(prompts['planner'], /## UI\/UX design/)
+  assert.match(prompts['planner'], /Do NOT re-decide/)
+  assert.doesNotMatch(prompts['planner'], /the dedicated design phase could not run/)
+  // One artifact: the section reaches disk through the same scribe as the plan, ahead of it.
+  assert.match(prompts['plan-write'], /## UI\/UX design/)
+  assert.ok(prompts['plan-write'].indexOf('## UI/UX design') < prompts['plan-write'].indexOf('## Context'),
+    'the design section is prepended to the plan, not appended after it')
+  // The scribe's truncation check is driven by the line count and the last line of what it is
+  // handed. Both must describe the COMBINED document, or a correctly-written plan reads as a
+  // truncated one.
+  const combined = `${DESIGN_BODY.trim()}\n\n${PLAN_TEXT}`.split('\n').length
+  assert.match(prompts['plan-write'], new RegExp(`PLAN \\(${combined} line\\(s\\)\\)`))
+  // And the implementers are told it is binding.
+  assert.match(prompts['implement:backend'], /BINDING for the visual work/)
+  assert.equal(out.designIntent, DESIGN_INTENT)
+})
 
-  const light = await run({
+test('the design phase runs at the light tier too', async () => {
+  // A "cosmetic template change" is classified light by definition — and it is exactly the task
+  // where design judgement IS the whole job.
+  const { counts, prompts } = await run({
     source: baseSource({ profile: 'light', exploreAspects: ['the template'] }),
     args: { source: '#81', profile: 'light' },
   })
-  assert.match(light.prompts['plan-light'], /load the `frontend-design` skill/,
-    'a cosmetic template change is exactly where design judgement IS the task')
+  assert.equal(counts['ui-design'], 1)
+  assert.match(prompts['plan-light'], /THE UI\/UX IS ALREADY DECIDED/)
+  assert.match(prompts['plan-light'], /## UI\/UX design/)
 })
 
-test('a backend-only task does not drag the planner through the design rubric', async () => {
-  const { prompts } = await run({
+test('a backend-only task skips the design phase entirely', async () => {
+  const { out, counts, prompts } = await run({
     source: baseSource({ uiTouched: false }),
     review: OK_REVIEW, planfix: OK_FIX,
   })
+  assert.equal(counts['ui-design'], undefined)
   assert.doesNotMatch(prompts['planner'], /frontend-design/)
+  assert.doesNotMatch(prompts['planner'], /UI\/UX/)
+  assert.doesNotMatch(prompts['implement:backend'], /BINDING for the visual work/)
+  assert.equal(out.designIntent, '')
+  assert.equal(out.uiTouched, false)
+})
+
+test('a dead design agent costs depth, not the run — the planner takes the design back', async () => {
+  // Deliberately NOT the codex-plan-review treatment: there no stand-in reviewer is acceptable, so
+  // the run stops. Here the fallback is real — the planner loads frontend-design itself, which is
+  // what this pipeline did before the phase existed.
+  for (const dead of [null, THROW]) {
+    const { out, prompts, counts, logText } = await run({
+      overrides: { 'ui-design': dead }, review: OK_REVIEW, planfix: OK_FIX,
+    })
+    assert.equal(out.stopped, undefined, 'a blocked design phase must not stop the run')
+    assert.equal(counts['ui-design'], 3, 'reliable() re-dispatches it three times first')
+    assert.match(prompts['planner'], /the dedicated design phase could not run/)
+    assert.match(prompts['planner'], /Load the `frontend-design` skill/)
+    assert.doesNotMatch(prompts['implement:backend'], /BINDING for the visual work/,
+      'never point an implementer at a section that was never written')
+    assert.equal(out.designIntent, '')
+    assert.match(logText, /design phase came back blocked/)
+  }
+})
+
+test('a design section without its DESIGN-INTENT trailer still lands, minus the intent', async () => {
+  const { out, prompts, logText } = await run({
+    design: DESIGN_BODY, review: OK_REVIEW, planfix: OK_FIX,
+  })
+  assert.match(prompts['plan-write'], /## UI\/UX design/, 'the document is the expensive artifact')
+  assert.equal(out.designIntent, '')
+  assert.match(logText, /without a DESIGN-INTENT trailer/)
+})
+
+test('a design reply too short to be a section is re-dispatched, not accepted', async () => {
+  const { counts, logText } = await run({
+    design: '## UI/UX design\nlooks fine', review: OK_REVIEW, planfix: OK_FIX,
+  })
+  assert.equal(counts['ui-design'], 3)
+  assert.match(logText, /design phase came back blocked/)
+})
+
+test('the explorers turn uiTouched ON when Phase 0 read the task as backend-only', async () => {
+  // The gate this exists for: "stop the import from wiping the admin page" reads as a backend fix
+  // and lands in three templates. Until the explorers could vote, that task got no design phase
+  // and no UI verification in the review.
+  const { out, counts, logText } = await run({
+    source: baseSource({ uiTouched: false }),
+    uiFiles: ['templates/admin/rates.html', 'static/css/admin.css'],
+    review: OK_REVIEW, planfix: OK_FIX,
+  })
+  assert.equal(out.uiTouched, true)
+  assert.equal(counts['ui-design'], 1)
+  assert.match(logText, /uiTouched false -> TRUE/)
+  assert.match(logText, /templates\/admin\/rates\.html/, 'an escalation must name its evidence')
+  assert.equal(out.profile, 'full', 'and it must not move the tier on its own')
+  assert.equal(out.profileEscalated, false)
+})
+
+test('a UIFILES vote that names no frontend file buys nothing', async () => {
+  // The same guard as the risk flags: a field that merely exists is not evidence. A placeholder
+  // would otherwise buy a whole design phase and, downstream, a browser deploy in the review.
+  const { out, counts, logText } = await run({
+    source: baseSource({ uiTouched: false, exploreAspects: ['the one seam'] }),
+    uiFiles: ['AdminRatesController.java', 'the template'],
+    review: OK_REVIEW, planfix: OK_FIX,
+  })
+  assert.equal(out.uiTouched, false)
+  assert.equal(counts['ui-design'], undefined)
+  assert.match(logText, /ignored 2 UIFILES vote\(s\)/)
+})
+
+test('uiTouched only ever moves up — an explorer\'s silence does not turn it off', async () => {
+  // An explorer maps its own slice, not the repository, so "no templates here" is not evidence
+  // that the change touches none. A false positive is corrected later, from the real diff.
+  const { out, counts } = await run({ uiFiles: [], review: OK_REVIEW, planfix: OK_FIX })
+  assert.equal(out.uiTouched, true)
+  assert.equal(counts['ui-design'], 1)
+})
+
+test('a missing UIFILES trailer is logged as a vote that was never cast', async () => {
+  const { logText } = await run({
+    overrides: { explore: `${BRIEF_TEXT}\nRISKFLAGS: []` },
+    review: OK_REVIEW, planfix: OK_FIX,
+  })
+  assert.match(logText, /no parsable UIFILES line/)
+})
+
+test('the trailers parse in either order', async () => {
+  // Each trailer's JSON is bounded by the other, so a UIFILES line written AFTER the risk flags is
+  // not swallowed by the risk parser's lastIndexOf(']').
+  const { out, logText } = await run({
+    source: baseSource({ profile: 'standard', uiTouched: false }),
+    args: { source: '#81', profile: 'standard' },
+    overrides: {
+      explore: `${BRIEF_TEXT}\nRISKFLAGS: [{"surface":"auth","where":"Admin.java:12","why":"adds a role check"}]\nUIFILES: ["templates/admin/rates.html"]`,
+    },
+    review: OK_REVIEW, planfix: OK_FIX,
+  })
+  assert.equal(out.uiTouched, true, 'the UI vote survived being written last')
+  assert.equal(out.profile, 'full', 'and the risk flag still escalated')
+  assert.match(logText, /uiTouched false -> TRUE/)
+})
+
+test('the Codex plan review gets the UI rubric item only when there is a UI', async () => {
+  const ui = await run({ review: OK_REVIEW, planfix: OK_FIX })
+  assert.match(ui.prompts['codex-plan-review#1'], /6\. UI\/UX design/)
+  assert.match(ui.prompts['codex-plan-review#1'], /rubric "ui-design"/)
+
+  const backend = await run({
+    source: baseSource({ uiTouched: false }), review: OK_REVIEW, planfix: OK_FIX,
+  })
+  assert.doesNotMatch(backend.prompts['codex-plan-review#1'], /UI\/UX design/,
+    'a rubric item with nothing to apply it to comes back with invented findings')
+})
+
+test('a ui-design finding is judged and applied like any other', async () => {
+  const { out, prompts } = await run({
+    review: { ran: true, findings: [{ severity: 'major', rubric: 'ui-design', what: 'finding 1' }] },
+    planfix: { applied: ['named the empty state for the versions table'] },
+    verdict: { real: true, why: 'rates.html:44 has no empty branch', fix: 'add the empty state' },
+  })
+  assert.match(prompts['judge#1.1:ui-design'], /finding 1/)
+  assert.deepEqual(out.planReview.applied, ['named the empty state for the versions table'])
 })
 
 test('explorers escalate to full when the CHANGE alters a risk surface', async () => {

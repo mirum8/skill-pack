@@ -2,8 +2,9 @@
 // run-task (implement half) — PROTOTYPE Workflow (deterministic orchestration)
 //
 // This encodes /r:task-run Steps 0 – 4 as a hardcoded subagent graph: resolve the
-// task source, map the code, plan it on Opus at xhigh, have Codex challenge the plan,
-// implement it test-first through domain subagents, and drive the build green.
+// task source, map the code, design the UI when the change touches one, plan it on
+// Opus at xhigh, have Codex challenge the plan, implement it test-first through domain
+// subagents, and drive the build green.
 // It STOPS after the build, leaving the uncommitted diff on the feature branch
 // and returning a handoff. Steps 5 (review) and 6 (finish) are the CALLER's.
 //
@@ -43,7 +44,9 @@
 //   is fetched, their acceptance criteria merge into criteria[], and the branch
 //   is issues-42-61-<slug>. The caller (e.g. /r:gh-issues-fix) closes all of them.
 // returns: { branch, base, profile, profileReason, profileForced, profileEscalated,
-//            uiTouched, taskIntent, planPath, criteria,
+//            uiTouched (settled: Phase 0's guess, which the explorers can turn ON),
+//            designIntent: string ('' when no design phase ran — see Phase 1b),
+//            taskIntent, planPath, criteria,
 //            buildGreen: true | 'n/a' (no build tool — NEVER a silent true),
 //            planReview: { ran, passes, raised, applied[], dropped[] },
 //            testEvidence: string[] (what each test did BEFORE and after the change, as observed
@@ -65,6 +68,7 @@ export const meta = {
   phases: [
     { title: 'Source',      detail: 'resolve task + criteria + tier + build tool' },
     { title: 'Explore',     detail: 'read-only fan-out over the change surface', model: 'sonnet' },
+    { title: 'Design',      detail: 'UI/UX spec via frontend-design, iff uiTouched', model: 'opus' },
     { title: 'Plan',        detail: 'Opus xhigh planner, written to .task-plans/', model: 'opus' },
     { title: 'Plan-review', detail: 'Codex challenge + one bounded re-review' },
     { title: 'Implement',   detail: 'branch + test-first domain subagents' },
@@ -130,6 +134,18 @@ const RISK_SURFACES = ['auth', 'money', 'persistence', 'concurrency', 'security'
 // string, and when the trailer is missing the brief still survives; only the flags are lost, and
 // loudly.
 const RISKFLAGS_MARKER = 'RISKFLAGS:'
+// The second trailer, and the reason it exists: `uiTouched` was decided in Phase 0 from the task
+// DESCRIPTION, before anyone had opened a file. A task worded as a backend fix ("stop the import
+// from wiping the page") that lands in three templates got no design phase and no UI verification,
+// because nothing downstream could correct the guess. The explorers HAVE read the code by now, so
+// they name the frontend files this change will touch, exactly as they name risk surfaces.
+const UIFILES_MARKER = 'UIFILES:'
+// The evidence filter, and the analogue of looksLikeEvidence() below: a vote counts only when it
+// cites something that actually looks like a frontend file. Same failure it guards against — a
+// placeholder ("a file", "the template") is indistinguishable from a real citation to a gate that
+// only checks the field exists, and here it would buy a whole design phase and, downstream, a
+// browser deploy in the review.
+const FRONTEND_PATH = /\.(html|htm|css|scss|sass|js|jsx|ts|tsx|vue|svelte)$|(^|\/)(templates|static|public|assets)\//i
 // A brief this short is not a brief. It is the shape an explorer returns once it has given up —
 // "test", "done", an apology — and the old `b.brief` truthiness check let exactly that through to
 // the planner. Returning null here instead routes it back through reliable()'s re-dispatch, which
@@ -139,28 +155,57 @@ const MIN_BRIEF_CHARS = 400
 // That was always where it mattered: when this was schema-checked free text an explorer reporting
 // "business-logic branching" (true of nearly every change) escalated the run anyway, and the gate
 // is what stopped counting it.
+// Each trailer's JSON is bounded by the OTHER trailer when that one comes later, so the two parse
+// correctly in either order. Without that bound, a `UIFILES:` line written after `RISKFLAGS:` would
+// be swallowed by the risk-flag parser's `lastIndexOf(']')`, and both signals would be lost to one
+// mis-ordered reply.
+const parseTrailerArray = (raw, marker, otherAt) => {
+  const at = raw.lastIndexOf(marker)
+  if (at === -1) return { at, seen: false, items: [] }
+  const end = otherAt > at ? otherAt : raw.length
+  const tail = raw.slice(at + marker.length, end).trim()
+  // No array at all is a legitimate empty answer ("RISKFLAGS: none"). An array that is there but
+  // does not parse — truncated, half-escaped — is not: that is a lost signal, and it says so
+  // rather than passing as "no risk here", which is the read that made the original bug silent.
+  const s = tail.indexOf('[')
+  if (s === -1) return { at, seen: true, items: [] }
+  const e = tail.lastIndexOf(']')
+  let parsed = null
+  if (e > s) { try { parsed = JSON.parse(tail.slice(s, e + 1)) } catch { parsed = null } }
+  return Array.isArray(parsed) ? { at, seen: true, items: parsed } : { at, seen: false, items: [] }
+}
 const parseExplore = (raw) => {
   if (typeof raw !== 'string') return null
-  const at = raw.lastIndexOf(RISKFLAGS_MARKER)
-  const brief = (at === -1 ? raw : raw.slice(0, at)).trim()
+  const riskAt = raw.lastIndexOf(RISKFLAGS_MARKER)
+  const uiAt = raw.lastIndexOf(UIFILES_MARKER)
+  // The brief ends at the FIRST trailer present — with two of them, cutting at the last one would
+  // leave the other's line sitting at the bottom of the document the planner reads.
+  const cuts = [riskAt, uiAt].filter((i) => i !== -1)
+  const brief = (cuts.length ? raw.slice(0, Math.min(...cuts)) : raw).trim()
   if (brief.length < MIN_BRIEF_CHARS) return null
-  let riskFlags = []
-  let flagsSeen = at !== -1
-  if (flagsSeen) {
-    const tail = raw.slice(at + RISKFLAGS_MARKER.length).trim()
-    // No array at all is a legitimate empty answer ("RISKFLAGS: none"). An array that is there but
-    // does not parse — truncated, half-escaped — is not: that is a lost signal, and it says so
-    // rather than passing as "no risk here", which is the read that made the original bug silent.
-    const s = tail.indexOf('[')
-    if (s !== -1) {
-      const e = tail.lastIndexOf(']')
-      let parsed = null
-      if (e > s) { try { parsed = JSON.parse(tail.slice(s, e + 1)) } catch { parsed = null } }
-      if (Array.isArray(parsed)) riskFlags = parsed
-      else flagsSeen = false
-    }
-  }
-  return { brief, riskFlags, flagsSeen }
+  const risk = parseTrailerArray(raw, RISKFLAGS_MARKER, uiAt)
+  const ui = parseTrailerArray(raw, UIFILES_MARKER, riskAt)
+  return { brief, riskFlags: risk.items, flagsSeen: risk.seen, uiFiles: ui.items, uiSeen: ui.seen }
+}
+// The design agent is schema-less for the same reason the explorers and the planner are: its
+// output is a markdown document, and a document plus a second parameter is the payload that blows
+// the StructuredOutput retry cap. The one short field the caller needs — a sentence or two of
+// design intent to hand the review's visual half — rides out on a trailer line, parsed here.
+const DESIGN_INTENT_MARKER = 'DESIGN-INTENT:'
+// A section shorter than this is not a design section; it is the shape an agent returns once it has
+// given up. Returning null routes it back through reliable()'s re-dispatch. The floor is higher
+// than the explorers' because this document has eight named subsections to fill.
+const MIN_DESIGN_CHARS = 600
+const parseDesign = (raw) => {
+  if (typeof raw !== 'string') return null
+  const at = raw.lastIndexOf(DESIGN_INTENT_MARKER)
+  const section = (at === -1 ? raw : raw.slice(0, at)).trim()
+  if (section.length < MIN_DESIGN_CHARS) return null
+  // A missing trailer costs the intent, never the section: the document is the expensive artifact
+  // and it is already on the page. The caller logs the loss rather than re-running the agent for
+  // one sentence.
+  const intent = at === -1 ? '' : raw.slice(at + DESIGN_INTENT_MARKER.length).trim().split('\n')[0].trim()
+  return { section, intent }
 }
 // There is deliberately NO schema for the planner. It used to return {planMarkdown: string} —
 // a single field wrapping a ~250-line markdown document, which is the largest structured payload
@@ -211,7 +256,9 @@ const REVIEW = {
         required: ['severity', 'rubric', 'what'],
         properties: {
           severity: { type: 'string', enum: ['major', 'minor'] },
-          rubric: { type: 'string' },   // coverage | grounding | test-adequacy | simplicity | risk
+          // coverage | grounding | test-adequacy | simplicity | risk | ui-design (the last only
+          // when the plan carries a design section, i.e. a UI change)
+          rubric: { type: 'string' },
           what: { type: 'string' },
         },
       },
@@ -380,6 +427,13 @@ const PLAN_RUN = { model: 'opus', effort: 'xhigh' }
 // escalate light->FULL the moment they see auth, money, migrations or concurrency, so a
 // misclassified task never actually gets planned here. Same model, one tier down.
 const PLAN_LIGHT_RUN = { model: 'opus', effort: 'high' }
+// The UI/UX design agent. Opus because this is judgement — what the screen should be, which of the
+// app's existing components it is built from, which states it owes the user — and a cheaper model
+// reliably produces the generic layout `frontend-design` exists to rule out. `high` rather than the
+// planner's `xhigh`: the surface is one screen area against a design system that already exists,
+// not the whole change, and this document is reviewed downstream (by Codex at full tier, and by the
+// review's visual half against the rendered pages) rather than being the last word.
+const DESIGN_RUN = { model: 'opus', effort: 'high' }
 // The implementers were the one track that pinned nothing, so their depth came from the SESSION —
 // xhigh when entered through /r:task-run (whose frontmatter sets it), but whatever the caller
 // happened to be running at when this script is called directly, which SKILL.md explicitly invites
@@ -568,8 +622,13 @@ ${inRepo}
    4b. profileReason: one sentence naming the deciding factor ("adds a migration", "log-level
       change only, no behavior", "unscoped — the issue names no files"). This is logged and
       carried to the caller, so a wrong tier can be traced to a reason instead of re-guessed.
-   5. uiTouched: will this touch a frontend file (*.html/templates, *.css, *.js, static/**,
-      templates/**)? Also set hasBackend / hasFrontend for implementer routing.
+   5. uiTouched: will this touch a frontend file — templates and *.html, *.css/*.scss, frontend
+      *.js/*.ts (and *.jsx/*.tsx/*.vue/*.svelte), anything under templates/, static/, public/ or
+      assets/? This is a FIRST guess from the description, and the explorers who actually read the
+      code can turn it on afterwards (they cannot turn it off), so answer what the task plainly
+      says and do not stretch for it. It buys a UI/UX design phase before planning, so a wrong
+      "true" costs an agent and a wrong "false" costs the design step entirely.
+      Also set hasBackend / hasFrontend for implementer routing.
    6. BUILD TOOL from the repo root — return BOTH commands. buildCmd is the CLEAN certifying
       build used exactly ONCE; buildCmdFast is the incremental rebuild used every time after.
       maven -> "mvn clean package" / "mvn package", runnerAgent "maven-build-runner".
@@ -622,9 +681,21 @@ ${inRepo}
      Write the brief as plain prose/markdown and nothing else — it is read verbatim by the planner,
      so there is no JSON to escape and no wrapper to fill in. Your reply IS the brief.
 
-     Then end your reply with ONE final line, nothing after it:
+     Then end your reply with these TWO final lines, in this order and with nothing after them:
+       UIFILES: ["path/to/template.html", "path/to/styles.css"]
        RISKFLAGS: [{"surface": "...", "where": "path:LINE", "why": "..."}]
-     one entry per risk surface THIS TASK'S CHANGE will add or alter. There
+
+     UIFILES lists the FRONTEND files this task's change will touch — templates and *.html, *.css /
+     *.scss, frontend *.js/*.ts (and *.jsx/*.tsx/*.vue/*.svelte), anything under templates/,
+     static/, public/ or assets/. Same discipline as the risk flags below: list a file only if the
+     change will MODIFY it. A template the change merely renders through, or a stylesheet that
+     happens to live next door, is not a UI file for this purpose. \`UIFILES: []\` is a real and
+     common answer — return it for backend-only work.
+     This decides whether the run gets a UI/UX design phase before planning, and whether the review
+     later boots the app and looks at the rendered pages. It can only turn the design phase ON: the
+     task description already voted, and you are correcting it with what you actually read.
+
+     RISKFLAGS carries one entry per risk surface THIS TASK'S CHANGE will add or alter. There
      are exactly five, and 'surface' must be one of them:
        auth        — an authentication, authorization, permission or role decision
        money       — pricing, tax, billing or any other money math
@@ -772,6 +843,45 @@ if (profile !== 'full' && foundRisks.length) {
   log(`run-task-implement: re-classified ${from} -> FULL${overridden} — the change alters a risk surface: ${named}`)
 }
 
+// The same correction, for the OTHER guess Phase 0 made from the description alone. uiTouched
+// decides whether this run gets a design phase before planning and, through the handoff, whether
+// the review boots the app and looks at the rendered pages — and until now nothing could revise it
+// after someone had actually read the code.
+//
+// ONE DIRECTION ONLY, and not for symmetry's sake: an explorer maps its own slice, not the
+// repository, so "my slice has no templates" is not evidence that the change touches none. A
+// false POSITIVE from Phase 0 is already corrected downstream — /r:task-review re-classifies
+// uiTouched from the real diff whenever the tier was not forced — while a false negative is
+// exactly what this gate exists to catch, and nothing else would.
+//
+// It does NOT move the tier. UI is not one of the five risk surfaces, and routing every template
+// change to full would undo the reason `standard` exists.
+//
+// And no quorum, unlike the risk flags above. The quorum is there because "does this touch one of
+// five surfaces?" is a judgement an explorer will answer yes to for anything non-trivial, so one
+// reader's yes proves little. This asks for something else: a FILE PATH, which either is a
+// frontend file or is not, and the filter below checks that rather than trusting the claim. A
+// second explorer agreeing that rates.html is a template adds nothing — and it could not agree
+// anyway, since the slices are disjoint and only one of them holds the templates.
+const uiVotes = liveBriefs.flatMap((b) => b.uiFiles || [])
+  .filter((f) => typeof f === 'string' && f.trim().length >= 4)
+const uiFiles = uiVotes.filter((f) => FRONTEND_PATH.test(f))
+const uiIgnored = uiVotes.filter((f) => !FRONTEND_PATH.test(f))
+if (uiIgnored.length) {
+  log(`run-task-implement: ignored ${uiIgnored.length} UIFILES vote(s) that do not name a frontend file: ${JSON.stringify(uiIgnored).slice(0, 200)}`)
+}
+const uiFileless = liveBriefs.filter((b) => !b.uiSeen)
+if (uiFileless.length) {
+  log(`run-task-implement: ${uiFileless.length} explorer(s) returned no parsable UIFILES line — their view of the frontend surface did not vote`)
+}
+let uiTouched = !!src.uiTouched
+let uiEscalated = false
+if (!uiTouched && uiFiles.length) {
+  uiTouched = true
+  uiEscalated = true
+  log(`run-task-implement: uiTouched false -> TRUE — the explorers found frontend files this change touches: ${uiFiles.slice(0, 5).join(', ')}`)
+}
+
 // Dry run stops HERE — after the tier is settled, before the first thing that writes. Phase 2's
 // scribe creates .task-plans/, so returning any later would leave a file behind in a repo the
 // caller only asked to classify.
@@ -788,7 +898,12 @@ if (classifyOnly) {
     // between the two IS the measurement — it says how often reading the code changes the answer.
     profileFromDescription: src.profile,
     profileReason: src.profileReason || '',
-    uiTouched: !!src.uiTouched,
+    // Settled, post-escalation — and next to it what Phase 0 thought, for the same reason the two
+    // tier fields sit together: the gap is the measurement.
+    uiTouched,
+    uiFromDescription: !!src.uiTouched,
+    uiEscalated,
+    uiFiles,
     explorers: aspects.length || 1,
     exploreAspects: aspects,
     riskFlags: foundRisks,
@@ -858,32 +973,145 @@ const branchP = !wantBranch ? null : (async () => {
   return br
 })().catch(() => null)
 
-// --- Phase 2: the plan -------------------------------------------------------
-// Resume: a plan already past review is not re-planned or re-reviewed.
-phase('Plan')
+// --- Phase 1b: the UI/UX design, when there is a UI to design ----------------
+// WHY THIS IS ITS OWN PHASE AND NOT A PARAGRAPH IN THE PLANNER'S PROMPT.
+// It was a paragraph, and that is the whole problem: the planner owns nine sections — criteria
+// coverage, the reuse map, the TDD test plan, the risks — and "also decide how the page should
+// look" competed with all of them inside one context. What came back was a plan with markup in it
+// and no stated visual intent, so the implementer decided the visuals while writing templates and
+// the review's visual half then graded the result against generic taste. Splitting it out buys one
+// agent whose entire output is the design, before a line of the plan exists.
+//
+// It runs in EVERY tier, because the tier says how risky the change is, not whether a page changed
+// — a light-tier "cosmetic template change" is precisely the task where design judgement IS the
+// work. It is skipped on a resume: the section is already in the plan file on disk.
+//
+// The agent is read-only and writes nothing. The section reaches disk through the same scribe that
+// writes the plan, so there is exactly one artifact and one verbatim-copy check.
 const resuming = src.planStatus === 'implementing' || src.planStatus === 'done'
-if (resuming) log(`run-task-implement: resuming — ${planPath} is already at status "${src.planStatus}", skipping plan + plan-review`)
-
+// Shared by the design agent, both planners and the implementers: everyone downstream builds
+// against the same acceptance criteria, so they are rendered once.
 const criteriaText = (src.criteria || []).length
   ? (src.criteria || []).map((c) => `- ${c}`).join('\n')
   : '(none written — DERIVE an explicit acceptance-criteria list from the task description FIRST, then plan against it)'
+let designSection = ''
+let designIntent = ''
+if (uiTouched && !resuming) {
+  phase('Design')
+  const design = await reliable('ui-design', 'Design', async () => parseDesign(await agent(
+    `Decide the UI/UX for this task, before it is planned or built. You are read-only: return the
+     design section, do not write a file and do not edit anything.
 
-// The plan is the last point where visual direction is still cheap to set: by the time an
-// implementer is writing a template it is choosing markup, not deciding how the page should look.
-// So when the change touches the UI, the planner reads the same `frontend-design` rubric that
-// post-task-review's visual half will later judge the finished pages against — otherwise the run
-// is graded on a bar the planner never saw. Both planners get it; a "cosmetic template change" is
-// exactly the light-tier task where design judgement is the whole job.
-const uiDesignNote = src.uiTouched
+     TASK (${src.kind}): ${rawSource}
+     INTENT: ${src.taskIntent}
+     ACCEPTANCE CRITERIA:
+     ${criteriaText}
+
+     The codebase has already been mapped for you. Design against THESE briefs, and re-open the
+     templates, stylesheets and components they cite rather than inferring what they contain:
+     ${briefText}
+     ${uiFiles.length ? `The explorers named these frontend files as the ones this change touches: ${uiFiles.join(', ')}.` : ''}
+
+     FIRST, load the \`frontend-design\` skill (Skill tool) and design against its rubric. This is
+     the same rubric the review's visual half will judge the finished pages against, so a design
+     that never read it is designing against an invisible bar.
+
+     THEN find the design system this app already has, and build on it. Look for a written one —
+     ui-design.md, DESIGN.md, docs/ui*, a tokens/theme file, the CSS custom properties at the top
+     of the main stylesheet — and for the unwritten one in the pages next to the ones you are
+     changing. A design that starts a SECOND visual language inside the same app is the expensive
+     kind of wrong: it looks fine in isolation and wrong in the product. If the app genuinely has
+     no design system, say so and derive the direction from the closest existing page.
+
+     Return ONE markdown section, starting with the heading "## UI/UX design", with exactly these
+     subsections:
+     - Screens & routes — which pages/fragments change, and how the user reaches them.
+     - States — what each changed screen shows for: default, empty, loading, error, success, and
+       no-permission. Name the ones that genuinely do not apply and say why. Missing states are the
+       most common real UI defect, and they are decided here or not at all.
+     - Layout & hierarchy — what dominates, what recedes, what the eye hits first. Include a plain
+       text wireframe (ASCII boxes are fine) for each changed screen.
+     - Reuse map — the existing components, fragments, utility classes and tokens this is built
+       from, each with a file:LINE pointer, plus an explicit "do NOT invent" list: the things an
+       implementer might otherwise write from scratch when the app already has them.
+     - Responsive — what changes at desktop, tablet and mobile widths. Say what collapses, what
+       reflows, and what must not overflow.
+     - Accessibility — labels, focus order, keyboard path, contrast, and anything a screen reader
+       needs. Concrete requirements, not a reminder to be accessible.
+     - Copy — the exact user-facing strings this introduces, using the app's own i18n keys if it
+       has them.
+     - Decisions & rejected alternatives — the calls you made and, for each, the one or two you
+       turned down and why. This is what stops the implementer re-deciding it downstream.
+
+     Stay in your lane: you decide what the user sees, NOT how the code is structured. No class
+     names, no controller wiring, no data flow — the planner owns those and will plan against your
+     section. Cite file:LINE for every existing thing you claim to reuse; a reuse map built on
+     files you did not open is worse than none.
+
+     Scale the section to the change. A one-element tweak gets a short section, not eight headings
+     padded to look thorough — but it never drops the states or the reuse map, which are the two
+     that stop an implementer inventing something the app already has.
+
+     YOUR ENTIRE REPLY IS THE SECTION, followed by ONE final line and nothing after it:
+       DESIGN-INTENT: <at most two sentences saying what this change should look and feel like>
+     That line is carried to the reviewer who later looks at the rendered pages, so write the bar
+     you want to be held to. Everything above it is copied verbatim into the plan file, so no
+     preamble, no "here is the design", and no fenced code block around the whole document.`,
+    { label: 'ui-design', phase: 'Design', ...GP, ...DESIGN_RUN })))
+  if (blocked(design) || !design.section) {
+    // NOT a halt, and deliberately unlike the Codex plan review's `codex-plan-review-unavailable`.
+    // There the whole premise of the tier is that the approach was challenged before code existed,
+    // and no stand-in reviewer is acceptable. Here there IS a real fallback one line below — the
+    // planner loading `frontend-design` itself, which is what this pipeline did before this phase
+    // existed — so a dead design agent costs depth, not the run.
+    log("run-task-implement: the UI/UX design phase came back blocked — falling back to the planner's own frontend-design pass")
+  } else {
+    designSection = design.section
+    designIntent = design.intent
+    if (!designIntent) log('run-task-implement: the design section arrived without a DESIGN-INTENT trailer — the section still lands in the plan, but the review gets no stated design intent')
+    log(`run-task-implement: UI/UX design decided (${designSection.split('\n').length} lines) — it goes into ${planPath} and the planner plans against it`)
+  }
+}
+
+// --- Phase 2: the plan -------------------------------------------------------
+// Resume: a plan already past review is not re-planned or re-reviewed.
+phase('Plan')
+if (resuming) log(`run-task-implement: resuming — ${planPath} is already at status "${src.planStatus}", skipping plan + plan-review`)
+
+// What the planner is told about the visuals, in three shapes.
+//
+// 1. The design phase ran: the section is DECIDED, and the planner's job is to build the
+//    implementation around it rather than to re-open it. Handing a planner a design and letting it
+//    "improve" the design is how the two artifacts end up disagreeing inside one plan file.
+// 2. The design phase was wanted but died: fall back to what this pipeline did before it existed —
+//    the planner loads `frontend-design` itself. Thinner, but the run is not graded on a bar
+//    nobody read.
+// 3. No UI in this change: nothing at all. A backend planner dragged through a design rubric
+//    spends its attention on a section it will not write.
+const uiDesignNote = designSection
   ? `
-       THIS TASK TOUCHES THE UI. Before you design that part, load the \`frontend-design\` skill
-       (Skill tool) and plan the visual work against it: layout and hierarchy, typography, spacing,
-       the states a real page needs (empty, loading, error), and responsive behaviour. Build on the
-       components, tokens and page structure the briefs found — a plan that starts a second visual
-       language inside the same app is the expensive kind of wrong. Write the design decisions you
-       made and why into the plan, so the implementer inherits direction instead of re-deciding it
-       from scratch, and so the reviewer can check the pages against a stated intent.`
-  : ''
+       THE UI/UX IS ALREADY DECIDED. A design agent worked it out against the \`frontend-design\`
+       rubric and the app's existing design system, before this plan existed, and its section is
+       reproduced below. It is copied into the plan file verbatim, ahead of your plan, and the
+       implementers build from it — so plan the IMPLEMENTATION of it: which templates, fragments
+       and assets change, and which existing components the reuse map points at. Do NOT re-decide
+       the visuals, re-word the section, or design a second version of it. If it genuinely
+       contradicts the code you read, say so in "Assumptions & risks" with the file:LINE that
+       contradicts it, rather than quietly diverging.
+
+${designSection.split('\n').map((l) => `       ${l}`).join('\n')}
+`
+  : uiTouched
+    ? `
+       THIS TASK TOUCHES THE UI, and the dedicated design phase could not run — so the visual
+       direction is yours to set. Load the \`frontend-design\` skill (Skill tool) and plan the
+       visual work against it: layout and hierarchy, typography, spacing, the states a real page
+       needs (empty, loading, error), and responsive behaviour. Build on the components, tokens and
+       page structure the briefs found — a plan that starts a second visual language inside the
+       same app is the expensive kind of wrong. Write the design decisions you made and why into
+       the plan, so the implementer inherits direction instead of re-deciding it from scratch, and
+       so the reviewer can check the pages against a stated intent.`
+    : ''
 
 if (!resuming) {
   let planMarkdown
@@ -979,6 +1207,18 @@ ${uiDesignNote}
     if (blocked(lite) || typeof lite !== 'string' || !lite.trim()) return { stopped: 'planner-blocked' }
     planMarkdown = lite.trim()
   }
+
+  // The design section rides into the plan file AHEAD of the plan, as one document with one
+  // scribe. Not a second file: the plan path is what Codex reviews, what the implementers read,
+  // and what a resume picks up from — a design kept beside it would be the one artifact nobody
+  // downstream is already opening. Verbatim, because the planner may paraphrase anything it is
+  // asked to repeat, and the point of deciding the design in its own phase is that the words
+  // survive to the implementer.
+  //
+  // Everything the scribe verifies is computed from THIS combined text — the line count, the
+  // last-line truncation check, the disk re-check below — so prepending here needs no change to
+  // any of it.
+  if (designSection) planMarkdown = `${designSection}\n\n${planMarkdown}`
 
   // The planner is read-only and this script has no filesystem access, so a scribe agent puts
   // the plan on disk. The file is the shared artifact for the Codex reviewer and the
@@ -1086,7 +1326,23 @@ if (!resuming && profile === 'full') {
      4. Simplicity (YAGNI) — is anything over-built for needs that aren't here? Is there a simpler
         approach that still satisfies every criterion?
      5. Risk — are the risky spots (migration, money math, concurrency, auth, external calls)
-        called out and handled, or waved past?`
+        called out and handled, or waved past?${uiTouched ? `
+     6. UI/UX design — the plan opens with a "## UI/UX design" section, decided in its own phase
+        before the plan. Does it cover the states a real page owes the user (empty, loading, error,
+        no-permission), reuse the components and tokens this codebase already has instead of
+        starting a parallel visual language, and state responsive and accessibility behaviour in
+        concrete terms? Check its reuse map the way you check the plan's: a file:LINE that does not
+        say what the section claims is a MAJOR finding. Then check the plan AGAINST the section —
+        a plan that builds something other than what the design says is the failure this pairing
+        exists to catch. Tag these findings with rubric "ui-design".` : ''}`
+  // Item 6 is added only when the change touches the UI. A rubric item handed to a reviewer with
+  // nothing to apply it to does not come back empty — it comes back with invented findings about a
+  // section that does not exist, and each one then costs a judge.
+  //
+  // Note what this does NOT reach: the plan review runs at `full` only, so at light and standard
+  // the design section goes unchallenged until the review's visual half sees the rendered pages.
+  // That is the existing tier trade — the same one that leaves those tiers without a plan review
+  // at all — not a hole this phase opened.
 
   // Pass 2 used to be a COLD re-read: a fresh Codex process with no idea what it said the first
   // time or what the triage did with it. That wastes the one thing a second pass is uniquely good
@@ -1407,6 +1663,14 @@ const implBrief = (a) => `Implement your slice of the plan at ${planPath}. READ 
    ACCEPTANCE CRITERIA your slice must satisfy:
    ${criteriaText}
 
+   ${/* Gated on the section EXISTING, not on uiTouched: when the design phase died the plan has no
+        such section, and pointing an implementer at one it cannot find is worse than saying
+        nothing. On a resume it is unset here but present in the plan file, which the implementer
+        reads first anyway. */
+     designSection ? `- The plan opens with a "## UI/UX design" section that was decided before the plan and is
+     BINDING for the visual work: the states, the layout, the reuse map and its "do NOT invent"
+     list. Build what it says, reusing the components it points at. If you cannot, say so in
+     blockedOn — do not substitute your own design.` : ''}
    - WRITE THE TESTS FIRST, per the plan's TDD test plan — load the \`write-tests\` skill
      (Skill tool) so they match house style — then implement until they pass.
    - RUN each new test BEFORE you write any production code, and record what you SAW in
@@ -1520,7 +1784,12 @@ const statsRow = {
   profileEscalated,
   profileReason: (src.profileReason || '').slice(0, 200),
   explorers: aspects.length || 1,
-  uiTouched: !!src.uiTouched,
+  uiTouched,
+  // The two things worth measuring about the new gate, for the same reason profileEscalated is
+  // recorded: uiEscalated says how often the description-based guess was wrong, and designRan says
+  // whether the phase it buys actually produced a document.
+  uiEscalated,
+  designRan: !!designSection,
   buildGreen,
   planReviewRan: !!(planReview && planReview.ran),
   planApplied: (planReview && planReview.applied || []).length,
@@ -1547,7 +1816,13 @@ return {
   // any code existed, which post-task-review can beat by classifying from the actual diff.
   profileForced: !!forcedProfile,
   profileEscalated,
-  uiTouched: !!src.uiTouched,
+  // Settled: Phase 0's guess, which the explorers can turn ON once they have read the code.
+  uiTouched,
+  // At most two sentences of stated design intent, from the design phase. '' when the change has
+  // no UI, when the design agent died, or on a resume (the section is already in the plan file).
+  // The caller appends it to the intent it hands /r:task-review, which is what gets the finished
+  // pages judged against a stated bar instead of generic taste.
+  designIntent,
   taskIntent: src.taskIntent,
   planPath,
   criteria: src.criteria || [],
