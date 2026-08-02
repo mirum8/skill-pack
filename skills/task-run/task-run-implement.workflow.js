@@ -532,6 +532,11 @@ ${inRepo}
            anything security-sensitive?                              no  -> "standard"
         c. otherwise                                                     -> "full"
 
+      When the approach follows a comparable feature already in this repo, say which one in
+      profileReason ("mirrors the existing cancel-deal action"); when it does not, say that.
+      A tier whose reason names the precedent it checked can be audited by opening that file,
+      and a wrong tier is then traceable to a wrong claim instead of a matter of taste.
+
       READ THE PERSISTENCE ARM NARROWLY. It means schema, migration, index, locking — the
       things you cannot simply revert. Adding an ordinary read-only query, a repository or
       port method over a table that already exists, or a field and its mapping, is NOT this
