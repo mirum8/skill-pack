@@ -13,7 +13,6 @@ description: >-
   own after an ordinary code change, and never at the end of a regular coding session.
   Auto-detects Maven vs Gradle; skips itself on doc-only / config-only turns.
 effort: xhigh
-disable-model-invocation: true
 ---
 
 # post-task-review
@@ -93,6 +92,7 @@ There's a second reason these are pinned rather than inherited: **the frontmatte
 
 The full text of each lives in `references/prose-pipeline.md` (between Steps 8 and 9). These govern **both** engines:
 
+- **This routine never fires on its own — but it is reachable.** It runs on an explicit `/r:task-review`, or when `/r:task-run` reaches its post-task-review step and invokes it through the Skill tool. It does **not** run because a coding turn ended, a build went green, or a diff looked reviewable. This rule used to be frontmatter (`disable-model-invocation: true`), which was wrong: that flag doesn't distinguish "the model auto-loaded this" from "the model was told to run this", so it also blocked `/r:task-run`'s mandatory Step 5 — the pipeline's own caller could not reach it. The flag is gone and the rule is held here and in the description; don't restore it.
 - **The pipeline is immutable — never edit or fork it.** One pipeline, two encodings: the canonical `post-task-review.workflow.js`, and the prose Steps 0–9 in `references/prose-pipeline.md`. Run the workflow *only* from the canonical path — a `PreToolUse` hook blocks forked invocations, and on the prose path (which the hook can't reach) the immutability is on you. **The two encodings must change together**; editing one silently makes the engines diverge.
 - **The build invariant is GREEN, and it is never relaxed.** A red build — **including a `main` that was already red** — STOPS the routine and is surfaced. Never tolerate known failures, never add an "expected to fail" allowance, never touch out-of-scope tests to force green. The build→fix loop only fixes failures *this turn's change caused*.
 - **Real tools only.** Every step named after a tool runs that actual tool. If it can't, stop and say so; never substitute an LLM prompt that imitates a scanner, reviewer, or build.

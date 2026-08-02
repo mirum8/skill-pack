@@ -17,7 +17,7 @@
       "kind": "neighbour-exclusion",
       "neighbour": "task-run",
       "prompt": "implement the CSV export and ship it",
-      "expected_output": "Building the change is task-run's job; task-review must not load, because there is no diff to review yet. task-review also carries disable-model-invocation, so it can only ever be reached deliberately.",
+      "expected_output": "Building the change is task-run's job; task-review must not load, because there is no diff to review yet. task-review is reachable by name and from task-run's Step 5, but never fires on its own.",
       "files": [],
       "fixture": null,
       "assertions": []

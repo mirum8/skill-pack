@@ -121,8 +121,8 @@ CASES = {
         "task-run",
         "implement the CSV export and ship it",
         "Building the change is task-run's job; task-review must not load, because there is "
-        "no diff to review yet. task-review also carries disable-model-invocation, so it can "
-        "only ever be reached deliberately.",
+        "no diff to review yet. task-review is reachable by name and from task-run's Step 5, "
+        "but never fires on its own.",
     ),
     "task-run": (
         "run this task: add a dark-mode toggle to the settings page",

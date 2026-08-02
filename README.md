@@ -73,11 +73,18 @@ Names are domain-first (`<domain>-<action>`, at most three kebab segments) so th
 alphabetically sorted `/` menu groups the families: `claudemd-*`, `code-*`,
 `spec-*`, `task-*`.
 
-`task-run`, `task-review` and `gh-issues-fix` carry
-`disable-model-invocation: true` — each says in its own text that it must never
-fire on its own, and the frontmatter enforces that rather than trusting the
-prose. They stay invocable by name; they just will not auto-load, and they do not
-appear in the model's own list of skills.
+`task-run` and `gh-issues-fix` carry `disable-model-invocation: true` — each says
+in its own text that it must never fire on its own, and the frontmatter enforces
+that rather than trusting the prose. They stay invocable by name; they just will
+not auto-load, and they do not appear in the model's own list of skills.
+
+`task-review` says the same thing but carries no flag, on purpose. The flag is
+all-or-nothing: it blocks the Skill tool outright, so it cannot tell "the model
+auto-loaded this" from "the model was told to run this" — and `task-run`'s Step 5
+is *required* to invoke `/r:task-review`. With the flag on, that step could not
+reach it and the mandatory review quietly became something the user had to type.
+For that one skill the no-auto-fire rule is carried by its description and its
+non-negotiables instead.
 
 The eight agents in `agents/` are what the review fan-out dispatches to — four
 bug hunters, two build runners, and two stack-specific implementers.

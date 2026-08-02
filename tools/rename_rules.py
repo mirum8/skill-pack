@@ -53,8 +53,13 @@ AGENTS = [
 # for these; see ref_patterns().
 AMBIGUOUS_IN_BACKTICKS = {"commit", "refactor"}
 
-# FR-16 — skills whose own text says they must never fire on their own.
-NO_AUTO_FIRE = {"task-review", "task-run", "gh-issues-fix"}
+# FR-16 — skills whose own text says they must never fire on their own AND that
+# nothing else in the pack has to invoke. task-review is deliberately NOT here:
+# its own text says the same thing, but `disable-model-invocation` does not
+# distinguish "auto-loaded" from "explicitly told to run", so it also blocked
+# /r:task-run's mandatory Step 5 from reaching the review through the Skill tool.
+# There, the rule is held by the description and the non-negotiables instead.
+NO_AUTO_FIRE = {"task-run", "gh-issues-fix"}
 
 # Files worth rewriting at all; everything else is copied byte-for-byte.
 TEXT_SUFFIXES = (".md", ".js", ".mjs", ".py", ".sh", ".json", ".template", ".txt")
