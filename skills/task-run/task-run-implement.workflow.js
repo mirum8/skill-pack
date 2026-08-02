@@ -45,6 +45,7 @@
 //   is issues-42-61-<slug>. The caller (e.g. /r:gh-issues-fix) closes all of them.
 // returns: { branch, base, profile, profileReason, profileForced, profileEscalated,
 //            uiTouched (settled: Phase 0's guess, which the explorers can turn ON),
+//            uiVisualChange (does anything RENDER differently — the design phase's own gate),
 //            designIntent: string ('' when no design phase ran — see Phase 1b),
 //            taskIntent, planPath, criteria,
 //            buildGreen: true | 'n/a' (no build tool — NEVER a silent true),
@@ -68,7 +69,7 @@ export const meta = {
   phases: [
     { title: 'Source',      detail: 'resolve task + criteria + tier + build tool' },
     { title: 'Explore',     detail: 'read-only fan-out over the change surface', model: 'sonnet' },
-    { title: 'Design',      detail: 'UI/UX spec via frontend-design, iff uiTouched', model: 'opus' },
+    { title: 'Design',      detail: 'UI/UX spec via frontend-design, iff the visuals change', model: 'opus' },
     { title: 'Plan',        detail: 'Opus xhigh planner, written to .task-plans/', model: 'opus' },
     { title: 'Plan-review', detail: 'Codex challenge + one bounded re-review' },
     { title: 'Implement',   detail: 'branch + test-first domain subagents' },
@@ -82,8 +83,8 @@ export const meta = {
 const SOURCE = {
   type: 'object', additionalProperties: false,
   required: ['kind', 'slug', 'branch', 'base', 'taskIntent', 'criteria', 'profile',
-             'profileReason', 'uiTouched', 'hasBackend', 'hasFrontend', 'buildTool',
-             'exploreAspects', 'planPath', 'planStatus', 'branchExists'],
+             'profileReason', 'uiTouched', 'uiVisualChange', 'hasBackend', 'hasFrontend',
+             'buildTool', 'exploreAspects', 'planPath', 'planStatus', 'branchExists'],
   properties: {
     kind: { type: 'string', enum: ['issue', 'todo', 'text'] },
     slug: { type: 'string' },
@@ -96,6 +97,11 @@ const SOURCE = {
     // indistinguishable after the fact, and "why is everything full?" has no answer but a guess.
     profileReason: { type: 'string' },
     uiTouched: { type: 'boolean' },
+    // The SECOND UI question, and not a duplicate of the first. `uiTouched` asks whether a frontend
+    // FILE changes — it buys the review's browser pass, and a font swap that must render identically
+    // wants that pass. `uiVisualChange` asks whether anything a user sees or interacts with has to be
+    // DECIDED, which is the only thing the design phase can produce. See the gate at Phase 1b.
+    uiVisualChange: { type: 'boolean' },
     hasBackend: { type: 'boolean' },
     hasFrontend: { type: 'boolean' },
     buildTool: { type: 'string', enum: ['maven', 'gradle', 'none'] },
@@ -626,8 +632,20 @@ ${inRepo}
       *.js/*.ts (and *.jsx/*.tsx/*.vue/*.svelte), anything under templates/, static/, public/ or
       assets/? This is a FIRST guess from the description, and the explorers who actually read the
       code can turn it on afterwards (they cannot turn it off), so answer what the task plainly
-      says and do not stretch for it. It buys a UI/UX design phase before planning, so a wrong
-      "true" costs an agent and a wrong "false" costs the design step entirely.
+      says and do not stretch for it. It decides whether the review later boots the app and looks
+      at the rendered pages, so a change that must LOOK the same still counts as touching the UI.
+   5b. uiVisualChange: does this change what a user SEES or INTERACTS WITH — a new or changed
+      screen, fragment, component, state (empty/loading/error), layout, visual treatment, or user-
+      facing copy? Answer for the RENDERED RESULT, not for the file extension: a change that edits
+      templates or CSS but is meant to leave every page looking and behaving exactly as it does now
+      is "false". Self-hosting a font or an icon set, a CSP or header change, renaming a CSS class
+      or a template fragment, a build/asset-pipeline change, adding a test hook or a data-attribute
+      — all false, even though every one of them edits .html or .css. An acceptance criterion of
+      the form "the appearance does not change" is the giveaway: answer false.
+      This buys a UI/UX DESIGN phase before planning, whose entire output is a decision about what
+      the screen should be. There is nothing for it to decide when the answer is "the same as now",
+      and a design agent given that task writes a section explaining that it has nothing to design.
+      It cannot be true when uiTouched is false.
       Also set hasBackend / hasFrontend for implementer routing.
    6. BUILD TOOL from the repo root — return BOTH commands. buildCmd is the CLEAN certifying
       build used exactly ONCE; buildCmdFast is the incremental rebuild used every time after.
@@ -691,9 +709,10 @@ ${inRepo}
      change will MODIFY it. A template the change merely renders through, or a stylesheet that
      happens to live next door, is not a UI file for this purpose. \`UIFILES: []\` is a real and
      common answer — return it for backend-only work.
-     This decides whether the run gets a UI/UX design phase before planning, and whether the review
-     later boots the app and looks at the rendered pages. It can only turn the design phase ON: the
-     task description already voted, and you are correcting it with what you actually read.
+     This decides whether the review later boots the app and looks at the rendered pages, and — when
+     the task description gave no sign of a frontend at all — whether the run gets a UI/UX design
+     phase before planning. It can only turn those ON: the task description already voted, and you
+     are correcting it with what you actually read.
 
      RISKFLAGS carries one entry per risk surface THIS TASK'S CHANGE will add or alter. There
      are exactly five, and 'surface' must be one of them:
@@ -881,6 +900,27 @@ if (!uiTouched && uiFiles.length) {
   uiEscalated = true
   log(`run-task-implement: uiTouched false -> TRUE — the explorers found frontend files this change touches: ${uiFiles.slice(0, 5).join(', ')}`)
 }
+// The design phase's own gate, and the reason it is not `uiTouched`. That flag answers "does a
+// frontend FILE change?", which is the right question for the review's browser pass and the wrong
+// one here: issue #123 of a real repo ("self-host the fonts, drop Google Fonts from the layouts and
+// the CSP") edits three templates and a stylesheet and lists "the appearance does not change
+// noticeably" as an acceptance criterion. It bought a full Opus design phase, which opened with
+// "this change is visually invisible by design" and then filled eight subsections saying so — ten
+// minutes and the run's most expensive agent spent proving there was nothing to decide.
+//
+// So the design phase asks the narrower question: is there a VISUAL DECISION to make? A change that
+// must render exactly as it does now has none, however many .html files it edits.
+//
+// One exception, and it is the case Phase 1b was built for: when the explorers turned uiTouched on,
+// Phase 0 did not know this task had a frontend at all, so its uiVisualChange answer is not a
+// judgement about the visuals — it is a consequence of having missed them. Treat it as unanswered
+// and run the design phase. That is the "backend-worded task that lands in three templates" the
+// UIFILES trailer exists to catch, and it is exactly where nobody has decided the visuals yet.
+let uiVisualChange = uiTouched && !!src.uiVisualChange
+if (uiEscalated && !uiVisualChange) {
+  uiVisualChange = true
+  log('run-task-implement: uiVisualChange -> TRUE — the description hid the frontend entirely, so Phase 0 never judged the visuals; the design phase runs')
+}
 
 // Dry run stops HERE — after the tier is settled, before the first thing that writes. Phase 2's
 // scribe creates .task-plans/, so returning any later would leave a file behind in a repo the
@@ -903,6 +943,10 @@ if (classifyOnly) {
     uiTouched,
     uiFromDescription: !!src.uiTouched,
     uiEscalated,
+    // The design phase's gate, kept separate from uiTouched for the same reason the two tier fields
+    // sit together: the pair (uiTouched true, uiVisualChange false) is the whole class of change
+    // that edits templates without deciding anything, and it is worth being able to count.
+    uiVisualChange,
     uiFiles,
     explorers: aspects.length || 1,
     exploreAspects: aspects,
@@ -984,7 +1028,10 @@ const branchP = !wantBranch ? null : (async () => {
 //
 // It runs in EVERY tier, because the tier says how risky the change is, not whether a page changed
 // — a light-tier "cosmetic template change" is precisely the task where design judgement IS the
-// work. It is skipped on a resume: the section is already in the plan file on disk.
+// work. It is skipped on a resume: the section is already in the plan file on disk. And it is
+// gated on `uiVisualChange`, not on `uiTouched`: editing a template is not the same as deciding
+// what a page should be, and the gap between the two is where this phase used to burn an agent
+// (see the uiVisualChange settle above).
 //
 // The agent is read-only and writes nothing. The section reaches disk through the same scribe that
 // writes the plan, so there is exactly one artifact and one verbatim-copy check.
@@ -996,7 +1043,13 @@ const criteriaText = (src.criteria || []).length
   : '(none written — DERIVE an explicit acceptance-criteria list from the task description FIRST, then plan against it)'
 let designSection = ''
 let designIntent = ''
-if (uiTouched && !resuming) {
+// Wanted, not merely run: it is also what the planner's fallback keys off, so a task with no visual
+// decision does not get told to set a visual direction by a planner instead.
+const designWanted = uiVisualChange && !resuming
+if (uiTouched && !uiVisualChange && !resuming) {
+  log('run-task-implement: skipping the UI/UX design phase — this change touches frontend files but decides nothing visual (the rendered result is meant to stay as it is)')
+}
+if (designWanted) {
   phase('Design')
   const design = await reliable('ui-design', 'Design', async () => parseDesign(await agent(
     `Decide the UI/UX for this task, before it is planned or built. You are read-only: return the
@@ -1086,8 +1139,10 @@ if (resuming) log(`run-task-implement: resuming — ${planPath} is already at st
 // 2. The design phase was wanted but died: fall back to what this pipeline did before it existed —
 //    the planner loads `frontend-design` itself. Thinner, but the run is not graded on a bar
 //    nobody read.
-// 3. No UI in this change: nothing at all. A backend planner dragged through a design rubric
-//    spends its attention on a section it will not write.
+// 3. No visual decision in this change — a backend task, or one that edits templates without
+//    changing what they render: nothing at all. A planner dragged through a design rubric it does
+//    not need spends its attention on a section it will not write, and case 2 is keyed on
+//    `designWanted` rather than `uiTouched` for exactly that reason.
 const uiDesignNote = designSection
   ? `
        THE UI/UX IS ALREADY DECIDED. A design agent worked it out against the \`frontend-design\`
@@ -1101,7 +1156,7 @@ const uiDesignNote = designSection
 
 ${designSection.split('\n').map((l) => `       ${l}`).join('\n')}
 `
-  : uiTouched
+  : designWanted
     ? `
        THIS TASK TOUCHES THE UI, and the dedicated design phase could not run — so the visual
        direction is yours to set. Load the \`frontend-design\` skill (Skill tool) and plan the
@@ -1326,7 +1381,7 @@ if (!resuming && profile === 'full') {
      4. Simplicity (YAGNI) — is anything over-built for needs that aren't here? Is there a simpler
         approach that still satisfies every criterion?
      5. Risk — are the risky spots (migration, money math, concurrency, auth, external calls)
-        called out and handled, or waved past?${uiTouched ? `
+        called out and handled, or waved past?${designSection ? `
      6. UI/UX design — the plan opens with a "## UI/UX design" section, decided in its own phase
         before the plan. Does it cover the states a real page owes the user (empty, loading, error,
         no-permission), reuse the components and tokens this codebase already has instead of
@@ -1335,9 +1390,11 @@ if (!resuming && profile === 'full') {
         say what the section claims is a MAJOR finding. Then check the plan AGAINST the section —
         a plan that builds something other than what the design says is the failure this pairing
         exists to catch. Tag these findings with rubric "ui-design".` : ''}`
-  // Item 6 is added only when the change touches the UI. A rubric item handed to a reviewer with
-  // nothing to apply it to does not come back empty — it comes back with invented findings about a
-  // section that does not exist, and each one then costs a judge.
+  // Item 6 is added only when there IS a design section in the plan — not merely when the change
+  // touches the UI. A rubric item handed to a reviewer with nothing to apply it to does not come
+  // back empty: it comes back with invented findings about a section that does not exist, and each
+  // one then costs a judge. That is reachable two ways here — a change with no visual decision, and
+  // a design phase that died — and `designSection` is the only thing true in neither case.
   //
   // Note what this does NOT reach: the plan review runs at `full` only, so at light and standard
   // the design section goes unchallenged until the review's visual half sees the rendered pages.
@@ -1789,6 +1846,9 @@ const statsRow = {
   // recorded: uiEscalated says how often the description-based guess was wrong, and designRan says
   // whether the phase it buys actually produced a document.
   uiEscalated,
+  // The gap between these two is the measurement the design gate exists for: uiTouched-without-
+  // uiVisualChange is the run that would have spent an Opus agent writing "nothing changes visually".
+  uiVisualChange,
   designRan: !!designSection,
   buildGreen,
   planReviewRan: !!(planReview && planReview.ran),
@@ -1823,6 +1883,8 @@ return {
   // The caller appends it to the intent it hands /r:task-review, which is what gets the finished
   // pages judged against a stated bar instead of generic taste.
   designIntent,
+  // Why designIntent can be '' on a UI change: this says whether a visual decision was even wanted.
+  uiVisualChange,
   taskIntent: src.taskIntent,
   planPath,
   criteria: src.criteria || [],

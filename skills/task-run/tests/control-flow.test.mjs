@@ -58,7 +58,11 @@ function baseSource(over = {}) {
     kind: 'issue', slug: 'issue-81-import', branch: 'issue-81-import', base: 'main',
     taskIntent: 'Stop the rate-sheet import from wiping the admin page.',
     criteria: ['rejected import keeps the versions table'],
-    profile: 'full', profileReason: 'rewrites the import error path', uiTouched: true,
+    profile: 'full', profileReason: 'rewrites the import error path',
+    // Two flags, not one: uiTouched says a frontend file changes (it buys the review's browser
+    // pass), uiVisualChange says something RENDERS differently (it buys the design phase). The
+    // default task changes both; the pair comes apart in the tests below.
+    uiTouched: true, uiVisualChange: true,
     hasBackend: true, hasFrontend: false,
     buildTool: 'maven', buildCmd: 'mvn clean package', buildCmdFast: 'mvn package',
     runnerAgent: 'maven-build-runner',
@@ -412,6 +416,9 @@ test('classifyOnly reports the settled uiTouched next to the guess it corrected'
   assert.equal(out.uiFromDescription, false)   // the pair is the measurement, as with the tier
   assert.equal(out.uiEscalated, true)
   assert.deepEqual(out.uiFiles, ['templates/admin/rates.html'])  // the .java vote is not evidence
+  // The escalation carries the design gate with it: Phase 0 said "no UI", so its uiVisualChange
+  // "false" was never a judgement about the visuals.
+  assert.equal(out.uiVisualChange, true)
 })
 
 test('classifyOnly reports flags the gate ignored, so a drifting enum is visible', async () => {
@@ -527,6 +534,29 @@ test('a backend-only task skips the design phase entirely', async () => {
   assert.equal(out.uiTouched, false)
 })
 
+test('a change that edits templates but decides nothing visual skips the design phase', async () => {
+  // The real run this gate came from: "self-host the fonts, drop Google Fonts from the layouts and
+  // the CSP", whose acceptance criteria include "the appearance does not change noticeably". It
+  // edits three templates and a stylesheet, so uiTouched is true and the review should still boot
+  // the app — but there is nothing for a design agent to decide, and the one that ran spent ten
+  // minutes writing a section that opened "this change is visually invisible by design".
+  const { out, counts, prompts, logText } = await run({
+    source: baseSource({ uiTouched: true, uiVisualChange: false }),
+    review: OK_REVIEW, planfix: OK_FIX,
+  })
+  assert.equal(counts['ui-design'], undefined, 'no design agent for a change with no visual decision')
+  // And no consolation prize: the planner must not be told to set the visual direction instead,
+  // which is what keying the fallback on uiTouched would have done.
+  assert.doesNotMatch(prompts['planner'], /the dedicated design phase could not run/)
+  assert.doesNotMatch(prompts['planner'], /frontend-design/)
+  assert.doesNotMatch(prompts['codex-plan-review#1'], /UI\/UX design/)
+  assert.equal(out.designIntent, '')
+  assert.equal(out.uiVisualChange, false)
+  // The review still gets the browser pass — that is the flag this one does NOT touch.
+  assert.equal(out.uiTouched, true)
+  assert.match(logText, /skipping the UI\/UX design phase/)
+})
+
 test('a dead design agent costs depth, not the run — the planner takes the design back', async () => {
   // Deliberately NOT the codex-plan-review treatment: there no stand-in reviewer is acceptable, so
   // the run stops. Here the fallback is real — the planner loads frontend-design itself, which is
@@ -635,6 +665,14 @@ test('the Codex plan review gets the UI rubric item only when there is a UI', as
   })
   assert.doesNotMatch(backend.prompts['codex-plan-review#1'], /UI\/UX design/,
     'a rubric item with nothing to apply it to comes back with invented findings')
+
+  // The other way to reach a plan with no design section: the phase was wanted and died. Gating
+  // item 6 on uiTouched sent Codex after a section that does not exist in both cases.
+  const dead = await run({
+    overrides: { 'ui-design': null }, review: OK_REVIEW, planfix: OK_FIX,
+  })
+  assert.doesNotMatch(dead.prompts['codex-plan-review#1'], /rubric "ui-design"/,
+    'no design section on disk, so no rubric item about one')
 })
 
 test('a ui-design finding is judged and applied like any other', async () => {
