@@ -230,9 +230,12 @@ that skill is mis-routing right now.
 
 ### Rollback
 
-The pack is the only copy of these skills on this machine. If one turns out to be
-wrong, fix it here and re-run `./install.sh`. The pre-pack versions are archived
-under `~/.claude-backups/`:
+Fix a wrong skill here and re-run `./install.sh` — the repo is the copy to edit.
+It is **not** the only copy on this machine: pre-pack originals under their old
+flat names still sit in `~/.agents/skills/`, and an edit that lands there works
+under the old name and is missing under the new one. `validate.sh` names them on
+every run for exactly that reason; treat that line as a standing warning, not as
+noise. The pre-pack versions are also archived under `~/.claude-backups/`:
 
 ```sh
 tar -xzf ~/.claude-backups/claude-skills-<stamp>.tar.gz -C ~/.claude

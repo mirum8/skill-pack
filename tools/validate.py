@@ -382,6 +382,27 @@ def check_vendored():
 
 
 # --- R-4 --------------------------------------------------------------------
+# Every skills root a pre-pack original can still be sitting in. R-4 is the risk that an edit
+# lands in one of those instead of the pack, so "closed" may only be claimed when NO root holds
+# a twin. Checking one root and announcing the pack is the only copy is how the risk stays open
+# while the gate certifies it shut — which is worse than not checking, because it is believed.
+OTHER_SKILL_ROOTS = ("~/.agents/skills",)
+
+
+def surviving_elsewhere(source_root):
+    """(root, names) for every root outside the scanned one that still holds flat originals."""
+    scanned = os.path.realpath(os.path.join(source_root, "skills"))
+    out = []
+    for root in OTHER_SKILL_ROOTS:
+        base = os.path.expanduser(root)
+        if os.path.realpath(base) == scanned or not os.path.isdir(base):
+            continue
+        live = sorted(o for o in R.RENAME if os.path.isdir(os.path.join(base, o)))
+        if live:
+            out.append((root, live))
+    return out
+
+
 def drift_hashes(source_root):
     out = {}
     base = os.path.join(source_root, "skills")
@@ -399,24 +420,28 @@ def drift_hashes(source_root):
 def check_drift(source_root, refresh):
     """R-4 is the risk that an edit lands in a flat original instead of the pack.
 
-    ADR-13 said the originals live forever, which is what made that risk
-    permanent. **That decision was reversed on 2026-07-31: the originals were
-    backed up and deleted.** So this check now has two valid outcomes, and only
-    one of them is still a warning:
+    The originals under the scanned source were backed up and deleted on 2026-07-31, so this
+    check has three outcomes and only the last is silent:
 
-      * every original gone  -> the cut-over happened, R-4 is closed, nothing to
-        compare. The pack is the only copy, which is what the risk wanted.
-      * some original present -> a partial cut-over, or a machine that never
-        deleted them. Those are still checked against the baseline, because
-        while a twin exists an edit can still land in it.
+      * an original present in the scanned source -> a partial cut-over, or a machine that never
+        deleted them. Those are checked against the baseline, because while a twin exists an
+        edit can still land in it.
+      * an original present in ANOTHER skills root -> the risk is open there too. Reported by
+        name, not compared: those copies have their own lineage, and per-file drift against a
+        baseline taken elsewhere is noise, while their mere existence is the signal.
+      * no original anywhere -> R-4 is closed, and only then may that be said.
 
-    A wholesale deletion is therefore reported, not failed. Reporting it as 79
-    failures — one per file — is what this did before the reversal, and it would
-    make the pre-push script useless rather than informative.
+    A wholesale deletion is reported, not failed. Reporting it as 79 failures — one per file —
+    would make the pre-push script useless rather than informative.
     """
     path = os.path.join(REPO, "tools", "drift-baseline.json")
+    elsewhere = surviving_elsewhere(source_root)
+    for root, live in elsewhere:
+        NOTES.append(f"R-4 STILL OPEN: {len(live)} of {len(R.RENAME)} pre-pack originals are "
+                     f"installed at {root} ({', '.join(live)}) — the pack is NOT the only copy "
+                     f"on this machine, so an edit can still land in the wrong one")
     if not os.path.isdir(os.path.join(source_root, "skills")):
-        NOTES.append("R-4 drift check skipped: the flat originals are not on this machine")
+        NOTES.append("R-4 drift check skipped: the flat originals are not in the scanned source")
         return
     now = drift_hashes(source_root)
     if refresh or not os.path.isfile(path):
@@ -428,8 +453,9 @@ def check_drift(source_root, refresh):
     surviving = sorted(o for o in R.RENAME
                        if os.path.isdir(os.path.join(source_root, "skills", o)))
     if not surviving:
-        NOTES.append("R-4 closed: all fifteen flat originals are gone, so the pack is the only "
-                     "copy and an edit can no longer land in the wrong one")
+        if not elsewhere:
+            NOTES.append("R-4 closed: all fifteen flat originals are gone, so the pack is the "
+                         "only copy and an edit can no longer land in the wrong one")
         return
     if len(surviving) < len(R.RENAME):
         NOTES.append(f"R-4 partial cut-over: {len(surviving)} of {len(R.RENAME)} flat originals "

@@ -38,7 +38,13 @@ claude --plugin-dir "$PWD"                                 # load the pack witho
 
 `tools/build-pack.py` is a **one-shot historical build** that wipes `skills/` and `agents/` and
 regenerates them from flat originals under `~/.claude`. Those originals were deleted on
-2026-07-31 — this pack is now the only copy. Do not run it.
+2026-07-31. Do not run it.
+
+**The repo is the copy to edit, but it is not the only copy.** Pre-pack originals under their old
+flat names (`post-task-review`, `run-task`, `find-bugs`, …) still live in `~/.agents/skills/`, so
+R-4 — an edit landing in the wrong copy, where it works under the old name and is missing under
+the new one — is open, not closed. `validate.sh` names them on every run. Before editing anything
+that exists under both names, check which path you are in.
 
 Eval suites (`skills/*/evals/evals.json`) need a model, so they are not part of `validate.sh`. Run
 them deliberately after editing any `description`, and before a release.
