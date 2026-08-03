@@ -270,6 +270,15 @@ test('a re-review that re-raises a dismissed finding sends it back through triag
   assert.deepEqual(out.planReview.applied, ['the dismissal was wrong — added the missing test'])
 })
 
+test('the build call steps up over the runner agent\'s haiku, because it classifies', async () => {
+  // maven-build-runner and gradle-build-runner are haiku, which is right for the "BUILD SUCCESSFUL"
+  // path that is almost every dispatch. On a RED build this call decides in-scope vs pre-existing,
+  // and that decides whether the run fixes the failures or halts and surfaces them.
+  const { optsBy } = await run({ review: OK_REVIEW, planfix: OK_FIX })
+  assert.equal(optsBy['build#1'].model, 'sonnet')
+  assert.equal(optsBy['build#1'].effort, 'medium')
+})
+
 test('implementers self-check by COMPILING — the pipeline owns the build', async () => {
   // The implementers are the priciest agents in the run (measured: 117 turns and ~40 shell calls
   // each, of which ~1.7 are Maven invocations, times ~1.8 per run) and Phase 4 builds the moment
@@ -1472,9 +1481,12 @@ test('every judging track still keeps its own model and depth', async () => {
   assert.equal(optsBy['planner'].model, 'opus')
   assert.equal(optsBy['planner'].effort, 'xhigh')
   assert.equal(optsBy['implement:backend'].model, 'opus')
-  for (const l of ['source', 'judge#1.1:coverage', 'plan-fix#1', 'build#1']) {
+  for (const l of ['source', 'judge#1.1:coverage', 'plan-fix#1']) {
     assert.equal(optsBy[l].model, undefined, `${l} classifies — it must not be down-tiered`)
   }
+  // build#1 is the one classifier that names a model rather than inheriting: its AGENT is haiku,
+  // so inheriting would take it DOWN a tier, not leave it where the session is.
+  assert.equal(optsBy['build#1'].model, 'sonnet')
 })
 
 // ------------------------------------------------ locating the pack itself ---

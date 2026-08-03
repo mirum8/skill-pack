@@ -553,11 +553,26 @@ const ECHO = { model: 'haiku', effort: 'low' }
 // Cheap, but not the echo tier: it composes prose (a GitHub issue body) or has a fallback path to
 // choose between.
 const MECHANICAL = { model: 'sonnet', effort: 'low' }
-const BUILD_RUN = { effort: 'medium' }  // runs the build, but must classify in-scope vs pre-existing failures
-// The post-local-scan rebuild is a build too, but not a classifying one: the build was fully green
+// The build runner AGENTS (maven-build-runner, gradle-build-runner) are `haiku`, which is right
+// for what they do on almost every dispatch: run one command and report "BUILD SUCCESSFUL". This
+// call is the exception, and it steps the model back up over the agent's own tier. On a RED build
+// it must split the failures into inScopeFailures and preExistingFailures, and that split is
+// load-bearing in both directions: wrongly "pre-existing" HALTS the run (stopped:
+// 'build-red-preexisting') on a failure the fix phase should have taken, and wrongly "in-scope"
+// sends a fixer to edit somebody else's failing test, which the pipeline forbids outright. Paying
+// for a bigger model on every build to protect the red path is the trade here; the green path is
+// most of them and costs the same either way, because the model only matters once there is
+// something to classify.
+const BUILD_RUN = { model: 'sonnet', effort: 'medium' }
+// The post-local-scan rebuild is a build too, but not a classifying one: the tree was fully green
 // before local-scan ran, so the prompt can tell it that ANY failure here is in-scope by
-// construction. That is the whole judgement BUILD_RUN exists to protect, and it is already made.
-const REBUILD_RUN = { model: 'sonnet', effort: 'medium' }
+// construction. That is the whole judgement BUILD_RUN steps up to protect, and it is already made
+// — so this one stays on the runner agent's own tier.
+const REBUILD_RUN = { effort: 'medium' }
+// The UI deploy is not a build runner at all — it is a GP agent reading a command out of a skill
+// file and running a helper. It has its own tier so a change to BUILD_RUN above, which exists for
+// a judgement this step does not make, cannot move it by accident.
+const DEPLOY_RUN = { model: 'sonnet', effort: 'medium' }
 // The Codex tracks (`codex`, every `end-verify` pass) shell out to the real Codex CLI, wait, and
 // parse the report it produces. CODEX does the reviewing; the wrapper's own reasoning adds nothing
 // to the critique, and it was paying the top tier on every standard and full run plus up to two
@@ -1526,7 +1541,7 @@ const uiTrack = async () => {
     // against the same docker daemon when the deploy asks for the same layers.
     if (prewarmP) await prewarmP
 
-    // 7a — deploy. Its own step, at BUILD_RUN effort: reading a command out of a skill file and
+    // 7a — deploy. Its own step, at DEPLOY_RUN: reading a command out of a skill file and
     // running a script is not work that improves with more thinking (it only has to tell a real
     // failure from a slow start), and doing it inside the verifier put a whole docker build log
     // into an xhigh context. reliable() only re-dispatches a DEAD agent, so an honest
@@ -1548,7 +1563,7 @@ const uiTrack = async () => {
        If you are in a linked git worktree and the helper is missing or not executable, return
        ok=false with that reason: deploying on the project's default port from a worktree would
        collide with the main stack, which is the whole failure this helper exists to prevent.`,
-      { label: 'ui-deploy', phase: 'UI', schema: DEPLOY, ...GP, ...BUILD_RUN }))
+      { label: 'ui-deploy', phase: 'UI', schema: DEPLOY, ...GP, ...DEPLOY_RUN }))
 
     if (!dep || !dep.ok || !dep.url) {
       // A failed deploy is a blocked TRACK, not a clean UI pass. ran=false makes blocked() true,

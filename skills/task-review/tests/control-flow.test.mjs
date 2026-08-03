@@ -1234,22 +1234,25 @@ test('the pure command-runners run on haiku', async () => {
   }
 })
 
-test('the post-scan rebuild is sonnet — its in-scope call is already made for it', async () => {
+test('the post-scan rebuild stays on the runner agent\'s own tier', async () => {
   // It is a build, but not a classifying one: the tree was fully green before local-scan ran, so
-  // any failure here is in-scope by construction and the prompt says so.
+  // any failure here is in-scope by construction and the prompt says so. Nothing to classify means
+  // nothing to step the model up for.
   const { opts, prompts } = await run({
     overrides: { 'local-scan': { status: 'ok', changedCode: true } },
   })
-  assert.equal(opts['rebuild'].model, 'sonnet')
+  assert.equal(opts['rebuild'].model, undefined)
   assert.match(prompts['rebuild'], /ANY failure here is a regression from local-scan's own self-fixes/)
 })
 
-test('the builds that DO classify keep the session model', async () => {
+test('the build that DOES classify steps up over the runner agent\'s haiku', async () => {
   // in-scope vs pre-existing is load-bearing both ways: wrongly "in-scope" edits somebody else's
-  // failing test, wrongly "pre-existing" halts a run that should have proceeded.
+  // failing test, wrongly "pre-existing" halts a run that should have proceeded. The runner agents
+  // are haiku for the "BUILD SUCCESSFUL" path; this call is the one that has to read a red build.
   const { opts } = await run({ triage: baseTriage({ uiTouched: true, hasTestApp: true }) })
-  assert.equal(opts['build#1'].model, undefined)
-  assert.equal(opts['ui-deploy'].model, undefined, 'it must tell a real failure from a slow start')
+  assert.equal(opts['build#1'].model, 'sonnet')
+  // The deploy carries its own tier, so a change to the build's cannot move it by accident.
+  assert.equal(opts['ui-deploy'].model, 'sonnet', 'it must tell a real failure from a slow start')
 })
 
 test('every judging track still inherits the session model', async () => {

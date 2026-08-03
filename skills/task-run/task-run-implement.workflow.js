@@ -406,7 +406,12 @@ const SCRIBE = { model: 'sonnet', effort: 'medium' }
 // there is nothing to truncate or paraphrase. It is a heredoc handed to `python3` — the echo tier, and by design it
 // can never fail the run, so it is the cheapest thing here to get wrong.
 const SINK = ECHO
-const BUILD_RUN = { effort: 'medium' }  // runs the build, but classifies failures
+// The runner AGENTS are `haiku` — right for the "BUILD SUCCESSFUL" path that is almost every
+// dispatch. This call steps back up over the agent's own tier because on a RED build it has to
+// split the failures into in-scope and pre-existing, and that split decides whether the run fixes
+// them or halts and surfaces them. The green path costs the same either way; the model only
+// matters once there is something to classify.
+const BUILD_RUN = { model: 'sonnet', effort: 'medium' }
 // Phase 0 reads gh/git into a schema; the one real judgement is the tier. Keep the inherited
 // model — the tier is a three-way tree decided on calibration examples, which needs real
 // discrimination, and an unsure answer lands on "standard" rather than "full", so a weak
