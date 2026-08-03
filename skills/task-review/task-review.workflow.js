@@ -27,11 +27,11 @@
 //   As of Claude Code 2.1.217 subagents lost the `Agent` tool, so the prose engine is
 //   only viable in a main thread that has `Agent` but no `Workflow` (headless/cron); a
 //   context with NEITHER must STOP rather than improvise - SKILL.md states that floor.
-//   The hunter fan-out USED to differ between the engines (this script spawned the
-//   hunters itself; the prose nested them under one find-bugs subagent). It no
-//   longer does: nobody can nest them anymore, so the prose engine now spawns the same
-//   hunters directly too. The engines agree here - keep them that way, including WHICH
-//   hunters each tier dispatches (full: all four; standard: security + docs only).
+//   BOTH engines spawn the hunters directly - this script from the workflow, the prose
+//   engine from the main thread. Neither may nest them under a single find-bugs subagent,
+//   because nothing below the orchestrator can fan out. Keep the engines agreeing here,
+//   including WHICH hunters each tier dispatches (full: all four; standard: security +
+//   docs only).
 //
 // TESTS: tests/control-flow.test.mjs executes this script with agent()/parallel() stubbed and
 //   asserts the branches — what halts, what is retried, what reaches the summary. Run it after
@@ -116,6 +116,10 @@ const TRIAGE = {
     hasBackend: { type: 'boolean' },
     hasFrontend: { type: 'boolean' },
     hasTestApp: { type: 'boolean' },        // /test-app present ON DISK — the Phase 7 gate, folded in here to save a hop
+    // The project's written-intent docs, listed ONCE here instead of re-discovered by the docs
+    // hunter on every run. Optional: an empty or missing list just means the hunter globs for
+    // them itself, which is what it did before.
+    docFiles: { type: 'array', items: { type: 'string' } },
     // Does the diff touch anything /security-review could have an opinion about? Deliberately
     // NOT required, and read as `!== false` below: an unanswered gate runs the hunter. A missing
     // field must never be the reason a security review was skipped.
@@ -210,6 +214,21 @@ const DEPLOY = {
     reason: { type: 'string' },  // one line, only when ok=false
   },
 }
+// The shared diff every hunter reads (Phase 0b). Deliberately a PATH and a couple of counts, never
+// the diff text itself: a schema field holding 40k characters of patch asks the model to re-emit it
+// verbatim, and a hunter reviewing a silently paraphrased diff is worse than one that fetched its
+// own. A file costs each hunter exactly one Read and cannot be transcribed wrong.
+const DIFFPACK = {
+  type: 'object', additionalProperties: false,
+  required: ['ok'],
+  properties: {
+    ok: { type: 'boolean' },
+    path: { type: 'string' },     // absolute path to the unified diff
+    files: { type: 'integer' },   // changed-file count, for the prompt
+    lines: { type: 'integer' },   // line count of the patch, ditto
+    reason: { type: 'string' },   // one line, only when ok=false
+  },
+}
 // --------------------------------------------------------------- helpers -----
 // The subagent-flow contract, in code: a null return means the subagent died /
 // was skipped. Re-dispatch up to 2 extra times (3 total), then surface a blocked
@@ -221,7 +240,7 @@ const DEPLOY = {
 // certifies nothing but looks like an infrastructure blip. A throw is the same event as a null
 // return — the step produced nothing — so it earns the same bounded re-dispatch. It also restores
 // the retries for reliable() calls nested inside parallel(), which converts a thrown thunk to null
-// one level ABOVE this loop and so used to cost the step all three attempts.
+// one level ABOVE this loop — untrapped, one throw there costs the step all three attempts at once.
 async function reliable(label, phaseName, run) {
   for (let attempt = 1; attempt <= 3; attempt++) {
     let r = null
@@ -242,10 +261,11 @@ const GP = { agentType: 'general-purpose' }
 // {findings: []}, and reading that as "reviewed, nothing found" is precisely how an
 // unattended run certifies a review that never happened.
 //
-// The null case is the one that used to leak. `!!(x && …)` made blocked(null) === FALSE, so
-// every call NOT wrapped in reliable() read a dead agent as a good result: a null end-verify
-// had no findings and "converged", a null triage skipped the whole review, a null fix-triage
-// dropped every finding on the floor. Nothing downstream ever treats blocked() as anything but
+// The null case is the one that leaks if this is written as `!!(x && …)`: that makes
+// blocked(null) === FALSE, so every call NOT wrapped in reliable() reads a dead agent as a good
+// result — a null end-verify has no findings and "converges", a null triage skips the whole
+// review, a null fix-triage drops every finding on the floor. Nothing downstream treats
+// blocked() as anything but
 // "this track is bad", so counting a dead agent as blocked is correct at every call site.
 // FR-22: an optional prerequisite that is simply absent. Distinct from blocked (a tool that
 // died) and from clean (a review that ran and found nothing) — collapsing the three is how a
@@ -274,16 +294,29 @@ const RAN_CLAUSE = `
 // nested fan-out is structurally impossible here, and asking for one buys a silent single-
 // context skim on EVERY run — the exact degradation SKILL.md calls a last-resort fallback.
 //
-// The script itself can spawn agents, so the fan-out moves up one level and the workflow plays
-// the coordinator role that find-bugs' Phase 2 describes. Since Claude Code 2.1.217 ordinary
-// subagents lost `Agent` too, so the prose engine in SKILL.md now spawns these same five
+// The script itself can spawn agents, so the fan-out lives one level up and the workflow plays
+// the coordinator role that find-bugs' Phase 2 describes. As of Claude Code 2.1.217 ordinary
+// subagents have no `Agent` tool either, so the prose engine in SKILL.md spawns these same
 // hunters directly as well — the engines AGREE here. Keep them agreeing: whoever is
 // orchestrating owns the fan-out, because no level below it can perform one.
 //
 // `refs` is where each hunter's pattern file lives; hunters read only their own file, which is
-// what keeps five parallel reads cheap. bug-hunter has Bash/Glob/Grep/Read (enough to run
+// what keeps five parallel reads cheap. bug-hunter-pattern has Bash/Glob/Grep/Read (enough to run
 // `git diff` itself), bug-hunter-security additionally has `Skill` (that is why the security
 // track is its own type — it must invoke the REAL /security-review, never a checklist read).
+//
+// WHY THE PATTERN HUNTERS ARE `bug-hunter-pattern` AND NOT `bug-hunter`. The agent has to agree
+// with the job, or it quietly does the other one. `bug-hunter` is the /r:code-bugs single-bug
+// investigator — "Reproduce Before You Fix", trace the data flow, ask clarifying questions — a
+// persona that earns its cost by going deep on ONE thread, and it carries 13 tools, including MCP
+// and Task tools a hunter never calls (0.0 uses per run) and WebSearch (0.1), all sitting in the
+// prefix that every turn re-reads. These hunters do the opposite: a discovery sweep over a
+// changeset, which the prompt below also says ("report-only, write no tests"). Point them at the
+// investigator and the persona wins for the first dozen turns — measured over 151 stored `logic`
+// runs, the median hunt reads TWELVE whole source files before it ever runs `git diff` and reaches
+// the diff around turn 31 of 49. `bug-hunter-pattern` is the same reasoning depth with the sweep
+// discipline and four tools. `bug-hunter` is right where reproduction IS the job — /r:gh-issues-fix
+// uses it for exactly that.
 //
 // PER-HUNTER EFFORT, and why the pattern hunters are not at the top tier. A pattern hunter is
 // handed one reference file of known failure shapes and asked whether the diff matches any of
@@ -307,22 +340,39 @@ const RAN_CLAUSE = `
 // securitySurface). Trimming depth there would save little and risks the one track whose misses
 // are the most expensive.
 const PATTERN_HUNT = { effort: 'high' }
-const DOC_HUNT = { effort: 'medium' }
+// The docs hunter is the one track whose MODEL is pinned down, not just its effort. Every hunter
+// agent carries `model: opus` in its own frontmatter, so an effort pin alone leaves the top model
+// in place — correct for a track that adjudicates, wrong for this one. It compares a diff against
+// written statements, its output is never auto-fixed (0.00 fixes/run BY CONSTRUCTION — doc drift
+// resolves to update-doc / update-code / confirm-intent, which is the user's call), so a false
+// positive costs a user one read rather than a wrong edit. Measured at 3.18M cache-read tokens over
+// 52 turns per run, the second-most expensive hunter, for a matching job. Sonnet is the tier that
+// fits. Keep the hunters that decide what is broken on the inherited model.
+const DOC_HUNT = { model: 'sonnet', effort: 'medium' }
 // A function, not a constant: PACK is resolved after the arg parser below, and this is only
 // ever evaluated inside hunterPrompt() at dispatch time — long after that.
 const refsDir = () => `${PACK}/skills/code-bugs/references`
-// `concurrency` and `silent-failures` used to be two separate hunters. They are one now, and the
-// reason is how fan-out is billed: every extra subagent is a fresh context that re-reads the diff
-// and the surrounding source from scratch, and with no shared prefix it re-writes its whole cache
-// (the security hunter alone was measured at ~232k cache-write tokens per dispatch). Two agents
-// therefore cost roughly twice one for the same diff — while together these two returned 0.37
-// fixes per run, the weakest pair in the pipeline. Merging keeps BOTH pattern files and both
-// category sets, and pays the diff-reading cost once. Splitting a hunter is worth it when each
-// half has enough to find that the second read pays for itself; here it did not.
+// `concurrency` and `silent-failures` are ONE hunter, and the reason is how fan-out is billed:
+// every extra subagent is a fresh context that re-reads the diff and the surrounding source from
+// scratch, and with no shared prefix it re-writes its whole cache (the security hunter alone is
+// measured at ~232k cache-write tokens per dispatch). Two agents therefore cost roughly twice one
+// for the same diff — while together these two return 0.37 fixes per run, the weakest pair in the
+// pipeline. Keeping them merged keeps BOTH pattern files and both category sets, and pays the
+// diff-reading cost once. Splitting a hunter is worth it when each half has enough to find that
+// the second read pays for itself; these two do not.
+//
+// DON'T MERGE FURTHER — the saving is smaller than it looks, and it is not where the money is.
+// Apart, concurrency and silent-failures cost 2.15M and 2.86M cache-read tokens per run; together
+// as runtime-and-failures they cost 4.23M. That is ~15%, not the ~50% "one agent instead of two"
+// suggests, because a merged hunter simply takes more turns (41/47 -> 57). Cost here is
+// turns × context; an agent count is only a proxy for it. Folding `logic` in as well would risk
+// the best-yielding pattern track (0.92 fixes/run) for another ~15%. The levers that actually pay
+// are the ones below: a leaner agent, a hunt that reads the diff first and stops, and one shared
+// diff so N hunters don't each orient themselves from scratch.
 const HUNTERS = [
-  { label: 'logic', agentType: 'bug-hunter', ref: 'logic-and-flow.md',
+  { label: 'logic', agentType: 'bug-hunter-pattern', ref: 'logic-and-flow.md',
     focus: 'Wrong Business Logic, Implementation Mistakes, Broken Flows', ...PATTERN_HUNT },
-  { label: 'runtime-and-failures', agentType: 'bug-hunter',
+  { label: 'runtime-and-failures', agentType: 'bug-hunter-pattern',
     ref: ['concurrency-data-and-performance.md', 'silent-failures-and-java.md'],
     focus: 'Data Corruption, Concurrency Issues, Resource & Connection Issues, Performance & Scalability (N+1, unbounded fetches, pool exhaustion), Silent Failures, Language-Specific Patterns',
     ...PATTERN_HUNT },
@@ -330,9 +380,38 @@ const HUNTERS = [
   { label: 'docs', agentType: 'bug-hunter-docs', ref: 'documentation-consistency.md',
     focus: 'Documentation Consistency', ...DOC_HUNT },
 ]
+// How each hunter gets at the change. Set once, right after triage, from the shared diff capture
+// below; the value here is the fallback, used whenever there is no capture to point at — the
+// capture failed, or the scope is the whole project rather than a diff. A `let` rather than a
+// parameter because hunterPrompt() is called from three places and only ever renders one scan's
+// worth of prompts, all after the capture is resolved.
+let diffClause = 'Run `git diff HEAD` yourself, ONCE, to see the change — no prepared diff was handed to you.'
+// Same idea for the docs hunter's OTHER input: the doc tree. Discovering it costs that hunter 25
+// Bash calls and 141k characters of tool output per run, the most shell-heavy of the four, and
+// triage is already walking this repo — so triage lists the docs once and they arrive here. The
+// value below is the fallback for a triage that found none to hand over.
+let docListClause = 'Locate the docs yourself with Glob over the filesystem (never `git ls-files` — doc files are often gitignored).'
 const hunterPrompt = (h, scope) => {
-  const common = `You are one hunter of a parallel bug scan over ${scope}. Run \`git diff HEAD\`
-     yourself to see the change; read enough surrounding source to judge it in context.
+  // The order and the budget are the point. Left to itself a hunter explores first and reads the
+  // change late: measured over 151 stored `logic` runs the median one opens twelve whole source
+  // files before it ever runs git diff, reaches the diff around turn 31, and finishes at turn 49
+  // holding ~93k tokens of context. Cost here is turns × context, so that preamble — not the
+  // reasoning, not the reference file, not this prompt — is the largest line item in the review.
+  // The clauses below are the shape the security hunter's own prompt already uses ("do NOT
+  // re-derive the diff … ~13 extra shell calls per run that produced no extra finding").
+  const common = `You are one hunter of a parallel bug scan over ${scope}.
+     ${diffClause}
+     Work in this order, and keep it tight:
+       1. Read the change FIRST, before you open any other file.
+       2. Judge each hunk against your patterns from the diff itself wherever that is possible.
+       3. Only when a concrete candidate at a specific line cannot be settled from the hunk,
+          open the source around it — Grep for the symbol, Read with offset/limit around that
+          line. Don't read a file end to end, and don't open every file that mentions a name.
+     Budget: about 12 tool calls. That is a budget, not a wall — a real candidate that needs a few
+     more is worth them — but spend the overrun on THAT candidate, not on general orientation.
+     If you run out with a candidate still unconfirmed, NAME IT in 'coverage' (e.g. "possible N+1
+     at OrderRepo:88, not confirmed"). An honest short answer is worth more than either a silent
+     drop or a padded report.
      Report ONLY findings you have HIGH confidence are actually broken — no style, no
      naming, no "could be better", no theoretical risks. Each finding: file, line,
      category, and 'what' = what the code does now vs what it should do + the production
@@ -362,10 +441,12 @@ const hunterPrompt = (h, scope) => {
   }
   if (h.label === 'docs') {
     return `You are the DOCUMENTATION-CONSISTENCY hunter of a parallel bug scan over ${scope}.
+     ${diffClause}
      Read ${refsDir()}/${h.ref} for what to look for. Run in DIFF mode: compare only the changed
      code against the project's written intent — spec.md/spec.html, todo.md, docs/*,
-     DESIGN.md/ui-design.md, the **/CLAUDE.md hierarchy incl. nested module rules, README/ARCHITECTURE —
-     and report divergences plus violations of stated CLAUDE.md rules. Use category
+     DESIGN.md/ui-design.md, the **/CLAUDE.md hierarchy incl. nested module rules, README/ARCHITECTURE.
+     ${docListClause}
+     Report divergences plus violations of stated CLAUDE.md rules. Use category
      'doc-drift' for every finding, and put the doc side (file + quoted statement) and the
      suggested resolution (update doc / update code / confirm intent) in 'what'. These are
      user decisions, not bugs to fix. "No documentation found to check against" is a valid
@@ -427,16 +508,25 @@ async function hunterFanOut(scope, hunters, trackName) {
   })
   const secIdx = hunters.findIndex((h) => h.label === 'security')
   const sec = secIdx >= 0 ? hunts[secIdx] : null
+  // Three different states share one empty findings list, and they mean opposite things.
+  // Whoever reads this summary must be able to tell them apart without the transcript.
+  const securityNote = secIdx < 0
+    ? 'security hunter NOT DISPATCHED — no security surface in this diff. Nothing was ' +
+      'security-reviewed. This is a skip, not a clean bill.'
+    : (sec && sec.coverage) ||
+      (missing.includes('security') ? 'security hunter BLOCKED — nothing was security-reviewed' : '')
+  // Every hunter's coverage note survives the merge, not just the security one. The hunt is
+  // budgeted, and a hunter that runs out with a candidate still unconfirmed says so here. Dropping
+  // that turns "I could not confirm the N+1 at OrderRepo:88" into silence, and silence from a
+  // finding track reads as "looked, found nothing" — the one thing this pipeline must never
+  // manufacture. The security note leads, so skipped()'s ^SKIPPED test still sees what it needs.
+  const notes = hunts.map((h, i) =>
+    (hunters[i].label !== 'security' && h && typeof h.coverage === 'string' && h.coverage.trim())
+      ? `${hunters[i].label}: ${h.coverage.trim()}` : '').filter(Boolean)
   return {
     ran: missing.length === 0,
     findings,
-    // Three different states share one empty findings list, and they mean opposite things.
-    // Whoever reads this summary must be able to tell them apart without the transcript.
-    coverage: secIdx < 0
-      ? 'security hunter NOT DISPATCHED — no security surface in this diff. Nothing was ' +
-        'security-reviewed. This is a skip, not a clean bill.'
-      : (sec && sec.coverage) ||
-        (missing.includes('security') ? 'security hunter BLOCKED — nothing was security-reviewed' : ''),
+    coverage: [securityNote, ...notes].filter(Boolean).join(' | '),
   }
 }
 
@@ -524,16 +614,15 @@ const opts = (() => {
 // script the Workflow tool executes, and not in a subagent's shell, where the variable is unset and
 // bash expands it to the empty string.
 //
-// It used to be read off the RAW `args`, above the tolerant parser: `(args && typeof args ===
-// 'object' && args.packRoot)`. Callers hand over a JSON *string* almost every time — 0 object args
-// against 39 string ones across the stored history — and a string fails that typeof, so packRoot
-// went missing even when it WAS passed. Reading it from `opts` is the actual fix; everything below
-// is about failing honestly when it is genuinely absent.
+// Read it off `opts`, NEVER off the raw `args` above the tolerant parser. A test like
+// `(args && typeof args === 'object' && args.packRoot)` looks equivalent and is not: callers hand
+// over a JSON *string* almost every time — 0 object args against 39 string ones across the stored
+// history — and a string fails that typeof, so packRoot goes missing even when it WAS passed.
 //
-// The old fallback was the placeholder itself, on the reasoning that it "either expands or fails
-// loudly". Neither half held. It does not expand, and it does not fail loudly: `python3
-// /skills/…/record-run.py` is a plain not-found, and the one track that surfaced it is the stats
-// sink — best-effort by design, so the row was lost in silence while every other path was equally
+// And do not fall back to the placeholder itself on the reasoning that it "either expands or fails
+// loudly". Neither half holds. It does not expand, and it does not fail loudly: `python3
+// /skills/…/record-run.py` is a plain not-found, and the one track that surfaces it is the stats
+// sink — best-effort by design, so the row is lost in silence while every other path is equally
 // broken. A run that cannot locate its own tools must stop before it certifies anything.
 const PACK = (() => {
   const p = typeof opts.packRoot === 'string' ? opts.packRoot.trim() : ''
@@ -591,6 +680,13 @@ const triage = await reliable('triage', 'Triage', () => agent(
        gitignored test-app counts). A stale worktree where it was never checked out naturally
        reports no, so no git/branch reasoning is needed. This is the Phase 7 gate, answered here
        so the pipeline doesn't spend a whole subagent round-trip on one \`test -f\` later.
+   4c. docFiles — the project's written-intent docs, as repo-relative paths: spec.md/spec.html,
+       todo.md, docs/**, DESIGN.md/ui-design.md, README.md/ARCHITECTURE.md/CONTRIBUTING.md, and
+       EVERY **/CLAUDE.md (root and nested module ones). Glob the FILESYSTEM, not git — these are
+       often gitignored, so \`git ls-files\` would silently miss them. One \`find\`-style pass is
+       enough; do not read them. Cap the list at ~40 entries, closest to the changed files first.
+       You are already walking this repo, and the docs hunter would otherwise re-discover the same
+       tree on every run (measured: 25 shell calls per dispatch). Return [] if the project has none.
    5. changeIntent — 1-3 sentences on what this change is trying to accomplish. The later fix
       subagents use it to avoid "fixing" (undoing) something intentional, so it must be accurate.
       If a caller-provided intent is given below, echo it back verbatim as changeIntent. Otherwise
@@ -629,7 +725,7 @@ const triage = await reliable('triage', 'Triage', () => agent(
    7. uiTouched — true iff any changed file is frontend: *.html/templates, *.css/*.scss,
       *.js/frontend *.ts, or under templates/, static/, resources/templates/, webapp/.
       Answer this carefully: it is the SOLE gate on the UI/runtime step in EVERY tier (the tier
-      no longer forces it), and that step is the single most expensive thing in the pipeline —
+      does not force it), and that step is the single most expensive thing in the pipeline —
       a false 'true' boots the whole stack and drives a browser for nothing, a false 'false'
       ships a rendered change that nothing looked at.
       Caller-provided uiTouched: ${typeof opts.uiTouched === 'boolean' ? opts.uiTouched : '(none — determine it)'}
@@ -688,9 +784,9 @@ log(`post-task-review: tier=${profile}, uiTouched=${uiTouched} (${TIERS.includes
 //
 // 1. The docker image pre-warm for the UI step. Measured over 59 stored UI runs the deploy is 42%
 //    of that step's tool time and took over two minutes in 17 of 56 runs (worst: 607s), all of it
-//    on the critical path at the very end. This used to start alongside the end-verify, which
-//    overlapped it with one phase; started here it overlaps the review, the fix phase, the build
-//    and the static scan as well. Build-only — nothing starts, so it cannot serve stale code, and
+//    on the critical path at the very end. Started here it overlaps the review, the fix phase, the
+//    build and the static scan; dispatched alongside the end-verify instead, it would overlap only
+//    one phase. Build-only — nothing starts, so it cannot serve stale code, and
 //    a fixer editing a file below simply invalidates the layers that file touches, which the real
 //    deploy then rebuilds. The cache is an optimisation, never the artifact under test. The helper
 //    always exits 0 and Phase 7 never reads this result, so a failed pre-warm costs a cold build
@@ -710,6 +806,56 @@ const prewarmP = (uiWanted && triage.hasTestApp)
       { label: 'ui-prewarm', phase: 'Triage', ...GP, ...ECHO }).catch(() => null)
   : null
 
+// --- Phase 0b: capture the diff ONCE, for every hunter ------------------------
+// Each hunter is a fresh context with no shared prefix, so left to themselves they each derive the
+// change independently: 10–17 shell calls apiece just to work out what they are looking at, before
+// any hunting starts. And they do not converge on the same answer — across stored runs one review
+// has hunters using `git diff HEAD`, `git diff`, and `git diff origin/main..HEAD`, which are three
+// different changesets. One capture answers both: the orientation is paid once at the cheapest
+// tier, and every hunter reviews the same bytes, so their findings are about the same diff.
+//
+// It runs HERE, after triage, because triage's step 1b `git add -N` is what makes untracked new
+// files visible to `git diff` at all — captured any earlier, a brand-new file is missing from the
+// artifact the whole scan reads.
+//
+// Fail-open by construction: one attempt, no reliable() wrapper, and `diffClause` simply stays the
+// fetch-it-yourself instruction if anything goes wrong. A failed capture costs each hunter a few
+// shell calls, never the review. Skipped entirely when there is no diff to capture (scope 'all')
+// or nothing to hand it to (the light tier dispatches no hunters).
+if (profile !== 'light' && opts.scope !== 'all') {
+  const pack = await agent(
+    `Capture this review's diff to a file, so the hunters that follow read one shared artifact
+     instead of each deriving its own. From the repo root run EXACTLY this, in one Bash call:
+       d="$(mktemp)"; git diff HEAD -U20 > "$d"; echo "PATH=$d"; wc -l < "$d"; git diff HEAD --name-only | wc -l
+     Return ok=true with path=$d, lines=<the wc -l of the file> and files=<the name-only count>.
+     If the command fails, or the file came out empty (0 lines), return ok=false with a one-line
+     reason and no path.
+     Do NOT read the diff, do NOT summarise it, do NOT judge it, and do NOT modify the repo. You
+     are capturing an artifact for other agents; its contents are none of your business.`,
+    { label: 'diff-pack', phase: 'Triage', schema: DIFFPACK, ...GP, ...ECHO }).catch(() => null)
+  if (pack && pack.ok && pack.path) {
+    diffClause =
+      `The change is already captured for you: read the unified diff at ${pack.path}` +
+      `${pack.files ? ` (${pack.files} changed file(s), ${pack.lines || '?'} lines)` : ''}. ` +
+      `It is \`git diff HEAD -U20\` taken after any untracked sources were staged, and EVERY hunter ` +
+      `in this scan reads that same file — so a finding against it is a finding against the same ` +
+      `change everyone else reviewed. Read it FIRST and treat it as the scope. Do NOT re-derive it ` +
+      `with git. Only if that file is missing or empty, run \`git diff HEAD\` yourself once.`
+    log(`post-task-review: diff captured once at ${pack.path} — every hunter reads that file instead of deriving its own`)
+  } else {
+    log('post-task-review: the shared diff capture did not produce a file — each hunter will run ' +
+        '`git diff HEAD` itself. Slower, not wrong.')
+  }
+}
+// Triage already walked this repo, so the docs hunter is handed the doc tree rather than
+// re-globbing for it. Absent or empty => the hunter finds them itself.
+if (Array.isArray(triage.docFiles) && triage.docFiles.length) {
+  docListClause =
+    `The docs in this project have already been located for you — check these, and do not spend ` +
+    `shell calls re-discovering the tree:\n     ${triage.docFiles.join('\n     ')}\n     ` +
+    `If a doc you clearly need is missing from that list, Glob for that one file.`
+}
+
 const DOCS_HUNTER = HUNTERS.find((h) => h.label === 'docs')
 const docsP = profile === 'light' ? null
   : reliable('find-bugs:docs', 'Review', () => agent(
@@ -717,8 +863,8 @@ const docsP = profile === 'light' ? null
       { label: 'find-bugs:docs', phase: 'Review', schema: FINDINGS,
         agentType: DOCS_HUNTER.agentType, ...DOC_HUNT })).catch(() => null)
 
-// A fixer's self-check only has to prove the code COMPILES. The prompt used to say just "verify it
-// compiles" with no command, so a fixer could plausibly reach for the full clean build — a whole
+// A fixer's self-check only has to prove the code COMPILES, and the prompt has to NAME the command.
+// Told just "verify it compiles", a fixer can plausibly reach for the full clean build — a whole
 // hidden test-suite run, seconds before the pipeline runs the suite itself. Naming the cheap command
 // (and forbidding the full build) removes that duplication without removing any verification: the
 // one test the fixer wrote test-first still runs, and Phase 4 runs everything else right after.
@@ -823,7 +969,12 @@ phase('Review')
      context for you, not an argument.`
        : `That is the strict adversarial/challenge review: it questions the chosen approach, the
      design tradeoffs and the assumptions, not just implementation defects.`}
-     Report-only. Return its findings; [] if it ran clean. Put the wrapper's trailing
+     Report-only, and the report is CODEX'S. Do not review the diff yourself: do not read project
+     source, do not \`git show\`/\`cat\`/\`grep\` through the change, and do not check the script's
+     directory before invoking it — run the command, wait for it, and report what it returns. One
+     \`git diff --stat\` to name the scope is enough. Your own reading adds nothing to Codex's
+     critique and is measured at ~30k characters of tool output per run for no extra finding.
+     Return its findings; [] if it ran clean. Put the wrapper's trailing
      "what this run examined" block in 'coverage' (reviewer mode + whether the diff text was
      embedded or Codex had to fetch it itself) — those lines are provenance, NOT findings, and
      they are what tells a clean verdict over a real read apart from one over a file list.
@@ -877,9 +1028,9 @@ if (profile === 'standard') {
 // and 122k tokens before it was split. The readability agent does not even exist below full, where
 // code-quality never runs.
 //
-// docDrift is no longer triaged at all: it comes straight from the docs hunter. Routing a list that
-// is only ever handed to the user through a filter that cannot act on it bought nothing, and it was
-// the reason the docs hunter had to finish before this phase could start.
+// docDrift is not triaged at all: it comes straight from the docs hunter. Routing a list that is
+// only ever handed to the user through a filter that cannot act on it buys nothing, and it would
+// force the docs hunter to finish before this phase could start.
 phase('Fix-triage')
 const triageIntro = `You are Step 3 triage. REPORT-ONLY: do NOT edit, write, or run any code — your
    ONLY output is your part of the fix-list. A report marked "(not run at this tier)" is a
@@ -926,9 +1077,9 @@ if (profile !== 'light' && blocked(docs)) {
 const docDrift = ((docs && docs.findings) || [])
   .map((f) => `${f.file}:${f.line} ${f.what}`)
 
-// A dead triage used to read as `nothingToFix` — so every finding the tracks just paid for was
-// dropped on the floor and the run reported `fixed: 0/0, reviewed: true`. Whether that is a halt
-// depends on whether there was anything to lose:
+// A dead triage must never read as `nothingToFix`: that drops every finding the tracks just paid
+// for on the floor and reports `fixed: 0/0, reviewed: true`. Whether it is a halt depends on
+// whether there was anything to lose:
 //   findings exist -> STOP. They were found, never triaged, never fixed; a caller must not merge.
 //   no findings    -> nothing was lost. Note it and carry on with an empty fix-list.
 // Only the CORRECTNESS half can halt the run: a lost readability list costs polish, not soundness.
@@ -1005,10 +1156,10 @@ if (!nothingToFix) {
        - ${selfCheckClause}${noFullBuild}
        - Return a short summary (files + one line each).${intentBlock}`,
       { label: 'fix-correctness', phase: 'Fix', agentType, ...FIX_RUN })
-    // Same rule the end-verify fixer already follows: only count what a live fixer took. A dead
-    // one used to leave `fixed.correctness` reporting the full triaged list, which is the same
-    // false-confidence failure the serialization above exists to prevent — arriving by a different
-    // route. The items stay visible in the log either way.
+    // Same rule the end-verify fixer follows: only count what a live fixer took. Counting a dead
+    // one leaves `fixed.correctness` reporting the full triaged list — the same false-confidence
+    // failure the serialization above exists to prevent, arriving by a different route. The items
+    // stay visible in the log either way.
     if (blocked(fc)) {
       correctnessFixed = false
       log(`post-task-review: the correctness fixer DIED — ${fixList.correctness.length} triaged item(s) were NOT fixed:\n` +
@@ -1046,7 +1197,7 @@ if (!nothingToFix) {
 // local-scan trustworthy bytecode. Every build AFTER it (retry, post-local-scan rebuild,
 // UI minor-fix rebuild) is incremental, because by then target/ holds THIS run's own clean
 // output plus a small fix delta — there is nothing stale for it to pick up. That turns the
-// 2–4 clean builds a fixing review used to do into 1 clean + N incremental, with the green
+// 2–4 clean builds a fixing review would otherwise do into 1 clean + N incremental, with the green
 // invariant untouched: the bar is still a fully green build with tests, never relaxed.
 const cleanCmd = triage.buildCmd || ''
 const fastCmd = (triage.buildCmdFast || cleanCmd.replace(/\bclean\s+/, '')) || cleanCmd
@@ -1066,8 +1217,8 @@ if (baselineBuilt) log('post-task-review: caller certified a clean green build i
 // The one case incremental is unsafe: a deleted/renamed source can leave a stale .class that
 // makes a genuinely broken build pass. Every rebuild prompt carries this escape hatch.
 const staleRule = `If any source file was DELETED or RENAMED since the last build, run \`${cleanCmd}\` instead — a removed source can leave a stale .class behind that would let a broken build pass.`
-// Handed to the later fixers (end-verify, UI minor) so they rebuild incrementally too, instead of
-// picking their own command — those fixers used to be told only "ensure the build is green".
+// Handed to the later fixers (end-verify, UI minor) so they rebuild incrementally too. Told only
+// "ensure the build is green", a fixer picks its own command, and that is usually the clean one.
 const rebuildClause = triage.buildTool !== 'none'
   ? `then rebuild via the ${triage.runnerAgent} agent with \`${fastCmd}\` (incremental — a clean baseline build already ran in this working tree) until green. ${staleRule}`
   : 'then verify nothing is broken (no build tool was detected for this project).'
@@ -1123,13 +1274,13 @@ let localScan = 'n/a'
 if (triage.buildTool !== 'none') {
   phase('Local-scan')
   {
-    // The scan agent computes its OWN class list, at scan time. It used to be handed
-    // triage.changedFiles — the working-tree diff as it looked in PHASE 0, before the fix phase
-    // ran — so anything the fixers or /r:code-refactor touched (a new test class, a second file pulled
-    // into a fix) was never scanned, and a class deferred from an earlier turn on this branch
-    // never was either. SKILL.md Step 6b always specified the branch-wide, scan-time list; only
-    // the script disagreed. Cost of asking here instead of reusing Phase 0: one round trip on a
-    // JVM project with no JVM change, which the agent reports back as status 'skipped'.
+    // The scan agent computes its OWN class list, at scan time — it is NOT handed
+    // triage.changedFiles. That list is the working-tree diff as it looked in PHASE 0, before the
+    // fix phase ran, so anything the fixers or /r:code-refactor touch (a new test class, a second
+    // file pulled into a fix) would never be scanned, and neither would a class deferred from an
+    // earlier turn on this branch. SKILL.md Step 6b specifies the branch-wide, scan-time list.
+    // Cost of asking here instead of reusing Phase 0: one round trip on a JVM project with no JVM
+    // change, which the agent reports back as status 'skipped'.
     const scan = await reliable('local-scan', 'Local-scan', () => agent(
       `Run /r:code-scan over the classes this BRANCH changed. First compute the list YOURSELF —
        do not use any list you were given, and do not scope it to today's working-tree diff:
@@ -1148,9 +1299,9 @@ if (triage.buildTool !== 'none') {
        status:error means an analyzer errored / none ran => NOT clean), whether it changed
        any code, and which tools were skipped/errored.`,
       { label: 'local-scan', phase: 'Local-scan', schema: SCAN, ...GP }))
-    // Fail-closed, both ways. A dead scan agent used to fall through BOTH branches with no log
-    // at all — a step the non-negotiables call mandatory became a silent no-op, and the run
-    // still reported clean. Blocked and status:'error' are the same thing here: not scanned.
+    // Fail-closed, both ways. A dead scan agent must not fall through BOTH branches unlogged:
+    // that turns a step the non-negotiables call mandatory into a silent no-op while the run still
+    // reports clean. Blocked and status:'error' are the same thing here: not scanned.
     if (blocked(scan) || scan.status === 'error') {
       localScan = 'blocked'
       log(`post-task-review: local-scan BLOCKED — NOT a clean result (${(scan && scan.reason) || 'the scan agent returned nothing / an analyzer errored / none ran'}); ` +
@@ -1177,14 +1328,14 @@ if (triage.buildTool !== 'none') {
 // The UI gate. It is resolved much earlier now (right after the tier, alongside the docker
 // pre-warm) so the image build can start there — see the note at that dispatch site.
 //
-// The gate is `uiTouched` in EVERY tier, full included. It used to be `full || uiTouched`, and the
-// unconditional half was the most expensive unearned step in the pipeline: measured over 59 stored
-// runs this step ran a median of 542s (p90 1150s) with two thirds of that model time across ~86
+// The gate is `uiTouched` in EVERY tier, full included — never `full || uiTouched`. That
+// unconditional half is the most expensive unearned step available: measured over 59 stored runs
+// this step takes a median of 542s (p90 1150s) with two thirds of that model time across ~86
 // serial turns, two `high` agents and up to six screenshots the visual half must then READ back as
 // images. What routes a change to `full` is auth, money, persistence, concurrency or an approach
-// worth challenging — none of which implies a rendered page changed. So a backend-only `full` run
-// was booting the whole stack, driving a browser and grading the design of pages the diff never
-// touched. The evidence for a UI defect is the rendered result, and there is a new rendered result
+// worth challenging — none of which implies a rendered page changed. Gated on the tier, a
+// backend-only `full` run boots the whole stack, drives a browser and grades the design of pages
+// the diff never touched. The evidence for a UI defect is the rendered result, and there is a new rendered result
 // only when a frontend file changed; when none did, the static tracks (which `full` runs in full)
 // are what actually read the change. Tier still governs DEPTH everywhere else — this one step is
 // governed by whether there is anything new to look at.
@@ -1199,14 +1350,14 @@ if (triage.buildTool !== 'none') {
 // it ALWAYS fires and reads the whole change. Same mode, fuller framing. All bounded to 2 passes.
 const endVerifyWanted = profile !== 'full' ? true : (!nothingToFix || scanChangedCode)
 let endVerifyBlocked = false
-// What the LAST pass raised and nothing re-read clean. This used to have nowhere to go, and the
-// findings simply vanished — two ways, both observed:
-//   * `real` is OPTIONAL in FINDINGS, so `filter(f => f.real)` dropped every finding a pass
-//     returned WITHOUT adjudicating it. The loop then read "no real findings" as converged and
-//     the run reported endVerify:'passed', fixed.correctness:0 — for a Codex pass that had found
-//     a genuine defect and said so. Nothing downstream ever saw it.
-//   * even an explicitly real finding raised by pass 2 was handed to a fixer whose work no pass
-//     ever re-read, and the run still reported 'passed'.
+// What the LAST pass raised and nothing re-read clean. It needs somewhere to go, or the findings
+// vanish — two ways, both observed in practice:
+//   * `real` is OPTIONAL in FINDINGS, so `filter(f => f.real)` drops every finding a pass returns
+//     WITHOUT adjudicating it. The loop then reads "no real findings" as converged and the run
+//     reports endVerify:'passed', fixed.correctness:0 — for a Codex pass that found a genuine
+//     defect and said so. Nothing downstream ever sees it.
+//   * even an explicitly real finding raised by pass 2 goes to a fixer whose work no pass ever
+//     re-reads, and the run still reports 'passed'.
 // A caller merges on the strength of that word, so it must be backed by a pass that actually came
 // back clean. Carry the remainder out instead, and let it decide the verdict below.
 let endVerifyUnresolved = []
@@ -1341,7 +1492,7 @@ ${priorPass.findings.map(f => `         - ${f.file}:${f.line} [${f.category}] ${
 
 // --- Phase 7: UI / runtime verification (deploy -> 2 halves in parallel) ------
 // Runs when /test-app exists AND the change touched the frontend (uiWanted === uiTouched, resolved
-// above the end-verify — see the note there for why the tier no longer forces it). A CSS/template
+// above the end-verify — see the note there for why the tier does not force it). A CSS/template
 // change is exactly where the rendered result, not the diff, is the evidence. A backend-only change
 // skips it at every tier: booting the whole stack to look at pages nothing touched is the most
 // expensive way to learn nothing.
@@ -1499,9 +1650,9 @@ const uiTrack = async () => {
 //
 // The honesty cost, and the guard that pays it. The UI half verifies an image built before the
 // end-verify's fixers ran. When one of those fixers touched a frontend file, what the UI looked at
-// is stale — so it looks again, once. That case costs roughly what the old serial ordering cost
-// every time, which is the point: the worst case here is the previous behaviour, and the common
-// case (end-verify fixes are overwhelmingly backend) is the whole overlap.
+// is stale — so it looks again, once. That case costs roughly what running the two serially costs
+// every time, which is the point: the worst case here is the serial ordering, and the common case
+// (end-verify fixes are overwhelmingly backend) is the whole overlap.
 if (uiWanted && !triage.hasTestApp) {
   log('post-task-review: the change touches the frontend but /test-app is not on disk — no UI ' +
       'verification ran. Nothing looked at the rendered result; this is a gap, not a clean bill.')
@@ -1640,8 +1791,8 @@ PTR_STATS_JSON
 
    The script always exits 0 by design; its stderr says whether the row was recorded.`,
   // The echo tier: this appends one JSONL line and edits nothing, and by design it can never fail
-  // the run. run-task's identical sink is pinned the same way. It used to inherit whatever the
-  // caller was running at — for a /r:task-run chain, Opus, for a `python3 script <<EOF`.
+  // the run. run-task's identical sink is pinned the same way. Unpinned it inherits whatever the
+  // caller is running at — for a /r:task-run chain, Opus, to run one `python3 script <<EOF`.
   { label: 'stats', phase: 'End-verify', ...GP, ...ECHO })
 
 return {
@@ -1656,9 +1807,9 @@ return {
   // track that found them. This is the number that can retire a track on evidence instead of
   // argument; it is also written to ~/.claude/review-stats.jsonl for accumulation across runs.
   fixedBySource,
-  // correctness = the triaged fix-list items + everything the end-verify handed to a fixer. The
-  // second half used to be missing, so a run that found and fixed a defect at the end still
-  // reported `correctness: 0` — a summary field that contradicted what the run had just done.
+  // correctness = the triaged fix-list items + everything the end-verify handed to a fixer. BOTH
+  // halves count: without the second, a run that finds and fixes a defect at the end still reports
+  // `correctness: 0`, a summary field contradicting what the run just did.
   // Each half is counted only when its fixer LIVED: a triaged list is what someone was asked to
   // do, not what got done, and the whole value of this field is that a caller can merge on it.
   fixed: { correctness: (fixList && fixApplied.correctness ? fixList.correctness.length : 0) + endVerifyFixed,
@@ -1671,8 +1822,8 @@ return {
   localScan,
   // skipped (nothing to re-read) | blocked (Codex didn't run — the final diff is UNVERIFIED)
   // | findings-unresolved (a pass raised findings that no later pass read clean) | passed.
-  // 'passed' now REQUIRES a Codex pass that came back with nothing outstanding: it is the word a
-  // caller merges on, so it can no longer be reached with findings still on the table.
+  // 'passed' REQUIRES a Codex pass that came back with nothing outstanding: it is the word a
+  // caller merges on, so it must be unreachable with findings still on the table.
   endVerify: endVerifyVerdict,
   // The unresolved remainder, verbatim. Empty on 'passed'/'skipped'. This is the difference
   // between surfacing a defect to the caller and swallowing it.

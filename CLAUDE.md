@@ -115,5 +115,12 @@ missing, the step is recorded as **skipped** and named, and the run continues.
 
 - The prose is the product: keep the existing register — direct, reasoned, explaining *why* a
   constraint exists where a future editor would otherwise remove it.
+- **Write it as it stands now, never as a changelog.** Skills, agents and workflow comments
+  describe the current design in the present tense. No "used to", "no longer", "this replaces",
+  "we changed it to" — git already records what moved, and prose that narrates its own edits ages
+  into a claim about a version nobody is running. Keep the *reason* and the measured numbers that
+  justify a constraint (that is what stops a future editor deleting it); drop the story of how it
+  got there. Where a wrong alternative is genuinely tempting, name it as a rule for the reader —
+  "use X, never Y, because …" — not as a history of having once used Y.
 - `skills/spec-brainstorm/references/html-effectiveness/` is vendored third-party material; its
   `LICENSE`, `CODE_OF_CONDUCT.md` and `SECURITY.md` stay verbatim.

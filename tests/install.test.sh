@@ -82,7 +82,7 @@ out=$(run "$H" --no-deps)
 D="$H/.claude/skills/r"
 has  "the manifest lands"                          "$D/.claude-plugin/plugin.json"
 is   "fifteen skills land"                         "$(ls "$D/skills" | wc -l | tr -d ' ')" 15
-is   "eight agents land"                           "$(ls "$D/agents" | wc -l | tr -d ' ')" 8
+is   "nine agents land"                            "$(ls "$D/agents" | wc -l | tr -d ' ')" 9
 has  "the guard hook lands"                        "$D/hooks/guard-workflow.py"
 has  "hooks.json lands"                            "$D/hooks/hooks.json"
 has  "check-prereqs.sh lands"                      "$D/check-prereqs.sh"

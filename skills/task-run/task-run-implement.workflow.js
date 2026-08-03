@@ -153,9 +153,9 @@ const UIFILES_MARKER = 'UIFILES:'
 // browser deploy in the review.
 const FRONTEND_PATH = /\.(html|htm|css|scss|sass|js|jsx|ts|tsx|vue|svelte)$|(^|\/)(templates|static|public|assets)\//i
 // A brief this short is not a brief. It is the shape an explorer returns once it has given up —
-// "test", "done", an apology — and the old `b.brief` truthiness check let exactly that through to
-// the planner. Returning null here instead routes it back through reliable()'s re-dispatch, which
-// is what recovered the failed slice on the run that exposed this.
+// "test", "done", an apology. A bare `b.brief` truthiness check lets exactly that through to the
+// planner; returning null here instead routes it back through reliable()'s re-dispatch, which is
+// what recovers a failed slice.
 const MIN_BRIEF_CHARS = 400
 // The surface stays an ENUM by way of the countedFlag filter below rather than by way of a schema.
 // That was always where it mattered: when this was schema-checked free text an explorer reporting
@@ -213,10 +213,10 @@ const parseDesign = (raw) => {
   const intent = at === -1 ? '' : raw.slice(at + DESIGN_INTENT_MARKER.length).trim().split('\n')[0].trim()
   return { section, intent }
 }
-// There is deliberately NO schema for the planner. It used to return {planMarkdown: string} —
-// a single field wrapping a ~250-line markdown document, which is the largest structured payload
-// in the run and the one most likely to fail escaping. Observed on a real run: the planner blew
-// the StructuredOutput retry cap (5 failed calls) and the THROW killed the whole workflow before
+// There is deliberately NO schema for the planner. A schema means {planMarkdown: string} — a
+// single field wrapping a ~250-line markdown document, the largest structured payload in the run
+// and the one most likely to fail escaping. Observed on a real run: the planner blew the
+// StructuredOutput retry cap (5 failed calls) and the THROW killed the whole workflow before
 // anything was written. A schema-less agent returns its final text verbatim, so the document
 // never has to survive a round-trip through JSON at all. The cost is that nothing structurally
 // forbids a preamble line; the prompts ask for none, and a stray one is visible in the plan file
@@ -328,9 +328,9 @@ const IMPL = {
     filesChanged: { type: 'array', items: { type: 'string' } },
     blockedOn: { type: 'string' }, // set when the plan looked wrong — surfaced, never worked around
     // One line per test written: "<test> — before: RED|GREEN (<the failure, or 'passed on
-    // unmodified code'>) — after: GREEN". Red-before-green used to be asserted in the plan and
-    // never checked: a plan claimed its tests would fail first when several already passed, and
-    // only the full-tier Codex plan review caught it. A test that passed before the change is a
+    // unmodified code'>) — after: GREEN". Red-before-green is asserted HERE, after running the
+    // test, not in the plan: a plan is free to claim its tests will fail first when several
+    // already pass, and only the full-tier Codex plan review would catch that. A test that passed before the change is a
     // regression guard, which is fine — but it must be LABELLED one, because a suite of green
     // guards proves nothing about the fix. Asking for the observed result makes the claim
     // falsifiable at the point where it can actually be observed: after running the test.
@@ -364,8 +364,8 @@ const BUILD = {
 // `TelemetrySafeError` before writing anything, because this await was bare. A throw is the same
 // event as a null return — the step produced nothing — so it gets the same bounded re-dispatch
 // rather than taking the run down with it. This also restores the retries for reliable() calls
-// nested inside parallel(): parallel converts a thrown thunk to null, which used to swallow the
-// throw one level ABOVE this loop, costing the step all three attempts.
+// nested inside parallel(): parallel converts a thrown thunk to null one level ABOVE this loop,
+// and untrapped that swallows the throw and costs the step all three attempts at once.
 async function reliable(label, phaseName, run) {
   for (let attempt = 1; attempt <= 3; attempt++) {
     let r = null
@@ -379,7 +379,7 @@ async function reliable(label, phaseName, run) {
 // Blocked = the agent DIED (agent() resolved null/undefined), the runner gave up (the
 // reliable() sentinel), or the subagent said its tool never ran. The null case matters even
 // though most calls here go through reliable(): `parallel()` resolves a thrown thunk to null,
-// so `impls.every(blocked)` used to be FALSE when every implementer died — and the run went on
+// so without it `impls.every(blocked)` is FALSE when every implementer died, and the run goes on
 // to build code nobody wrote. Every call site treats blocked() as "this track is bad".
 const blocked = (x) => !x || !!(x.blocked || x.ran === false)
 
@@ -401,17 +401,17 @@ const MECHANICAL = { model: 'sonnet', effort: 'low' }
 // plan file is reproduced VERBATIM from the prompt, and a paraphrased or truncated plan silently
 // degrades the Codex review and every implementer that reads it.
 const SCRIBE = { model: 'sonnet', effort: 'medium' }
-// The stats sink appends counts to a JSONL file. It used to share SCRIBE, but it has none of the
-// property that makes SCRIBE `medium`: nothing is reproduced verbatim, so there is nothing to
-// truncate or paraphrase. It is a heredoc handed to `python3` — the echo tier, and by design it
+// The stats sink appends counts to a JSONL file. It deliberately does NOT share SCRIBE: it has
+// none of the property that makes SCRIBE `medium`, because nothing is reproduced verbatim, so
+// there is nothing to truncate or paraphrase. It is a heredoc handed to `python3` — the echo tier, and by design it
 // can never fail the run, so it is the cheapest thing here to get wrong.
 const SINK = ECHO
 const BUILD_RUN = { effort: 'medium' }  // runs the build, but classifies failures
 // Phase 0 reads gh/git into a schema; the one real judgement is the tier. Keep the inherited
-// model — the tier is now a three-way tree decided on calibration examples, which needs more
-// discrimination than the old binary did, and an unsure answer no longer lands on "full" but on
-// "standard", so a weak classifier's mistakes go BOTH ways: the expensive direction is now
-// under-rating, which ships an unchallenged approach rather than merely costing time. Drop the
+// model — the tier is a three-way tree decided on calibration examples, which needs real
+// discrimination, and an unsure answer lands on "standard" rather than "full", so a weak
+// classifier's mistakes go BOTH ways: the expensive direction is under-rating, which ships an
+// unchallenged approach rather than merely costing time. Drop the
 // inherited xhigh though — it buys nothing on what is otherwise transcription.
 const SOURCE_RUN = { effort: 'medium' }
 // The Codex agent shells out and collects the run; Codex does the reviewing. Its own reasoning
@@ -449,15 +449,15 @@ const DESIGN_RUN = { model: 'opus', effort: 'high' }
 // is named here too — the two specialized types already declare opus, so this only lifts the
 // `general` fallback to match them rather than letting it inherit the session's model.
 const IMPL_RUN = { model: 'opus', effort: 'high' }
-// Triage used to be ONE agent at xhigh that judged every finding and rewrote the plan — 11 minutes
-// and 122k tokens on a measured run, most of it re-deriving a code map the explorers had already
-// produced. It is now split, and the two halves want different depths.
+// Triage is SPLIT, not one agent, and the two halves want different depths. Collapsed into a
+// single xhigh agent that judges every finding and rewrites the plan, it measures 11 minutes and
+// 122k tokens on a real run, most of it re-deriving a code map the explorers already produced.
 //
 // A judge answers ONE narrow question — does this finding hold against the real code — with the
-// briefs already in hand, so `high` is depth where it counts without the context that made the old
-// step slow. It is no longer the last word either: a dismissal is re-read by Codex in pass 2 (the
-// dismissedAll branch below) and the diff is re-read by /r:task-review, which is what the old
-// "no reviewer after it" argument for xhigh was defending against.
+// briefs already in hand, so `high` is depth where it counts without the context that makes the
+// collapsed step slow. Nor is it the last word: a dismissal is re-read by Codex in pass 2 (the
+// dismissedAll branch below) and the diff is re-read by /r:task-review, which covers what a
+// "no reviewer after it" argument for xhigh would be defending against.
 const JUDGE_RUN = { effort: 'high' }
 // The editor applies fixes that are already written down and flips one header line. There is no
 // judgement left in it except "did this change the approach".
@@ -489,14 +489,14 @@ const opts = (() => {
 // nowhere else — not inside a workflow script the Workflow tool executes (FR-19), and not in a
 // subagent's shell, where the variable is unset and bash expands it to the empty string.
 //
-// This used to be read off the RAW `args`, ABOVE the parser just above: `(args && typeof args ===
-// 'object' && args.packRoot)`. Callers hand over a JSON *string* almost every time — 0 object args
-// against 39 string ones across the stored history — and a string fails that typeof, so packRoot
-// went missing even when it WAS passed. Reading it from `opts` is the actual fix.
+// Read it off `opts`, NEVER off the raw `args` above the parser. A test like `(args && typeof
+// args === 'object' && args.packRoot)` looks equivalent and is not: callers hand over a JSON
+// *string* almost every time — 0 object args against 39 string ones across the stored history —
+// and a string fails that typeof, so packRoot goes missing even when it WAS passed.
 //
-// The old fallback was the placeholder itself, on the reasoning that it "either expands or fails
-// loudly". Neither half held: it does not expand, and `python3 /skills/…/record-run.py` is a plain
-// not-found in the one step that is best-effort by design, so it failed in silence. Observed on a
+// And do not fall back to the placeholder itself on the reasoning that it "either expands or fails
+// loudly". Neither half holds: it does not expand, and `python3 /skills/…/record-run.py` is a plain
+// not-found in the one step that is best-effort by design, so it fails in silence. Observed on a
 // real run of the sibling pipeline, where the same fallback broke seven tool paths at once.
 const PACK = (() => {
   const p = typeof opts.packRoot === 'string' ? opts.packRoot.trim() : ''
@@ -655,8 +655,8 @@ ${inRepo}
       NOT \`install\`: a multi-module reactor resolves inter-module dependencies within the same
       session, so writing every module into ~/.m2 buys this run nothing and costs the whole
       install phase. /r:task-review certifies the same tree with \`package\`, and the caller hands
-      THIS build's result to it as \`baselineBuilt\` — the two pipelines used to disagree about
-      what the certifying build even was, for no stated reason.
+      THIS build's result to it as \`baselineBuilt\`, so the two pipelines agree on what the
+      certifying build is.
    7. base: the CURRENT branch (\`git branch --show-current\`)${opts.base ? `, unless it differs from the caller's stated base ${JSON.stringify(opts.base)} — then return that one` : ''}.
    8. RESUME STATE: planPath = ".task-plans/<slug>.md". Report planStatus from its "status:"
       header if the file exists (else "none"), and branchExists from
@@ -751,7 +751,7 @@ ${inRepo}
     { label: `explore#${i + 1}:${aspect.slice(0, 24)}`, phase: 'Explore', agentType: 'Explore', ...EXPLORE_RUN })))))
 
 const liveBriefs = briefs.filter((b) => b && !blocked(b) && b.brief)
-// Two accountings that used to be silent. A slice that came back unusable is a hole in the code map
+// Two accountings that would otherwise be silent. A slice that came back unusable is a hole in the code map
 // the planner is about to design against, and a missing RISKFLAGS trailer is an escalation vote
 // that was never cast — neither is fatal, and both are things you want to read afterwards when the
 // plan turns out to have missed the seam nobody explored.
@@ -815,8 +815,8 @@ if (ignoredFlags.length) {
   log(`run-task-implement: ignored ${ignoredFlags.length} risk flag(s) with no usable surface, no evidence, or a hedged why: ${JSON.stringify(ignoredFlags).slice(0, 200)}`)
 }
 
-// QUORUM. One well-formed flag used to escalate straight to full, which made a single
-// opportunistic flag decisive. Issue #73 — a read-only admin page Phase 0 correctly called
+// QUORUM — two flags, because letting one well-formed flag escalate straight to full makes a
+// single opportunistic flag decisive. Issue #73 — a read-only admin page Phase 0 correctly called
 // standard — escalated on FOUR consecutive runs, each time on a different rationale: two
 // speculative index claims (now dropped as hedged), then "the new route relies on the existing
 // /admin/** matcher" (which the prompt already forbids, since no auth decision changes), then
@@ -1030,8 +1030,8 @@ const branchP = !wantBranch ? null : (async () => {
 // — a light-tier "cosmetic template change" is precisely the task where design judgement IS the
 // work. It is skipped on a resume: the section is already in the plan file on disk. And it is
 // gated on `uiVisualChange`, not on `uiTouched`: editing a template is not the same as deciding
-// what a page should be, and the gap between the two is where this phase used to burn an agent
-// (see the uiVisualChange settle above).
+// what a page should be, and the gap between the two is where this phase would otherwise burn an
+// agent (see the uiVisualChange settle above).
 //
 // The agent is read-only and writes nothing. The section reaches disk through the same scribe that
 // writes the plan, so there is exactly one artifact and one verbatim-copy check.
@@ -1115,8 +1115,7 @@ if (designWanted) {
     // NOT a halt, and deliberately unlike the Codex plan review's `codex-plan-review-unavailable`.
     // There the whole premise of the tier is that the approach was challenged before code existed,
     // and no stand-in reviewer is acceptable. Here there IS a real fallback one line below — the
-    // planner loading `frontend-design` itself, which is what this pipeline did before this phase
-    // existed — so a dead design agent costs depth, not the run.
+    // planner loading `frontend-design` itself — so a dead design agent costs depth, not the run.
     log("run-task-implement: the UI/UX design phase came back blocked — falling back to the planner's own frontend-design pass")
   } else {
     designSection = design.section
@@ -1146,7 +1145,7 @@ if (resuming) log(`run-task-implement: resuming — ${planPath} is already at st
 const uiDesignNote = designSection
   ? `
        THE UI/UX IS ALREADY DECIDED. A design agent worked it out against the \`frontend-design\`
-       rubric and the app's existing design system, before this plan existed, and its section is
+       rubric and the app's existing design system, ahead of this plan, and its section is
        reproduced below. It is copied into the plan file verbatim, ahead of your plan, and the
        implementers build from it — so plan the IMPLEMENTATION of it: which templates, fragments
        and assets change, and which existing components the reuse map points at. Do NOT re-decide
@@ -1186,7 +1185,11 @@ if (!resuming) {
        ${criteriaText}
 
        The codebase has already been mapped for you — plan against THESE briefs, and re-open the
-       files yourself rather than inferring what they contain:
+       files yourself rather than inferring what they contain. Re-open the ones you will CITE; the
+       briefs cover the rest. THIS PROJECT'S source only — never unpack a dependency to read its
+       internals (no \`unzip\`/\`jar -x\` over ~/.m2, no decompiling): a library's private behaviour
+       is not something a plan should depend on, and if you genuinely need a version or an API
+       shape, use the maven-deps MCP or name it in "Assumptions & risks" for the review to settle.
        ${briefText}
 ${uiDesignNote}
        Reuse the existing patterns and utilities you find; do not invent new ones. Return the plan
@@ -1281,7 +1284,7 @@ ${uiDesignNote}
   //
   // The one job here is a byte-for-byte copy, and it is the step most likely to fail QUIETLY:
   // a scribe that re-wraps prose, "tidies" a heading or drops a section produces a perfectly
-  // well-formed plan file that no longer matches the plan Codex is about to review and the
+  // well-formed plan file that does not match the plan Codex is about to review and the
   // implementers are about to build. So the prompt asks for a quoted heredoc (the plan is full of
   // backticks and file:LINE refs that an unquoted one would hand to the shell) and gives the
   // scribe the ONE fact it cannot fake — the exact line count — to check its own work against.
@@ -1360,11 +1363,11 @@ ${uiDesignNote}
 // on every review that outlives the 600s Bash cap. Observed on issues #82 and #55.
 //
 // Audit trail. Everything else in this pipeline refuses to let a track vanish quietly (`ran`
-// flags, blocked sentinels, the in-scope/pre-existing split) — the triage step used to be the
-// exception: it decided which Codex findings were real, edited the plan, and dropped both lists
-// on the floor. "Codex raised three majors and the triage dismissed all three" then looked
-// identical to "Codex found nothing". Carry the decisions out instead, so they can reach the
-// caller's PR body and a lazy triage has somewhere to show up.
+// flags, blocked sentinels, the in-scope/pre-existing split) — and the triage step is the easiest
+// place to break that, since it decides which Codex findings were real and edits the plan. Drop
+// those two lists and "Codex raised three majors and the triage dismissed all three" reads
+// identically to "Codex found nothing". Carry the decisions out, so they reach the caller's PR
+// body and a lazy triage has somewhere to show up.
 const planReview = { ran: false, passes: 0, raised: 0, applied: [], dropped: [] }
 if (!resuming && profile === 'full') {
   phase('Plan-review')
@@ -1401,10 +1404,10 @@ if (!resuming && profile === 'full') {
   // That is the existing tier trade — the same one that leaves those tiers without a plan review
   // at all — not a hole this phase opened.
 
-  // Pass 2 used to be a COLD re-read: a fresh Codex process with no idea what it said the first
-  // time or what the triage did with it. That wastes the one thing a second pass is uniquely good
-  // for. The triage is the only judgement in this run with nothing reviewing it — it decides which
-  // of Codex's findings were real, edits the plan accordingly, and until now its dismissals were
+  // Pass 2 is NOT a cold re-read. A fresh Codex process with no idea what it said the first time
+  // or what the triage did with it wastes the one thing a second pass is uniquely good for. The
+  // triage is the only judgement in this run with nothing reviewing it — it decides which of
+  // Codex's findings were real and edits the plan accordingly, so left cold its dismissals are
   // answerable by nobody but the human reading the PR much later. Handing pass 2 the delta makes
   // Codex grade what happened to its OWN findings, and lets it re-raise a dismissal it still
   // disagrees with. It is also cheaper than a cold re-read: the reviewer is checking a diff of
@@ -1492,11 +1495,11 @@ ${checks.map((c, i) => `     ${i + 1}. ${c}`).join('\n')}
   // the point: this catches a rewrite that opened a fresh hole, it does not loop until the plan
   // is flawless. No approval gate — the run is autonomous, and the human reviews the final PR.
   //
-  // Triage is a FAN-OUT, not one agent. It used to be a single xhigh agent handed nothing but the
-  // finding strings: to decide whether a finding held it re-opened every file the finding cited,
-  // re-deriving a code map the explorers had already built minutes earlier, then worked through the
-  // findings one after another. Measured: 11 minutes and 122k tokens, more than the Codex review it
-  // was triaging. Two things fix that, and they compose:
+  // Triage is a FAN-OUT, not one agent. A single xhigh agent handed nothing but the finding
+  // strings has to re-open every file each finding cites to decide whether it holds, re-deriving a
+  // code map the explorers built minutes earlier, and works the findings one after another.
+  // Measured: 11 minutes and 122k tokens, more than the Codex review it is triaging. Two things
+  // answer that, and they compose:
   //   - each judge gets the EXPLORER BRIEFS, so it starts from the map instead of rebuilding it;
   //   - the judges run in parallel, so the cost is the slowest single finding, not their sum.
   // The editor that follows is then genuinely mechanical: every fix it applies is already written
@@ -1710,6 +1713,24 @@ if (src.hasBackend) areas.push({ label: 'backend', agentType: 'java-backend-deve
 if (src.hasFrontend) areas.push({ label: 'frontend', agentType: 'htmx-thymeleaf-dev', slice: 'the templates, HTMX wiring, and frontend assets' })
 if (!areas.length) areas.push({ label: 'general', agentType: 'general-purpose', slice: 'everything the plan calls for' })
 
+// An implementer's self-check only has to prove its slice COMPILES and that ITS OWN tests pass.
+// Phase 4 runs the certifying build the moment every implementer returns, so a full build here is
+// a whole hidden test-suite run seconds before the pipeline runs the suite itself — and it is the
+// most expensive place in either pipeline to duplicate, because the implementers are the priciest
+// agents in the run (measured across 46 of them: 117 turns and 40 shell calls each, of which ~1.7
+// are Maven invocations, times ~1.8 implementers per run). Naming the cheap command removes the
+// duplication without removing any verification: the TDD tests they wrote still run here, which is
+// what red-before-green evidence requires, and everything else runs in Phase 4 immediately after.
+// `build-fix` below has carried this exact pair for a while; so does every fixer in /r:task-review.
+// No `-o` (offline): on a fresh clone an uncached dependency would make it fail hard.
+const selfCheckClause = src.buildTool === 'maven'
+  ? 'Self-check by COMPILING, not by building: `mvn -q test-compile` — plus `mvn -q test -Dtest=<TheTestsYouWrote>` for the tests in your own slice.'
+  : src.buildTool === 'gradle'
+    ? 'Self-check by COMPILING, not by building: `./gradlew -q testClasses` — plus `./gradlew -q test --tests <TheTestsYouWrote>` for the tests in your own slice.'
+    : 'Verify your change is syntactically sound before returning.'
+const noFullBuild = src.buildTool === 'none' ? ''
+  : ' Do NOT run the full build or the whole test suite: the pipeline builds and runs everything the moment you return, and that is what proves your slice is green.'
+
 const implBrief = (a) => `Implement your slice of the plan at ${planPath}. READ THAT FILE FIRST — it holds
    the Context, the acceptance criteria, and the TDD test plan, so you build what the plan intends
    rather than your own reinterpretation.
@@ -1744,6 +1765,7 @@ const implBrief = (a) => `Implement your slice of the plan at ${planPath}. READ 
      ones. Match the surrounding code: no new comments or Javadocs, @Builder on data classes with
      more than 3 fields.
    - No scope creep beyond the plan.
+   - ${selfCheckClause}${noFullBuild}
    - Leave EVERYTHING UNCOMMITTED in the working tree. The whole task lands as ONE commit at the
      very end, after the review — so the reviewer reads the work before any of it is committed.
    - If the plan looks WRONG or blocked, stop and set blockedOn instead of silently deviating. A

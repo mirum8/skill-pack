@@ -279,10 +279,10 @@ def class_dirs():
 
 
 def ensure_compiled():
-    """SpotBugs analyzes bytecode, so recompile every run. Compiling only when
-    no .class files exist (the old behaviour) meant a re-scan after fixes read
-    stale bytecode and re-reported issues that were already fixed, at their old
-    line numbers. An incremental compile is cheap and keeps findings honest."""
+    """SpotBugs analyzes bytecode, so recompile every run — never only when no
+    .class files exist. On that condition a re-scan after fixes reads stale
+    bytecode and re-reports issues that are already fixed, at their old line
+    numbers. An incremental compile is cheap and keeps findings honest."""
     cmd = None
     if Path("pom.xml").exists():
         cmd = "mvn -q -DskipTests compile"

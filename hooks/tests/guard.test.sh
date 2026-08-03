@@ -44,9 +44,9 @@ check "an inline fork is refused" \
   "$J;print(json.dumps({'tool_name':'Workflow','tool_input':{'script':open('$CANON').read()}}))" 2
 check "editing the canonical file is allowed (maintenance)" \
   "$J;print(json.dumps({'tool_name':'Edit','tool_input':{'file_path':'$CANON','new_string':'// touched'}}))" 0
-# The gap this closes: CLAUDE_PLUGIN_ROOT names the INSTALLED pack, so a source
-# checkout's identical file used to be read as a fork — blocking edits at the one
-# place install.sh tells you to make them. A copy is now recognised by its
+# The gap this closes: CLAUDE_PLUGIN_ROOT names the INSTALLED pack, so on a path
+# comparison alone a source checkout's identical file reads as a fork — blocking edits
+# at the one place install.sh tells you to make them. A copy is recognised by its
 # manifest, so this passes with the root pointed somewhere else entirely.
 check "the source checkout is editable when it is not the installed pack" \
   "$J;print(json.dumps({'tool_name':'Edit','tool_input':{'file_path':'$CANON','new_string':'// touched'}}))" 0 /nonexistent

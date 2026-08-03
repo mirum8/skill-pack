@@ -5,9 +5,9 @@
 // asserted directly: what halts the run, what is retried, what reaches the returned summary.
 //
 // The class of bug most of these lock down: a subagent that DIES resolves agent() to `null`,
-// and a null used to read as a good result at every call site not wrapped in reliable(). A dead
-// track then looked byte-identical to a clean one, which is the single failure this pipeline is
-// least able to detect and most damaged by — an unattended caller banks it as verified.
+// and unguarded a null reads as a good result at every call site not wrapped in reliable(). A dead
+// track is then byte-identical to a clean one, which is the single failure this pipeline is least
+// able to detect and most damaged by — an unattended caller banks it as verified.
 //
 // Death has a second shape: agent() also REJECTS (a StructuredOutput retry cap, an exhausted
 // token budget), and an untrapped throw ends the whole script rather than the step. reliable()
@@ -70,6 +70,7 @@ async function run({ triage = baseTriage(), args = {}, overrides = {} } = {}) {
       return typeof val === 'function' ? val(counts[l]) : val
     }
     if (l === 'triage') return triage
+    if (l === 'diff-pack') return { ok: true, path: '/tmp/review.patch', files: 1, lines: 40 }
     if (l === 'codex' || l === 'code-quality' || l.startsWith('find-bugs:')) return CLEAN
     if (l === 'fix-triage') return { correctness: [], readability: [], docDrift: [] }
     if (l === 'stats') return { ok: true }
@@ -197,18 +198,19 @@ test('planReviewed is fail-open — anything but an explicit true keeps the adve
 })
 
 test('a track the tier never dispatched is not reported as blocked', async () => {
-  // `blocked(undefined)` is true, so a tier-skipped track used to be indistinguishable from a
-  // tool that died — telling the caller codex failed when it was simply never asked to run.
+  // `blocked(undefined)` is true, so without the dispatched-set check a tier-skipped track is
+  // indistinguishable from a tool that died — telling the caller codex failed when it was simply
+  // never asked to run.
   const { out } = await run({ args: { profile: 'standard' } })
   assert.deepEqual(out.tracksBlocked, [])
 })
 
 test('UI verification is gated on uiTouched in EVERY tier, full included', async () => {
   // This step is the most expensive thing in the pipeline (median 542s over 59 stored runs, two
-  // `high` agents, up to six screenshots read back as images), and `full` used to force it
-  // unconditionally. But what routes a diff to `full` — auth, money, persistence, concurrency —
-  // says nothing about whether a page changed, so a backend-only `full` run was booting the whole
-  // stack to grade pages the diff never touched. The evidence for a UI defect is a NEW rendered
+  // `high` agents, up to six screenshots read back as images), so `full` must NOT force it
+  // unconditionally. What routes a diff to `full` — auth, money, persistence, concurrency — says
+  // nothing about whether a page changed, so on that gate a backend-only `full` run boots the
+  // whole stack to grade pages the diff never touched. The evidence for a UI defect is a NEW rendered
   // result, and there is one only when a frontend file changed.
   for (const profile of ['standard', 'full']) {
     const backend = await run({ args: { profile }, triage: baseTriage({ hasTestApp: true }) })
@@ -225,17 +227,18 @@ test('UI verification is gated on uiTouched in EVERY tier, full included', async
 })
 
 // ------------------------------------------------------------ UI: the split ---
-// Phase 7 used to be ONE xhigh agent doing deploy + smoke test + screenshots + design critique
-// end to end. Measured over 59 stored transcripts that was the largest serial block in the
-// pipeline (median 542s, 66% of it model time over ~86 turns), and 0 of those runs ever managed
-// /test-app's own parallel fan-out, because subagents have no Agent tool. These lock the split.
+// Phase 7 is a deploy plus TWO halves, never one agent doing deploy + smoke test + screenshots +
+// design critique end to end. Measured over 59 stored transcripts, that single agent is the
+// largest serial block in the pipeline (median 542s, 66% of it model time over ~86 turns), and 0
+// of those runs ever managed /test-app's own parallel fan-out, because subagents have no Agent
+// tool. These lock the split.
 
 test('the UI step deploys ONCE, then runs both halves', async () => {
   const { counts } = await run({ triage: baseTriage({ hasTestApp: true, uiTouched: true }) })
   assert.equal(counts['ui-deploy'], 1)
   assert.equal(counts['ui-functional'], 1)
   assert.equal(counts['ui-visual'], 1)
-  assert.equal(counts['ui-verify'], undefined) // the old single agent is gone
+  assert.equal(counts['ui-verify'], undefined) // never one end-to-end agent
 })
 
 test('the two halves drive ISOLATED browser sessions', async () => {
@@ -328,6 +331,129 @@ test('the pattern hunters run below the top tier; security keeps it', async () =
   assert.equal(opts['find-bugs:security'].effort, undefined)
 })
 
+test('the docs hunter is the one hunter pinned to a cheaper MODEL, not just a lower effort', async () => {
+  // Every hunter agent carries `model: opus` in its frontmatter, so an effort pin alone leaves the
+  // top model in place. That is right where a track adjudicates. The docs hunter does not: it
+  // matches a diff against written statements, and its output is never auto-fixed, so a false
+  // positive costs a user one read. The hunters that DO decide what is broken keep the tier.
+  const { opts } = await run()
+  assert.equal(opts['find-bugs:docs'].model, 'sonnet')
+  assert.equal(opts['find-bugs:logic'].model, undefined)
+  assert.equal(opts['find-bugs:runtime-and-failures'].model, undefined)
+  assert.equal(opts['find-bugs:security'].model, undefined)
+})
+
+test('the pattern hunters use the lean sweep agent, never the single-bug investigator', async () => {
+  // `bug-hunter` is the /r:code-bugs root-cause persona — reproduce first, trace the data flow —
+  // and it fights this job: under it the median `logic` run reads twelve whole files before it
+  // ever runs git diff. These hunters do a sweep, and the agent has to agree with the prompt.
+  const { opts } = await run()
+  assert.equal(opts['find-bugs:logic'].agentType, 'bug-hunter-pattern')
+  assert.equal(opts['find-bugs:runtime-and-failures'].agentType, 'bug-hunter-pattern')
+  // The two specialised hunters are unaffected — only bug-hunter-security has the `Skill` tool
+  // that invokes the REAL /security-review, and swapping it is how that track silently becomes a
+  // checklist read.
+  assert.equal(opts['find-bugs:security'].agentType, 'bug-hunter-security')
+  assert.equal(opts['find-bugs:docs'].agentType, 'bug-hunter-docs')
+})
+
+// ------------------------------------------------------ the shared diff pack ---
+// Each hunter is a fresh context, so unpointed each derives the change itself — 10–17 shell calls
+// apiece, and NOT to the same answer: stored runs show `git diff HEAD`, `git diff` and
+// `git diff origin/main..HEAD` inside one review. Capturing it once answers the cost and the
+// disagreement together.
+
+test('the diff is captured once, after triage, and every hunter is pointed at that file', async () => {
+  const { counts, prompts, opts, order } = await run()
+  assert.equal(counts['diff-pack'], 1)
+  // AFTER triage: triage's `git add -N` is what makes an untracked new file visible to git diff
+  // at all, so a capture taken any earlier would silently omit brand-new files.
+  assert.ok(order.indexOf('triage') < order.indexOf('diff-pack'))
+  assert.ok(order.indexOf('diff-pack') < order.indexOf('find-bugs:logic'))
+  // Cheapest tier: it runs one fixed command and reports a path. It decides nothing.
+  assert.equal(opts['diff-pack'].model, 'haiku')
+  for (const h of ['logic', 'runtime-and-failures', 'docs']) {
+    assert.match(prompts[`find-bugs:${h}`], /\/tmp\/review\.patch/,
+      `the ${h} hunter must read the shared capture`)
+    assert.match(prompts[`find-bugs:${h}`], /Do NOT re-derive it/)
+  }
+})
+
+test('a failed capture falls back to fetch-it-yourself — it never blocks the scan', async () => {
+  const { out, counts, prompts, logText } = await run({
+    overrides: { 'diff-pack': { ok: false, reason: 'not a git repo' } },
+  })
+  assert.equal(out.reviewed, true)
+  assert.equal(counts['find-bugs:logic'], 1)
+  assert.match(prompts['find-bugs:logic'], /Run `git diff HEAD` yourself/)
+  assert.match(logText, /did not produce a file/)
+})
+
+test('a DEAD capture agent is the same fallback, not a halt', async () => {
+  const { out, prompts } = await run({ overrides: { 'diff-pack': null } })
+  assert.equal(out.reviewed, true)
+  assert.match(prompts['find-bugs:logic'], /Run `git diff HEAD` yourself/)
+})
+
+test('nothing is captured when there is no diff to capture, or no hunter to hand it to', async () => {
+  const whole = await run({ args: { scope: 'all' } })
+  assert.equal(whole.counts['diff-pack'], undefined)
+  const light = await run({ args: { profile: 'light' } })
+  assert.equal(light.counts['diff-pack'], undefined)
+})
+
+test('the codex wrapper is told not to re-review the diff itself', async () => {
+  // Codex does the reviewing; the wrapper shells out and parses. Its own reading of the source
+  // adds nothing to the critique and is measured at ~30k characters of tool output per run.
+  const { prompts } = await run()
+  assert.match(prompts['codex'], /Do not review the diff yourself/)
+  assert.match(prompts['codex'], /git diff --stat` to name the scope is enough/)
+})
+
+test('a hunter that stops short is heard — its coverage note survives the merge', async () => {
+  // The budget is only safe because a hunter must SAY when it ran out with something unconfirmed.
+  // If the merge keeps only the security note, that admission vanishes, and silence from a finding
+  // track reads as "looked, found nothing" — the one claim this pipeline must never manufacture.
+  const { prompts } = await run({
+    overrides: {
+      'find-bugs:logic': { ran: true, findings: [], coverage: 'possible N+1 at OrderRepo:88, not confirmed' },
+      'find-bugs:security': { ran: true, findings: [], coverage: 'reviewed the working-tree diff; excludes DoS' },
+    },
+  })
+  // Both reach triage, and the security note still leads (skipped() tests it with an anchored ^).
+  assert.match(prompts['fix-triage'], /excludes DoS/)
+  assert.match(prompts['fix-triage'], /logic: possible N\+1 at OrderRepo:88/)
+})
+
+test('the hunt is ordered and bounded — diff first, then a budget', async () => {
+  // The clauses that pay for themselves: cost here is turns × context, and the stored runs spent
+  // both on orientation before the change was ever opened.
+  const { prompts } = await run()
+  for (const h of ['logic', 'runtime-and-failures']) {
+    const p = prompts[`find-bugs:${h}`]
+    assert.match(p, /Read the change FIRST/)
+    assert.match(p, /about 12 tool calls/)
+    assert.match(p, /offset\/limit/)
+    // A budget that silently truncates the scan would be worse than no budget at all.
+    assert.match(p, /NAME IT in 'coverage'/)
+  }
+})
+
+test('the docs hunter is handed triage\'s doc list instead of re-globbing the tree', async () => {
+  const { prompts } = await run({
+    triage: baseTriage({ docFiles: ['CLAUDE.md', 'docs/spec.md'] }),
+  })
+  assert.match(prompts['find-bugs:docs'], /docs\/spec\.md/)
+  assert.match(prompts['find-bugs:docs'], /do not spend shell calls re-discovering/)
+})
+
+test('no doc list from triage means the hunter locates them itself, as before', async () => {
+  // Fail-open: an empty or missing list is a triage that found nothing to hand over, never an
+  // instruction to skip the doc side of the check.
+  const { prompts } = await run({ triage: baseTriage({ docFiles: [] }) })
+  assert.match(prompts['find-bugs:docs'], /Glob over the filesystem/)
+})
+
 test('a failed deploy blocks the UI track — it never tests whatever is already running', async () => {
   const { out, counts, logText } = await run({
     triage: baseTriage({ hasTestApp: true, uiTouched: true }),
@@ -367,8 +493,8 @@ test('findings are stamped with the half that found them', async () => {
 // ------------------------------------------------------------- UI: pre-warm ---
 
 test('the image pre-warm is launched with the end-verify, not after it', async () => {
-  // The docker build is 42% of the UI step's tool time and used to sit entirely on the critical
-  // path. It only helps if it starts BEFORE the deploy that consumes its cache.
+  // The docker build is 42% of the UI step's tool time, all of it on the critical path unless it
+  // is started early. It only helps if it starts BEFORE the deploy that consumes its cache.
   const { counts, order } = await run({ triage: baseTriage({ hasTestApp: true, uiTouched: true }) })
   assert.equal(counts['ui-prewarm'], 1)
   assert.ok(order.indexOf('ui-prewarm') < order.indexOf('ui-deploy'))
@@ -614,9 +740,9 @@ test('a readability refactor that dies costs polish only — correctness is unaf
 })
 
 test('a fixer that THROWS does not end a run with the build, scan and end-verify still to do', async () => {
-  // parallel() used to convert a thrown thunk to null one level above these calls. Awaiting them
-  // directly removed that trap, so the catch is now explicit — without it a StructuredOutput cap
-  // in a fixer would take down a review that had not yet built, scanned or verified anything.
+  // parallel() converts a thrown thunk to null one level above these calls, but these are awaited
+  // directly, so the catch has to be explicit — without it a StructuredOutput cap in a fixer takes
+  // down a review that has not yet built, scanned or verified anything.
   const { out } = await run({
     overrides: {
       'fix-triage': ONE_OF_EACH,
@@ -898,8 +1024,8 @@ test('teardown still runs when BOTH UI halves die (the finally block)', async ()
 // ----------------------------------------------------- local-scan scope (fix #4) --
 
 test('REGRESSION: local-scan computes its own branch-wide class list, not the Phase-0 diff', async () => {
-  // It used to be handed triage.changedFiles — the diff as it looked BEFORE the fix phase — so
-  // anything the fixers wrote was never scanned. SKILL.md Step 6b always said branch-wide.
+  // Handed triage.changedFiles — the diff as it looked BEFORE the fix phase — it would never scan
+  // anything the fixers wrote. SKILL.md Step 6b specifies branch-wide.
   const { prompts } = await run()
   const p = prompts['local-scan']
   assert.match(p, /merge-base/)
@@ -967,9 +1093,9 @@ test('an end-verify that reports ran:false TWICE is blocked — the retry is bou
 })
 
 test('a DEAD end-verify agent gets reliable()\'s 3 attempts, then blocks', async () => {
-  // Two different failures that used to look identical from here: the agent dying (null) and the
-  // agent reporting its tool didn't run. The first is reliable()'s job — and this call used to be
-  // the one major step dispatched bare, with no retry at all.
+  // Two different failures that look identical from here unless both are handled: the agent dying
+  // (null) and the agent reporting its tool didn't run. The first is reliable()'s job, so this
+  // step must not be dispatched bare with no retry.
   const { out, counts, logText } = await run({
     overrides: { 'fix-triage': NEEDS_FIX, 'end-verify#1': null },
   })
@@ -1013,8 +1139,8 @@ const feFinding = {
 }
 
 test('the UI deploy starts before the end-verify has finished fixing', async () => {
-  // The lock on the overlap itself. In the old serial ordering the deploy came strictly after
-  // every end-verify pass AND its fixer; now it must not wait for them.
+  // The lock on the overlap itself. Serially the deploy would come strictly after every
+  // end-verify pass AND its fixer; here it must not wait for them.
   const { order } = await run({
     triage: uiTriage(), args: { profile: 'light' },
     overrides: { 'end-verify#1': { ran: true, findings: [finding()] } },
@@ -1142,11 +1268,11 @@ test('every judging track still inherits the session model', async () => {
 })
 
 // ------------------------------------------------ locating the pack itself ---
-// REPRODUCES: a run whose every tool path resolved to `/skills/...` because
-// ${CLAUDE_PLUGIN_ROOT} is substituted in skill MARKDOWN, never inside a workflow script and
-// never in a subagent's shell. Seven paths come off PACK — both Codex tracks, deploy, teardown,
-// the hunters' reference files and the stats sink — and only the sink reports its own stderr, so
-// that is the one that told us.
+// GUARDS: a run whose every tool path resolves to `/skills/...` because ${CLAUDE_PLUGIN_ROOT} is
+// substituted in skill MARKDOWN, never inside a workflow script and never in a subagent's shell.
+// Seven paths come off PACK — both Codex tracks, deploy, teardown, the hunters' reference files
+// and the stats sink — and only the sink reports its own stderr, so it is the only one that says
+// anything when this breaks.
 
 test('args as a JSON STRING still resolves the pack root', async () => {
   // The case that actually bites: PACK is computed from the RAW args, hundreds of lines before the

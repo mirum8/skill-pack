@@ -219,9 +219,9 @@ for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
     # review ran clean", so it is the one path that must not be reachable by a run that
     # produced nothing. Four gates, all of which must pass:
     if [[ -z "${out//[[:space:]]/}" ]]; then
-      # Empty stdout used to pass as clean. It is the plainest possible proof of the
-      # opposite: the companion emits a header on every render path, so no output at
-      # all means nothing was rendered.
+      # Empty stdout is never clean — it is the plainest possible proof of the opposite:
+      # the companion emits a header on every render path, so no output at all means
+      # nothing was rendered.
       echo "adversarial-review: Codex exited 0 with EMPTY stdout — no review was produced (attempt $attempt/$MAX_ATTEMPTS)" >&2
     elif ! grep -qE "$REVIEW_RE" <<<"$out"; then
       echo "adversarial-review: Codex exited 0 but stdout carries no '# Codex' review header — this is not a review result (attempt $attempt/$MAX_ATTEMPTS)" >&2
@@ -262,9 +262,10 @@ done
 # missing plugin (3).
 #
 # The provenance block goes out on THIS path too. A caller judges "did the review run?" partly by
-# whether this block is present, and its absence used to be ambiguous — it meant either "the
-# wrapper died before it could report" or "the wrapper ran, tried three times, and could not get
-# Codex to read anything". Those deserve the same verdict (not-run) but not the same silence: a
+# whether this block is present, and without it on this path its absence is ambiguous — it means
+# either "the wrapper died before it could report" or "the wrapper ran, tried three times, and
+# could not get Codex to read anything". Those deserve the same verdict (not-run) but not the
+# same silence: a
 # blocked run should still record WHAT it was trying to review, so the caller can see the target
 # was real and the failure was environmental.
 printf '%s\n' "$out"

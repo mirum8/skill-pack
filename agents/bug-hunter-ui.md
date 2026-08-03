@@ -16,7 +16,7 @@ Phase 7 runs as **deploy → (functional half ‖ visual half) → teardown**, a
 - **functional half** — behaviour: API responses and status codes, form submits and redirects, end-to-end flows, and the app logs.
 - **visual half** — rendering: screenshots of the changed pages at three viewports, the responsive checklist, and the `frontend-design` rubric.
 
-This split exists because `/test-app` is *designed* to fan its work out across parallel subagents ("one subagent for one focused area… spawn them in parallel") and **cannot** — since Claude Code 2.1.217 subagents have no `Agent` tool. So the orchestrator does the fan-out instead, exactly as it already does for `/r:code-bugs`' hunters. Measured over 59 stored runs of the old single-agent shape: median 542s, two thirds of it model time across ~86 serial turns, and not one of them ever spawned a nested agent.
+This split exists because `/test-app` is *designed* to fan its work out across parallel subagents ("one subagent for one focused area… spawn them in parallel") and **cannot** — since Claude Code 2.1.217 subagents have no `Agent` tool. So the orchestrator does the fan-out instead, exactly as it already does for `/r:code-bugs`' hunters. Measured over 59 stored runs of the single-agent shape: median 542s, two thirds of it model time across ~86 serial turns, and not one of them ever spawned a nested agent.
 
 Do the half you were given. Do not do the other half's work "to be safe" — it is already running, and duplicating it is the cost this split removed.
 

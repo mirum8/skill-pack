@@ -48,10 +48,10 @@ PACK_RELATIVE = (
 )
 
 PACK = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
-# The allow-list used to also carry the two flat originals under ~/.claude/skills,
-# for FR-14's permanent dual-run. Those were deleted once the pack became the only
-# copy (validate.py now reports "R-4 closed"), so the entries named files that
-# cannot exist. Nothing is relaxed by dropping them: a path that isn't a canonical
+# The allow-list carries only the packed pipelines. It deliberately does NOT name the
+# flat originals under ~/.claude/skills that FR-14's dual-run once needed: the pack is
+# the only copy (validate.py reports "R-4 closed"), so those entries would name files
+# that cannot exist. Nothing is relaxed by their absence — a path that isn't a canonical
 # pipeline is judged by its CONTENT, exactly as any other script is.
 CANON = {
     os.path.realpath(os.path.expanduser(os.path.join(PACK, rel)))

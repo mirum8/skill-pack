@@ -41,6 +41,7 @@ RENAME = {
 AGENTS = [
     "bug-hunter",
     "bug-hunter-docs",
+    "bug-hunter-pattern",
     "bug-hunter-security",
     "bug-hunter-ui",
     "gradle-build-runner",

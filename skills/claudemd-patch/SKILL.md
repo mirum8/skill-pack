@@ -5,7 +5,7 @@ description: >-
   my standard rules", "add my common rules to claude.md", "bring claude.md up to date with my
   guidelines". Inserts (or replaces existing similar versions of) the Test-Writing Policy block
   and the Code Conventions rules, and *removes* any post-task auto-run block it finds (the
-  `/r:task-review` skill is no longer wired to run automatically — it runs only via `/r:task-run`
+  `/r:task-review` skill is not wired to run automatically — it runs only via `/r:task-run`
   or when the user asks). It also installs a PreToolUse `Write|Edit` hook into the project's
   `.claude/settings.json` that injects a write-tests reminder whenever a JVM test file is edited —
   the deterministic enforcement that advisory CLAUDE.md text alone can't guarantee. The user keeps
@@ -177,7 +177,7 @@ Every code change ships with tests. Use the `r:tests-write` skill.
 - run sonar at the end
 ```
 
-The skill detects `r:code-bugs` + a security review in a checklist-style section and **removes the whole section** — the review is no longer wired to run automatically. If that section carried a genuinely project-specific note worth keeping, it asks **"Remove this 'Quality Gates' section?"** first; otherwise it deletes it outright.
+The skill detects `r:code-bugs` + a security review in a checklist-style section and **removes the whole section** — the review is not wired to run automatically. If that section carried a genuinely project-specific note worth keeping, it asks **"Remove this 'Quality Gates' section?"** first; otherwise it deletes it outright.
 
 ### Example 3 — already canonical, no change
 

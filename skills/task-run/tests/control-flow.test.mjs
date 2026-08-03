@@ -160,11 +160,11 @@ test('full tier: mixed triage reaches the handoff with the plan-review audit tra
 })
 
 test('every finding is judged, in rubric batches, and the judges get the explorer briefs', async () => {
-  // Two regressions in one. Triage used to be ONE agent handed nothing but the finding strings, so
-  // it re-read the codebase to answer the first one and worked through the rest serially — hence
-  // the briefs. Then it became one agent PER finding, which at a measured ~24 findings a run was
+  // Two failure modes locked out at once. ONE agent handed nothing but the finding strings has to
+  // re-read the codebase to answer the first finding and then works the rest serially — hence the
+  // briefs. One agent PER finding is the opposite mistake: at a measured ~24 findings a run that is
   // ~24 cold contexts re-reading the same plan and the same files. Findings that share a rubric are
-  // checked the same way, so they now share a reader — and still get separate verdicts.
+  // checked the same way, so they share a reader — and still get separate verdicts.
   const { out, counts, prompts, optsBy } = await run({
     review: { ran: true, findings: F(3) }, planfix: OK_FIX, verdict: MIXED,
   })
@@ -270,6 +270,41 @@ test('a re-review that re-raises a dismissed finding sends it back through triag
   assert.deepEqual(out.planReview.applied, ['the dismissal was wrong — added the missing test'])
 })
 
+test('implementers self-check by COMPILING — the pipeline owns the build', async () => {
+  // The implementers are the priciest agents in the run (measured: 117 turns and ~40 shell calls
+  // each, of which ~1.7 are Maven invocations, times ~1.8 per run) and Phase 4 builds the moment
+  // they return. Without this the same suite runs three times per task.
+  const { prompts } = await run({ review: OK_REVIEW, planfix: OK_FIX })
+  const p = prompts['implement:backend']
+  assert.match(p, /mvn -q test-compile/)
+  assert.match(p, /Do NOT run the full build or the whole test suite/)
+  // TDD survives: they must still run the tests they wrote, or testEvidence is unfalsifiable.
+  assert.match(p, /mvn -q test -Dtest=/)
+})
+
+test('a gradle project gets gradle self-check commands, and no build tool gets none', async () => {
+  const g = await run({
+    source: baseSource({ buildTool: 'gradle', runnerAgent: 'gradle-build-runner' }),
+    review: OK_REVIEW, planfix: OK_FIX,
+  })
+  assert.match(g.prompts['implement:backend'], /\.\/gradlew -q testClasses/)
+  const none = await run({
+    source: baseSource({ buildTool: 'none' }), review: OK_REVIEW, planfix: OK_FIX,
+  })
+  const p = none.prompts['implement:backend']
+  assert.match(p, /syntactically sound/)
+  assert.doesNotMatch(p, /Do NOT run the full build/, 'there is no build to forbid')
+})
+
+test('the planner reads THIS project, never the inside of a dependency', async () => {
+  // Measured at 0.85 `unzip -p ~/.m2/repository/...` calls per planner run: decompressing library
+  // jars to read their internals. A plan that depends on a library's private behaviour is a plan
+  // built on something no one is maintaining for it.
+  const { prompts } = await run({ review: OK_REVIEW, planfix: OK_FIX })
+  assert.match(prompts['planner'], /never unpack a dependency/)
+  assert.match(prompts['planner'], /maven-deps MCP/)
+})
+
 test('implementers pin model+effort, so depth cannot depend on the calling session', async () => {
   // SKILL.md invites callers (e.g. /r:gh-issues-fix) to run this script directly, which never loads
   // the skill frontmatter — so anything left inherited here silently varies by entry point.
@@ -349,9 +384,9 @@ test('plan-write gets the plan\'s real line count and a QUOTED heredoc to write 
 })
 
 test('the scribe is told to VERIFY by command, not by counting lines itself', async () => {
-  // The count it used to be asked to do by hand — "everything after the 4 header lines and the
-  // blank line that follows them" — is boundary arithmetic, and on a real run it came out two
-  // short on a plan that was completely intact. The scribe returned written=false and a good
+  // Counting by hand — "everything after the 4 header lines and the blank line that follows them"
+  // — is boundary arithmetic, and on a real run it comes out two short on a plan that is
+  // completely intact. The scribe returned written=false and a good
   // 247-line plan was thrown away. So the check is a command whose output it reads, the LAST
   // LINE is the authority (truncation always moves it, an off-by-one never does), and a count
   // mismatch alone is a note rather than a failure.
@@ -467,8 +502,9 @@ test('light tier runs no Codex plan review at all', async () => {
   assert.equal(out.planReview.ran, false)
   assert.equal(counts['codex-plan-review#1'], undefined)
   assert.equal(counts['plan-light'], 1)
-  // The regression this locks: riskFlags used to report every risk surface PRESENT in the files
-  // the explorer read, so an empty list was near-impossible and light always escalated away.
+  // What this locks: riskFlags must report what the CHANGE touches, not every risk surface
+  // present in the files the explorer read — on the latter an empty list is near-impossible and
+  // light always escalates away.
   assert.doesNotMatch(logText, /re-classified/)
 })
 
@@ -485,8 +521,8 @@ test('standard tier: full planner, but no Codex plan review', async () => {
 })
 
 test('a UI task gets its own design phase, and the plan is built around the section', async () => {
-  // The design used to be a paragraph inside the planner's prompt, competing with eight other
-  // sections. Now it is decided first, in its own agent, and lands in the plan file verbatim.
+  // The design is decided FIRST, in its own agent, and lands in the plan file verbatim — not as a
+  // paragraph inside the planner's prompt competing with eight other sections.
   const { out, prompts, optsBy } = await run({ review: OK_REVIEW, planfix: OK_FIX })
   assert.match(prompts['ui-design'], /load the `frontend-design` skill/)
   assert.equal(optsBy['ui-design'].model, 'opus')
@@ -708,7 +744,7 @@ test('explorers escalate to full when the CHANGE alters a risk surface', async (
 test('REGRESSION: a placeholder flag does not buy a full tier', async () => {
   // Observed on a real classification run: an explorer returned {surface:"security", where:"a",
   // why:"b"}. The schema can require the fields; only the gate can require that they mean
-  // something. One placeholder used to be worth a whole Codex plan review.
+  // something. Ungated, one placeholder buys a whole Codex plan review.
   const { out, logText } = await run({
     source: baseSource({ profile: 'standard', exploreAspects: ['the one seam'] }),
     args: { source: '#81', classifyOnly: true },
@@ -848,10 +884,9 @@ test('a real file:LINE citation still counts as evidence', async () => {
 })
 
 test('a risk surface outside the five the tier tree names does NOT escalate', async () => {
-  // The escalation used to fire on any non-empty riskFlags, and the explorer prompt invited
-  // "business-logic branching" and "an external call" — true of nearly every change, so nearly
-  // every run reached full and paid for a Codex plan review. The gate now counts only what the
-  // classifier tree itself counts.
+  // Firing the escalation on any non-empty riskFlags sends nearly every run to full: the explorer
+  // prompt invites "business-logic branching" and "an external call", true of nearly every change,
+  // and each one buys a Codex plan review. The gate counts only what the classifier tree counts.
   const { out, logText } = await run({
     source: baseSource({ profile: 'standard', exploreAspects: ['the one seam'] }),
     args: { source: '#81', profile: 'standard' },
@@ -905,9 +940,9 @@ test('a fix that changes the approach buys exactly ONE re-review, never a loop',
 })
 
 test('the re-review is bought by the JUDGE, not by the editor that applies the fix', async () => {
-  // approachChanged gates a second full Codex pass. It used to be reported by the editor — the
-  // lowest-depth agent in the phase, which sees a fix list and never opened the code. It belongs to
-  // the judge that read the code and wrote the fix, so an editor claim about it must not count.
+  // approachChanged gates a second full Codex pass. It belongs to the judge that read the code and
+  // wrote the fix, never to the editor — the lowest-depth agent in the phase, which sees a fix list
+  // and never opens the code — so an editor claim about it must not count.
   const { counts } = await run({
     review: OK_REVIEW,
     verdict: { real: true, why: 'holds', fix: 'a detail' },        // no changesApproach
@@ -1025,8 +1060,8 @@ test('in-scope red build is bounded at 3 attempts, then stops', async () => {
 // ------------------------------------------- regression locks: dead-agent leaks --
 
 test('REGRESSION: implementers that all die (thrown) stop the run instead of building nothing', async () => {
-  // parallel() resolves a throwing thunk to null. blocked(null) used to be FALSE, so the run
-  // walked past `impls.every(blocked)` and went on to build code that nobody had written.
+  // parallel() resolves a throwing thunk to null. With blocked(null) FALSE the run walks straight
+  // past `impls.every(blocked)` and goes on to build code that nobody wrote.
   const { out, counts } = await run({
     review: OK_REVIEW, planfix: OK_FIX,
     overrides: { implement: THROW },
@@ -1167,10 +1202,10 @@ test('resume: a plan already at "implementing" skips planning and plan-review', 
 // (5) exceeded` and the same task then burned two more attempts on the recovery path.
 
 test('REGRESSION: a planner that THROWS is retried, not fatal to the run', async () => {
-  // The planner is a bare `await reliable(...)`, not inside parallel(), so its throw used to
-  // propagate straight out of the script and end the workflow — status `failed`, nothing written,
-  // an hour of the task's wall-clock lost to an infrastructure error. reliable() now traps it, so
-  // the worst case is a bounded 3 attempts and an honest `planner-blocked`.
+  // The planner is a bare `await reliable(...)`, not inside parallel(), so an untrapped throw
+  // propagates straight out of the script and ends the workflow — status `failed`, nothing
+  // written, an hour of the task's wall-clock lost to an infrastructure error. reliable() traps
+  // it, so the worst case is a bounded 3 attempts and an honest `planner-blocked`.
   const { out, counts, logText } = await run({
     review: OK_REVIEW, planfix: OK_FIX, overrides: { planner: THROW },
   })
@@ -1192,8 +1227,8 @@ test('a planner that throws ONCE still produces a plan on the retry', async () =
 
 test('an explorer that THROWS inside parallel() still gets its 3 reliable() attempts', async () => {
   // The explore fan-out is parallel(… () => reliable(… agent(…))). parallel() converts a thrown
-  // thunk to null ABOVE the retry loop, so a throw used to cost the explorer all three attempts
-  // silently. With the throw trapped inside reliable(), the retries happen where they were meant to.
+  // thunk to null ABOVE the retry loop, so an untrapped throw costs the explorer all three
+  // attempts silently. Trapped inside reliable(), the retries happen where they are meant to.
   const { counts } = await run({
     review: OK_REVIEW, planfix: OK_FIX, overrides: { 'explore#1:controller': THROW },
   })
@@ -1319,8 +1354,8 @@ test('the planner is told its whole final message IS the plan', async () => {
 // ------------------------------------------------ the brief never round-trips through JSON ---
 // Measured on three runs: an 8k-char brief plus a riskFlags parameter serialized malformed, the
 // parser folded riskFlags INTO brief, and validation rejected the call with "must have required
-// property 'riskFlags'" five times in a row. The tests below lock the two halves of the fix — the
-// payload no longer goes through a schema, and a brief that comes back empty-handed can no longer
+// property 'riskFlags'" five times in a row. The tests below lock both halves of the answer — the
+// payload does not go through a schema at all, and a brief that comes back empty-handed cannot
 // pass itself off as exploration.
 
 test('explorers are dispatched with NO schema — the brief never round-trips through JSON', async () => {
