@@ -28,15 +28,15 @@ Determine what code to scan:
 
 ## Phase 2: Code Scanning
 
-1. Launch up to **5 hunters in parallel** — three `bug-hunter-pattern` agents by pattern category, plus a dedicated security hunter and a dedicated documentation-consistency hunter. Each owns a topic file under `references/` and reads **only that file**, so each hunter loads just its own patterns:
-   - **Agent 1** (`bug-hunter-pattern`): Wrong Business Logic, Implementation Mistakes, Broken Flows → `references/logic-and-flow.md`
-   - **Agent 2** (`bug-hunter-pattern`): Data Corruption, Concurrency Issues, Resource & Connection Issues, Performance & Scalability → `references/concurrency-data-and-performance.md`
-   - **Agent 3** (`bug-hunter-pattern`): Silent Failures, Language-Specific Patterns → `references/silent-failures-and-java.md`
-   - **Agent 4** (`bug-hunter-security`): Security — this hunter runs the **real `/security-review` skill** over the scope, not the static checklist (`references/security.md` is its fallback only). `bug-hunter-pattern` has no `Skill` tool and can't invoke it; `bug-hunter-security` does. This is why Security is its own hunter rather than a category bolted onto Agent 3 — a checklist is not a security review.
-   - **Agent 5** (`bug-hunter-docs`): Documentation Consistency — checks the change against the project's docs (`spec.md`/`spec.html`, `todo.md`, `docs/*`, `DESIGN.md`/`ui-design.md`, the `**/CLAUDE.md` hierarchy + nested module rules, `README.md`/`ARCHITECTURE.md`) and reports code/doc divergences and violations of stated CLAUDE.md rules → `references/documentation-consistency.md`. Dispatch it with `subagent_type: "bug-hunter-docs"` — the dedicated hunter that treats docs as authoritative intent and recommends which side to move. This is a consistency check, not a bug hunt: when code and docs disagree, the fix may be to update the docs, not the code.
+1. Launch up to **5 hunters in parallel** — three `r:bug-hunter-pattern` agents by pattern category, plus a dedicated security hunter and a dedicated documentation-consistency hunter. Each owns a topic file under `references/` and reads **only that file**, so each hunter loads just its own patterns:
+   - **Agent 1** (`r:bug-hunter-pattern`): Wrong Business Logic, Implementation Mistakes, Broken Flows → `references/logic-and-flow.md`
+   - **Agent 2** (`r:bug-hunter-pattern`): Data Corruption, Concurrency Issues, Resource & Connection Issues, Performance & Scalability → `references/concurrency-data-and-performance.md`
+   - **Agent 3** (`r:bug-hunter-pattern`): Silent Failures, Language-Specific Patterns → `references/silent-failures-and-java.md`
+   - **Agent 4** (`r:bug-hunter-security`): Security — this hunter runs the **real `/security-review` skill** over the scope, not the static checklist (`references/security.md` is its fallback only). `r:bug-hunter-pattern` has no `Skill` tool and can't invoke it; `r:bug-hunter-security` does. This is why Security is its own hunter rather than a category bolted onto Agent 3 — a checklist is not a security review.
+   - **Agent 5** (`r:bug-hunter-docs`): Documentation Consistency — checks the change against the project's docs (`spec.md`/`spec.html`, `todo.md`, `docs/*`, `DESIGN.md`/`ui-design.md`, the `**/CLAUDE.md` hierarchy + nested module rules, `README.md`/`ARCHITECTURE.md`) and reports code/doc divergences and violations of stated CLAUDE.md rules → `references/documentation-consistency.md`. Dispatch it with `subagent_type: "r:bug-hunter-docs"` — the dedicated hunter that treats docs as authoritative intent and recommends which side to move. This is a consistency check, not a bug hunt: when code and docs disagree, the fix may be to update the docs, not the code.
 
    **Do not downgrade Agent 4.** The security track is the one place this skill is most often subtly broken, so be exact:
-   - Dispatch it with `subagent_type: "bug-hunter-security"` — never `bug-hunter-pattern`. Substituting a pattern hunter silently turns the scan into a checklist read, because that agent has no `Skill` tool.
+   - Dispatch it with `subagent_type: "r:bug-hunter-security"` — never `r:bug-hunter-pattern`. Substituting a pattern hunter silently turns the scan into a checklist read, because that agent has no `Skill` tool.
    - Its prompt must instruct it to **invoke the `/security-review` skill** over the scope. Do NOT write a prompt that says "read `security.md` and check these patterns" or "run `git diff` and look for XSS/SQLi" — that makes the fallback checklist the primary scan, which is the failure this design exists to prevent. `security.md` is fallback only; the prompt names the scope, not the checklist.
    - Its report must contain the mandatory confirmation line (`✅ Invoked the real /security-review skill …` or `❌ Did NOT run …`), leading the report. If that line is genuinely absent, or the output is a hand-rolled "security analysis" with no sign the real skill ran, treat the security track as not having run and re-dispatch.
    - **Mind the scope gap.** `/security-review` is diff-scoped — it reviews the working-tree diff (or the unpushed branch commits when the tree is clean), NOT the full source tree, even when this scan is whole-project. The security hunter states its real coverage in the confirmation line; carry that through to Phase 3 so a clean security result is reported as "no issues in the changeset reviewed," never as "the whole codebase is secure."
@@ -94,7 +94,7 @@ For each bug the user selected:
 2. Test framework selection:
    - **Java**: JUnit 5 + Mockito, follow existing test patterns in the project
    - **Other languages**: detect and use the project's existing test framework
-3. Use `java-backend-developer` agent (or appropriate language agent) for test implementation
+3. Use `r:java-backend-developer` agent (or appropriate language agent) for test implementation
 4. Run the tests to confirm they fail — this proves the bug exists
 5. If a test passes (bug not reproducible), reconsider the finding and inform the user
 

@@ -19,7 +19,7 @@ description: >-
 
 ## Delegate the writing to a dedicated subagent
 
-Writing tests is detailed, context-heavy work: exploring existing patterns, reading the code under test, drafting many test methods, running them, reading failures. Doing all of that inline bloats the main conversation and crowds out the larger task the tests belong to. So when you can, **hand the actual writing to a dedicated `java-backend-developer` subagent** and keep the orchestrating context lean.
+Writing tests is detailed, context-heavy work: exploring existing patterns, reading the code under test, drafting many test methods, running them, reading failures. Doing all of that inline bloats the main conversation and crowds out the larger task the tests belong to. So when you can, **hand the actual writing to a dedicated `r:java-backend-developer` subagent** and keep the orchestrating context lean.
 
 **First — can you delegate?** You can only spawn a subagent if you have an Agent/Task subagent tool, and a subagent cannot spawn another subagent. So if you are yourself a subagent (this includes the case where you were spawned specifically to write these tests), you have no such tool — don't waste time searching for one. Skip straight to the Workflow below and write the tests yourself inline. This is also what prevents delegating in a loop.
 
@@ -27,8 +27,8 @@ Writing tests is detailed, context-heavy work: exploring existing patterns, read
 
 1. Do a light scope pass — what's the target (git diff, named files, or a bug report), and how many files/classes need tests?
 2. Spawn the subagent(s):
-   - **Single target (default):** one `java-backend-developer` subagent writes all the tests.
-   - **Large target (many files/classes):** fan out — several `java-backend-developer` subagents in parallel, each owning one slice (e.g. one service plus its tests). Give them a shared one-line style note ("match the existing test conventions in `<module>`") so the slices stay consistent.
+   - **Single target (default):** one `r:java-backend-developer` subagent writes all the tests.
+   - **Large target (many files/classes):** fan out — several `r:java-backend-developer` subagents in parallel, each owning one slice (e.g. one service plus its tests). Give them a shared one-line style note ("match the existing test conventions in `<module>`") so the slices stay consistent.
 3. Each subagent prompt must include:
    - The exact target (files/classes/bug to cover).
    - "Load the `/r:tests-write` skill and follow it. You are the dedicated test-writing subagent — write the tests yourself, do NOT delegate further."

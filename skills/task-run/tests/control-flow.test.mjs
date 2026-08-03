@@ -65,7 +65,7 @@ function baseSource(over = {}) {
     uiTouched: true, uiVisualChange: true,
     hasBackend: true, hasFrontend: false,
     buildTool: 'maven', buildCmd: 'mvn clean package', buildCmdFast: 'mvn package',
-    runnerAgent: 'maven-build-runner',
+    runnerAgent: 'r:maven-build-runner',
     exploreAspects: ['controller + templates', 'existing tests'],
     planPath: '.task-plans/issue-81-import.md', planStatus: 'none', branchExists: false,
     ...over,
@@ -271,7 +271,7 @@ test('a re-review that re-raises a dismissed finding sends it back through triag
 })
 
 test('the build call steps up over the runner agent\'s haiku, because it classifies', async () => {
-  // maven-build-runner and gradle-build-runner are haiku, which is right for the "BUILD SUCCESSFUL"
+  // r:maven-build-runner and r:gradle-build-runner are haiku, which is right for the "BUILD SUCCESSFUL"
   // path that is almost every dispatch. On a RED build this call decides in-scope vs pre-existing,
   // and that decides whether the run fixes the failures or halts and surfaces them.
   const { optsBy } = await run({ review: OK_REVIEW, planfix: OK_FIX })
@@ -293,7 +293,7 @@ test('implementers self-check by COMPILING — the pipeline owns the build', asy
 
 test('a gradle project gets gradle self-check commands, and no build tool gets none', async () => {
   const g = await run({
-    source: baseSource({ buildTool: 'gradle', runnerAgent: 'gradle-build-runner' }),
+    source: baseSource({ buildTool: 'gradle', runnerAgent: 'r:gradle-build-runner' }),
     review: OK_REVIEW, planfix: OK_FIX,
   })
   assert.match(g.prompts['implement:backend'], /\.\/gradlew -q testClasses/)

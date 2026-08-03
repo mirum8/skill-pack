@@ -62,7 +62,7 @@ Keep the fetched title/body/labels/comments; you'll hand them to the verifiers s
 
 ## Step 2 — Verify (parallel, read-only)
 
-Using the Agent tool, spawn **one read-only verification subagent per candidate**, all at once — this is safe to parallelize because verification touches no branch and writes nothing. Use `Explore` (pure code-reading) by default, or `bug-hunter` when the issue needs runtime reproduction to confirm. Brief each verifier with the issue's number, title, body, labels, and relevant comments, and ask it to explore the codebase and decide whether this is worth an expensive fix.
+Using the Agent tool, spawn **one read-only verification subagent per candidate**, all at once — this is safe to parallelize because verification touches no branch and writes nothing. Use `Explore` (pure code-reading) by default, or `r:bug-hunter` when the issue needs runtime reproduction to confirm. Brief each verifier with the issue's number, title, body, labels, and relevant comments, and ask it to explore the codebase and decide whether this is worth an expensive fix.
 
 Each verifier must judge, from the code and the issue:
 - **Is it a genuine bug** — not a feature request, a question, a docs-only ask, or unactionable noise?

@@ -36,7 +36,7 @@ function baseTriage(over = {}) {
     profile: 'full', uiTouched: false, hasTestApp: false,
     changeIntent: 'Stop a rejected rate-sheet import from wiping the versions table.',
     buildTool: 'maven', buildCmd: 'mvn clean package', buildCmdFast: 'mvn package',
-    runnerAgent: 'maven-build-runner',
+    runnerAgent: 'r:maven-build-runner',
     changedFiles: [CHANGED], hasBackend: true, hasFrontend: false,
     ...over,
   }
@@ -344,17 +344,17 @@ test('the docs hunter is the one hunter pinned to a cheaper MODEL, not just a lo
 })
 
 test('the pattern hunters use the lean sweep agent, never the single-bug investigator', async () => {
-  // `bug-hunter` is the /r:code-bugs root-cause persona — reproduce first, trace the data flow —
+  // `r:bug-hunter` is the /r:code-bugs root-cause persona — reproduce first, trace the data flow —
   // and it fights this job: under it the median `logic` run reads twelve whole files before it
   // ever runs git diff. These hunters do a sweep, and the agent has to agree with the prompt.
   const { opts } = await run()
-  assert.equal(opts['find-bugs:logic'].agentType, 'bug-hunter-pattern')
-  assert.equal(opts['find-bugs:runtime-and-failures'].agentType, 'bug-hunter-pattern')
-  // The two specialised hunters are unaffected — only bug-hunter-security has the `Skill` tool
+  assert.equal(opts['find-bugs:logic'].agentType, 'r:bug-hunter-pattern')
+  assert.equal(opts['find-bugs:runtime-and-failures'].agentType, 'r:bug-hunter-pattern')
+  // The two specialised hunters are unaffected — only r:bug-hunter-security has the `Skill` tool
   // that invokes the REAL /security-review, and swapping it is how that track silently becomes a
   // checklist read.
-  assert.equal(opts['find-bugs:security'].agentType, 'bug-hunter-security')
-  assert.equal(opts['find-bugs:docs'].agentType, 'bug-hunter-docs')
+  assert.equal(opts['find-bugs:security'].agentType, 'r:bug-hunter-security')
+  assert.equal(opts['find-bugs:docs'].agentType, 'r:bug-hunter-docs')
 })
 
 // ------------------------------------------------------ the shared diff pack ---

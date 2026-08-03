@@ -2,7 +2,7 @@
 
 Real-world production bug patterns — things that actually break, not theoretical concerns. Hunter focus: **Security.**
 
-> This is a **fallback checklist** for the `bug-hunter-security` hunter. The primary scan is the real `/security-review` skill; use these patterns only to catch anything the skill didn't surface — not as a replacement for running it.
+> This is a **fallback checklist** for the `r:bug-hunter-security` hunter. The primary scan is the real `/security-review` skill; use these patterns only to catch anything the skill didn't surface — not as a replacement for running it.
 
 ## Security (Production Impact)
 

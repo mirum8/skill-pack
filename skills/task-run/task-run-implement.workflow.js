@@ -107,7 +107,7 @@ const SOURCE = {
     buildTool: { type: 'string', enum: ['maven', 'gradle', 'none'] },
     buildCmd: { type: 'string' },        // CLEAN certifying build — used ONCE
     buildCmdFast: { type: 'string' },    // incremental — every rebuild after that
-    runnerAgent: { type: 'string' },     // maven-build-runner | gradle-build-runner
+    runnerAgent: { type: 'string' },     // r:maven-build-runner | r:gradle-build-runner
     // 1 aspect for light, 2 for standard, 2-3 for full. Each becomes one read-only Explore agent.
     exploreAspects: { type: 'array', items: { type: 'string' } },
     planPath: { type: 'string' },
@@ -654,8 +654,8 @@ ${inRepo}
       Also set hasBackend / hasFrontend for implementer routing.
    6. BUILD TOOL from the repo root — return BOTH commands. buildCmd is the CLEAN certifying
       build used exactly ONCE; buildCmdFast is the incremental rebuild used every time after.
-      maven -> "mvn clean package" / "mvn package", runnerAgent "maven-build-runner".
-      gradle -> "./gradlew clean build" / "./gradlew build", runnerAgent "gradle-build-runner".
+      maven -> "mvn clean package" / "mvn package", runnerAgent "r:maven-build-runner".
+      gradle -> "./gradlew clean build" / "./gradlew build", runnerAgent "r:gradle-build-runner".
       neither -> buildTool "none".
       NOT \`install\`: a multi-module reactor resolves inter-module dependencies within the same
       session, so writing every module into ~/.m2 buys this run nothing and costs the whole
@@ -1714,8 +1714,8 @@ if (onBranch !== wantBranch) log(`run-task-implement: on "${onBranch}", not the 
 // build the WRONG thing, so every brief carries the plan path, the slice boundary, the criteria,
 // and the house rules.
 const areas = []
-if (src.hasBackend) areas.push({ label: 'backend', agentType: 'java-backend-developer', slice: 'the backend code (*.java / *.kt) and its tests' })
-if (src.hasFrontend) areas.push({ label: 'frontend', agentType: 'htmx-thymeleaf-dev', slice: 'the templates, HTMX wiring, and frontend assets' })
+if (src.hasBackend) areas.push({ label: 'backend', agentType: 'r:java-backend-developer', slice: 'the backend code (*.java / *.kt) and its tests' })
+if (src.hasFrontend) areas.push({ label: 'frontend', agentType: 'r:htmx-thymeleaf-dev', slice: 'the templates, HTMX wiring, and frontend assets' })
 if (!areas.length) areas.push({ label: 'general', agentType: 'general-purpose', slice: 'everything the plan calls for' })
 
 // An implementer's self-check only has to prove its slice COMPILES and that ITS OWN tests pass.

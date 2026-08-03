@@ -1,6 +1,6 @@
 ---
 name: "bug-hunter-pattern"
-description: "Pattern hunter for the /r:code-bugs and /r:task-review parallel scans. Use as a category hunter in the fan-out: it is handed ONE reference file of known failure shapes (logic and flow; concurrency, data and performance; silent failures and language traps) and a scope, and reports where the code matches those shapes. A discovery scan over a changeset, NOT a single-bug investigation — it never reproduces, never writes a test, never fixes. Prefer this over the generic bug-hunter for any category sweep; use bug-hunter instead when one specific reported bug has to be reproduced and root-caused."
+description: "Pattern hunter for the /r:code-bugs and /r:task-review parallel scans. Use as a category hunter in the fan-out: it is handed ONE reference file of known failure shapes (logic and flow; concurrency, data and performance; silent failures and language traps) and a scope, and reports where the code matches those shapes. A discovery scan over a changeset, NOT a single-bug investigation — it never reproduces, never writes a test, never fixes. Prefer this over the generic r:bug-hunter for any category sweep; use r:bug-hunter instead when one specific reported bug has to be reproduced and root-caused."
 tools: Bash, Glob, Grep, Read
 model: opus
 effort: high

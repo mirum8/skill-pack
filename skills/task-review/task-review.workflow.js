@@ -111,7 +111,7 @@ const TRIAGE = {
     buildTool: { type: 'string', enum: ['maven', 'gradle', 'none'] },
     buildCmd: { type: 'string' },           // CLEAN, certifying build — used once, for the run's first build
     buildCmdFast: { type: 'string' },       // incremental rebuild — every build AFTER the first one in this run
-    runnerAgent: { type: 'string' },        // maven-build-runner | gradle-build-runner
+    runnerAgent: { type: 'string' },        // r:maven-build-runner | r:gradle-build-runner
     changedFiles: { type: 'array', items: { type: 'string' } },
     hasBackend: { type: 'boolean' },
     hasFrontend: { type: 'boolean' },
@@ -301,12 +301,12 @@ const RAN_CLAUSE = `
 // orchestrating owns the fan-out, because no level below it can perform one.
 //
 // `refs` is where each hunter's pattern file lives; hunters read only their own file, which is
-// what keeps five parallel reads cheap. bug-hunter-pattern has Bash/Glob/Grep/Read (enough to run
-// `git diff` itself), bug-hunter-security additionally has `Skill` (that is why the security
+// what keeps five parallel reads cheap. r:bug-hunter-pattern has Bash/Glob/Grep/Read (enough to run
+// `git diff` itself), r:bug-hunter-security additionally has `Skill` (that is why the security
 // track is its own type — it must invoke the REAL /security-review, never a checklist read).
 //
-// WHY THE PATTERN HUNTERS ARE `bug-hunter-pattern` AND NOT `bug-hunter`. The agent has to agree
-// with the job, or it quietly does the other one. `bug-hunter` is the /r:code-bugs single-bug
+// WHY THE PATTERN HUNTERS ARE `r:bug-hunter-pattern` AND NOT `r:bug-hunter`. The agent has to agree
+// with the job, or it quietly does the other one. `r:bug-hunter` is the /r:code-bugs single-bug
 // investigator — "Reproduce Before You Fix", trace the data flow, ask clarifying questions — a
 // persona that earns its cost by going deep on ONE thread, and it carries 13 tools, including MCP
 // and Task tools a hunter never calls (0.0 uses per run) and WebSearch (0.1), all sitting in the
@@ -314,8 +314,8 @@ const RAN_CLAUSE = `
 // changeset, which the prompt below also says ("report-only, write no tests"). Point them at the
 // investigator and the persona wins for the first dozen turns — measured over 151 stored `logic`
 // runs, the median hunt reads TWELVE whole source files before it ever runs `git diff` and reaches
-// the diff around turn 31 of 49. `bug-hunter-pattern` is the same reasoning depth with the sweep
-// discipline and four tools. `bug-hunter` is right where reproduction IS the job — /r:gh-issues-fix
+// the diff around turn 31 of 49. `r:bug-hunter-pattern` is the same reasoning depth with the sweep
+// discipline and four tools. `r:bug-hunter` is right where reproduction IS the job — /r:gh-issues-fix
 // uses it for exactly that.
 //
 // PER-HUNTER EFFORT, and why the pattern hunters are not at the top tier. A pattern hunter is
@@ -370,14 +370,14 @@ const refsDir = () => `${PACK}/skills/code-bugs/references`
 // are the ones below: a leaner agent, a hunt that reads the diff first and stops, and one shared
 // diff so N hunters don't each orient themselves from scratch.
 const HUNTERS = [
-  { label: 'logic', agentType: 'bug-hunter-pattern', ref: 'logic-and-flow.md',
+  { label: 'logic', agentType: 'r:bug-hunter-pattern', ref: 'logic-and-flow.md',
     focus: 'Wrong Business Logic, Implementation Mistakes, Broken Flows', ...PATTERN_HUNT },
-  { label: 'runtime-and-failures', agentType: 'bug-hunter-pattern',
+  { label: 'runtime-and-failures', agentType: 'r:bug-hunter-pattern',
     ref: ['concurrency-data-and-performance.md', 'silent-failures-and-java.md'],
     focus: 'Data Corruption, Concurrency Issues, Resource & Connection Issues, Performance & Scalability (N+1, unbounded fetches, pool exhaustion), Silent Failures, Language-Specific Patterns',
     ...PATTERN_HUNT },
-  { label: 'security', agentType: 'bug-hunter-security', ref: null, focus: 'Security' },
-  { label: 'docs', agentType: 'bug-hunter-docs', ref: 'documentation-consistency.md',
+  { label: 'security', agentType: 'r:bug-hunter-security', ref: null, focus: 'Security' },
+  { label: 'docs', agentType: 'r:bug-hunter-docs', ref: 'documentation-consistency.md',
     focus: 'Documentation Consistency', ...DOC_HUNT },
 ]
 // How each hunter gets at the change. Set once, right after triage, from the shared diff capture
@@ -553,7 +553,7 @@ const ECHO = { model: 'haiku', effort: 'low' }
 // Cheap, but not the echo tier: it composes prose (a GitHub issue body) or has a fallback path to
 // choose between.
 const MECHANICAL = { model: 'sonnet', effort: 'low' }
-// The build runner AGENTS (maven-build-runner, gradle-build-runner) are `haiku`, which is right
+// The build runner AGENTS (r:maven-build-runner, r:gradle-build-runner) are `haiku`, which is right
 // for what they do on almost every dispatch: run one command and report "BUILD SUCCESSFUL". This
 // call is the exception, and it steps the model back up over the agent's own tier. On a RED build
 // it must split the failures into inScopeFailures and preExistingFailures, and that split is
@@ -592,7 +592,7 @@ const TRIAGE_RUN = { effort: 'medium' }
 // triage. Deliberately not applied to fix-triage, which is where that thinking lives.
 const FIX_RUN = { effort: 'high' }
 // The UI verifiers are the one JUDGING track where xhigh does not pay for itself. Measured over
-// 59 stored bug-hunter-ui transcripts: 66% of their wall time was model time, spread over a median
+// 59 stored r:bug-hunter-ui transcripts: 66% of their wall time was model time, spread over a median
 // of 86 turns (p90 144) at ~4.2s of thinking each — and the large majority of those turns drive a
 // browser or read a page, not adjudicate a defect. `high` keeps the judgement that decides "is this
 // a real problem or an intentional design choice" while cutting the per-turn cost of the mechanical
@@ -682,8 +682,8 @@ const triage = await reliable('triage', 'Triage', () => agent(
       file => true. A comment/format-only edit inside source still => true.
    3. Detect the build tool and return BOTH build commands — the run does exactly ONE clean
       build (the first) and every rebuild after it is incremental over that same run's output:
-        pom.xml        => buildTool 'maven',  buildCmd \`mvn clean package\`,   buildCmdFast \`mvn package\`,      runnerAgent maven-build-runner
-        build.gradle*  => buildTool 'gradle', buildCmd \`./gradlew clean build\`, buildCmdFast \`./gradlew build\`, runnerAgent gradle-build-runner
+        pom.xml        => buildTool 'maven',  buildCmd \`mvn clean package\`,   buildCmdFast \`mvn package\`,      runnerAgent r:maven-build-runner
+        build.gradle*  => buildTool 'gradle', buildCmd \`./gradlew clean build\`, buildCmdFast \`./gradlew build\`, runnerAgent r:gradle-build-runner
         neither        => buildTool 'none'
       Do NOT add parallelism flags (-T, --parallel, --build-cache): a non-thread-safe plugin
       would turn them into a flaky false-red, which halts the whole routine.
@@ -1155,7 +1155,7 @@ if (!nothingToFix) {
   let correctnessFixed = true
   let readabilityFixed = true
   if (fixList.correctness.length) {
-    const agentType = triage.hasFrontend && !triage.hasBackend ? 'htmx-thymeleaf-dev' : 'java-backend-developer'
+    const agentType = triage.hasFrontend && !triage.hasBackend ? 'r:htmx-thymeleaf-dev' : 'r:java-backend-developer'
     const fc = await fix(
       `Surgical fixer, not a feature builder. Fix ONLY these items — the smallest diff that
        resolves each; no refactoring, renaming, or "improving" outside them:
@@ -1269,7 +1269,7 @@ if (triage.buildTool !== 'none') {
        pass:\n${inScope}
        ${selfCheckClause}${noFullBuild} (This loop rebuilds and re-runs the suite as soon as
        you return — that is what proves the failures are gone.)${intentBlock}`,
-      { label: `build-fix#${i}`, phase: 'Build', agentType: 'java-backend-developer' })
+      { label: `build-fix#${i}`, phase: 'Build', agentType: 'r:java-backend-developer' })
   }
   if (!buildGreen) {
     log('post-task-review: in-scope build still RED after 3 attempts — stopping, surfacing to user')
@@ -1387,7 +1387,7 @@ const FRONTEND_FILE = /\.(html|htm|css|scss|sass|less|js|mjs|ts|tsx|jsx|vue|svel
 let endVerifyTouchedFrontend = false
 const endVerifyTrack = async () => {
   if (!endVerifyWanted) return
-  const fixAgent = triage.hasFrontend && !triage.hasBackend ? 'htmx-thymeleaf-dev' : 'java-backend-developer'
+  const fixAgent = triage.hasFrontend && !triage.hasBackend ? 'r:htmx-thymeleaf-dev' : 'r:java-backend-developer'
   // What pass 1 raised and what happened to it. Each pass shells out to `run.sh --mode review`,
   // which starts a FRESH Codex thread (lib/codex.mjs runAppServerReview: startThread, ephemeral) —
   // there is no session to resume, so pass 2 has literally no memory of pass 1 and, until this,
@@ -1512,7 +1512,7 @@ ${priorPass.findings.map(f => `         - ${f.file}:${f.line} [${f.category}] ${
 // skips it at every tier: booting the whole stack to look at pages nothing touched is the most
 // expensive way to learn nothing.
 //
-// WHY THIS IS THREE STEPS AND NOT ONE. Measured over 59 stored bug-hunter-ui transcripts: median
+// WHY THIS IS THREE STEPS AND NOT ONE. Measured over 59 stored r:bug-hunter-ui transcripts: median
 // 542s, p90 1150s — the largest SERIAL block in the pipeline, since the Phase 2 hunters overlap
 // each other while this one runs alone at the end. 66% of it was model time over a median of 86
 // turns, because ONE agent did four different jobs end to end: deploy, functional smoke test,
@@ -1639,7 +1639,7 @@ const uiTrack = async () => {
       ]
       const parts = await parallel(halves.map((h) => () =>
         reliable(h.label, 'UI', () => agent(h.prompt,
-          { label: h.label, phase: 'UI', schema: UIRES, agentType: 'bug-hunter-ui', ...VERIFY }))))
+          { label: h.label, phase: 'UI', schema: UIRES, agentType: 'r:bug-hunter-ui', ...VERIFY }))))
       uiDead = halves.filter((h, i) => blocked(parts[i])).map((h) => h.label)
       if (uiDead.length) {
         log(`post-task-review: UI half BLOCKED — ${uiDead.join(', ')}. The UI track is INCOMPLETE; ` +
@@ -1691,7 +1691,7 @@ try {
   const major = findings.filter(f => f.fixSize === 'major')
   if (minor.length) await agent(`Fix these minor UI/runtime defects (surgical), ${rebuildClause}
     Then redeploy and re-verify once:\n${minor.map(f => `${f.where}: ${f.title} — ${f.suggestedFix}`).join('\n')}${intentBlock}`,
-    { label: 'ui-fix-minor', phase: 'UI', agentType: triage.hasFrontend ? 'htmx-thymeleaf-dev' : 'java-backend-developer', ...FIX_RUN })
+    { label: 'ui-fix-minor', phase: 'UI', agentType: triage.hasFrontend ? 'r:htmx-thymeleaf-dev' : 'r:java-backend-developer', ...FIX_RUN })
   if (major.length) await agent(`File one GitHub issue per major UI finding via \`gh issue create\`
     (preflight gh auth + a github remote; best-effort --label bug, retry without on failure). If gh
     is unusable, write a grouped HTML report under .claude/skills/test-app/bugs/ instead. Findings:

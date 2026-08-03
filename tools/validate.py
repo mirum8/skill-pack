@@ -209,6 +209,37 @@ def check_r_prefix():
                              "prefix and would resolve to the flat twin outside the pack")
 
 
+# A bare agent name that quotes text living OUTSIDE the pack — a rule a user's own
+# CLAUDE.md might carry, which is written flat because that user never saw the pack.
+# Prefixing those would make the search heuristic miss the very lines it exists to find.
+FOREIGN_TEXT = {
+    "skills/claudemd-patch/SKILL.md",
+    "skills/code-bugs/references/documentation-consistency.md",
+}
+BARE_AGENT = re.compile(r"(?<![\w:/-])(" + "|".join(sorted(R.AGENTS, key=len, reverse=True))
+                        + r")(?![\w-])")
+
+
+def check_agent_prefix():
+    """BR-5, for agents — a bundled agent resolves as `r:<name>`. Written bare it either
+    dispatches a same-named agent outside the pack (a different persona and toolset, with
+    no error) or, where no such twin exists, dies with 'agent type not found' and takes
+    that track of the fan-out with it."""
+    for path in pack_text_files():
+        rel = os.path.relpath(path, REPO)
+        if rel in FOREIGN_TEXT:
+            continue
+        for i, line in enumerate(open(path, encoding="utf-8", errors="ignore"), 1):
+            # An agent's own frontmatter `name:` is what the r: prefix is built FROM, and
+            # its memory directory is a path on disk, not a dispatch target.
+            if re.match(r"^name:\s", line) or "agent-memory/" in line:
+                continue
+            m = BARE_AGENT.search(line)
+            if m:
+                fail("BR-5", f"{rel}:{i}: agent {m.group(1)} is missing the r: prefix — "
+                             "it resolves to a flat twin outside the pack, or to nothing")
+
+
 # --- FR-5, ADR-6 ------------------------------------------------------------
 def check_agents():
     adir = os.path.join(REPO, "agents")
@@ -477,6 +508,7 @@ def main():
     check_frontmatter()
     check_references()
     check_r_prefix()
+    check_agent_prefix()
     check_dangling()
     check_agents()
     check_evals()

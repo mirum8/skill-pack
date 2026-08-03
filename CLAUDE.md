@@ -101,7 +101,12 @@ missing, the step is recorded as **skipped** and named, and the run continues.
   substituted inside a `*.workflow.js`, so those take the pack root as `args.packRoot`, passed by
   the invoking `SKILL.md`. No `/Users/<name>/` or `~/.claude/skills/<x>` paths anywhere outside
   `docs/`.
-- **Names.** Every packed skill referenced anywhere must carry the `r:` prefix. Every skill name a
+- **Names.** Every packed skill *and every bundled agent* referenced anywhere must carry the `r:`
+  prefix — an `agentType` or `subagent_type` value, and the prose that names one. Bare, a bundled
+  agent either dispatches a same-named agent outside the pack (different persona, different tools,
+  no error) or dies with "agent type not found" and takes that track of the fan-out with it. The
+  two exemptions are listed as `FOREIGN_TEXT` in `tools/validate.py`: prose that quotes a *user's*
+  CLAUDE.md, where the flat name is what the search has to match. Every skill name a
   body mentions must be packed, bundled with Claude Code, or listed in the README as an external
   prerequisite — anything else is a name the model will try to invoke mid-run and fail to reach.
   New names are domain-first: `<domain>-<action>`, at most three kebab segments.

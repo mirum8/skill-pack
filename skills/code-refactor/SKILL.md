@@ -103,7 +103,7 @@ Summarize all changes made in a final report grouped by category (Naming, Spring
 
 ## Implementation
 
-Use the `java-backend-developer` agent for implementing:
+Use the `r:java-backend-developer` agent for implementing:
 - Writing the initial tests
 - Performing the refactoring
 - Running verification tests
