@@ -30,6 +30,7 @@ python3 tools/validate.py                                  # static checks only
 node --test skills/task-run/tests/control-flow.test.mjs    # one workflow's branches
 node --test skills/task-review/tests/control-flow.test.mjs
 bash hooks/tests/guard.test.sh                             # workflow-guard behaviour
+bash lib/tests/stats.test.sh                               # stats sink + hook + reporter
 bash tests/install.test.sh                                 # installer behaviour
 claude plugin validate .                                   # the loader's own view of the pack
 claude --plugin-dir "$PWD"                                 # load the pack without installing it
@@ -48,14 +49,15 @@ them deliberately after editing any `description`, and before a release.
 .claude-plugin/plugin.json   identity + namespace (name must stay "r")
 skills/<name>/SKILL.md       the skill; plus references/ scripts/ tests/ evals/
 agents/<name>.md             the 8 agents skills dispatch to
-hooks/                       hooks.json + guard-workflow.py
+hooks/                       hooks.json + guard-workflow.py + record-skill-run.py
+lib/                         pack-wide stats sink + reporter, shared by every skill
 tools/                       build/validation scripts — NOT shipped
 tests/, validate.sh          repo-level test + gate — NOT shipped
 docs/skill-pack-repo/        spec.html, architecture.html, interview notes — NOT shipped
 ```
 
-`install.sh` copies exactly `.claude-plugin/ skills/ agents/ hooks/ check-prereqs.sh`. Anything a
-skill needs at run time must live under one of those.
+`install.sh` copies exactly `.claude-plugin/ skills/ agents/ hooks/ lib/ check-prereqs.sh`. Anything
+a skill needs at run time must live under one of those.
 
 ## Architecture
 
@@ -81,6 +83,21 @@ resolving to `null`, and `agent()` throwing.
 allowed. Its allow-list is built at run time from `$CLAUDE_PLUGIN_ROOT`, and it matches only real
 workflow scripts (`export const meta` + a guarded `name`), so prose quoting a pipeline name is left
 alone. It fails open on any parse/IO trouble.
+
+**The stats store measures the pack.** `lib/record-run.py` appends one line to
+`~/.claude/skill-stats.jsonl`; `lib/skill-stats.py` reads it back. It lives in `lib/`, not in a
+skill's `scripts/`, because every skill writes to it — a shared store owned by one skill stays that
+skill's store. Two row shapes: `hooks/record-skill-run.py` writes an `invoke` row per invocation,
+and the skills with a countable yield write a `result` row. **Runs are counted from `invoke` rows
+only** — the same run produces both, so counting both doubles every number. The hook is registered
+on *two* events because the two ways to reach a skill are disjoint in the transcript
+(`PostToolUse`/`Skill` for a model invocation, `UserPromptSubmit` for a typed `/r:<name>`); dropping
+either registration silently halves the coverage. It records only `r:` names, always exits 0 and
+always prints nothing — on `UserPromptSubmit` stdout is injected into the conversation and a
+non-zero exit blocks the prompt. `~/.claude/review-stats.jsonl` is the review-only predecessor and
+is never written: `--import-legacy` copies its rows in, stamped with `mid` so a second import is a
+no-op, and from the first imported row the legacy file is no longer read — counting a run from both
+stores doubles every historical number.
 
 **Skills that must never self-trigger** (`task-run`, `gh-issues-fix`) carry
 `disable-model-invocation: true` in frontmatter — the enforcement, not just a sentence in the body.
@@ -118,6 +135,14 @@ missing, the step is recorded as **skipped** and named, and the run continues.
 
 ## Conventions
 
+- **Read the stats before changing or fixing anything.** Run `python3 lib/skill-stats.py` first
+  and let what it says shape the edit — which skills actually run, which tracks produce fixes,
+  which tiers get chosen. Every tier and track decision here was once argued from mechanism alone,
+  which is how a track nobody's findings survive stays in the pipeline for months. Quote the
+  number in the change. Two readings that are *not* evidence: a skill with no `invoke` rows was
+  never **observed**, not never useful (recording starts when the hook is installed), and a track
+  scores zero on every run whose tier never dispatched it — the report separates both, so use its
+  wording rather than the raw counts.
 - The prose is the product: keep the existing register — direct, reasoned, explaining *why* a
   constraint exists where a future editor would otherwise remove it.
 - **Write it as it stands now, never as a changelog.** Skills, agents and workflow comments

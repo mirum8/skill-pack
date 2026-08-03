@@ -70,7 +70,7 @@ cp "$H/.claude/settings.json" "$TMP/seeded-settings"   # what it looked like goi
 out=$(run "$H" --dry-run)
 hasnt "--dry-run creates nothing"                  "$H/.claude/skills/r"
 is    "--dry-run says so"                          "$(grep -c 'was a --dry-run' <<<"$out")" 1
-is    "--dry-run still echoes the copy commands"   "$(grep -c 'rsync\|cp -R' <<<"$out")" 5
+is    "--dry-run still echoes the copy commands"   "$(grep -c 'rsync\|cp -R' <<<"$out")" 6
 is    "--dry-run leaves settings.json alone" \
       "$(cmp -s "$H/.claude/settings.json" "$TMP/seeded-settings" && echo same || echo CHANGED)" same
 is    "--dry-run writes no backup" \
@@ -84,7 +84,12 @@ has  "the manifest lands"                          "$D/.claude-plugin/plugin.jso
 is   "fifteen skills land"                         "$(ls "$D/skills" | wc -l | tr -d ' ')" 15
 is   "nine agents land"                            "$(ls "$D/agents" | wc -l | tr -d ' ')" 9
 has  "the guard hook lands"                        "$D/hooks/guard-workflow.py"
+has  "the stats hook lands"                        "$D/hooks/record-skill-run.py"
 has  "hooks.json lands"                            "$D/hooks/hooks.json"
+# Every skill writes through lib/, so a pack missing it records nothing and says nothing —
+# the sink is best-effort by contract, which is exactly why its absence has to be caught here.
+has  "the stats sink lands"                        "$D/lib/record-run.py"
+has  "the stats reporter lands"                    "$D/lib/skill-stats.py"
 has  "check-prereqs.sh lands"                      "$D/check-prereqs.sh"
 is   "it says a restart is needed"                 "$(grep -c 'NEXT session' <<<"$out")" 1
 is   "the payload is byte-identical to the repo" \
@@ -164,8 +169,18 @@ done
 is   "the no-rsync PATH really has no rsync" \
      "$(PATH="$TMP/nopath" command -v rsync >/dev/null 2>&1 && echo found || echo absent)" absent
 out=$(HOME="$H4" PATH="$TMP/nopath" bash "$REPO/install.sh" --no-deps 2>&1)
-is   "without rsync it falls back to cp -R"        "$(grep -c '\$ cp -R' <<<"$out")" 5
+is   "without rsync it falls back to cp -R"        "$(grep -c '\$ cp -R' <<<"$out")" 6
 is   "and still lands fifteen skills"              "$(ls "$H4/.claude/skills/r/skills" | wc -l | tr -d ' ')" 15
+# Running any packed python leaves a __pycache__ in the REPO, and the repo gitignores it — so
+# neither copy path may carry one into the installed pack.
+mkdir -p "$REPO/lib/__pycache__" && touch "$REPO/lib/__pycache__/probe.pyc"
+out=$(HOME="$H4" PATH="$TMP/nopath" bash "$REPO/install.sh" --no-deps 2>&1)
+is   "the cp -R path ships no __pycache__" \
+     "$(find "$H4/.claude/skills/r" -name __pycache__ | wc -l | tr -d ' ')" 0
+H4b=$(newhome pycache); out=$(run "$H4b" --no-deps)
+is   "the rsync path ships no __pycache__ either" \
+     "$(find "$H4b/.claude/skills/r" -name __pycache__ | wc -l | tr -d ' ')" 0
+rm -rf "$REPO/lib/__pycache__"
 
 # --- 10. argument handling --------------------------------------------------
 H5=$(newhome args)

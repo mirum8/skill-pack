@@ -63,7 +63,7 @@ printf '%sr skill pack%s %s→%s %s\n' "$B" "$R" "$DIM" "$R" "$DEST"
 
 # The payload only. docs/, tools/, validate.sh and .git stay in the repo — the
 # install needs what Claude Code loads, nothing else.
-PAYLOAD=(.claude-plugin skills agents hooks check-prereqs.sh)
+PAYLOAD=(.claude-plugin skills agents hooks lib check-prereqs.sh)
 
 step "copy the pack"
 if [[ -e $DEST && ! -f $DEST/.claude-plugin/plugin.json ]]; then
@@ -85,11 +85,15 @@ for item in "${PAYLOAD[@]}"; do
     die "MISSING from the repo: $item — build the pack first (tools/build-pack.py)."
     exit 1
   fi
+  # __pycache__ is excluded because running any packed python — the stats sink, the hooks —
+  # leaves one behind in the REPO, and copying it would ship a build artefact that the repo
+  # itself gitignores.
   if command -v rsync >/dev/null 2>&1; then
-    run rsync -a --delete "$REPO/$item" "$DEST/"
+    run rsync -a --delete --exclude __pycache__ "$REPO/$item" "$DEST/"
   else
     run rm -rf "$DEST/$item"
     run cp -R "$REPO/$item" "$DEST/"
+    run find "$DEST/$item" -name __pycache__ -type d -prune -exec rm -rf {} +
   fi
 done
 ok "${#PAYLOAD[@]} items copied: ${PAYLOAD[*]}"

@@ -108,3 +108,18 @@ For each bug the user selected:
 3. Order fixes by:
    - Severity (data corruption > wrong results > silent failures)
    - Dependencies (fix A before B if B depends on A)
+
+## Record the run
+
+Last thing, once the report exists. One line into the pack-wide store, so a hunter can be
+retired on measured yield instead of opinion — counts only, never finding text:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
+{"skill":"r:code-bugs","scope":"diff|all|explicit","hunters":0,"huntersBlocked":[],"findings":0,"byCategory":{},"confirmed":0,"testsWritten":0}
+STATS_JSON
+```
+
+`confirmed` counts findings that survived Phase 3 — the ones you reported as real, not the raw
+hunter output. The script always exits `0`: a row that does not get written is a lost row, not a
+failed run. Never retry it and never report it as a failure of the hunt.

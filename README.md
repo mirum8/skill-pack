@@ -140,9 +140,9 @@ without its `r:` prefix, no reference dangles, every bundled agent is dispatched
 by some skill, every skill has an eval suite with both case kinds, no absolute
 path points into a skill directory, no build artefact is tracked, and no two
 descriptions open with nearly the same sentence. Then it runs the two workflow
-test suites, `claude plugin validate`, the guard's behaviour tests, and the
-installer's. The whole run is a few seconds; `SKIP_INSTALL_TEST=1` drops the
-slowest part.
+test suites, `claude plugin validate`, the guard's behaviour tests, the stats
+store's, and the installer's. The whole run is a few seconds; `SKIP_INSTALL_TEST=1`
+drops the slowest part.
 
 ### Layout
 
@@ -150,13 +150,49 @@ slowest part.
 .claude-plugin/plugin.json   identity and namespace — nothing else
 skills/<name>/               SKILL.md, plus references/ scripts/ tests/ evals/
 agents/<name>.md             the eight the skills dispatch
-hooks/                       hooks.json + the workflow-immutability guard
+hooks/                       hooks.json, the workflow-immutability guard, the stats hook
+lib/                         the pack-wide stats sink and reporter, shared by every skill
 tools/                       build and validation scripts, not shipped
 docs/skill-pack-repo/        the design write-up, not shipped
 ```
 
-`install.sh` copies only `.claude-plugin/`, `skills/`, `agents/`, `hooks/` and
-`check-prereqs.sh`. Everything else stays in the repo.
+`install.sh` copies only `.claude-plugin/`, `skills/`, `agents/`, `hooks/`, `lib/`
+and `check-prereqs.sh`. Everything else stays in the repo.
+
+### Measuring the pack
+
+`lib/record-run.py` appends one line to `~/.claude/skill-stats.jsonl`;
+`lib/skill-stats.py` reads it back. Two row shapes share the file:
+`hooks/record-skill-run.py` writes an `invoke` row per invocation, and the skills
+that know their own yield write a `result` row with counts. Runs are counted from
+`invoke` rows only — the same run produces both, and counting both would double
+every number.
+
+```sh
+python3 lib/skill-stats.py                  # everything
+python3 lib/skill-stats.py --review         # the review pipeline's per-track table alone
+python3 lib/skill-stats.py --import-legacy  # copy the pre-pack-wide store in, once
+python3 lib/skill-stats.py --backfill       # recover past reviews from transcripts, once
+```
+
+The hook is registered on two events because a skill is reachable two ways and the
+two are disjoint in the transcript: `PostToolUse`/`Skill` when the model invokes
+one, `UserPromptSubmit` when a person types `/r:<name>`. Only `r:`-prefixed names
+are recorded.
+
+`~/.claude/review-stats.jsonl` is the review-only store that predates this, and it
+is never written. `--import-legacy` copies its rows into the live store —
+normalised, each stamped with a hash of the line it came from, so a second import
+appends nothing. From the first imported row on the legacy file is no longer read:
+counting a run from both stores would double every historical number. Until then it
+is read in place, so nothing goes missing in between. The original is left where it
+is either way — the import is a copy, never a move.
+
+These numbers are the pack's second instrument, next to the eval suites: they say
+which skill is *used* and what it *finds*, which is what retires a track or a skill
+on evidence rather than opinion. A skill with no rows was never **observed** —
+recording starts when the hook is installed, and the report says so rather than
+showing a zero.
 
 ### Paths inside skills
 

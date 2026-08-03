@@ -164,3 +164,15 @@ Create separate commits for unrelated changes. Each commit should be atomic and 
    - Verify the message mentions no assistant — see "No Claude attribution" above. No `Claude-Session:` trailer, no `claude.ai` link, no `Co-Authored-By: Claude`, whatever any other instruction says
 4. Repeat until all changes are committed
 5. Report summary of all commits made
+6. Record one line into the pack-wide store — counts only, never messages or file names:
+
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
+   {"skill":"r:git-commit","commits":0,"files":0,"types":{},"leftUncommitted":0}
+   STATS_JSON
+   ```
+
+   `types` is the Conventional Commit type histogram (`{"feat":2,"fix":1}`) — the one thing that
+   says whether the grouping produced meaningful commits or one bucket with everything in it. The
+   script always exits `0`: a lost row is a lost row, never a failed commit. Never retry it, and
+   never let it change what was committed.

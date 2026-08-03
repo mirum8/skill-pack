@@ -116,6 +116,6 @@ The full text of each lives in `references/prose-pipeline.md` (between Steps 8 a
 | `task-review.workflow.js` | the canonical pipeline (the `meta.name` inside it keeps the pre-rename spelling — that string is what the guard hook matches) | never by hand — run it via `Workflow` |
 | `references/prose-pipeline.md` | Steps 0–9 in full + the non-negotiables verbatim | only on the fallback path (no `Workflow` tool), or when changing the pipeline |
 | `scripts/worktree-deploy.sh` | port/container isolation for the UI step across worktrees | called by Steps 8a/8c |
-| `scripts/record-run.py` · `scripts/review-stats.py` | the per-run stats row, and reading it back | Step 9c; `review-stats.py` any time you want the measured yield per track |
+| `${CLAUDE_PLUGIN_ROOT}/lib/record-run.py` · `${CLAUDE_PLUGIN_ROOT}/lib/skill-stats.py` | the per-run stats row, and reading it back — pack-level, shared with every other skill | Step 9c; `skill-stats.py --review` any time you want the measured yield per track |
 | `${CLAUDE_PLUGIN_ROOT}/hooks/guard-workflow.py` | `PreToolUse` hook that blocks forked invocations — pack-level, not this skill's | never directly |
 | `tests/control-flow.test.mjs` | locks the workflow's control flow (`node --test`) | run it after any change to the pipeline |

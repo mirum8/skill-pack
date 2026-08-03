@@ -482,7 +482,7 @@ def check_near_duplicates():
 
 def pack_text_files():
     out = []
-    for base in ("skills", "agents"):
+    for base in ("skills", "agents", "lib"):
         for root, dirs, files in os.walk(os.path.join(REPO, base)):
             dirs[:] = [d for d in dirs if d != "__pycache__"]
             for f in sorted(files):
@@ -490,7 +490,7 @@ def pack_text_files():
                 if any(v in rel for v in R.VENDORED) or not f.endswith(R.TEXT_SUFFIXES):
                     continue
                 out.append(os.path.join(root, f))
-    for f in ("hooks/guard-workflow.py", "hooks/hooks.json"):
+    for f in ("hooks/guard-workflow.py", "hooks/record-skill-run.py", "hooks/hooks.json"):
         p = os.path.join(REPO, f)
         if os.path.isfile(p):
             out.append(p)

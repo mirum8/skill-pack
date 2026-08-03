@@ -500,7 +500,7 @@ const opts = (() => {
 // and a string fails that typeof, so packRoot goes missing even when it WAS passed.
 //
 // And do not fall back to the placeholder itself on the reasoning that it "either expands or fails
-// loudly". Neither half holds: it does not expand, and `python3 /skills/…/record-run.py` is a plain
+// loudly". Neither half holds: it does not expand, and `python3 /lib/record-run.py` is a plain
 // not-found in the one step that is best-effort by design, so it fails in silence. Observed on a
 // real run of the sibling pipeline, where the same fallback broke seven tool paths at once.
 const PACK = (() => {
@@ -703,6 +703,13 @@ ${inRepo}
 
      Write the brief as plain prose/markdown and nothing else — it is read verbatim by the planner,
      so there is no JSON to escape and no wrapper to fill in. Your reply IS the brief.
+
+     KEEP IT UNDER 200 LINES, and cite \`path:LINE\` with a sentence on what the code there does
+     rather than pasting the code itself. This brief is carried whole into the Opus planner and,
+     on a UI task, into the design agent as well — so every line of padding is paid twice at the
+     most expensive tier in the run, and it competes for the planner's attention with the files it
+     actually has to reason about. A slice that genuinely cannot be mapped in 200 lines is a sign
+     the slice is too broad: say so at the top and map the part that matters most to this task.
 
      Then end your reply with these TWO final lines, in this order and with nothing after them:
        UIFILES: ["path/to/template.html", "path/to/styles.css"]
@@ -1054,8 +1061,24 @@ const designWanted = uiVisualChange && !resuming
 if (uiTouched && !uiVisualChange && !resuming) {
   log('run-task-implement: skipping the UI/UX design phase — this change touches frontend files but decides nothing visual (the rendered result is meant to stay as it is)')
 }
+// The design agent is told to stay in its lane — what the user sees, never how the code is
+// structured — so a brief that maps a service layer or a repository is context it has no use for.
+// It arrives at Opus rates and competes for attention with the templates and stylesheets it does
+// have to open. Hand it the slices whose explorer actually named frontend files.
+//
+// The fallback to every brief is not defensive padding: `uiVisualChange` can be decided in Phase 0
+// from the task description alone, before any explorer has voted, and a design agent with no code
+// map at all invents against a system it never read — which is the exact failure this phase exists
+// to prevent, and strictly worse than carrying one slice too many.
+const uiBriefs = liveBriefs.filter((b) => (b.uiFiles || []).some((f) => FRONTEND_PATH.test(f)))
+const designBriefText = uiBriefs.length
+  ? uiBriefs.map((b, i) => `--- brief ${i + 1} ---\n${b.brief}`).join('\n\n')
+  : briefText
 if (designWanted) {
   phase('Design')
+  if (uiBriefs.length && uiBriefs.length < liveBriefs.length) {
+    log(`run-task-implement: the design phase reads ${uiBriefs.length} of ${liveBriefs.length} brief(s) — the slices that named frontend files`)
+  }
   const design = await reliable('ui-design', 'Design', async () => parseDesign(await agent(
     `Decide the UI/UX for this task, before it is planned or built. You are read-only: return the
      design section, do not write a file and do not edit anything.
@@ -1067,7 +1090,7 @@ if (designWanted) {
 
      The codebase has already been mapped for you. Design against THESE briefs, and re-open the
      templates, stylesheets and components they cite rather than inferring what they contain:
-     ${briefText}
+     ${designBriefText}
      ${uiFiles.length ? `The explorers named these frontend files as the ones this change touches: ${uiFiles.join(', ')}.` : ''}
 
      FIRST, load the \`frontend-design\` skill (Skill tool) and design against its rubric. This is
@@ -1278,9 +1301,9 @@ ${uiDesignNote}
   // asked to repeat, and the point of deciding the design in its own phase is that the words
   // survive to the implementer.
   //
-  // Everything the scribe verifies is computed from THIS combined text — the line count, the
-  // last-line truncation check, the disk re-check below — so prepending here needs no change to
-  // any of it.
+  // Everything the scribe is measured against is computed from THIS combined text — its size
+  // label, the last-line truncation check, the disk re-check below — so prepending here needs no
+  // change to any of it.
   if (designSection) planMarkdown = `${designSection}\n\n${planMarkdown}`
 
   // The planner is read-only and this script has no filesystem access, so a scribe agent puts
@@ -1291,8 +1314,8 @@ ${uiDesignNote}
   // a scribe that re-wraps prose, "tidies" a heading or drops a section produces a perfectly
   // well-formed plan file that does not match the plan Codex is about to review and the
   // implementers are about to build. So the prompt asks for a quoted heredoc (the plan is full of
-  // backticks and file:LINE refs that an unquoted one would hand to the shell) and gives the
-  // scribe the ONE fact it cannot fake — the exact line count — to check its own work against.
+  // backticks and file:LINE refs that an unquoted one would hand to the shell) and makes the
+  // scribe check its own work against the one fact it cannot fake: what `tail -1` prints.
   const planLineCount = planMarkdown.split('\n').length
   const wrote = await reliable('plan-write', 'Plan', () => agent(
     `Write this plan to ${planPath} in the repo, prefixed with this status header:
@@ -1320,31 +1343,30 @@ ${uiDesignNote}
        RUN_TASK_PLAN_EOF
 
      THEN VERIFY, because a truncated copy looks like a successful one. Do NOT count lines by
-     hand — run the commands and read what they print:
+     hand — run the command and read what it prints:
        tail -1 ${planPath}
-       tail -n +6 ${planPath} | wc -l
 
-     The FIRST is the check that matters: the last line of the file must be the last line of the
-     plan below. Truncation — the failure this step exists to catch — always changes it.
+     The last line of the file must be the last line of the plan below. That is the whole check:
+     truncation — the failure this step exists to catch — always moves the last line. A line COUNT
+     is deliberately not part of it. Counting the body means arithmetic across the header boundary,
+     which comes out short on a file that is completely intact, so it raises false alarms and
+     catches nothing the last line does not already catch.
 
-     The second is a corroborating count: the plan body below is ${planLineCount} line(s), and
-     \`tail -n +6\` skips the 4 header lines and the blank line after them. If the last line is
-     right but the count is off by a line or two, the body is intact and the boundary arithmetic
-     is what disagrees — put both numbers in 'note' and still return written=true. Only return
-     written=false when the last line is WRONG or the file is missing: that is a real truncation,
-     and it is retried cheaply here. Returning written=false for an intact plan is not a safe
-     default — it throws away a document that cost the most expensive agent in the run to produce.
+     Return written=false only when the last line is WRONG or the file is missing: that is a real
+     truncation, and it is retried cheaply here. Returning written=false for an intact plan is not
+     a safe default — it throws away a document that cost the most expensive agent in the run to
+     produce.
 
      PLAN (${planLineCount} line(s)):
      ${planMarkdown}`,
     { label: 'plan-write', phase: 'Plan', schema: WROTE, ...GP, ...SCRIBE }))
   // A self-reported failure is a claim about the disk, not the disk itself — so check the disk
-  // before throwing the plan away. Observed on a real run: the scribe wrote a complete 247-line
-  // plan, miscounted its own body by two lines against the header boundary, and returned
-  // written=false; the run stopped at 'plan-not-written', and RESUMING replayed that cached
-  // verdict, so the same good plan was discarded twice before a third full attempt rewrote it.
-  // Reading the file makes this step idempotent: whatever the scribe believes, a plan whose last
-  // line is the planner's last line is a plan, and a poisoned cache entry stops mattering.
+  // before throwing the plan away. A scribe that writes a complete plan and then misjudges its own
+  // work costs the run more than the miswrite it is reporting: 'plan-not-written' stops the run,
+  // and RESUMING replays the cached verdict, so the same good plan is discarded twice before a
+  // third full attempt rewrites it. Reading the file makes this step idempotent: whatever the
+  // scribe believes, a plan whose last line is the planner's last line is a plan, and a poisoned
+  // cache entry stops mattering.
   if (blocked(wrote) || !wrote.written) {
     const wantLast = planMarkdown.split('\n').pop().trim()
     const onDisk = await reliable('plan-check', 'Plan', () => agent(
@@ -1887,7 +1909,7 @@ await agent(
    return; do NOT retry and do NOT treat it as a failure of the run. Run exactly this from the
    repo root, then return the script's stderr line verbatim:
 
-   python3 "${PACK}/skills/task-review/scripts/record-run.py" <<'RTI_STATS_JSON'
+   python3 "${PACK}/lib/record-run.py" <<'RTI_STATS_JSON'
 ${JSON.stringify(statsRow)}
 RTI_STATS_JSON
 

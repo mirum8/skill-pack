@@ -446,7 +446,7 @@ When **both** hold, dispatch `/r:claudemd-compact --auto` in a **`general-purpos
 **9c — Record one line of statistics.** Every tier and track decision in this routine was argued from mechanism, never measured — so no track can be retired on evidence, only on opinion. Fix that by appending one row per run:
 
 ```bash
-python3 ${CLAUDE_SKILL_DIR}/scripts/record-run.py" <<'PTR_STATS_JSON'
+python3 ${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'PTR_STATS_JSON'
 {"kind":"review","profile":"…","tracksBlocked":[],"fixedBySource":{…},"fixedCorrectness":0,"fixedReadability":0,"docDriftCount":0,"endVerify":"…","endVerifyCount":0,"localScan":"…","scanChangedCode":null,"build":"…"}
 PTR_STATS_JSON
 ```
@@ -457,6 +457,6 @@ PTR_STATS_JSON
 
 Two rules. **Counts, never finding text** — that keeps the row under the 4 KiB single-write limit, which is what makes parallel worktree runs safe to append to one file. And **it can never fail the run**: the script always exits `0`, and a row that doesn't get written is a lost row, not a failed review. Never retry it, never treat it as a blocked track.
 
-Read it back any time with `python3 ${CLAUDE_SKILL_DIR}/scripts/review-stats.py"` (add `--backfill` once to recover past runs from transcripts — those have no attribution, so they're marked and excluded from the per-track table).
+Read it back any time with `python3 ${CLAUDE_PLUGIN_ROOT}/lib/skill-stats.py"` (add `--review` for this section alone, or `--backfill` once to recover past runs from transcripts — those have no attribution, so they're marked and excluded from the per-track table).
 
 This is hands-free **by design** — no confirmation. Safety comes from `--auto`'s own contract, not a prompt: it prunes a rule **only** with hard codebase evidence that it's stale, keeps everything it can't confirm, and runs a mandatory verify pass that every still-valid rule survived — and it all lands in the diff, one `git revert` away. The subagent-flow non-negotiable applies: its returned report **is** completion; if it comes to rest without a usable report, re-dispatch bounded to 2, then note the compaction step is blocked and finish (a blocked compaction never blocks the routine — the review already happened).

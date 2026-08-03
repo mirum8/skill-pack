@@ -90,6 +90,18 @@ This is the lever that keeps the skill off the treadmill: fix a thing once, writ
 
 When done, offer to re-run the scan so the user sees the cleared list. Don't auto-loop — a re-scan recompiles for SpotBugs and takes a moment.
 
+### Step 5: Record the run
+
+One line into the pack-wide store. This skill is the one `/r:task-review` treats as mandatory on every tier, and it applies its own fixes rather than handing them to triage — so this row is the only place its yield can be read at all. Counts only, never finding text:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
+{"skill":"r:code-scan","scope":"diff|all|filter|files|commit|range","analyzers":["pmd","spotbugs","semgrep"],"analyzersMissing":[],"findings":0,"fixed":0,"changedCode":false}
+STATS_JSON
+```
+
+`analyzersMissing` is what makes a low `findings` readable: a scan that ran two of three tools found less because it looked less, and a store that cannot tell those apart will eventually be quoted as evidence the code is clean. The script always exits `0` — a row that does not get written is a lost row, not a failed scan. Never retry it.
+
 ### What NOT to do
 
 - Don't add `// NOSONAR`, `@SuppressWarnings`, `@SuppressFBWarnings`, or `nosemgrep` comments to silence findings unless the user explicitly asks. Fix the cause, not the messenger.

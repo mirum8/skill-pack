@@ -101,6 +101,16 @@ After refactoring:
 
 Summarize all changes made in a final report grouped by category (Naming, Spring, Code Smells, Modern Java, Error Handling, Logging, Comments).
 
+Then record one line into the pack-wide store — counts only, never code or finding text:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
+{"skill":"r:code-refactor","scope":"…","lockTest":"written|existing|impossible","refactors":0,"skippedRisky":0,"testsGreen":true}
+STATS_JSON
+```
+
+`lockTest: "impossible"` is the Step 2 gate firing — the run stopped without refactoring, and that is a real outcome worth counting, not a failure to hide. The script always exits `0`; a row that does not get written is a lost row, never a failed refactor. Never retry it.
+
 ## Implementation
 
 Use the `r:java-backend-developer` agent for implementing:

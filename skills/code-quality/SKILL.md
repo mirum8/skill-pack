@@ -81,3 +81,18 @@ If after the bounded re-dispatch a reviewer still doesn't return, **proceed with
    - **Suggested direction**: a brief sketch of a clearer form (not a full rewrite).
 4. If the code reads well, **say so plainly and stop** — "No meaningful clarity issues; the changes are readable and idiomatic." Do not pad the report to look thorough. An honest empty report is the correct, valuable outcome for clean code, and it's what keeps the skill trustworthy.
 5. This skill stops at the report. It does **not** edit code. Applying the findings is `/r:code-refactor`'s job — it locks behavior with a test first, then changes form safely, which is exactly what a readability/idiom fix needs. Hand it the confirmed findings if the user wants them applied.
+
+## Record the run
+
+Last thing, once the report exists. One line into the pack-wide store, so this skill's yield is
+measured rather than assumed — counts only, never finding text:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
+{"skill":"r:code-quality","scope":"diff|all|explicit","reviewers":0,"reviewersLost":0,"worthFixing":0,"minor":0}
+STATS_JSON
+```
+
+An honest empty report records `0` and `0` — that is the outcome this skill exists to be able to
+give, and the store has to be able to show it happening. The script always exits `0`: a row that
+does not get written is a lost row, not a failed review. Never retry it.

@@ -229,6 +229,16 @@ Failed (fix stopped):
 
 List the groups, which issues each closed, which branch merged into base, and the reason for every skip or failure. Point the user at anything that stopped and needs manual attention.
 
+Then record one line into the pack-wide store — counts only, never issue titles or bodies:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
+{"skill":"r:gh-issues-fix","candidates":0,"verifiedBugs":0,"skipped":0,"groups":0,"merged":0,"stopped":0,"dryRun":false}
+STATS_JSON
+```
+
+The pair worth measuring is `candidates` against `verifiedBugs`: it says how much of an issue backlog is actually a bug, which is what decides whether the read-only verification pass earns its cost. The script always exits `0` — a lost row is a lost row, never a failed run, and it must never change what was merged or closed. Never retry it.
+
 ## Non-negotiables
 
 - **Real tools only.** Actually run `gh` and the real `/r:task-run`; never simulate a triage or a fix with a prose summary. If a required tool can't run, stop and say so.

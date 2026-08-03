@@ -636,7 +636,7 @@ const opts = (() => {
 //
 // And do not fall back to the placeholder itself on the reasoning that it "either expands or fails
 // loudly". Neither half holds. It does not expand, and it does not fail loudly: `python3
-// /skills/…/record-run.py` is a plain not-found, and the one track that surfaces it is the stats
+// /lib/record-run.py` is a plain not-found, and the one track that surfaces it is the stats
 // sink — best-effort by design, so the row is lost in silence while every other path is equally
 // broken. A run that cannot locate its own tools must stop before it certifies anything.
 const PACK = (() => {
@@ -1809,7 +1809,7 @@ await agent(
    and return; do NOT retry, do NOT fix anything, and do NOT treat it as a failure of the review.
    Run exactly this from the repo root, then return the script's stderr line verbatim:
 
-   python3 "${PACK}/skills/task-review/scripts/record-run.py" <<'PTR_STATS_JSON'
+   python3 "${PACK}/lib/record-run.py" <<'PTR_STATS_JSON'
 ${JSON.stringify(statsRow)}
 PTR_STATS_JSON
 
@@ -1829,7 +1829,7 @@ return {
   tracksSkipped,
   // What each finding track actually bought: correctness items that survived triage, keyed by the
   // track that found them. This is the number that can retire a track on evidence instead of
-  // argument; it is also written to ~/.claude/review-stats.jsonl for accumulation across runs.
+  // argument; it is also written to ~/.claude/skill-stats.jsonl for accumulation across runs.
   fixedBySource,
   // correctness = the triaged fix-list items + everything the end-verify handed to a fixer. BOTH
   // halves count: without the second, a run that finds and fixes a defect at the end still reports

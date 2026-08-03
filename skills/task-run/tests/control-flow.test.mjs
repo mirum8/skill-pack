@@ -365,46 +365,46 @@ test('the light-tier planner keeps the model but not the top effort', async () =
   assert.equal(optsBy['planner'], undefined)   // the full planner keeps xhigh; it just didn't run
 })
 
-test('plan-write gets the plan\'s real line count and a QUOTED heredoc to write it with', async () => {
-  // Truncation is the failure mode that looks exactly like success, so the scribe is handed the
-  // one fact it cannot fake and asked to check itself against it. The heredoc must be quoted:
-  // plans are full of backticks, `$` and file:LINE refs that an unquoted one would execute.
+test('plan-write gets the plan verbatim, labelled with its size, in a QUOTED heredoc', async () => {
+  // Truncation is the failure mode that looks exactly like success, so the scribe is told how big
+  // the document it is copying is. The heredoc must be quoted: plans are full of backticks, `$`
+  // and file:LINE refs that an unquoted one would execute.
   const planMarkdown = [
     '## Context', 'the rejected import wipes the versions table', '',
     '## Files to change', '- AdminRatesController.java:167', '',
     '## TDD test plan', '- [RED] a rejected import keeps the versions table',
   ].join('\n')
   const lines = planMarkdown.split('\n').length
-  assert.ok(lines > 1, 'the fixture must be multi-line for the count to mean anything')
+  assert.ok(lines > 1, 'the fixture must be multi-line for the size label to mean anything')
 
   // Backend-only, so the body IS the plan: the design-section case is covered separately, where
-  // what matters is that the count follows the COMBINED document.
+  // what matters is that the label follows the COMBINED document.
   const { prompts } = await run({
     source: baseSource({ uiTouched: false }),
     review: OK_REVIEW, planfix: OK_FIX, overrides: { planner: planMarkdown },
   })
   const p = prompts['plan-write']
-  assert.match(p, new RegExp(`PLAN \\(${lines} line\\(s\\)\\)`), 'the body must be labelled with its real count')
-  assert.match(p, new RegExp(`below is ${lines} line`), 'the verify step must name the same count')
+  assert.match(p, new RegExp(`PLAN \\(${lines} line\\(s\\)\\)`), 'the body must be labelled with its real size')
   assert.match(p, /<<'RUN_TASK_PLAN_EOF'/, 'the heredoc delimiter must be quoted')
   assert.match(p, /COPY THE PLAN BODY BYTE FOR BYTE/)
   assert.match(p, /written=false/, 'a real truncation must be reported, not papered over')
   assert.ok(p.includes(planMarkdown), 'the plan body itself must reach the scribe verbatim')
 })
 
-test('the scribe is told to VERIFY by command, not by counting lines itself', async () => {
-  // Counting by hand — "everything after the 4 header lines and the blank line that follows them"
-  // — is boundary arithmetic, and on a real run it comes out two short on a plan that is
-  // completely intact. The scribe returned written=false and a good
-  // 247-line plan was thrown away. So the check is a command whose output it reads, the LAST
-  // LINE is the authority (truncation always moves it, an off-by-one never does), and a count
-  // mismatch alone is a note rather than a failure.
+test('the scribe verifies by ONE command — the last line, never a line count', async () => {
+  // The last line is the whole authority: truncation always moves it. A body count is boundary
+  // arithmetic across the header, comes out short on a completely intact file, and catches nothing
+  // the last line misses — so it is a false-alarm generator in the step that decides whether the
+  // run's most expensive artifact is kept. It must not be in the prompt at all: a count the scribe
+  // is asked to explain away is still a count it spends attention on.
   const { prompts } = await run({ review: OK_REVIEW, planfix: OK_FIX })
   const p = prompts['plan-write']
   assert.match(p, /tail -1 /, 'the last-line check must be a command')
-  assert.match(p, /tail -n \+6 .* \| wc -l/, 'the count must come from wc, not from the model')
-  assert.match(p, /Do NOT count lines by\s+hand/, 'hand-counting is what miscounted')
-  assert.match(p, /still return written=true/, 'a count-only mismatch must not fail the step')
+  assert.match(p, /Do NOT count lines by\s+hand/, 'hand-counting is what the command replaces')
+  assert.doesNotMatch(p, /wc -l/, 'no body count — it only ever fires on intact plans')
+  assert.doesNotMatch(p, /tail -n \+6/, 'no header-boundary arithmetic')
+  assert.match(p, /written=false only when the last line is WRONG/,
+    'the last line alone decides whether the plan is thrown away')
 })
 
 test('the editor folds in the status flip, so no separate plan-status agent is spawned', async () => {
@@ -564,6 +564,45 @@ test('the design phase runs at the light tier too', async () => {
   assert.equal(counts['ui-design'], 1)
   assert.match(prompts['plan-light'], /THE UI\/UX IS ALREADY DECIDED/)
   assert.match(prompts['plan-light'], /## UI\/UX design/)
+})
+
+test('the design phase reads only the briefs whose explorer named frontend files', async () => {
+  // The design agent decides what the user sees and is told to stay out of code structure, so a
+  // brief mapping a service layer is context it cannot use — paid at Opus rates, competing with
+  // the templates it does have to open. The planner still gets every brief: it owns the code.
+  const uiBrief = 'templates/admin/rates.html:12 renders the versions table. '.repeat(9)
+  const backendBrief = 'RateImportService.java:88 rolls the transaction back. '.repeat(9)
+  const { prompts, logText } = await run({
+    source: baseSource({ exploreAspects: ['the templates', 'the import service'] }),
+    review: OK_REVIEW, planfix: OK_FIX,
+    overrides: {
+      'explore#1': `${uiBrief}\nUIFILES: ["templates/admin/rates.html"]\nRISKFLAGS: []`,
+      'explore#2': `${backendBrief}\nUIFILES: []\nRISKFLAGS: []`,
+    },
+  })
+  assert.ok(prompts['ui-design'].includes(uiBrief.trim()), 'the frontend slice must reach the design agent')
+  assert.ok(!prompts['ui-design'].includes(backendBrief.trim()), 'the backend slice must not')
+  assert.ok(prompts['planner'].includes(uiBrief.trim()))
+  assert.ok(prompts['planner'].includes(backendBrief.trim()), 'the planner still plans against the whole map')
+  assert.match(logText, /design phase reads 1 of 2 brief/, 'a narrowed code map is not narrowed silently')
+})
+
+test('a design phase that no explorer voted for still gets the whole code map', async () => {
+  // uiVisualChange can be decided in Phase 0 from the task description alone, before an explorer
+  // has named a single file. Narrowing to zero briefs there would leave the design agent inventing
+  // against a design system it never read — the exact failure the phase exists to prevent.
+  const { counts, prompts } = await run({ review: OK_REVIEW, planfix: OK_FIX, uiFiles: [] })
+  assert.equal(counts['ui-design'], 1)
+  assert.ok(prompts['ui-design'].includes(BRIEF_TEXT.trim()), 'no UI votes means all briefs, not none')
+})
+
+test('the explorers are held to a size bound, because their briefs are re-paid downstream', async () => {
+  // Each brief is carried whole into the Opus planner and, on a UI task, into the design agent as
+  // well. An unbounded "focused brief" is billed twice at the most expensive tier in the run.
+  const { prompts } = await run({ review: OK_REVIEW, planfix: OK_FIX })
+  const explore = prompts['explore#1:controller + templates']
+  assert.match(explore, /KEEP IT UNDER 200 LINES/)
+  assert.match(explore, /rather than pasting the code itself/)
 })
 
 test('a backend-only task skips the design phase entirely', async () => {
@@ -1500,7 +1539,7 @@ test('args as a JSON STRING still resolves the pack root', async () => {
   const { prompts } = await run({
     args: '{"source":"#81","packRoot":"/pack"}', review: OK_REVIEW, planfix: OK_FIX,
   })
-  assert.match(prompts['stats'], /\/pack\/skills\/task-review\/scripts\/record-run\.py/)
+  assert.match(prompts['stats'], /\/pack\/lib\/record-run\.py/)
   assert.doesNotMatch(prompts['stats'], /CLAUDE_PLUGIN_ROOT/)
 })
 

@@ -50,6 +50,15 @@ else
 fi
 
 echo
+echo "==> stats store (sink, hook, reporter)"
+if out=$(bash lib/tests/stats.test.sh 2>&1); then
+  printf '  ✓ %s\n' "$(tail -1 <<<"$out" | tr -s ' ')"
+else
+  rc=1
+  sed 's/^/  /' <<<"$out"
+fi
+
+echo
 echo "==> install.sh"
 # ~9s, the only slow step here — it installs the pack eight times over. Skip it
 # with SKIP_INSTALL_TEST=1 when iterating on something else.

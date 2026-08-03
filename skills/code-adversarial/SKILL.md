@@ -71,6 +71,15 @@ ${CLAUDE_SKILL_DIR}/scripts/run.sh" --mode review --wait
 - **Return Codex's findings verbatim.** Do not paraphrase, summarize, or editorialize.
 - **Report the provenance block too.** On exit `0` the wrapper appends a short `--- adversarial-review: what this run examined ---` block: reviewer mode, diff range, shortstat, whether the diff text was embedded or Codex had to fetch it itself, and the attempt/elapsed/output size. Those lines are **provenance, not findings** — never fold them into a findings list. Quote them alongside the verdict, especially when the verdict is clean: "approve, no findings" over an embedded 40-line diff and "approve, no findings" over a file list of 12 files are very different claims, and this block is the only thing that tells them apart.
 - **Do not fix anything here.** This review is report-only. In a Post-Task Completion Checklist, the main agent merges these findings with the other reviewers and fixes the real ones in a separate step — this skill's single job is to surface what Codex found.
+- **Record the run.** One line into the pack-wide store, after the findings are reported. Counts only, never finding text:
+
+  ```bash
+  python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
+  {"skill":"r:code-adversarial","outcome":"reviewed|skipped|blocked|failed","exit":0,"findings":0,"diffEmbedded":true}
+  STATS_JSON
+  ```
+
+  `outcome` is the field that matters: a skipped run (no Codex plugin) and a clean run both report zero findings, and only this distinguishes them. Record the skip — that is the whole point of naming it rather than faking a review. The script always exits `0`, so a lost row is a lost row and never a failed review; never retry it.
 
 ## Exit codes & failure handling
 
