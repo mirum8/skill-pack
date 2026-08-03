@@ -21,6 +21,10 @@ anything:
   * A track that did not RUN cannot find anything. `logic` scores zero on every
     standard-tier run because standard does not dispatch it — the per-track table
     therefore reports opportunities (runs where the track ran) alongside hits.
+
+The local-scan track is absent from that table by construction, not by scoring zero: it applies
+its own fixes instead of handing them to triage, so no fix can be attributed to it. Its
+yield is the separate self-fix line below the status counts.
 """
 import argparse
 import collections
@@ -145,6 +149,11 @@ def backfill(path):
                         "endVerify": d.get("endVerify"),
                         "localScan": d.get("localScan"),
                         "build": d.get("build"),
+                        # Carried only when the mined return object actually had it. Writing an
+                        # explicit null for older transcripts would claim "no scan completed" for
+                        # runs where one did — the key's ABSENCE is what says "not measured here".
+                        **({"scanChangedCode": d["scanChangedCode"]}
+                           if "scanChangedCode" in d else {}),
                         # deliberately NO fixedBySource — it did not exist yet, and an empty
                         # dict here would read as "every track found nothing"
                     })
@@ -250,6 +259,26 @@ def summarize(rows):
         c = collections.Counter(r.get(field) for r in reviews if r.get(field))
         if c:
             print(f"{title}: " + " · ".join(f"{k} {v}" for k, v in c.most_common()))
+
+    # The one yield number local-scan can produce. It never appears in `fixes by source` because it
+    # applies its OWN fixes rather than handing them to the triage fix-list — so a zero there says
+    # nothing about it, exactly like the docs hunter. What it can say is how often the scan rewrote
+    # the code, which is also the expensive branch (it owes a rebuild and forces an end-verify).
+    #
+    # `in` and not `.get()`: a MISSING key is a row written before the field existed, and null is a
+    # run where no scan completed. Neither is a scan that found nothing, and counting either as one
+    # would manufacture the quiet-tool verdict this table exists to avoid.
+    measured = [r for r in reviews
+                if "scanChangedCode" in r and r["scanChangedCode"] is not None]
+    if measured:
+        hit = sum(1 for r in measured if r["scanChangedCode"])
+        line = (f"local-scan self-fixed the code in {hit}/{len(measured)} "
+                f"completed scan(s) ({pct(hit, len(measured))})")
+        older = sum(1 for r in reviews
+                    if "scanChangedCode" not in r and r.get("localScan"))
+        if older:
+            line += f"; {older} earlier row(s) predate the field"
+        print(line)
     print()
 
     if impls:

@@ -447,9 +447,11 @@ When **both** hold, dispatch `/r:claudemd-compact --auto` in a **`general-purpos
 
 ```bash
 python3 ${CLAUDE_SKILL_DIR}/scripts/record-run.py" <<'PTR_STATS_JSON'
-{"kind":"review","profile":"…","tracksBlocked":[],"fixedBySource":{…},"fixedCorrectness":0,"fixedReadability":0,"docDriftCount":0,"endVerify":"…","endVerifyCount":0,"localScan":"…","build":"…"}
+{"kind":"review","profile":"…","tracksBlocked":[],"fixedBySource":{…},"fixedCorrectness":0,"fixedReadability":0,"docDriftCount":0,"endVerify":"…","endVerifyCount":0,"localScan":"…","scanChangedCode":null,"build":"…"}
 PTR_STATS_JSON
 ```
+
+`scanChangedCode` is `true`/`false` only when a scan actually completed (`localScan":"ok"`) and `null` otherwise. It is the only yield signal local-scan can produce — the scan applies its own fixes rather than feeding the fix-list, so it can never appear in `fixedBySource`, and a zero there says nothing about it. Do not send `false` for a scan that was blocked, skipped or never owed: that invents a quiet scan that never ran.
 
 `fixedBySource` is the payload — the per-track counts from Step 3's fix-list, plus `end-verify` for anything the Step 7 passes handed to a fixer. In both cases a track is credited only when the fixer that received its finding actually **lived** (see Step 4): the number exists to retire a track on evidence, so it has to count fixes that happened, not assignments that were made. Everything else is the context needed to read it, since a track scores zero on a tier that never dispatched it.
 

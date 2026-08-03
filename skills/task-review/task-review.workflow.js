@@ -1792,6 +1792,15 @@ const statsRow = {
   endVerify: endVerifyVerdict,
   endVerifyCount: endVerifyUnresolved.length,
   localScan,
+  // Whether the scan REWROTE the code, which `localScan` alone cannot say: 'ok' covers both a scan
+  // that found nothing and one that self-fixed — and only the second owes a rebuild and forces an
+  // end-verify. It is also the only yield signal this track can produce, because local-scan applies
+  // its own fixes instead of feeding the triage fix-list, so it can never appear in `fixedBySource`.
+  // Reading a zero here as "the scan finds nothing" would be measuring the metric, not the tool.
+  // THREE states, deliberately: true/false only when a scan actually completed, null when it did
+  // not (n/a, blocked, skipped), and the key ABSENT on rows written before this field existed.
+  // Collapsing either of the last two into `false` invents a quiet scan that never ran.
+  scanChangedCode: localScan === 'ok' ? scanChangedCode : null,
   build: buildGreen ? 'green' : (triage.buildTool === 'none' ? 'n/a' : 'red'),
   ui: uiSummary,
 }
@@ -1835,6 +1844,10 @@ return {
   // Reported because /r:code-scan is mandatory in every tier: a caller has to be able to see that
   // the static pass did not actually happen, rather than infer it from a silent success.
   localScan,
+  // true when the scan applied its own fixes, so the final diff contains machine-written code the
+  // caller never saw in the fix-list; null when no scan completed. Same three states as the stats
+  // row, and it is on the return object so a transcript back-fill can recover it.
+  scanChangedCode: localScan === 'ok' ? scanChangedCode : null,
   // skipped (nothing to re-read) | blocked (Codex didn't run — the final diff is UNVERIFIED)
   // | findings-unresolved (a pass raised findings that no later pass read clean) | passed.
   // 'passed' REQUIRES a Codex pass that came back with nothing outstanding: it is the word a

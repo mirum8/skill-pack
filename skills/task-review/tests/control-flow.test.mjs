@@ -788,6 +788,35 @@ test('a run driven by /r:task-run is distinguishable from a direct invocation', 
   assert.equal(row.invokedBy, 'run-task')
 })
 
+test('the row separates a scan that self-fixed from one that found nothing', async () => {
+  // localScan:'ok' collapses both, and local-scan can never appear in fixedBySource (it applies
+  // its own fixes instead of feeding the fix-list) — so without this field the track has NO yield
+  // signal at all, and its permanent zero would read as a quiet tool rather than an unmeasured one.
+  const clean = await run()
+  assert.equal(JSON.parse(clean.prompts['stats'].match(/\{"kind":"review".*\}/)[0]).scanChangedCode, false)
+  assert.equal(clean.out.scanChangedCode, false)
+
+  const selfFixed = await run({ overrides: { 'local-scan': { status: 'ok', changedCode: true } } })
+  assert.equal(JSON.parse(selfFixed.prompts['stats'].match(/\{"kind":"review".*\}/)[0]).scanChangedCode, true)
+  assert.equal(selfFixed.out.scanChangedCode, true)
+})
+
+test('a scan that never completed records null, never false', async () => {
+  // false would claim a scan ran and found nothing. Every one of these ran no scan at all, and
+  // counting them as clean is exactly how a track gets retired on evidence that does not exist.
+  for (const [why, opt] of [
+    ['blocked', { overrides: { 'local-scan': null } }],
+    ['errored', { overrides: { 'local-scan': { status: 'error', changedCode: false } } }],
+    ['skipped', { overrides: { 'local-scan': { status: 'skipped', changedCode: false } } }],
+    ['no build tool', { triage: baseTriage({ buildTool: 'none', buildCmd: '', buildCmdFast: '' }) }],
+  ]) {
+    const { out, prompts } = await run(opt)
+    const row = JSON.parse(prompts['stats'].match(/\{"kind":"review".*\}/)[0])
+    assert.equal(row.scanChangedCode, null, `${why}: stats row must be null`)
+    assert.equal(out.scanChangedCode, null, `${why}: return object must be null`)
+  }
+})
+
 test('REGRESSION: a dead stats sink never fails the review', async () => {
   // Bookkeeping about a review must not be able to sink the review. No reliable(), no blocked()
   // check, no halt — the row is simply lost.
