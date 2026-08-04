@@ -96,11 +96,15 @@ One line into the pack-wide store. This skill is the one `/r:task-review` treats
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
-{"skill":"r:code-scan","scope":"diff|all|filter|files|commit|range","analyzers":["pmd","spotbugs","semgrep"],"analyzersMissing":[],"findings":0,"fixed":0,"changedCode":false}
+{"skill":"r:code-scan","scope":"diff|all|filter|files|commit|range","analyzers":["pmd","spotbugs","semgrep"],"analyzersMissing":[],"fixed":0,"changedCode":false,
+ "findings":[{"track":"pmd","category":"rule id","severity":"blocker|critical|major|minor","file":"src/Foo.java","line":88,
+              "verdict":"confirmed","fixed":true,"description":"one short line"}]}
 STATS_JSON
 ```
 
-`analyzersMissing` is what makes a low `findings` readable: a scan that ran two of three tools found less because it looked less, and a store that cannot tell those apart will eventually be quoted as evidence the code is clean. The script always exits `0` — a row that does not get written is a lost row, not a failed scan. Never retry it.
+`track` is the analyzer that reported it, so the store can say which of the three actually earns its place. Record what you triaged away as `verdict: "dismissed"` — for a static analyzer the false-positive rate *is* the thing worth knowing, and it is invisible in a fixed-count alone.
+
+`analyzersMissing` is what makes a low finding count readable: a scan that ran two of three tools found less because it looked less, and a store that cannot tell those apart will eventually be quoted as evidence the code is clean. Keep each `description` to one line; the payload travels in this step's prompt. The script always exits `0` — a record that does not get written is a lost record, not a failed scan. Never retry it.
 
 ### What NOT to do
 

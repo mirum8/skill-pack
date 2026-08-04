@@ -111,15 +111,24 @@ For each bug the user selected:
 
 ## Record the run
 
-Last thing, once the report exists. One line into the pack-wide store, so a hunter can be
-retired on measured yield instead of opinion — counts only, never finding text:
+Last thing, once the report exists. One record into the pack-wide store, so a hunter can be
+retired on measured yield instead of opinion:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
-{"skill":"r:code-bugs","scope":"diff|all|explicit","hunters":0,"huntersBlocked":[],"findings":0,"byCategory":{},"confirmed":0,"testsWritten":0}
+{"skill":"r:code-bugs","scope":"diff|all|explicit","hunters":0,"huntersBlocked":[],"testsWritten":0,
+ "findings":[{"track":"logic","category":"logic","severity":"high","file":"src/Foo.java","line":88,
+              "verdict":"confirmed","fixed":false,"description":"one short line, not the write-up"}]}
 STATS_JSON
 ```
 
-`confirmed` counts findings that survived Phase 3 — the ones you reported as real, not the raw
-hunter output. The script always exits `0`: a row that does not get written is a lost row, not a
-failed run. Never retry it and never report it as a failure of the hunt.
+**Record every finding a hunter reported, including the ones you rejected** — `verdict` is
+`confirmed` for what you kept and `dismissed` for what you dropped in Phase 3. This is the whole
+point of the row: a hunter whose findings you reject every time and a hunter that finds nothing
+look identical in the counts, and the first should be retired while the second may just have had
+clean diffs. `track` is the hunter that reported it.
+
+Keep each `description` to one line — the payload travels in this step's prompt, and the store
+holds titles, never finding bodies. The script always exits `0`: a record that does not get
+written is a lost record, not a failed run. Never retry it and never report it as a failure of
+the hunt.

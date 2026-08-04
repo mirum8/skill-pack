@@ -159,6 +159,18 @@ test('full tier: mixed triage reaches the handoff with the plan-review audit tra
   assert.deepEqual(out.planReview.dropped, ['finding 2 — misreads the template, the fragment is re-rendered'])
 })
 
+test('every judged plan finding reaches the stats row with its rubric and verdict', async () => {
+  // planApplied/planDropped are two totals; these rows are what can say WHICH rubric keeps
+  // producing findings the judges throw out — the number that decides if the pass earns its slot.
+  const { prompts } = await run({ review: OK_REVIEW, planfix: OK_FIX, verdict: MIXED })
+  const row = JSON.parse(prompts['stats'].match(/\{"kind":"implement".*\}/)[0])
+  assert.equal(row.findings.length, 2)
+  assert.deepEqual(row.findings.map((f) => f.verdict).sort(), ['confirmed', 'dismissed'])
+  assert.ok(row.findings.every((f) => f.track === 'coverage'))
+  // Counts and rows must agree; a row that contradicts its own summary is worse than neither.
+  assert.equal(row.findings.filter((f) => f.verdict === 'dismissed').length, row.planDropped)
+})
+
 test('every finding is judged, in rubric batches, and the judges get the explorer briefs', async () => {
   // Two failure modes locked out at once. ONE agent handed nothing but the finding strings has to
   // re-read the codebase to answer the first finding and then works the rest serially — hence the

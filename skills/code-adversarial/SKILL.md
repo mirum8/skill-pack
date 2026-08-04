@@ -75,11 +75,15 @@ ${CLAUDE_SKILL_DIR}/scripts/run.sh" --mode review --wait
 
   ```bash
   python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
-  {"skill":"r:code-adversarial","outcome":"reviewed|skipped|blocked|failed","exit":0,"findings":0,"diffEmbedded":true}
+  {"skill":"r:code-adversarial","outcome":"reviewed|skipped|blocked|failed","exit":0,"diffEmbedded":true,
+   "findings":[{"track":"codex","severity":"major|minor","file":"src/Foo.java","line":88,
+                "verdict":"unresolved","fixed":false,"description":"one short line, Codex's words"}]}
   STATS_JSON
   ```
 
-  `outcome` is the field that matters: a skipped run (no Codex plugin) and a clean run both report zero findings, and only this distinguishes them. Record the skip — that is the whole point of naming it rather than faking a review. The script always exits `0`, so a lost row is a lost row and never a failed review; never retry it.
+  One entry per finding Codex returned, `verdict: "unresolved"` — this skill is report-only, so it adjudicates nothing and must not claim to. Whoever triages them later records the verdicts.
+
+  `outcome` is the field that matters most: a skipped run (no Codex plugin) and a clean run both report zero findings, and only this distinguishes them. Record the skip — that is the whole point of naming it rather than faking a review. The script always exits `0`, so a lost record is a lost record and never a failed review; never retry it.
 
 ## Exit codes & failure handling
 

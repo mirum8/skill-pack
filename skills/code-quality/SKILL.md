@@ -85,14 +85,22 @@ If after the bounded re-dispatch a reviewer still doesn't return, **proceed with
 ## Record the run
 
 Last thing, once the report exists. One line into the pack-wide store, so this skill's yield is
-measured rather than assumed — counts only, never finding text:
+measured rather than assumed — counts, plus one short line per finding:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
-{"skill":"r:code-quality","scope":"diff|all|explicit","reviewers":0,"reviewersLost":0,"worthFixing":0,"minor":0}
+{"skill":"r:code-quality","scope":"diff|all|explicit","reviewers":0,"reviewersLost":0,"worthFixing":0,"minor":0,
+ "findings":[{"track":"code-quality","severity":"worth-fixing","file":"src/Foo.java","line":88,
+              "verdict":"confirmed","fixed":false,"description":"one short line, not the write-up"}]}
 STATS_JSON
 ```
 
-An honest empty report records `0` and `0` — that is the outcome this skill exists to be able to
-give, and the store has to be able to show it happening. The script always exits `0`: a row that
-does not get written is a lost row, not a failed review. Never retry it.
+One `findings` entry per item you reported, `severity` being `worth-fixing` or `minor`. Anything
+the reviewers raised that you dropped for not clearing the bar goes in too, as
+`verdict: "dismissed"` — that is the measurement of how much of this skill's output is noise, and
+it cannot be reconstructed later from a report that never mentioned it.
+
+An honest empty report records no findings at all — that is the outcome this skill exists to be
+able to give, and the store has to be able to show it happening. Keep each `description` to one
+line; the payload travels in this step's prompt. The script always exits `0`: a record that does
+not get written is a lost record, not a failed review. Never retry it.

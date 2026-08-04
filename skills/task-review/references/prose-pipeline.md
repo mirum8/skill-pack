@@ -447,15 +447,17 @@ When **both** hold, dispatch `/r:claudemd-compact --auto` in a **`general-purpos
 
 ```bash
 python3 ${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'PTR_STATS_JSON'
-{"kind":"review","profile":"…","tracksBlocked":[],"fixedBySource":{…},"fixedCorrectness":0,"fixedReadability":0,"docDriftCount":0,"endVerify":"…","endVerifyCount":0,"localScan":"…","scanChangedCode":null,"build":"…"}
+{"kind":"review","profile":"…","tracksBlocked":[],"fixedBySource":{…},"fixedCorrectness":0,"fixedReadability":0,"docDriftCount":0,"endVerify":"…","endVerifyCount":0,"localScan":"…","scanChangedCode":null,"build":"…","findings":[{"track":"logic","verdict":"confirmed","fixed":true,"description":"file:line + the fix, one short line"},{"track":"security","verdict":"dismissed","fixed":false,"description":"…"}]}
 PTR_STATS_JSON
 ```
 
 `scanChangedCode` is `true`/`false` only when a scan actually completed (`localScan":"ok"`) and `null` otherwise. It is the only yield signal local-scan can produce — the scan applies its own fixes rather than feeding the fix-list, so it can never appear in `fixedBySource`, and a zero there says nothing about it. Do not send `false` for a scan that was blocked, skipped or never owed: that invents a quiet scan that never ran.
 
-`fixedBySource` is the payload — the per-track counts from Step 3's fix-list, plus `end-verify` for anything the Step 7 passes handed to a fixer. In both cases a track is credited only when the fixer that received its finding actually **lived** (see Step 4): the number exists to retire a track on evidence, so it has to count fixes that happened, not assignments that were made. Everything else is the context needed to read it, since a track scores zero on a tier that never dispatched it.
+`fixedBySource` is the per-track counts from Step 3's fix-list, plus `end-verify` for anything the Step 7 passes handed to a fixer. In both cases a track is credited only when the fixer that received its finding actually **lived** (see Step 4): the number exists to retire a track on evidence, so it has to count fixes that happened, not assignments that were made. Everything else is the context needed to read it, since a track scores zero on a tier that never dispatched it.
 
-Two rules. **Counts, never finding text** — that keeps the row under the 4 KiB single-write limit, which is what makes parallel worktree runs safe to append to one file. And **it can never fail the run**: the script always exits `0`, and a row that doesn't get written is a lost row, not a failed review. Never retry it, never treat it as a blocked track.
+`findings` is the other half, and the more decisive one — **one row per finding, including the ones you dropped** (that is what the Step 3 dropped list is for). A track whose findings are all rejected scores exactly the same zero in `fixedBySource` as a track that found nothing, and only the verdicts tell a noisy track from a quiet one. Use `confirmed` for what survived triage, `dismissed` for what you rejected, and `unresolved` for anything never adjudicated (doc drift, which the user owns). A **blocked** triage made no judgement at all: send no dismissals rather than an empty list that reads as "rejected nothing".
+
+Two rules. **Short descriptions, never full finding bodies** — one line each, because the whole payload travels inside this step's prompt. And **it can never fail the run**: the script always exits `0`, and a row that doesn't get written is a lost row, not a failed review. Never retry it, never treat it as a blocked track.
 
 Read it back any time with `python3 ${CLAUDE_PLUGIN_ROOT}/lib/skill-stats.py"` (add `--review` for this section alone, or `--backfill` once to recover past runs from transcripts — those have no attribution, so they're marked and excluded from the per-track table).
 

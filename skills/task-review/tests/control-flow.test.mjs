@@ -767,6 +767,41 @@ test('the stats row is written once, with counts rather than finding text', asyn
   assert.ok(!('docDrift' in row))
 })
 
+test('what triage REJECTED reaches the stats row, and never the fixer', async () => {
+  // The whole point of recording dismissals: a track whose findings are all rejected scores the
+  // same zero in `fixedBySource` as a track that found nothing. Only the verdicts separate a
+  // noisy track (retire it) from a quiet one (it may just have had a clean diff).
+  const { prompts } = await run({
+    overrides: {
+      // Listed first: `overrides` matches a label PREFIX, so the readability entry has to be
+      // spelled out or the correctness stub answers for both agents.
+      'fix-triage-readability': { readability: [], dismissed: [] },
+      'fix-triage': {
+        correctness: [{ item: 'RateSheetImporter:42 guard the last row', source: 'logic' }],
+        dismissed: [{ item: 'RateSheetImporter:88 unreachable branch', source: 'security' }],
+        readability: [], docDrift: [],
+      },
+    },
+  })
+  const row = JSON.parse(prompts['stats'].match(/\{"kind":"review".*\}/)[0])
+  const kept = row.findings.filter((f) => f.verdict === 'confirmed')
+  const dropped = row.findings.filter((f) => f.verdict === 'dismissed')
+  assert.equal(dropped.length, 1)
+  assert.equal(dropped[0].track, 'security')
+  assert.equal(dropped[0].fixed, false)
+  assert.ok(kept.some((f) => f.track === 'logic' && f.fixed === true))
+  // A rejected finding must not reach the agent that applies fixes — it was judged NOT real.
+  assert.doesNotMatch(prompts['fix-correctness'] || '', /unreachable branch/)
+})
+
+test('a BLOCKED triage records no verdicts rather than "rejected nothing"', async () => {
+  // Absence of a judgement and a judgement of zero rejections are different claims, and only one
+  // of them is evidence about a track.
+  const { prompts } = await run({ overrides: { 'fix-triage': null } })
+  const row = JSON.parse(prompts['stats'].match(/\{"kind":"review".*\}/)[0])
+  assert.equal(row.findings.filter((f) => f.verdict === 'dismissed').length, 0)
+})
+
 test('the row records whether the tier was FORCED, not just what it was', async () => {
   // Without this the tier distribution silently reports what someone typed as though the
   // classifier had decided it — and a forced re-review pollutes the classifier's own numbers.

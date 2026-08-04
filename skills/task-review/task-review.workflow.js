@@ -134,32 +134,36 @@ const FIX_SOURCES = ['codex', 'security', 'docs', 'logic', 'runtime-and-failures
 // The buckets never shared an input: correctness reads the hunter + codex reports, readability
 // reads only code-quality, and docDrift is not triaged at all any more (it comes straight from the
 // docs hunter, because it is a list handed to the user rather than a fix anyone applies).
+// {item, source} rather than a bare string: without the source, every downstream count is
+// "the review fixed 8 things" and no one can ever ask WHICH track found them — which is the
+// only question that can retire a track for not earning its keep. The fixer is still shown
+// `item` alone, so knowing who flagged it can't bias how it gets fixed.
+const TRIAGED_ITEM = {
+  type: 'object', additionalProperties: false,
+  required: ['item', 'source'],
+  properties: {
+    item: { type: 'string' },                            // file:line + intended fix
+    source: { type: 'string', enum: FIX_SOURCES },
+  },
+}
 const CORRECTNESS_LIST = {
   type: 'object', additionalProperties: false,
-  required: ['correctness'],
+  required: ['correctness', 'dismissed'],
   properties: {
-    // {item, source} rather than a bare string: without the source, every downstream count is
-    // "the review fixed 8 things" and no one can ever ask WHICH track found them — which is the
-    // only question that can retire a track for not earning its keep. The fixer is still shown
-    // `item` alone, so knowing who flagged it can't bias how it gets fixed.
-    correctness: {
-      type: 'array',
-      items: {
-        type: 'object', additionalProperties: false,
-        required: ['item', 'source'],
-        properties: {
-          item: { type: 'string' },                            // file:line + intended fix
-          source: { type: 'string', enum: FIX_SOURCES },
-        },
-      },
-    },
+    correctness: { type: 'array', items: TRIAGED_ITEM },
+    // What triage REJECTED. A track that surfaces ten real defects triage throws away scores
+    // exactly like a track that finds nothing, unless the rejections are recorded — so this is
+    // the difference between retiring a track for being quiet and retiring it for being wrong.
+    // It reaches the stats row and nothing else; the fixer never sees it.
+    dismissed: { type: 'array', items: TRIAGED_ITEM },
   },
 }
 const READABILITY_LIST = {
   type: 'object', additionalProperties: false,
-  required: ['readability'],
+  required: ['readability', 'dismissed'],
   properties: {
     readability: { type: 'array', items: { type: 'string' } }, // always /r:code-quality
+    dismissed: { type: 'array', items: { type: 'string' } },
   },
 }
 const BUILD = {
@@ -963,6 +967,10 @@ if (!securitySurface && profile !== 'light') {
       'raw template output or security config). Nothing was security-reviewed; this is a skip, not a clean bill.')
 }
 let codex, bugs, quality, docs, fixList
+// Declared out here for the same reason the reports above are: the tier block below is where they
+// get filled, and the stats row at the end of the run is outside it. A light tier never triages,
+// so an empty list here means "no judgement was made", which is what it should record.
+let dismissedCorrectness = [], dismissedReadability = []
 let nothingToFix = true
 // Correctness fixes counted per finding track — the stats sink's whole reason to exist. Declared
 // out here because the light tier skips the block below entirely and the return still reads it.
@@ -1050,7 +1058,13 @@ phase('Fix-triage')
 const triageIntro = `You are Step 3 triage. REPORT-ONLY: do NOT edit, write, or run any code — your
    ONLY output is your part of the fix-list. A report marked "(not run at this tier)" is a
    deliberate tier decision, not a missing input to work around. A finding that contradicts the
-   intent below is a false positive — drop it.`
+   intent below is a false positive — drop it.
+
+   Dropping is a JUDGEMENT, and it is recorded: every finding you reject goes in \`dismissed\`,
+   in the same shape as a kept one. Never drop a finding silently. A track whose findings are all
+   rejected and a track that found nothing are indistinguishable in the statistics unless you
+   report the rejections, and the first should be retired while the second may just have had a
+   quiet run. Return \`dismissed: []\` only when you genuinely rejected nothing.`
 
 const [correctnessList, readabilityList] = await parallel([
   () => reliable('fix-triage', 'Fix-triage', () => agent(
@@ -1114,6 +1128,13 @@ const correctness = (!blocked(correctnessList) && Array.isArray(correctnessList.
   ? correctnessList.correctness : []
 const readability = (readabilityList && !blocked(readabilityList) && Array.isArray(readabilityList.readability))
   ? readabilityList.readability : []
+// What triage threw away. It goes only to the stats row — never to a fixer, and never into the
+// user-facing report, where a rejected finding reads as a defect nobody fixed. A blocked triage
+// returns nothing, which is ABSENCE of a judgement and must not be recorded as "rejected nothing".
+dismissedCorrectness = (!blocked(correctnessList) && Array.isArray(correctnessList.dismissed))
+  ? correctnessList.dismissed : []
+dismissedReadability = (readabilityList && !blocked(readabilityList) && Array.isArray(readabilityList.dismissed))
+  ? readabilityList.dismissed : []
 fixList = (correctness.length || readability.length || docDrift.length)
   ? { correctness, readability, docDrift } : null
 // Triage returns correctness as {item, source}. Normalize defensively: a model that hands back
@@ -1759,10 +1780,16 @@ const endVerifyVerdict = !endVerifyWanted ? 'skipped'
 // Two rules this must never break:
 //   * It CANNOT fail the run. No reliable(), no blocked() check, no halt — bookkeeping about a
 //     review must never be able to sink the review. A dead sink loses one row, silently.
-//   * The row carries COUNTS, not finding text. That keeps it well under the 4 KiB single-write
-//     atomicity limit, which is what lets parallel worktree runs append to one file safely.
+//   * Findings are TITLES, never bodies — one short line each, capped at FINDING_CAP. The whole
+//     payload travels inside this step's prompt, so an uncapped finding is paid for twice: once
+//     in the prompt that carries it and once in every future read of the row.
 // The heredoc is quoted, so nothing in the JSON is expanded; JSON.stringify emits one line, so
 // the delimiter can't collide with the payload.
+const FINDING_CAP = 200
+const short = (s) => String(s == null ? '' : s).slice(0, FINDING_CAP)
+// `fixList` is null when triage produced nothing, and the finding rows below must still build —
+// an empty review has to record an empty list, not throw inside the bookkeeping step.
+const fixed = fixList || { correctness: [], readability: [], docDrift: [] }
 const statsRow = {
   kind: 'review',
   profile,
@@ -1786,9 +1813,9 @@ const statsRow = {
   tracksBlocked,
   tracksSkipped,
   fixedBySource,
-  fixedCorrectness: (fixList ? fixList.correctness.length : 0) + endVerifyFixed,
-  fixedReadability: fixList ? fixList.readability.length : 0,
-  docDriftCount: fixList ? fixList.docDrift.length : 0,
+  fixedCorrectness: fixed.correctness.length + endVerifyFixed,
+  fixedReadability: fixed.readability.length,
+  docDriftCount: fixed.docDrift.length,
   endVerify: endVerifyVerdict,
   endVerifyCount: endVerifyUnresolved.length,
   localScan,
@@ -1803,6 +1830,40 @@ const statsRow = {
   scanChangedCode: localScan === 'ok' ? scanChangedCode : null,
   build: buildGreen ? 'green' : (triage.buildTool === 'none' ? 'n/a' : 'red'),
   ui: uiSummary,
+  // One row per finding, with the verdict triage reached. `fixedBySource` counts only what
+  // survived, so on its own a noisy track and a silent one are the same number; these rows are
+  // what tell them apart. Text is trimmed hard because the whole payload travels inside the sink
+  // agent's prompt — the store keeps counts and short titles, never full finding bodies.
+  findings: [
+    ...fixed.correctness.map((c) => ({
+      track: c.source, verdict: 'confirmed', fixed: true, description: short(c.item),
+    })),
+    ...dismissedCorrectness.map((c) => ({
+      track: (c && c.source) || 'unattributed', verdict: 'dismissed', fixed: false,
+      description: short((c && c.item) || c),
+    })),
+    ...fixed.readability.map((r) => ({
+      track: 'code-quality', verdict: 'confirmed', fixed: true, description: short(r),
+    })),
+    ...dismissedReadability.map((r) => ({
+      track: 'code-quality', verdict: 'dismissed', fixed: false, description: short(r),
+    })),
+    // Doc drift is never triaged — it is handed to the user, not fixed — so it is `unresolved`
+    // by construction rather than by anyone declining to judge it.
+    ...fixed.docDrift.map((d) => ({
+      track: 'docs', verdict: 'unresolved', fixed: false, description: short(d),
+    })),
+    // The end-verify pass adjudicates its own findings: what it kept is real and was handed to a
+    // fixer, and the pass-local rejects never leave the loop.
+    ...endVerifyUnresolved.map((e) => ({
+      track: 'end-verify', verdict: 'confirmed', fixed: false, description: short(e),
+    })),
+    ...((ui && Array.isArray(ui.findings)) ? ui.findings : []).map((f) => ({
+      track: `ui-${f.lens || 'functional'}`, severity: f.fixSize,
+      verdict: 'confirmed', fixed: f.fixSize === 'minor',
+      description: short(`${f.title || ''} — ${f.where || ''}`),
+    })),
+  ],
 }
 await agent(
   `Record one line of review statistics. This is bookkeeping — if anything goes wrong, say so

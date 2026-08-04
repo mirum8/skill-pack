@@ -1395,7 +1395,11 @@ ${uiDesignNote}
 // those two lists and "Codex raised three majors and the triage dismissed all three" reads
 // identically to "Codex found nothing". Carry the decisions out, so they reach the caller's PR
 // body and a lazy triage has somewhere to show up.
-const planReview = { ran: false, passes: 0, raised: 0, applied: [], dropped: [] }
+// `judged` keeps one object per adjudicated finding — what Codex raised, under which rubric and
+// severity, and whether the judges bought it. `dropped` stays a flat string list because the PR
+// body prints it; the objects are what the stats row records, and they are the only place the
+// rubric and severity survive the loop below.
+const planReview = { ran: false, passes: 0, raised: 0, applied: [], dropped: [], judged: [] }
 if (!resuming && profile === 'full') {
   phase('Plan-review')
   const rubric = `Work through this fixed rubric and tag every finding major or minor:
@@ -1628,6 +1632,17 @@ ${b.items.map((f, n) => `         ${n + 1}. [${f.severity}][${f.rubric}] ${f.wha
       else rejected.push(`${f.what} — ${v.why}`)
     })
     planReview.dropped.push(...rejected)
+    review.findings.forEach((f) => {
+      const v = verdicts.get(f)
+      planReview.judged.push({
+        what: String(f.what || '').slice(0, 200),
+        rubric: f.rubric,
+        severity: f.severity,
+        // A judge that died leaves `unresolved`, which is a different claim from `dismissed` —
+        // one says nobody decided, the other says someone decided against it.
+        verdict: (!v || typeof v.real !== 'boolean') ? 'unresolved' : (v.real ? 'confirmed' : 'dismissed'),
+      })
+    })
     log(`run-task-implement: plan review pass ${pass} — ${review.findings.length} finding(s): ${accepted.length} real, ${rejected.length} dismissed${unjudged.length ? `, ${unjudged.length} UNJUDGED (judge died)` : ''}`)
     if (rejected.length) log(`  dismissed as not-real: ${rejected.join(' | ')}`)
 
@@ -1879,9 +1894,9 @@ log(`run-task-implement: done — green build on ${onBranch}, diff left uncommit
 // The review's sink records which track found what; this records the OTHER unmeasured thing —
 // how tiers get chosen and whether the plan review earns its slot. `profileEscalated` says how
 // often the description-based guess was wrong, and applied/dropped says whether Codex's plan
-// findings ever survive triage. Same rules as the review sink: it can never fail the run, and it
-// carries counts, not text (the one free-text field, profileReason, is what makes a tier
-// auditable later, and record-run.py drops it first if the row runs long).
+// findings ever survive triage. Same rules as the review sink: it can never fail the run, and its
+// free text is kept to titles — `profileReason` is what makes a tier auditable later, and each
+// judged finding is one line, because the whole payload travels inside this step's prompt.
 const statsRow = {
   kind: 'implement',
   source: src.kind,
@@ -1903,6 +1918,17 @@ const statsRow = {
   planReviewRan: !!(planReview && planReview.ran),
   planApplied: (planReview && planReview.applied || []).length,
   planDropped: (planReview && planReview.dropped || []).length,
+  // One row per finding Codex raised against the plan, with the judges' verdict. The two counts
+  // above say how many landed and how many were thrown out; these say WHICH rubric keeps producing
+  // findings nobody buys, which is the number that decides whether a plan-review pass earns its
+  // slot. `track` is the rubric because that is the only dimension this reviewer varies along.
+  findings: (planReview && planReview.judged || []).map((j) => ({
+    track: j.rubric || 'plan-review',
+    severity: j.severity,
+    verdict: j.verdict,
+    fixed: j.verdict === 'confirmed',
+    description: j.what,
+  })),
 }
 await agent(
   `Record one line of run statistics. This is bookkeeping — if anything goes wrong, say so and
