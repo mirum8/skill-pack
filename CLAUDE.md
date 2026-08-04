@@ -90,20 +90,30 @@ allowed. Its allow-list is built at run time from `$CLAUDE_PLUGIN_ROOT`, and it 
 workflow scripts (`export const meta` + a guarded `name`), so prose quoting a pipeline name is left
 alone. It fails open on any parse/IO trouble.
 
-**The stats store measures the pack.** `lib/record-run.py` appends one line to
-`~/.claude/skill-stats.jsonl`; `lib/skill-stats.py` reads it back. It lives in `lib/`, not in a
-skill's `scripts/`, because every skill writes to it — a shared store owned by one skill stays that
-skill's store. Two row shapes: `hooks/record-skill-run.py` writes an `invoke` row per invocation,
-and the skills with a countable yield write a `result` row. **Runs are counted from `invoke` rows
-only** — the same run produces both, so counting both doubles every number. The hook is registered
-on *two* events because the two ways to reach a skill are disjoint in the transcript
-(`PostToolUse`/`Skill` for a model invocation, `UserPromptSubmit` for a typed `/r:<name>`); dropping
-either registration silently halves the coverage. It records only `r:` names, always exits 0 and
-always prints nothing — on `UserPromptSubmit` stdout is injected into the conversation and a
-non-zero exit blocks the prompt. `~/.claude/review-stats.jsonl` is the review-only predecessor and
-is never written: `--import-legacy` copies its rows in, stamped with `mid` so a second import is a
-no-op, and from the first imported row the legacy file is no longer read — counting a run from both
-stores doubles every historical number.
+**The stats store measures the pack.** `lib/record-run.py` writes into `~/.claude/skill-stats.db`
+(SQLite/WAL, schema in `lib/schema.sql`); `lib/skill-stats.py` reads it back. It lives in `lib/`,
+not in a skill's `scripts/`, because every skill writes to it — a shared store owned by one skill
+stays that skill's store. Rules that are load-bearing:
+
+- **Runs come from `invoke` rows only.** One run produces both an `invoke` row (hook) and a
+  `result` row (the skill), so counting both doubles every number. `session_id` joins them.
+- **`findings.verdict` is the point.** A track whose findings triage rejects scores the same zero
+  in `fixedBySource` as a track that finds nothing, so both pipelines record what they *dismissed*.
+  A blocked triage records no verdicts at all — absence of a judgement is not a judgement of zero.
+- **`items` is mined, never recorded.** Claude Code persists every workflow run under
+  `<session>/subagents/workflows/wf_*/`; `--mine-items` reads the prompts, results, models, tokens
+  and timestamps from there, so the pipelines pay nothing at run time. They could not do it
+  themselves anyway — `Date.now()` is unavailable inside a `Workflow` script.
+- **No fallback store.** A row the db rejects is lost. That is why inserts say
+  `ON CONFLICT(<key>) DO NOTHING` and never `INSERT OR IGNORE`, which also swallows a `NOT NULL`
+  violation — it hid exactly that bug once.
+- **The hook is registered on *two* events** because the two ways to reach a skill are disjoint in
+  the transcript (`PostToolUse`/`Skill` for a model invocation, `UserPromptSubmit` for a typed
+  `/r:<name>`); dropping either silently halves the coverage. It records only `r:` names, always
+  exits 0 and always prints nothing — on `UserPromptSubmit` stdout is injected into the
+  conversation and a non-zero exit blocks the prompt.
+- `~/.claude/skill-stats.jsonl` is the pre-SQLite archive: read by `--import-jsonl` once, never
+  written.
 
 **Skills that must never self-trigger** (`task-run`, `gh-issues-fix`) carry
 `disable-model-invocation: true` in frontmatter — the enforcement, not just a sentence in the body.

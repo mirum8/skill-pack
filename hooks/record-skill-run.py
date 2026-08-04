@@ -69,10 +69,14 @@ def main() -> int:
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         # The override exists so the behaviour tests can exercise the real hook against a
-        # throwaway file instead of the user's own store.
-        path = os.path.expanduser(os.environ.get("CLAUDE_SKILL_STATS_PATH")
-                                  or mod.DEFAULT_PATH)
-        mod.append({"skill": skill, "event": "invoke", "via": via}, path)
+        # throwaway db instead of the user's own store.
+        db = os.path.expanduser(os.environ.get("CLAUDE_SKILL_STATS_DB") or mod.DEFAULT_DB)
+        rec = {"skill": skill, "event": "invoke", "via": via}
+        # The hook is handed the session id directly, and it is what joins this invocation to the
+        # outcome row the skill writes later — and to the transcript the run left on disk.
+        if payload.get("session_id"):
+            rec["session_id"] = payload["session_id"]
+        mod.write(mod.normalise(rec), db)
     except Exception as exc:  # noqa: BLE001 — see the exit-0 rule above
         print(f"record-skill-run: not recorded ({exc})", file=sys.stderr)
     return 0

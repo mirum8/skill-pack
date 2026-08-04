@@ -161,38 +161,63 @@ and `check-prereqs.sh`. Everything else stays in the repo.
 
 ### Measuring the pack
 
-`lib/record-run.py` appends one line to `~/.claude/skill-stats.jsonl`;
-`lib/skill-stats.py` reads it back. Two row shapes share the file:
-`hooks/record-skill-run.py` writes an `invoke` row per invocation, and the skills
-that know their own yield write a `result` row with counts. Runs are counted from
-`invoke` rows only — the same run produces both, and counting both would double
-every number.
+`lib/record-run.py` writes into `~/.claude/skill-stats.db` (SQLite, WAL);
+`lib/skill-stats.py` reads it back. Four tables, defined in `lib/schema.sql`:
+
+| table | one row per |
+|---|---|
+| `runs` | invocation (`event=invoke`, from the hook) or outcome (`event=result`, from a skill) |
+| `findings` | finding, with the **verdict** triage reached — `confirmed` / `dismissed` / `unresolved` |
+| `items` | workflow agent: its prompt, its result, its model, tokens and wall-clock |
+| `meta` | `schema_version` |
 
 ```sh
 python3 lib/skill-stats.py                  # everything
 python3 lib/skill-stats.py --review         # the review pipeline's per-track table alone
-python3 lib/skill-stats.py --import-legacy  # copy the pre-pack-wide store in, once
+python3 lib/skill-stats.py --mine-items     # fill `items` from the workflow transcripts on disk
+python3 lib/skill-stats.py --import-jsonl   # copy the pre-SQLite JSONL archive in, once
 python3 lib/skill-stats.py --backfill       # recover past reviews from transcripts, once
 ```
+
+Runs are counted from `invoke` rows only — the same run produces both shapes, and
+counting both would double every number. `session_id` joins them, and points at the
+transcript the run left on disk.
+
+**`findings.verdict` is what makes a track judgeable.** A track that surfaces ten
+real defects triage rejects scores exactly the same zero in `fixes by source` as a
+track that finds nothing; only the rejections separate a noisy track from a quiet
+one. Both pipelines and the report-only skills therefore record what they *dropped*,
+not just what they kept. Descriptions are one line — the store holds titles, never
+finding bodies, because the payload travels inside an agent's prompt.
+
+**`items` is mined, not recorded.** Claude Code already persists every workflow
+run under `~/.claude/projects/<project>/<session>/subagents/workflows/wf_*/` — a
+`journal.jsonl` of each item's return value, plus a full transcript per agent
+carrying its prompt, model, effort, timestamps and token usage. `--mine-items`
+reads those, so the pipelines pay nothing at run time and every run already on
+disk is recoverable. `prompt` and `result` are capped and `transcript_path` keeps
+the full text one read away. Neither workflow could time itself in any case:
+`Date.now()` is unavailable inside a `Workflow` script.
 
 The hook is registered on two events because a skill is reachable two ways and the
 two are disjoint in the transcript: `PostToolUse`/`Skill` when the model invokes
 one, `UserPromptSubmit` when a person types `/r:<name>`. Only `r:`-prefixed names
 are recorded.
 
-`~/.claude/review-stats.jsonl` is the review-only store that predates this, and it
-is never written. `--import-legacy` copies its rows into the live store —
-normalised, each stamped with a hash of the line it came from, so a second import
-appends nothing. From the first imported row on the legacy file is no longer read:
-counting a run from both stores would double every historical number. Until then it
-is read in place, so nothing goes missing in between. The original is left where it
-is either way — the import is a copy, never a move.
+`~/.claude/skill-stats.jsonl` is the append-only store that predates the db, and it
+is never written now. `--import-jsonl` copies its rows in, deriving each `run_id`
+from a hash of the line it came from so a second import inserts nothing. The file
+stays where it is — the import is a copy, never a move.
+
+There is **no fallback store**: a row the db rejects is lost, and the reason goes to
+stderr. That is why the inserts name the one conflict they mean to ignore rather
+than using `INSERT OR IGNORE`, which also swallows a `NOT NULL` violation and would
+drop rows in silence.
 
 These numbers are the pack's second instrument, next to the eval suites: they say
-which skill is *used* and what it *finds*, which is what retires a track or a skill
-on evidence rather than opinion. A skill with no rows was never **observed** —
-recording starts when the hook is installed, and the report says so rather than
-showing a zero.
+which skill is *used*, what it *finds*, how much of that survives judgement, and
+what it cost. A skill with no rows was never **observed** — recording starts when
+the hook is installed, and the report says so rather than showing a zero.
 
 ### Paths inside skills
 
