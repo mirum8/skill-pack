@@ -199,6 +199,17 @@ disk is recoverable. `prompt` and `result` are capped and `transcript_path` keep
 the full text one read away. Neither workflow could time itself in any case:
 `Date.now()` is unavailable inside a `Workflow` script.
 
+**Cost is reported per pipeline step, not per agent type.** Claude Code persists a
+subagent's `agentType` but not the workflow's `label`, and one type covers many
+steps — `general-purpose` alone spans the codex pass, triage, `code-scan`, the UI
+deploy and the sink. So `items.label` is recovered by matching the prompt against
+the literal chunks of each `agent()` dispatch in the shipped `*.workflow.js`. The
+mapping is read from the scripts rather than kept in a table, so a reworded prompt
+updates it with the wording, and a rename fails to an **unlabelled** row — counted
+and named in the report — never a confidently wrong one. Pre-pack skill names are
+aliased so history still classifies; for runs recorded by a script the pack no
+longer ships, point `--label-source <script>` at it.
+
 The hook is registered on two events because a skill is reachable two ways and the
 two are disjoint in the transcript: `PostToolUse`/`Skill` when the model invokes
 one, `UserPromptSubmit` when a person types `/r:<name>`. Only `r:`-prefixed names

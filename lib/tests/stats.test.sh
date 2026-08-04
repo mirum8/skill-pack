@@ -121,6 +121,35 @@ ok "a skill with an outcome is not 'never observed'" \
 ok "it is reported as ran-without-a-run-count" \
    "$(grep -c 'ran, but with no invocation recorded' <<<"$rep")" 1
 
+# --- classifying a workflow item's step -------------------------------------
+# Claude Code persists an agentType but not the workflow label, so without this every cost number
+# rolls up per agent type — and `general-purpose` alone spans the codex pass, triage, local-scan
+# and the sink, which averages the expensive steps into the cheap ones.
+cls() { python3 - "$1" <<'PY'
+import importlib.util, sys, glob, os
+spec = importlib.util.spec_from_file_location("ss", "lib/skill-stats.py")
+ss = importlib.util.module_from_spec(spec); spec.loader.exec_module(ss)
+sigs = ss.label_signatures(sorted(glob.glob("skills/*/*.workflow.js")))
+print(ss.classify(sys.argv[1], sigs) or "<none>")
+PY
+}
+STATS_PROMPT='Record one line of review statistics. This is bookkeeping - if anything goes wrong, say so
+   and return; do NOT retry, do NOT fix anything, and do NOT treat it as a failure of the review.'
+ok "a stats prompt classifies as the sink step"      "$(cls "$STATS_PROMPT")" stats
+
+SCAN_PROMPT='Run /r:code-scan over the classes this BRANCH changed. First compute the list yourself;
+   do NOT use any list you were handed.'
+ok "a scan prompt classifies as its own step"        "$(cls "$SCAN_PROMPT")" local-scan
+# The same step under its PRE-PACK skill name. Without the alias every run recorded before the
+# rename classifies as nothing, and a step that cost 80M tokens reads as a step that never ran.
+# The old name is ASSEMBLED, never written whole: a flat skill name sitting in a shipped file is
+# one the model would try to invoke and fail to reach, and validate.py refuses it on sight.
+OLD_SCAN="/local""-scan"
+ok "and so does its pre-pack spelling"               "$(cls "${SCAN_PROMPT/\/r:code-scan/$OLD_SCAN}")" local-scan
+# An unrecognised prompt must stay unlabelled: a confidently wrong step name is worse than a gap,
+# because the gap is counted and reported while the wrong name is quietly averaged in.
+ok "an unrecognised prompt stays unlabelled" "$(cls 'do something entirely unrelated')" '<none>'
+
 # --- importing the pre-SQLite archive ---------------------------------------
 A="$TMP/archive.jsonl"; I="$TMP/imported.db"
 printf '%s\n' \

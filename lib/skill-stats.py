@@ -530,6 +530,66 @@ ITEM_COLUMNS = ("run_id", "wf_run_id", "agent_id", "agent_type", "label", "model
                 "duration_ms", "transcript_path")
 
 
+# Claude Code persists a subagent's agentType but not the workflow LABEL, so cost rolls up per
+# agent type unless the label is recovered — and one type covers many steps: `general-purpose`
+# alone spans the codex pass, triage, local-scan, the UI deploy and the sink, which averages the
+# expensive steps into the cheap ones and hides the only number worth acting on.
+#
+# The label is therefore recovered from the PROMPT, and the prefixes are read out of the workflow
+# scripts themselves rather than kept in a table here. A reworded prompt then updates the mapping
+# with the wording, and the failure mode of a rename is an unlabelled row — visible, and counted in
+# the report — rather than a confidently wrong one.
+LABEL_SIG_MIN = 28   # shorter chunks start matching more than one dispatch site
+# The pre-pack skill names, frozen. History was written by scripts that used them, and without this
+# every run before the rename classifies as unlabelled.
+LABEL_ALIASES = {"post-task-review": "task-review", "run-task-implement": "task-run",
+                 "run-task": "task-run", "find-bugs": "code-bugs", "local-scan": "code-scan",
+                 "refactor": "code-refactor", "write-tests": "tests-write",
+                 "adversarial-review": "code-adversarial"}
+
+
+def _label_norm(text):
+    """Compare prompts on their words alone — whitespace, punctuation, the `r:` prefix and the
+    pre-pack skill names all differ across the history without changing which step ran."""
+    t = (text or "").lower().replace("r:", "")
+    for old, new in LABEL_ALIASES.items():
+        t = t.replace(old, new)
+    return re.sub(r"[^a-z0-9]+", "", t)
+
+
+def label_signatures(paths):
+    """[(normalised literal chunk, label)] for every agent() dispatch, longest chunk first."""
+    sigs = []
+    for path in paths:
+        try:
+            src = open(path, encoding="utf-8", errors="replace").read()
+        except OSError:
+            continue
+        for m in re.finditer(r"agent\(\s*`", src):
+            body = src[m.end():m.end() + 8000]
+            end = body.find("`")
+            lm = re.search(r"label:\s*[`'\"]([^`'\"]*)", body)
+            if end <= 0 or not lm:
+                continue
+            # `end-verify#${pass}` and `implement:${a.label}` are one step each, not one per run.
+            label = re.sub(r"[#$].*", "", lm.group(1)) or lm.group(1)
+            for chunk in re.split(r"\$\{[^}]*\}", body[:end]):
+                n = _label_norm(chunk)
+                if len(n) >= LABEL_SIG_MIN:
+                    sigs.append((n[:90], label))
+    return sorted(sigs, key=lambda s: -len(s[0]))
+
+
+def classify(prompt, sigs):
+    """The label whose longest literal chunk this prompt contains, or None. Never a guess: an
+    unrecognised prompt stays unlabelled and shows up as such."""
+    n = _label_norm(prompt)
+    for sig, label in sigs:
+        if sig in n:
+            return label
+    return None
+
+
 def _text(content):
     """A message's content as text, whether it arrived as a string or as content blocks."""
     if isinstance(content, str):
@@ -605,7 +665,7 @@ def _millis(a, b):
         return None
 
 
-def mine_items(db):
+def mine_items(db, label_sources=()):
     """Fill `items` from the workflow transcripts on disk.
 
     Idempotent through `items.agent_id UNIQUE`: an agent already mined is skipped, so this can be
@@ -617,6 +677,10 @@ def mine_items(db):
     if not dirs:
         print(f"mine-items: no workflow transcripts under {PROJECTS}\n")
         return
+    # The shipped pipelines by default. Extra sources exist for history: a run recorded before the
+    # pack was built came from scripts that are no longer here, and only they can name its steps.
+    label_sigs = label_signatures(list(label_sources)
+                                  or sorted(glob.glob(os.path.join(PACK, "skills", "*", "*.workflow.js"))))
     con = connect(db)
     # Signature -> run_id, for the runs recorded before record-run.py echoed its id. Built once;
     # a signature shared by two runs is dropped rather than guessed at.
@@ -680,7 +744,8 @@ def mine_items(db):
                                                         if res is not None else None)
                 row = {
                     "run_id": run_id, "wf_run_id": wf, "agent_id": agent_id,
-                    "agent_type": agent_type, "label": None, "model": model, "effort": effort,
+                    "agent_type": agent_type, "label": classify(prompt, label_sigs),
+                    "model": model, "effort": effort,
                     "prompt_chars": len(prompt), "prompt": prompt[:PROMPT_CAP],
                     "prompt_sha": hashlib.sha256(prompt.encode()).hexdigest()[:16] if prompt else None,
                     "result": res[:RESULT_CAP] if res else None,
@@ -700,9 +765,26 @@ def mine_items(db):
                 skipped += not cur.rowcount
     finally:
         con.close()
+    # Rows mined before the classifier existed, or by a run whose scripts have since been
+    # reworded, still carry no label — relabelling here means a signature added later reaches
+    # history without re-reading half a gigabyte of transcripts.
+    con2 = connect(db)
+    relabelled = 0
+    try:
+        with con2:
+            for iid, prompt in con2.execute(
+                    "SELECT id, prompt FROM items WHERE label IS NULL AND prompt IS NOT NULL").fetchall():
+                lab = classify(prompt, label_sigs)
+                if lab:
+                    con2.execute("UPDATE items SET label=? WHERE id=?", (lab, iid))
+                    relabelled += 1
+        unlabelled = con2.execute("SELECT COUNT(*) FROM items WHERE label IS NULL").fetchone()[0]
+    finally:
+        con2.close()
     print(f"mine-items: {len(dirs)} workflow run(s) on disk; {added} item(s) inserted, "
           f"{skipped} already there; {runs_linked} linked by echoed run_id, "
-          f"{linked_by_sig} by quoted payload\n")
+          f"{linked_by_sig} by quoted payload; {relabelled} relabelled, "
+          f"{unlabelled} still unlabelled\n")
 
 
 def summarize_findings(db):
@@ -760,13 +842,24 @@ def summarize_cost(db):
         print(f"workflow items  {n}   "
               f"{(tin or 0) / 1000:.0f}k in · {(tout or 0) / 1000:.0f}k out · "
               f"{(dur or 0) / 3_600_000:.1f}h agent time")
+        # Grouped by the pipeline STEP, not the agent type: one type covers many steps, and
+        # averaging an expensive fixer into a cheap echo hides the only number worth acting on.
         rows = con.execute(
-            "SELECT COALESCE(label, agent_type, '?') k, COUNT(*) n, "
-            "       SUM(tokens_in + tokens_out) tk, AVG(duration_ms) d "
-            "FROM items GROUP BY k ORDER BY tk DESC LIMIT 12").fetchall()
-        print(f"  {'item':<26}{'runs':>6}{'tokens':>12}{'avg secs':>10}")
-        for k, cnt, tk, d in rows:
-            print(f"  {k:<26}{cnt:>6}{(tk or 0):>12,}{(d or 0) / 1000:>10.0f}")
+            "SELECT label k, COUNT(*) n, SUM(tokens_in + tokens_out + tokens_cache) tk, "
+            "       AVG(duration_ms) d "
+            "FROM items WHERE label IS NOT NULL GROUP BY k ORDER BY tk DESC LIMIT 12").fetchall()
+        if rows:
+            print(f"  {'step':<26}{'runs':>6}{'tokens':>14}{'avg secs':>10}")
+            for k, cnt, tk, d in rows:
+                print(f"  {k:<26}{cnt:>6}{(tk or 0):>14,}{(d or 0) / 1000:>10.0f}")
+        # Said out loud rather than left as a shortfall in the table above. The label is recovered
+        # from the prompt, so a run recorded by a script the pack no longer ships classifies as
+        # nothing — that is missing attribution, not a step that cost nothing.
+        dark = con.execute("SELECT COUNT(*) FROM items WHERE label IS NULL").fetchone()[0]
+        if dark:
+            print(f"\n  {dark} item(s) carry no step label — their prompts match no dispatch site in")
+            print("  the shipped pipelines. Pass --label-source <script> to classify runs recorded")
+            print("  by an older or foreign workflow.")
         print()
     finally:
         con.close()
@@ -782,6 +875,9 @@ def main():
                     help="copy the JSONL archive's rows into the db (idempotent, run once)")
     ap.add_argument("--mine-items", action="store_true",
                     help="fill `items` from the workflow transcripts under ~/.claude/projects")
+    ap.add_argument("--label-source", action="append", default=[], metavar="SCRIPT",
+                    help="extra *.workflow.js to read step labels from (repeatable) — use it to "
+                         "classify runs recorded by a script the pack no longer ships")
     ap.add_argument("--backfill", action="store_true",
                     help="mine past review runs out of ~/.claude/projects transcripts first")
     ap.add_argument("--review", action="store_true",
@@ -796,7 +892,7 @@ def main():
     if args.backfill:
         backfill(db, {r["bfid"] for r in load(db) if r.get("bfid")})
     if args.mine_items:
-        mine_items(db)
+        mine_items(db, args.label_source)
 
     rows = load(db)
     if not rows:

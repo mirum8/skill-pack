@@ -104,6 +104,11 @@ stays that skill's store. Rules that are load-bearing:
   `<session>/subagents/workflows/wf_*/`; `--mine-items` reads the prompts, results, models, tokens
   and timestamps from there, so the pipelines pay nothing at run time. They could not do it
   themselves anyway — `Date.now()` is unavailable inside a `Workflow` script.
+- **The step label is recovered from the prompt**, by matching it against the literal chunks of
+  each `agent()` dispatch in the shipped workflow scripts — `agentType` is persisted but `label`
+  is not, and one type covers many steps. Read from the scripts, never a table here, so a reworded
+  prompt updates the mapping with the wording; an unmatched prompt stays **unlabelled** and is
+  counted as such, because a wrong step name is averaged in silently while a gap is visible.
 - **No fallback store.** A row the db rejects is lost. That is why inserts say
   `ON CONFLICT(<key>) DO NOTHING` and never `INSERT OR IGNORE`, which also swallows a `NOT NULL`
   violation — it hid exactly that bug once.
