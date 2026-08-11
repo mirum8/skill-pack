@@ -647,7 +647,7 @@ def main():
     lines += [f"| `{a}` | {b} | `{c}` |" for a, b, c in report]
     open(os.path.join(REPO, "build-report.md"), "w").write("\n".join(lines) + "\n")
 
-    print(f"built 15 skills, {len(R.AGENTS)} agents")
+    print(f"built {len(R.RENAME)} skills, {len(R.AGENTS)} agents")
     print(f"  {refs} references rewritten, 0 left unrewritten")
     print(f"  FR-19: {self_refs} self, {cross_refs} cross")
     print("  read build-report.md before committing (R-1)")

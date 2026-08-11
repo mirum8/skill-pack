@@ -454,8 +454,8 @@ def check_drift(source_root, refresh):
                        if os.path.isdir(os.path.join(source_root, "skills", o)))
     if not surviving:
         if not elsewhere:
-            NOTES.append("R-4 closed: all fifteen flat originals are gone, so the pack is the "
-                         "only copy and an edit can no longer land in the wrong one")
+            NOTES.append(f"R-4 closed: all {len(R.RENAME)} flat originals are gone, so the pack "
+                         "is the only copy and an edit can no longer land in the wrong one")
         return
     if len(surviving) < len(R.RENAME):
         NOTES.append(f"R-4 partial cut-over: {len(surviving)} of {len(R.RENAME)} flat originals "

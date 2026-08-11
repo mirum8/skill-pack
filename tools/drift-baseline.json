@@ -57,6 +57,8 @@
  "find-bugs/references/security.md": "0acca2988ba221232716d1eeacadca121cedc6f1c6efb42a65721fcfabbf1066",
  "find-bugs/references/silent-failures-and-java.md": "5c41aaa6eadb839fd8e6effc18a5f32102c220ff3f0e4d3ffae8490bbf2f30d4",
  "fix-gh-issues/SKILL.md": "62b40c7eceb2acefaace6c14b294b1b90cc8d53c4399995ec4de2ed65022f587",
+ "hexagonal-architecture/SKILL.md": "3edcc5f05c40e3f2be762da26acd6f4694ed2c27ed938bca14fc03f58f002b5a",
+ "hexagonal-architecture/evals/evals.json": "1a481183af59d71e88c8bfaf9670449e932b5c43ae9527870947861d0650efc4",
  "local-scan/SKILL.md": "92615f6dcb4aade13b00e4f7c116eb9c1b5a8d998e90d6cb82ecf610a330054f",
  "local-scan/evals/evals.json": "1ef01d412d9867c8a0ae1f9db6d5119a43972bc6c7792384232a8c29f71db993",
  "local-scan/scripts/check-tools.sh": "da62dace75edde608d57305c8dce9344f99e8e497bfb727119117c93eb5313f0",

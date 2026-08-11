@@ -96,6 +96,18 @@ CASES = {
         "Running a whole unit of work through plan, implement, review and PR is task-run's "
         "job; git-commit must not load, because there is nothing to commit yet.",
     ),
+    "hexagonal-architecture": (
+        "where should this class live — core or the jpa adapter? and is core allowed to "
+        "import the payment SDK?",
+        "hexagonal-architecture loads and answers from the boundary rules: which module owns "
+        "the class, that core never imports adapter packages or tech SDKs, and that the SDK "
+        "type stays in its adapter behind an outbound port.",
+        "code-refactor",
+        "this OrderService is doing five things at once, split it up without changing behaviour",
+        "Restructuring code behind a behaviour-locking test is code-refactor's job; "
+        "hexagonal-architecture must not load, because nothing here asks where code belongs "
+        "or what a module may import.",
+    ),
     "spec-brainstorm": (
         "help me architect a service that syncs invoices to our accounting system",
         "spec-brainstorm loads, interviews for the missing decisions, researches prior art, "

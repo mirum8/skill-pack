@@ -81,7 +81,7 @@ H=$(newhome fresh)
 out=$(run "$H" --no-deps)
 D="$H/.claude/skills/r"
 has  "the manifest lands"                          "$D/.claude-plugin/plugin.json"
-is   "fifteen skills land"                         "$(ls "$D/skills" | wc -l | tr -d ' ')" 15
+is   "sixteen skills land"                         "$(ls "$D/skills" | wc -l | tr -d ' ')" 16
 is   "nine agents land"                            "$(ls "$D/agents" | wc -l | tr -d ' ')" 9
 has  "the guard hook lands"                        "$D/hooks/guard-workflow.py"
 has  "the stats hook lands"                        "$D/hooks/record-skill-run.py"
@@ -123,7 +123,7 @@ is "the unrelated hook survives" \
 out=$(run "$H" --no-deps)
 is   "a second run reports an update, not an install" "$(grep -c 'Updated in place' <<<"$out")" 1
 is   "a second run names /reload-plugins"          "$(grep -c 'reload-plugins' <<<"$out")" 1
-is   "fifteen skills, still"                       "$(ls "$D/skills" | wc -l | tr -d ' ')" 15
+is   "sixteen skills, still"                       "$(ls "$D/skills" | wc -l | tr -d ' ')" 16
 is   "the second guard removal is a no-op"         "$(grep -c 'nothing to remove' <<<"$out")" 1
 
 # --- 7. the copy DELETES what the repo dropped ------------------------------
@@ -170,7 +170,7 @@ is   "the no-rsync PATH really has no rsync" \
      "$(PATH="$TMP/nopath" command -v rsync >/dev/null 2>&1 && echo found || echo absent)" absent
 out=$(HOME="$H4" PATH="$TMP/nopath" bash "$REPO/install.sh" --no-deps 2>&1)
 is   "without rsync it falls back to cp -R"        "$(grep -c '\$ cp -R' <<<"$out")" 6
-is   "and still lands fifteen skills"              "$(ls "$H4/.claude/skills/r/skills" | wc -l | tr -d ' ')" 15
+is   "and still lands sixteen skills"              "$(ls "$H4/.claude/skills/r/skills" | wc -l | tr -d ' ')" 16
 # Running any packed python leaves a __pycache__ in the REPO, and the repo gitignores it — so
 # neither copy path may carry one into the installed pack.
 mkdir -p "$REPO/lib/__pycache__" && touch "$REPO/lib/__pycache__/probe.pyc"

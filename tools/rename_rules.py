@@ -5,7 +5,7 @@ result). Keeping them in one module is what stops the builder and the validator
 from disagreeing about what "rewritten" means.
 
   BR-1  directory names match NAME_RE, domain first, <= 3 kebab segments
-  BR-2  RENAME is exactly the fifteen pairs; an unmapped source dir is an error
+  BR-2  RENAME is exactly the sixteen pairs; an unmapped source dir is an error
   BR-3  only the four bounded patterns in ref_patterns() are rewritten
   BR-5  a reference to a packed skill carries the "r:" prefix
   FR-19 absolute ~/.claude/skills/... paths become substituted variables
@@ -14,7 +14,7 @@ import re
 
 NAMESPACE = "r"
 DESC_CAP = 1536          # BR-4, per skill: len(description) + len(when_to_use)
-LISTING_CAP = 16000      # NFR-1, across all fifteen
+LISTING_CAP = 16000      # NFR-1, across all sixteen
 
 NAME_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+){0,2}$")
 
@@ -29,6 +29,9 @@ RENAME = {
     "create-test-app":    "test-app-create",
     "find-bugs":          "code-bugs",
     "fix-gh-issues":      "gh-issues-fix",
+    # Named for its subject rather than <domain>-<action>: the pack has one architecture
+    # rulebook and "hexagonal" is the term a user reaches for. Two segments, so BR-1 holds.
+    "hexagonal-architecture": "hexagonal-architecture",
     "local-scan":         "code-scan",
     "post-task-review":   "task-review",
     "refactor":           "code-refactor",

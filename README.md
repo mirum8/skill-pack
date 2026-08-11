@@ -1,6 +1,6 @@
 # r — a personal Claude Code skill pack
 
-Fifteen engineering skills and the eight agents they dispatch, in one repository,
+Sixteen engineering skills and the eight agents they dispatch, in one repository,
 loaded as a skills-directory plugin named `r`. Every skill is reachable as
 `/r:<name>`.
 
@@ -49,7 +49,7 @@ skills-directory case. Whether plugin discovery follows a *symlinked* entry is
 documented neither way, and it fails identically to a malformed manifest, so the
 pack does not rely on it.
 
-## The fifteen skills
+## The sixteen skills
 
 | command | does |
 |---|---|
@@ -63,6 +63,7 @@ pack does not rely on it.
 | `/r:code-refactor` | restructure behind a behaviour-locking test |
 | `/r:spec-brainstorm` | idea → one `spec.html`: domain model, user stories, modules, stack, API |
 | `/r:spec-plan` | spec → phased `todo.md` with runnable done-when checks |
+| `/r:hexagonal-architecture` | Hexagonal Lite boundaries: what lives in core, what a module may import |
 | `/r:tests-write` | JVM test conventions; loads proactively on Java/Kotlin work |
 | `/r:test-app-create` | scaffold a project-local `/test-app` for the detected stack |
 | `/r:git-commit` | group the working tree into logical Conventional Commits |
@@ -71,7 +72,8 @@ pack does not rely on it.
 
 Names are domain-first (`<domain>-<action>`, at most three kebab segments) so the
 alphabetically sorted `/` menu groups the families: `claudemd-*`, `code-*`,
-`spec-*`, `task-*`.
+`spec-*`, `task-*`. `hexagonal-architecture` is the one exception — it is a
+rulebook rather than an action, and "hexagonal" is the word someone reaches for.
 
 `task-run` and `gh-issues-fix` carry `disable-model-invocation: true` — each says
 in its own text that it must never fire on its own, and the frontmatter enforces
@@ -133,7 +135,7 @@ floors, because no lower bound was tested: `pmd` 7.26.0 · `spotbugs` 4.10.2 ·
 ```
 
 There is no CI, so `validate.sh` is the whole gate. It checks that the manifest
-parses with `name == "r"`, fifteen skill directories sit exactly two levels deep,
+parses with `name == "r"`, sixteen skill directories sit exactly two levels deep,
 every frontmatter is valid YAML with a `description` under the 1,536-character
 cap, the total listing cost stays under 16,000, no skill name is referenced
 without its `r:` prefix, no reference dangles, every bundled agent is dispatched
