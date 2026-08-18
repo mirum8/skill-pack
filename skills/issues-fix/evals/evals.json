@@ -1,0 +1,36 @@
+{
+  "skill_name": "issues-fix",
+  "evals": [
+    {
+      "id": 0,
+      "name": "routing-triggers",
+      "kind": "trigger",
+      "prompt": "go through the open GitHub issues and fix the bugs",
+      "expected_output": "issues-fix loads, lists the open bug issues, verifies each still reproduces against the code, groups them by subsystem, and fixes the approved groups one at a time.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 1,
+      "name": "routing-excludes-task-run",
+      "kind": "neighbour-exclusion",
+      "neighbour": "task-run",
+      "prompt": "implement issue #42",
+      "expected_output": "One known issue handed over directly is task-run's job; issues-fix must not load, because there is no backlog to triage or group.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 2,
+      "name": "routing-triggers-file-backlog",
+      "kind": "trigger",
+      "prompt": "work through the list in issues.md and fix everything in it",
+      "expected_output": "issues-fix loads, reads issues.md as the backlog, verifies each unticked item is real and not already done, groups them, and fixes the approved groups one at a time — ticking each item as its fix merges. It must not require gh or a GitHub remote to do it.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    }
+  ]
+}

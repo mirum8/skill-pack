@@ -319,7 +319,7 @@ const RAN_CLAUSE = `
 // investigator and the persona wins for the first dozen turns — measured over 151 stored `logic`
 // runs, the median hunt reads TWELVE whole source files before it ever runs `git diff` and reaches
 // the diff around turn 31 of 49. `r:bug-hunter-pattern` is the same reasoning depth with the sweep
-// discipline and four tools. `r:bug-hunter` is right where reproduction IS the job — /r:gh-issues-fix
+// discipline and four tools. `r:bug-hunter` is right where reproduction IS the job — /r:issues-fix
 // uses it for exactly that.
 //
 // PER-HUNTER EFFORT, and why the pattern hunters are not at the top tier. A pattern hunter is
@@ -546,7 +546,7 @@ async function hunterFanOut(scope, hunters, trackName) {
 // from an adjudication.
 //
 // A second reason to pin rather than inherit: the frontmatter only applies when this skill is
-// entered through the Skill tool. Called by scriptPath — which /r:gh-issues-fix does for every group
+// entered through the Skill tool. Called by scriptPath — which /r:issues-fix does for every group
 // — nothing sets it, and these agents silently take the SESSION's effort instead. Pinning makes the
 // review's depth a property of the pipeline rather than of how it happened to be invoked.
 // Run one fixed command and report what it printed. No branch, no classification, no prose —
@@ -766,7 +766,7 @@ const triage = await reliable('triage', 'Triage', () => agent(
 ))
 // A DEAD triage and a diff that genuinely needs no review are opposite outcomes, and they used
 // to return the same `{skipped: true}`. That is the worst failure this pipeline has: an
-// unattended caller (/r:gh-issues-fix) reads `skipped` as "reviewed, nothing owed" and goes on to
+// unattended caller (/r:issues-fix) reads `skipped` as "reviewed, nothing owed" and goes on to
 // merge the branch and close the issue on a review that never started. Blocked => STOP.
 if (blocked(triage)) {
   log('post-task-review: TRIAGE BLOCKED — nothing classified the diff, so nothing was reviewed. This is a halt, not a skip.')
@@ -1239,7 +1239,7 @@ const cleanCmd = triage.buildCmd || ''
 const fastCmd = (triage.buildCmdFast || cleanCmd.replace(/\bclean\s+/, '')) || cleanCmd
 // `baselineBuilt` — the caller certifies that a CLEAN, fully green build already ran in THIS
 // working tree, on THIS branch, moments ago. That is exactly what run-task-implement hands back
-// as `buildGreen: true`, and when /r:gh-issues-fix chains implement -> review the two clean builds
+// as `buildGreen: true`, and when /r:issues-fix chains implement -> review the two clean builds
 // land minutes apart on a diff that changed only by this run's own fix phase. The second one
 // re-runs the whole suite from an empty target/ to re-learn what the first one just proved, which
 // on a multi-module JVM project is the single most expensive duplicated step in the loop.

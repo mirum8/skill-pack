@@ -40,11 +40,15 @@ claude --plugin-dir "$PWD"                                 # load the pack witho
 regenerates them from flat originals under `~/.claude`. Those originals were deleted on
 2026-07-31. Do not run it.
 
-**The repo is the copy to edit, but it is not the only copy.** Pre-pack originals under their old
-flat names (`post-task-review`, `run-task`, `find-bugs`, …) still live in `~/.agents/skills/`, so
-R-4 — an edit landing in the wrong copy, where it works under the old name and is missing under
-the new one — is open, not closed. `validate.sh` names them on every run. Before editing anything
-that exists under both names, check which path you are in.
+**The repo is the copy to edit, and `install.sh` is what makes it the only copy.** Pre-pack
+originals under their old flat names (`post-task-review`, `run-task`, `find-bugs`, …) may still be
+installed in `~/.claude/skills/` and `~/.agents/skills/`; while one survives, R-4 is open — an edit
+lands in the wrong copy, where it works under the old name and is missing under the new one, and
+the old bare name still answers with the old behaviour. `install.sh` retires them from both roots
+(`--keep-originals` opts out) and `validate.sh` names whatever is left on every run. The roots and
+the names both come from `tools/rename_rules.py`, so a skill added to the pack is retired by that
+one edit. Until you have re-run the installer, check which path you are in before editing anything
+that exists under both names.
 
 Eval suites (`skills/*/evals/evals.json`) need a model, so they are not part of `validate.sh`. Run
 them deliberately after editing any `description`, and before a release.
@@ -120,7 +124,7 @@ stays that skill's store. Rules that are load-bearing:
 - `~/.claude/skill-stats.jsonl` is the pre-SQLite archive: read by `--import-jsonl` once, never
   written.
 
-**Skills that must never self-trigger** (`task-run`, `gh-issues-fix`) carry
+**Skills that must never self-trigger** (`task-run`, `issues-fix`) carry
 `disable-model-invocation: true` in frontmatter — the enforcement, not just a sentence in the body.
 `task-review` must not self-trigger either, but carries **no** flag: the flag blocks the Skill tool
 outright and cannot tell an auto-load from a deliberate call, so it also blocked `task-run`'s

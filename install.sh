@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # FR-6 / FR-21 — install the r skill pack.
 #
-#   ./install.sh [--dry-run] [--no-deps]
+#   ./install.sh [--dry-run] [--no-deps] [--keep-originals]
 #
-# Four things happen, in this order:
+# Five things happen, in this order:
 #   1. copy the pack payload into ~/.claude/skills/r, overwriting
 #   2. provision the mandatory prerequisites (skip with --no-deps)
 #   3. remove the superseded global workflow-guard registration
-#   4. say what has to happen next
+#   4. retire the superseded flat originals (skip with --keep-originals)
+#   5. say what has to happen next
 #
 # It COPIES rather than symlinks. A plain directory holding
 # .claude-plugin/plugin.json is the documented skills-dir plugin case; whether
@@ -26,12 +27,14 @@ DEST="${CLAUDE_SKILLS_DIR:-$HOME/.claude/skills}/r"
 SETTINGS="$HOME/.claude/settings.json"
 DRY=0
 DEPS=1
+RETIRE=1
 
 for arg in "$@"; do
   case "$arg" in
     --dry-run) DRY=1 ;;
     --no-deps) DEPS=0 ;;
-    -h|--help) sed -n '2,20p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    --keep-originals) RETIRE=0 ;;
+    -h|--help) sed -n '2,21p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -46,7 +49,7 @@ else
 fi
 
 STEP=0
-step() { STEP=$((STEP + 1)); printf '\n%s[%d/4] %s%s\n' "$B" "$STEP" "$*" "$R"; }
+step() { STEP=$((STEP + 1)); printf '\n%s[%d/5] %s%s\n' "$B" "$STEP" "$*" "$R"; }
 say()  { printf '      %s\n' "$*"; }
 ok()   { printf '      %s✓%s %s\n' "$GREEN" "$R" "$*"; }
 note() { printf '      %s·%s %s\n' "$DIM" "$R" "$*"; }
@@ -164,6 +167,57 @@ PY
   fi
 else
   note "none registered — nothing to remove"
+fi
+
+step "superseded flat originals"
+# R-4 / ADR-13. The pack renames every skill it carries (run-task -> task-run, find-bugs ->
+# code-bugs, …) and installs them under one namespaced root. The pre-pack originals keep their old
+# FLAT names in the roots below, so while they survive every packed skill has a twin: an edit can
+# land in the wrong copy, and the old bare name still resolves to the OLD behaviour — which is the
+# more visible half, because a renamed skill that is "fully replaced" is not replaced at all while
+# its ancestor still answers. Publishing the pack without retiring them is what leaves R-4 open, so
+# this belongs to installing rather than to a chore someone remembers later.
+#
+# Both lists come from tools/rename_rules.py, the same table validate.py checks the result against,
+# so a skill added to the pack is retired from the old roots by that one edit rather than by two
+# that can drift apart. If the table cannot be read, retire NOTHING and say so: a delete loop
+# running on an empty list of names is the one outcome here that is worse than doing nothing.
+if (( RETIRE )); then
+  ORIG_NAMES=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import rename_rules as R; print("\n".join(sorted(R.RENAME)))' "$REPO/tools" 2>/dev/null)
+  ORIG_ROOTS=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import rename_rules as R; print("\n".join(R.ORIGINAL_ROOTS))' "$REPO/tools" 2>/dev/null)
+  if [[ -z $ORIG_NAMES || -z $ORIG_ROOTS ]]; then
+    warn "could not read tools/rename_rules.py — nothing was retired."
+    say  "Re-run from a full checkout, or pass --keep-originals to stop being asked." >&2
+  else
+    DEST_REAL=$(cd "$DEST" 2>/dev/null && pwd -P)
+    RETIRED=0
+    while IFS= read -r root; do
+      base="${root/#\~/$HOME}"
+      [[ -d $base ]] || continue
+      while IFS= read -r name; do
+        victim="$base/$name"
+        [[ -d $victim ]] || continue
+        # Two guards, and both have a job. SKILL.md keeps a same-named directory that is not a
+        # skill at all out of the loop; the realpath test keeps the pack we have just written out
+        # of it, since one root is the very directory the pack installs into.
+        [[ -f "$victim/SKILL.md" ]] || continue
+        victim_real=$(cd "$victim" && pwd -P)
+        # Compare on path BOUNDARIES, never as a bare string prefix: the pack installs to
+        # .../skills/r, and "r" is a prefix of "run-task" and "refactor" — two real originals that
+        # a `== "$DEST_REAL"*` test silently spares while reporting success.
+        [[ -n $DEST_REAL && ( $victim_real == "$DEST_REAL" || $victim_real == "$DEST_REAL"/* ) ]] && continue
+        run rm -rf "$victim"
+        RETIRED=$((RETIRED + 1))
+      done <<< "$ORIG_NAMES"
+    done <<< "$ORIG_ROOTS"
+    if (( RETIRED )); then
+      ok "$RETIRED superseded original(s) retired — the pack is now the only copy"
+    else
+      note "none found — the pack is already the only copy"
+    fi
+  fi
+else
+  note "skipped (--keep-originals) — the old flat names still resolve to the old skills"
 fi
 
 step "next"

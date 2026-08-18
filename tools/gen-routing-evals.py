@@ -78,13 +78,15 @@ CASES = {
         "A judgement-based hunt is code-bugs' job; code-scan must not load, because it runs "
         "mechanical analyzers rather than reading for intent.",
     ),
-    "gh-issues-fix": (
+    # The second trigger in this skill's suite — a file-backed backlog — is hand-written, because
+    # a CASES row is one trigger and this skill routes off two different source shapes.
+    "issues-fix": (
         "go through the open GitHub issues and fix the bugs",
-        "gh-issues-fix loads, lists the open bug issues, verifies each still reproduces "
+        "issues-fix loads, lists the open bug issues, verifies each still reproduces "
         "against the code, groups them by subsystem, and fixes the approved groups one at a time.",
         "task-run",
         "implement issue #42",
-        "One known issue handed over directly is task-run's job; gh-issues-fix must not "
+        "One known issue handed over directly is task-run's job; issues-fix must not "
         "load, because there is no backlog to triage or group.",
     ),
     "git-commit": (

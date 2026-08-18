@@ -28,7 +28,7 @@ RENAME = {
     "commit":             "git-commit",
     "create-test-app":    "test-app-create",
     "find-bugs":          "code-bugs",
-    "fix-gh-issues":      "gh-issues-fix",
+    "fix-gh-issues":      "issues-fix",
     # Named for its subject rather than <domain>-<action>: the pack has one architecture
     # rulebook and "hexagonal" is the term a user reaches for. Two segments, so BR-1 holds.
     "hexagonal-architecture": "hexagonal-architecture",
@@ -57,13 +57,21 @@ AGENTS = [
 # for these; see ref_patterns().
 AMBIGUOUS_IN_BACKTICKS = {"commit", "refactor"}
 
+# R-4 / ADR-13 — every skills root a pre-pack original can still be sitting in, under its old
+# flat name. The pack renames what it carries and installs it under one namespaced root, so until
+# these are empty each packed skill has a twin: an edit can land in the wrong copy, and the old
+# name still resolves to the old behaviour. install.sh removes them; validate.py reports whatever
+# survives. Both read THIS list, because a root one of them checks and the other does not is how
+# the gate certifies a risk shut while it is still open.
+ORIGINAL_ROOTS = ("~/.claude/skills", "~/.agents/skills")
+
 # FR-16 — skills whose own text says they must never fire on their own AND that
 # nothing else in the pack has to invoke. task-review is deliberately NOT here:
 # its own text says the same thing, but `disable-model-invocation` does not
 # distinguish "auto-loaded" from "explicitly told to run", so it also blocked
 # /r:task-run's mandatory Step 5 from reaching the review through the Skill tool.
 # There, the rule is held by the description and the non-negotiables instead.
-NO_AUTO_FIRE = {"task-run", "gh-issues-fix"}
+NO_AUTO_FIRE = {"task-run", "issues-fix"}
 
 # Files worth rewriting at all; everything else is copied byte-for-byte.
 TEXT_SUFFIXES = (".md", ".js", ".mjs", ".py", ".sh", ".json", ".template", ".txt")

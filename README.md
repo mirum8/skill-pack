@@ -15,10 +15,14 @@ loaded as a skills-directory plugin named `r`. Every skill is reachable as
 ```sh
 git clone <this repo> ~/projects/skill-pack && cd ~/projects/skill-pack
 ./install.sh            # --dry-run to see the commands, --no-deps to skip provisioning
+                        # --keep-originals to keep the old flat-named skills installed
 ```
 
 `install.sh` copies the pack into `~/.claude/skills/r`, provisions the mandatory
-prerequisites, and removes a superseded global hook registration. Then **restart
+prerequisites, removes a superseded global hook registration, and retires the
+pre-pack originals still installed under their old flat names — the pack renames
+what it carries, so an original left behind is a twin that answers to the old
+name with the old behaviour. Pass `--keep-originals` to leave them. Then **restart
 the session** — skills-directory plugins are discovered at session start, never
 mid-session. An install that appears to have done nothing is almost always a
 session that was not restarted.
@@ -55,7 +59,7 @@ pack does not rely on it.
 |---|---|
 | `/r:task-run` | one unit of work end to end — plan, implement test-first, review, PR |
 | `/r:task-review` | the review pipeline over the current diff; never fires on its own |
-| `/r:gh-issues-fix` | triage, group and fix open GitHub bug issues, one group at a time |
+| `/r:issues-fix` | triage, group and fix a backlog — GitHub issues or a markdown list |
 | `/r:code-bugs` | hunt real defects, plus drift between the changes and the docs |
 | `/r:code-quality` | readability and idiom review; reports, never edits |
 | `/r:code-scan` | PMD + SpotBugs + Semgrep as local CLIs, then triage and fix |
@@ -75,7 +79,7 @@ alphabetically sorted `/` menu groups the families: `claudemd-*`, `code-*`,
 `spec-*`, `task-*`. `hexagonal-architecture` is the one exception — it is a
 rulebook rather than an action, and "hexagonal" is the word someone reaches for.
 
-`task-run` and `gh-issues-fix` carry `disable-model-invocation: true` — each says
+`task-run` and `issues-fix` carry `disable-model-invocation: true` — each says
 in its own text that it must never fire on its own, and the frontmatter enforces
 that rather than trusting the prose. They stay invocable by name; they just will
 not auto-load, and they do not appear in the model's own list of skills.
@@ -105,7 +109,7 @@ goes through `agent-browser`.
 | tool | for | install |
 |---|---|---|
 | `pmd`, `spotbugs`, `semgrep` | `code-scan` | `brew install pmd spotbugs semgrep` |
-| `gh` (authenticated) | `gh-issues-fix` | `brew install gh && gh auth login` |
+| `gh` (authenticated) | `task-run` issue sources and PRs; `issues-fix` against GitHub | `brew install gh && gh auth login` |
 | `agent-browser` | UI verification | `npm i -g agent-browser && agent-browser install` |
 | `node`, `python3` | workflow scripts, analyzers | — |
 

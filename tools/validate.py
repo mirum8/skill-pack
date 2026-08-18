@@ -382,11 +382,12 @@ def check_vendored():
 
 
 # --- R-4 --------------------------------------------------------------------
-# Every skills root a pre-pack original can still be sitting in. R-4 is the risk that an edit
-# lands in one of those instead of the pack, so "closed" may only be claimed when NO root holds
-# a twin. Checking one root and announcing the pack is the only copy is how the risk stays open
-# while the gate certifies it shut — which is worse than not checking, because it is believed.
-OTHER_SKILL_ROOTS = ("~/.agents/skills",)
+# R-4 is the risk that an edit lands in a pre-pack original instead of the pack, so "closed" may
+# only be claimed when NO root holds a twin. Checking one root and announcing the pack is the only
+# copy is how the risk stays open while the gate certifies it shut — which is worse than not
+# checking, because it is believed. The roots live in rename_rules so install.sh retires exactly
+# the ones this reports; `surviving_elsewhere` drops whichever one is currently being scanned.
+OTHER_SKILL_ROOTS = R.ORIGINAL_ROOTS
 
 
 def surviving_elsewhere(source_root):

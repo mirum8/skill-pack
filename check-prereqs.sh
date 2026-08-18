@@ -7,9 +7,9 @@
 #
 # This does not replace the checks the skills already do at the point of use —
 # code-scan/scripts/check-tools.sh names each analyzer and says which categories
-# go uncovered, gh-issues-fix gates on `gh auth status`, code-adversarial's
-# wrapper reports a skip when the Codex plugin is absent. Those are better than
-# any install-time check, because they fire when it matters and can say what
+# go uncovered, issues-fix gates on `gh auth status` when its source is GitHub,
+# code-adversarial's wrapper reports a skip when the Codex plugin is absent. Those
+# are better than any install-time check, because they fire when it matters and can say what
 # coverage was lost. This aggregates them to answer the one question they cannot
 # answer between them: will this pack work on this machine at all?
 set -uo pipefail
@@ -44,8 +44,11 @@ report python3       python3       "brew install python"              mandatory
 report node          node          "brew install node"                mandatory
 report agent-browser agent-browser "npm i -g agent-browser && agent-browser install" mandatory
 
-# gh has to be authenticated, not merely present: gh-issues-fix gates the whole
-# loop on `gh auth status`, so an unauthenticated gh fails later, not here.
+# gh has to be authenticated, not merely present: task-run resolves issue sources and
+# opens PRs through it, and issues-fix gates its whole loop on `gh auth status` whenever
+# the backlog is a GitHub one, so an unauthenticated gh fails later, not here. A run whose
+# source is a markdown list needs none of it — this stays mandatory for the pack, not for
+# every run.
 if report gh gh "brew install gh" mandatory; then
   if ! gh auth status >/dev/null 2>&1; then
     missing_mandatory=$((missing_mandatory + 1))

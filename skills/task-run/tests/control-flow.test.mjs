@@ -1211,6 +1211,43 @@ test('an unusable branch name from Phase 0 is replaced, never silently resolved 
   assert.match(logText, /unusable branch name/)
 })
 
+test('a file-backed list item is a first-class source: it reaches the handoff on its own branch', async () => {
+  // /r:issues-fix hands a file-backed backlog over as "<path> / <locator> | <locator>". The point
+  // of the `item` kind is that the criteria are LIFTED FROM THE FILE, where `text` is defined as
+  // the arm with none — so a grouped item source must arrive carrying both of its criteria.
+  const { out, prompts } = await run({
+    args: { source: "issues.md / Login 500s on '+' | Signup rejects unicode" },
+    source: baseSource({
+      kind: 'item', slug: 'items-login-escaping', branch: 'items-login-escaping',
+      planPath: '.task-plans/items-login-escaping.md',
+      criteria: ["Login 500s on '+': the address is escaped before the lookup",
+                 'Signup rejects unicode: a unicode name is accepted'],
+    }),
+    review: OK_REVIEW, planfix: OK_FIX, verdict: MIXED,
+    overrides: { branch: { onBranch: 'items-login-escaping' } },
+  })
+  assert.equal(out.stopped, undefined)
+  assert.equal(out.branch, 'items-login-escaping')
+  assert.equal(out.criteria.length, 2)
+  // The tier sink records WHICH source kind a run came from; an unrecognised kind would land here
+  // as 'issue' or 'text' and quietly pollute every per-source number read back out of the store.
+  assert.equal(JSON.parse(prompts['stats'].match(/\{"kind":"implement".*\}/)[0]).source, 'item')
+})
+
+test('an item source with an unusable branch name falls back to item-<slug>, never to base', async () => {
+  // The prefix table is the only place `item` could be forgotten, and forgetting it is silent:
+  // the fallback would build "issue-<slug>" for a change that has no issue anywhere.
+  const { out, prompts } = await run({
+    args: { source: 'issues.md / Login 500s' },
+    source: baseSource({ kind: 'item', slug: 'login-escaping', branch: '' }),
+    review: OK_REVIEW, planfix: OK_FIX,
+    overrides: { branch: { onBranch: 'item-login-escaping' } },
+  })
+  assert.equal(out.stopped, undefined)
+  assert.match(prompts['branch'], /item-login-escaping/)
+  assert.doesNotMatch(prompts['branch'], /issue-login-escaping/)
+})
+
 test('the branch agent is asked for the branch git is REALLY on, not the one it intended', async () => {
   const { prompts } = await run({ review: OK_REVIEW, planfix: OK_FIX })
   assert.match(prompts['branch'], /rev-parse --abbrev-ref HEAD/)

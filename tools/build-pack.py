@@ -292,7 +292,7 @@ MD_PATCHES = {
          f'  args: {{ packRoot: "{PR}",\n'
          '          source:'),
     ],
-    "gh-issues-fix/SKILL.md": [
+    "issues-fix/SKILL.md": [
         ('Workflow({ scriptPath: "$HOME/.claude/skills/run-task/'
          'run-task-implement.workflow.js",\n              args: { source:',
          f'Workflow({{ scriptPath: "{PR}/skills/task-run/task-run-implement.workflow.js",\n'

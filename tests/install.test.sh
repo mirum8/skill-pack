@@ -182,7 +182,60 @@ is   "the rsync path ships no __pycache__ either" \
      "$(find "$H4b/.claude/skills/r" -name __pycache__ | wc -l | tr -d ' ')" 0
 rm -rf "$REPO/lib/__pycache__"
 
-# --- 10. argument handling --------------------------------------------------
+# --- 10. superseded flat originals are retired (R-4) ------------------------
+# The pack renames what it carries, so an original left behind is a twin: the old bare name still
+# answers, with the OLD behaviour, and an edit can land in the wrong copy. "Fully replaced" is a
+# claim about both roots, which is why this seeds one original in each.
+seed_original() {                      # seed_original <home> <root-rel> <name> [--no-skill]
+  local d="$1/$2/$3"
+  mkdir -p "$d"
+  [[ ${4:-} == --no-skill ]] || printf -- '---\nname: %s\n---\n' "$3" > "$d/SKILL.md"
+}
+H7=$(newhome retire)
+seed_original "$H7" .claude/skills run-task
+seed_original "$H7" .agents/skills fix-gh-issues
+seed_original "$H7" .agents/skills find-bugs
+seed_original "$H7" .agents/skills sonar                 # not a pack original — must survive
+seed_original "$H7" .agents/skills commit --no-skill     # right name, not a skill — must survive
+out=$(run "$H7" --no-deps)
+hasnt "an original under ~/.claude/skills is retired"    "$H7/.claude/skills/run-task"
+hasnt "an original under ~/.agents/skills is retired"    "$H7/.agents/skills/fix-gh-issues"
+hasnt "every packed name is retired, not just one"       "$H7/.agents/skills/find-bugs"
+has   "a skill the pack does not carry is left alone"    "$H7/.agents/skills/sonar"
+has   "a same-named directory with no SKILL.md is left alone" "$H7/.agents/skills/commit"
+is    "it reports what it retired"                       "$(grep -c 'superseded original(s) retired' <<<"$out")" 1
+# The realpath guard earns its place here: one of the roots scanned IS the directory the pack
+# installs into, so a loop without it could delete the payload written moments earlier.
+has   "the pack it just wrote is untouched"              "$H7/.claude/skills/r/skills/task-run/SKILL.md"
+is    "the pack still holds all sixteen skills"          "$(ls "$H7/.claude/skills/r/skills" | wc -l | tr -d ' ')" 16
+
+# --- 11. --keep-originals opts out ------------------------------------------
+H8=$(newhome keep)
+seed_original "$H8" .agents/skills run-task
+out=$(run "$H8" --keep-originals --no-deps)
+has "--keep-originals leaves the original in place"      "$H8/.agents/skills/run-task"
+is  "--keep-originals says the old names still resolve" \
+    "$(grep -c 'skipped (--keep-originals)' <<<"$out")" 1
+
+# --- 12. --dry-run retires nothing ------------------------------------------
+H9=$(newhome retire-dry)
+seed_original "$H9" .agents/skills run-task
+out=$(run "$H9" --dry-run)
+has "--dry-run retires nothing"                          "$H9/.agents/skills/run-task"
+is  "--dry-run still echoes the retire commands"         "$(grep -c 'agents/skills/run-task' <<<"$out")" 1
+
+# --- 13. an unreadable rename table retires NOTHING -------------------------
+# The one failure worse than doing nothing: an empty list of names driving a delete loop. If the
+# table cannot be read the step must refuse, not proceed with whatever it managed to parse.
+NOTOOLS="$TMP/notools"
+rsync -a --exclude .git --exclude docs --exclude tools "$REPO/" "$NOTOOLS/"
+H10=$(newhome notools)
+seed_original "$H10" .agents/skills run-task
+out=$(HOME="$H10" bash "$NOTOOLS/install.sh" --no-deps 2>&1)
+has "no rename table means no original is retired"       "$H10/.agents/skills/run-task"
+is  "and it says so rather than passing silently"        "$(grep -c 'could not read tools/rename_rules.py' <<<"$out")" 1
+
+# --- 14. argument handling --------------------------------------------------
 H5=$(newhome args)
 out=$(run "$H5" --nonsense); rc=$?
 is   "an unknown option exits 2"                   "$rc" 2
@@ -192,7 +245,7 @@ is   "--help exits 0"                              "$rc" 0
 is   "--help explains the flags"                   "$(grep -c 'dry-run' <<<"$out")" 1
 hasnt "--help installs nothing"                    "$H5/.claude/skills/r"
 
-# --- 11. it stops if the pack was never built -------------------------------
+# --- 15. it stops if the pack was never built -------------------------------
 BARE="$TMP/bare"; mkdir -p "$BARE"
 cp "$REPO/install.sh" "$BARE/"; cp "$REPO/check-prereqs.sh" "$BARE/"
 H6=$(newhome bare)

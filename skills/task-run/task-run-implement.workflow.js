@@ -37,12 +37,18 @@
 //              args: { packRoot: "${CLAUDE_PLUGIN_ROOT}", ...
 //              args: { source: "#42", profile: "full", base: "main" } })
 // args: { source: string (REQUIRED — "#42" | "#42 #61" (a group of issues that
-//                 one change fixes) | "todo.md / Phase 3" | free text),
+//                 one change fixes) | "todo.md / Phase 3" | "issues.md / Login 500s"
+//                 (a list item, several joined by " | ") | free text),
 //         profile?: "light"|"standard"|"full" (omitted => classified here),
 //         base?: string (omitted => current branch) }
 //   Multiple issue refs in `source` ("#42 #61") are one GROUPED task: every issue
 //   is fetched, their acceptance criteria merge into criteria[], and the branch
-//   is issues-42-61-<slug>. The caller (e.g. /r:gh-issues-fix) closes all of them.
+//   is issues-42-61-<slug>. The caller (e.g. /r:issues-fix) closes all of them.
+//   A file-backed backlog groups the same way — "issues.md / Login 500s | Signup
+//   rejects unicode" is one task over two items of one list, branch items-<slug>.
+//   Either way the caller passes REFERENCES and this script re-reads the source
+//   for the criteria; a body pasted in as free text arrives with none, which is
+//   the whole difference between the "item" and "text" kinds below.
 // returns: { branch, base, profile, profileReason, profileForced, profileEscalated,
 //            uiTouched (settled: Phase 0's guess, which the explorers can turn ON),
 //            uiVisualChange (does anything RENDER differently — the design phase's own gate),
@@ -86,9 +92,9 @@ const SOURCE = {
              'profileReason', 'uiTouched', 'uiVisualChange', 'hasBackend', 'hasFrontend',
              'buildTool', 'exploreAspects', 'planPath', 'planStatus', 'branchExists'],
   properties: {
-    kind: { type: 'string', enum: ['issue', 'todo', 'text'] },
+    kind: { type: 'string', enum: ['issue', 'todo', 'item', 'text'] },
     slug: { type: 'string' },
-    branch: { type: 'string' },          // issue-<n>-<slug> | issues-<n1>-<n2>-<slug> | phase-<slug> | task-<slug>
+    branch: { type: 'string' },          // issue-<n>-<slug> | issues-<n1>-<n2>-<slug> | phase-<slug> | item(s)-<slug> | task-<slug>
     base: { type: 'string' },            // branch to return to / merge into later
     taskIntent: { type: 'string' },      // 1-3 sentences — threaded into every fixer downstream
     criteria: { type: 'array', items: { type: 'string' } },
@@ -448,7 +454,7 @@ const DESIGN_RUN = { model: 'opus', effort: 'high' }
 // The implementers were the one track that pinned nothing, so their depth came from the SESSION —
 // xhigh when entered through /r:task-run (whose frontmatter sets it), but whatever the caller
 // happened to be running at when this script is called directly, which SKILL.md explicitly invites
-// callers like /r:gh-issues-fix to do. The same workflow wrote code at a different depth depending on
+// callers like /r:issues-fix to do. The same workflow wrote code at a different depth depending on
 // the entry point, silently. Pin it instead: `high` is a real floor for work that follows a plan
 // built at opus/xhigh, challenged by Codex, and re-read afterwards by /r:task-review. The model
 // is named here too — the two specialized types already declare opus, so this only lifts the
@@ -571,19 +577,37 @@ ${inRepo}
       - Todo phase (a markdown path + a phase id, or "next phase"): read the file, locate the
         phase block; "next phase" = the first phase with unchecked "- [ ]" items.
         kind="todo", branch="phase-<slug>".
+      - List item(s) — a markdown/text file path, " / ", then one or more ITEM LOCATORS
+        joined by " | " ("issues.md / Login 500s on '+' | Signup rejects unicode"). A locator is
+        a short unique PREFIX of the item's own text, not its body. Read the file and find each
+        item: a checklist/bullet line ("- [ ] …", "- …", "1. …") plus any lines indented under it,
+        or a heading plus the prose beneath it. kind="item".
+        * One locator -> branch="item-<short-slug>".
+        * Several     -> branch="items-<short-slug>", the slug naming the shared fix. Several
+          locators are ONE GROUPED task, exactly as several issue refs are.
+        Do NOT tick, edit or reorder anything in that file — the caller marks items done after
+        its review passes and its merge lands. If a locator matches no item or matches more than
+        one, set blockedReason rather than guessing: the wrong item fixed is worse than a stop.
+        TODO PHASE vs LIST ITEM, since both are "<markdown path> / <something>": it is a PHASE
+        when what the locator names is a section CONTAINING a checklist (the whole block is the
+        task); it is an ITEM when what it names is a single line of one (that line is the task).
+        Decide by what you actually find in the file, never by the file's name.
       - Free text: the argument IS the task; there is no source to fetch. kind="text",
         branch="task-<slug>". If the input is contentless or genuinely ambiguous (no file, no
         issue, no described work), set blockedReason — there is no task to run.
-   2. ACCEPTANCE CRITERIA -> criteria[]. For an issue or a phase, take the checklist/bullets that
-      describe "done". For a GROUP of issues, merge every issue's criteria into the one criteria[],
-      each prefixed with its number ("#42: …") so the planner and implementers can tell which
-      issue each requirement belongs to — the fix is done only when EVERY grouped issue's criteria
-      are met. For free text there are none written: leave criteria empty — deriving them is the
-      planner's job — but still write taskIntent.
+   2. ACCEPTANCE CRITERIA -> criteria[]. For an issue, a phase or a list item, take the
+      checklist/bullets that describe "done" — for an item that is its own text plus whatever is
+      nested under it. For a GROUP (several issue refs, or several locators), merge every member's
+      criteria into the one criteria[], each prefixed with its identity ("#42: …", "Login 500s: …")
+      so the planner and implementers can tell which member each requirement belongs to — the fix
+      is done only when EVERY grouped member's criteria are met. For free text there are none
+      written: leave criteria empty — deriving them is the planner's job — but still write
+      taskIntent. This is the ONLY difference that matters between "item" and "text": an item has
+      written criteria to lift, so never downgrade one to free text.
    3. taskIntent: 1-3 sentences on what this task sets out to do. It is threaded into every
       downstream implementer and (via the handoff) into the review, so a fixer cannot "fix"
       something the task did on purpose. Write it even when criteria are empty. For a group, state
-      the shared change and name the issues it resolves.
+      the shared change and name the issues or items it resolves.
    4. TIER (${forcedProfile ? `FORCED to "${forcedProfile}" by the caller — return exactly that, and still write profileReason` : 'classify it'}):
       Classify the CHANGE this task will make — not the subsystem it lives in. Almost every file
       worth editing sits near a query, a permission check or some money math; what decides the
@@ -994,7 +1018,7 @@ if (classifyOnly) {
 // reported "main" passed the only test there was (non-empty). Two guards close it — a branch name
 // that is missing or equal to base never reaches the agent, and a result equal to base is retried
 // once and then STOPS the run. `branch === base` is not a degraded success; it is a failed step.
-const branchPrefix = src.kind === 'todo' ? 'phase' : src.kind === 'text' ? 'task' : 'issue'
+const branchPrefix = src.kind === 'todo' ? 'phase' : src.kind === 'text' ? 'task' : src.kind === 'item' ? 'item' : 'issue'
 const srcSlug = (src.slug || '').trim()
 let wantBranch = (src.branch || '').trim()
 if (!wantBranch || wantBranch === src.base) {
