@@ -1881,7 +1881,16 @@ const TRACKS = [['codex', codex, wantCodexUpfront],
 const tracksBlocked = TRACKS.filter(([, r, ran]) => ran && blocked(r)).map(([n]) => n)
 // Named separately from tracksBlocked so a caller can tell an absent optional prerequisite
 // from a tool that failed. Both mean the step did not run; only one is anybody's fault.
+//
+// The security hunter is appended by hand because its gate is not like the others': `securitySurface`
+// is a per-DIFF decision taken above, not a tier decision, so nothing in TRACKS can see it — at full
+// tier the hunter simply drops out of HUNTER_SET while `hunterTrack` still reports as having run.
+// Recording it matters beyond this payload: the stats report derives a track's denominator from the
+// TIER, so without this line every standard/full run counts as an opportunity security had, whether
+// or not the hunter dispatched, and its fixes-per-run reads lower than it earned — which is the
+// number the retirement list reads. Logging the skip to the user is not recording it.
 const tracksSkipped = TRACKS.filter(([, r, ran]) => ran && skipped(r)).map(([n]) => n)
+  .concat(!securitySurface && profile !== 'light' ? ['security'] : [])
 const endVerifyVerdict = !endVerifyWanted ? 'skipped'
   : endVerifyBlocked ? 'blocked'
   : (endVerifyUnresolved.length ? 'findings-unresolved' : 'passed')

@@ -637,6 +637,21 @@ test('a skipped security hunter is reported as a SKIP, never as coverage', async
   assert.match(prompts['fix-triage'], /skip, not a clean bill/)
 })
 
+test('a security hunter closed by its per-diff gate is RECORDED as skipped', async () => {
+  // Not cosmetic. The stats report derives a track's denominator from the TIER, so a skip it
+  // cannot see counts as a run the hunter had a chance on and produced nothing — which is the
+  // number that puts a track on the retirement list. `securitySurface` is the one gate that is
+  // per-diff rather than per-tier, so it is the one the tier cannot account for.
+  const { out } = await run({ triage: baseTriage({ securitySurface: false }) })
+  assert.ok(out.tracksSkipped.includes('security'))
+  assert.ok(!out.tracksBlocked.includes('security'), 'a closed gate is not a tool failure')
+
+  // The other direction: a hunter that RAN must never be recorded as skipped, or the denominator
+  // shrinks below what the track was actually asked to do and its fixes/run reads too high.
+  const ran = await run({ triage: baseTriage({ securitySurface: true }) })
+  assert.ok(!ran.out.tracksSkipped.includes('security'))
+})
+
 test('at standard with no security surface, no hunter is dispatched inside the barrier', async () => {
   // Both members of the standard set are gone — the security hunter by its own surface gate, the
   // docs hunter because it never belonged to this barrier. The name has to say that plainly rather

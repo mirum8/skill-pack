@@ -171,6 +171,25 @@ test('every judged plan finding reaches the stats row with its rubric and verdic
   assert.equal(row.findings.filter((f) => f.verdict === 'dismissed').length, row.planDropped)
 })
 
+test('the rubric is a CLOSED vocabulary, in the schema and in the prompt', async () => {
+  // Left as a free string, the reviewer writes composites — `coverage / test-adequacy`,
+  // `risk / test-adequacy`, `simplicity (YAGNI) / project rules` were all measured in the store —
+  // and each spelling becomes a track of its own, so one rubric's findings sit in three rows that
+  // cannot be added back together. That is the exact question these rows exist to answer (which
+  // rubric keeps raising findings nobody buys), and it also splits the batching below, whose whole
+  // saving comes from findings that are checked the same way sharing one reader.
+  const RUBRICS = ['coverage', 'grounding', 'test-adequacy', 'simplicity', 'risk', 'ui-design']
+  const { optsBy, prompts } = await run({ review: OK_REVIEW, planfix: OK_FIX })
+  const schema = optsBy['codex-plan-review#1'].schema
+  assert.deepEqual(schema.properties.findings.items.properties.rubric.enum, RUBRICS)
+  // The prompt has to name the same tokens the schema accepts. A rubric described only as prose
+  // headings ("Test adequacy") and enforced as slugs ('test-adequacy') costs a retry per finding.
+  for (const r of RUBRICS.filter((r) => r !== 'ui-design')) {
+    assert.match(prompts['codex-plan-review#1'], new RegExp(r))
+  }
+  assert.match(prompts['codex-plan-review#1'], /EXACTLY ONE rubric/)
+})
+
 test('every finding is judged, in rubric batches, and the judges get the explorer briefs', async () => {
   // Two failure modes locked out at once. ONE agent handed nothing but the finding strings has to
   // re-read the codebase to answer the first finding and then works the rest serially — hence the

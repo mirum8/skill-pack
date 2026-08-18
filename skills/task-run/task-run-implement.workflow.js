@@ -268,9 +268,18 @@ const REVIEW = {
         required: ['severity', 'rubric', 'what'],
         properties: {
           severity: { type: 'string', enum: ['major', 'minor'] },
-          // coverage | grounding | test-adequacy | simplicity | risk | ui-design (the last only
-          // when the plan carries a design section, i.e. a UI change)
-          rubric: { type: 'string' },
+          // An ENUM, not a free string. Left open, the reviewer writes composites — `coverage /
+          // test-adequacy`, `risk / test-adequacy`, `simplicity (YAGNI) / project rules` — and each
+          // spelling lands in the stats store as a track of its own, so one rubric's findings sit
+          // in three rows that nothing can add back together. That defeats the reason the rows are
+          // recorded at all (see the sink below: WHICH rubric keeps raising findings nobody buys),
+          // and it splits the judge batching, which groups by this value precisely so the code
+          // behind a group is read once. An enum is enforced at the tool-call layer, so a composite
+          // comes back as a retry rather than as a row. `ui-design` is only reachable when the plan
+          // carries a design section, i.e. a UI change.
+          rubric: { type: 'string',
+                    enum: ['coverage', 'grounding', 'test-adequacy', 'simplicity', 'risk',
+                           'ui-design'] },
           what: { type: 'string' },
         },
       },
@@ -1437,7 +1446,11 @@ ${uiDesignNote}
 const planReview = { ran: false, passes: 0, raised: 0, applied: [], dropped: [], judged: [] }
 if (!resuming && profile === 'full') {
   phase('Plan-review')
-  const rubric = `Work through this fixed rubric and tag every finding major or minor:
+  const rubric = `Work through this fixed rubric. Tag every finding major or minor, and tag it
+     with EXACTLY ONE rubric, spelled verbatim from this list:
+       coverage | grounding | test-adequacy | simplicity | risk${designSection ? ' | ui-design' : ''}
+     One tag, never two joined by a slash, and never a name of your own: a finding that seems
+     to span two rubrics belongs to the one that would have caught it first.
      1. Coverage — does every acceptance criterion map to a concrete implementation AND a test
         that proves it? A criterion covered only in prose is a gap.
      2. Grounding — do the cited file:LINE references and the Reuse map actually exist and behave

@@ -103,6 +103,52 @@ TRACK_REVS = {
 }
 LATEST_REV = max(TRACK_REVS)
 
+# Tracks the review SURFACES but never routes to a fixer, and the payload counter carrying what each
+# one produced. A track in here cannot appear in `fixedBySource` at all, so "never produced a fix"
+# measures nothing about it: doc drift resolves to update-doc / update-code / confirm-intent, which
+# is the USER's call, so the pipeline reports it and stops. Reading that structural zero as a dead
+# track is measuring the metric rather than the tool — and it is the retirement list below that
+# would act on it, recommending the deletion of a hunter doing exactly its job, on every run,
+# forever. Per-finding rows carry the same fact as verdict='unresolved'; this counter is what the
+# runs recorded before those rows existed, and the only evidence most stored runs have.
+SURFACED_ONLY = {"docs": "docDriftCount"}
+
+# A review names a dead track in the CALLER's vocabulary, which is not this table's. The hunter
+# fan-out is reported under ONE name — the scan's, or the security hunter's alone at a tier where
+# that hunter is all the scan has left — while the tier dispatches its members separately and
+# scores them separately. Expanding the alias is what makes a scan that never ran subtract from
+# every hunter it stood for; without it the subtraction quietly covers only `codex` and `docs` and
+# misses the most expensive thing that can fail here. Which hunters a name stood for is a TIER
+# question, so these are intersected with the row's own tier rather than applied whole. Both
+# revisions' member names are listed for the same reason: the intersection is what decides, so a
+# name belonging to the other rev simply drops out.
+#
+# The keys are strings ANOTHER file emits. `lib/tests/stats.test.sh` checks them against it — a
+# rename there would otherwise stop the subtraction silently, with no error and no empty column.
+HUNTER_ALIASES = {
+    "find-bugs": {"logic", "runtime-and-failures", "concurrency", "silent-failures", "security"},
+    "security hunter": {"security"},
+}
+
+
+def missed_tracks(row):
+    """The tracks this row dispatched on paper and never actually ran — a per-diff gate closed
+    (`tracksSkipped`) or the tool failed (`tracksBlocked`). The two are different in meaning and
+    are reported apart, but they are the same thing to a denominator: the track had no chance to
+    produce a fix, so counting the run as an opportunity divides its yield by a diff it never saw.
+
+    A name that maps to nothing is left alone rather than guessed at. That leaves the denominator
+    too generous, which under-states the track — the safe direction, because the number is read to
+    decide what to delete."""
+    tier = tier_tracks(row)
+    out = set()
+    for name in list(row.get("tracksSkipped") or []) + list(row.get("tracksBlocked") or []):
+        if name in tier:
+            out.add(name)
+        else:
+            out |= HUNTER_ALIASES.get(name, set()) & tier
+    return out
+
 
 def sink():
     """The writer, imported rather than reimplemented — one definition of the INSERT and of the
@@ -441,22 +487,58 @@ def summarize_reviews(rows):
         for r in live:
             for k, v in (r.get("fixedBySource") or {}).items():
                 hits[k] += v
-        # A track can only score on a run that dispatched it.
+        # A track can only score on a run that dispatched it. The tier says which tracks were in
+        # play; missed_tracks() says which of those never actually ran on THIS diff — a per-diff
+        # gate closed it (the security hunter's `securitySurface`) or its tool failed. Count either
+        # as an opportunity and the track's fixes-per-run is divided by runs it never saw.
         opps = collections.Counter()
         for r in live:
+            missed = missed_tracks(r)
             for t in tier_tracks(r):
-                opps[t] += 1
+                # `+= 0` on purpose: a track whose gate closed on every run still gets a ROW, at
+                # zero. Dropping it from the table would hide the one track nothing can be said
+                # about behind the same blank as a track that does not exist — and this table is
+                # read to decide what to delete.
+                opps[t] += 0 if t in missed else 1
             if r.get("endVerify") in ("passed", "findings-unresolved"):
                 opps["end-verify"] += 1
+        # What the surfaced-only tracks handed the user, for the line under the table.
+        surfaced = collections.Counter()
+        for r in live:
+            for t, key in SURFACED_ONLY.items():
+                n = r.get(key)
+                if isinstance(n, int):
+                    surfaced[t] += n
         names = sorted(set(hits) | set(opps), key=lambda k: (-hits[k], k))
         print(f"  {'track':<16}{'fixes':>7}{'runs it ran in':>16}{'fixes/run':>12}")
         for t in names:
-            rate = f"{hits[t] / opps[t]:.2f}" if opps[t] else "—"
+            # `n/a` rather than 0.00: the column does not apply to a track whose findings never
+            # reach a fixer, and a printed zero is read as a yield.
+            rate = ("n/a" if t in SURFACED_ONLY
+                    else f"{hits[t] / opps[t]:.2f}" if opps[t] else "—")
             print(f"  {t:<16}{hits[t]:>7}{opps[t]:>16}{rate:>12}")
-        dark = [t for t in names if opps[t] >= 5 and hits[t] == 0]
+        for t in sorted(SURFACED_ONLY):
+            if opps[t]:
+                print(f"\n  {t}: {surfaced[t]} item(s) surfaced over {opps[t]} run(s), and 0 fixed BY")
+                print("  DESIGN — the pipeline hands these to you rather than acting on them, so this")
+                print("  track can never score above. It is not a retirement candidate; to judge it,")
+                print("  read what it surfaced.")
+        dark = [t for t in names
+                if opps[t] >= 5 and hits[t] == 0 and t not in SURFACED_ONLY]
         if dark:
             print(f"\n  ran >=5 times and never produced a fix: {', '.join(dark)}")
             print("  (candidates for retirement — confirm the sample is big enough first)")
+            # A denominator is only as good as the record of what did not run. A row missing
+            # either field counts every tier track as an opportunity, including ones a per-diff
+            # gate closed or a failed tool never reached — so for those runs the figure above is an
+            # upper bound and the fixes-per-run a lower one. Said out loud rather than left to be
+            # discovered: the whole point of this list is that somebody acts on it.
+            blind = sum(1 for r in live
+                        if "tracksSkipped" not in r or "tracksBlocked" not in r)
+            if blind:
+                print(f"  {blind}/{len(live)} of the runs behind these figures predate the record of")
+                print("  what did NOT run, so their denominators still count tracks a per-diff gate")
+                print("  closed or a failed tool never reached. Treat each as an upper bound.")
     print()
 
     blocked = collections.Counter()
@@ -1029,11 +1111,26 @@ def summarize_cost(db):
         # Said out loud rather than left as a shortfall in the table above. The label is recovered
         # from the prompt, so a run recorded by a script the pack no longer ships classifies as
         # nothing — that is missing attribution, not a step that cost nothing.
-        dark = con.execute("SELECT COUNT(*) FROM items WHERE label IS NULL").fetchone()[0]
+        #
+        # Split by provenance, because one total buries the number worth acting on under the number
+        # that means nothing. An unlabelled item sitting in a workflow run that DID produce pipeline
+        # steps is one of ours in a prompt shape the classifier cannot read — the expensive kind,
+        # since it costs its step on every run it ever made. An unlabelled item in a run with no
+        # pipeline step at all belongs to somebody else's workflow (any ad-hoc script put through
+        # the Workflow tool in any repo lands in the same store) and was never ours to label. The
+        # second dwarfs the first, so an undivided total reads as a large regression at all times
+        # and therefore reports nothing at all.
+        dark, ours = con.execute(
+            "SELECT COUNT(*), COUNT(CASE WHEN wf_run_id IN "
+            "  (SELECT wf_run_id FROM items WHERE label IS NOT NULL) THEN 1 END) "
+            "FROM items WHERE label IS NULL").fetchone()
         if dark:
-            print(f"\n  {dark} item(s) carry no step label — their prompts match no dispatch site in")
-            print("  the shipped pipelines. Pass --label-source <script> to classify runs recorded")
-            print("  by an older or foreign workflow.")
+            print(f"\n  {dark} item(s) carry no step label. {ours} of them sit in a workflow run that")
+            print("  DID produce pipeline steps — those are the ones to chase: a prompt shape the")
+            print("  classifier cannot read costs its step every run it ever made. The other")
+            print(f"  {dark - ours} come from workflow runs with no pipeline step at all, which are not")
+            print("  this pack's. Pass --label-source <script> to classify runs recorded by an older")
+            print("  or foreign workflow.")
         print()
     finally:
         con.close()

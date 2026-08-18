@@ -200,6 +200,110 @@ ok "a chunk two steps share names neither" \
 ok "a chunk only one step uses still names it" \
    "$(in_fixture 'Take the screenshots at three viewports and say what each one shows.')" gamma
 
+# --- reading the fixes-by-source table honestly ------------------------------
+# The two ways this table lies about a track that is behaving correctly. Both end in the same
+# place: a name on the retirement list, which is the one line here anybody acts on.
+R="$TMP/review.db"
+for i in 1 2 3 4 5 6; do
+  echo "{\"kind\":\"review\",\"profile\":\"full\",\"pipeline\":2,\"origin\":\"live\",\"n\":$i,
+         \"fixedBySource\":{\"logic\":1},\"docDriftCount\":3,\"tracksSkipped\":[\"security\"]}" \
+    | python3 "$SINK" --db "$R" >/dev/null 2>&1
+done
+rep=$(python3 "$REPORT" --db "$R" --review 2>&1)
+
+# A per-DIFF gate (the security hunter's `securitySurface`) closes on a run the TIER still lists as
+# dispatching that track. Counted as an opportunity, every such run divides the track's yield by a
+# diff it never saw — and drives it toward a retirement it did not earn.
+ok "a skipped track gets no opportunity"   "$(grep -cE '^  security +0 +0' <<<"$rep")" 1
+ok "a track that ran keeps its own"        "$(grep -cE '^  logic +6 +6 +1\.00' <<<"$rep")" 1
+
+# A BLOCKED track is a different claim from a skipped one — nobody's fault versus a tool that
+# failed — and they stay reported apart. To a denominator they are the same: the track never ran,
+# so the run was not an opportunity it had and missed.
+B="$TMP/blocked.db"
+for i in 1 2 3 4 5 6; do
+  echo "{\"kind\":\"review\",\"profile\":\"full\",\"pipeline\":2,\"origin\":\"live\",\"n\":$i,
+         \"fixedBySource\":{\"logic\":1},\"tracksSkipped\":[],\"tracksBlocked\":[\"codex\"]}" \
+    | python3 "$SINK" --db "$B" >/dev/null 2>&1
+done
+rep=$(python3 "$REPORT" --db "$B" --review 2>&1)
+ok "a blocked track gets no opportunity either" "$(grep -cE '^  codex +0 +0' <<<"$rep")" 1
+ok "and it is still reported as blocked"   "$(grep -cE '^  codex +6' <<<"$rep")" 1
+
+# The case a naive union of the two lists silently misses. A review names a dead track for its
+# CALLER, and the hunter fan-out reports under one name while the tier scores its members
+# separately. Unexpanded, the subtraction covers `codex` and `docs` and quietly skips the whole
+# scan — the most expensive thing that can fail in the pipeline.
+A2="$TMP/alias.db"
+for i in 1 2 3 4 5 6; do
+  echo "{\"kind\":\"review\",\"profile\":\"full\",\"pipeline\":2,\"origin\":\"live\",\"n\":$i,
+         \"fixedBySource\":{\"codex\":1},\"tracksSkipped\":[],\"tracksBlocked\":[\"find-bugs\"]}" \
+    | python3 "$SINK" --db "$A2" >/dev/null 2>&1
+done
+rep=$(python3 "$REPORT" --db "$A2" --review 2>&1)
+for t in logic runtime-and-failures security; do
+  ok "a blocked scan subtracts from $t"    "$(grep -cE "^  $t +0 +0" <<<"$rep")" 1
+done
+ok "the track that DID run is untouched"   "$(grep -cE '^  codex +6 +6 +1\.00' <<<"$rep")" 1
+# The alias is intersected with the tier, never applied whole: at standard the fan-out never
+# dispatched `logic` at all, so there is nothing there to subtract from and no row to invent.
+echo '{"kind":"review","profile":"standard","pipeline":2,"origin":"live","fixedBySource":{},
+       "tracksSkipped":[],"tracksBlocked":["security hunter"]}' \
+  | python3 "$SINK" --db "$TMP/std.db" >/dev/null 2>&1
+rep=$(python3 "$REPORT" --db "$TMP/std.db" --review 2>&1)
+ok "an alias never invents a track off-tier" "$(grep -cE '^  logic ' <<<"$rep")" 0
+ok "and it still subtracts the one on-tier"  "$(grep -cE '^  security +0 +0' <<<"$rep")" 1
+
+# Back to the first store: the fixtures above each rebound `rep`.
+rep=$(python3 "$REPORT" --db "$R" --review 2>&1)
+
+# `docs` produces findings the pipeline hands to the USER and never fixes (update-doc /
+# update-code / confirm-intent is nobody else's call), so it cannot appear in fixedBySource at all.
+# Its zero is structural. Reading it as a dead track measures the metric, not the tool.
+ok "a surfaced-only track is not a retirement candidate" \
+   "$(grep 'never produced a fix' <<<"$rep" | grep -c docs)" 0
+ok "what it surfaced is reported instead"  "$(grep -c 'docs: 18 item(s) surfaced over 6 run(s)' <<<"$rep")" 1
+ok "and its fixes/run reads n/a, not 0.00" "$(grep -cE '^  docs +0 +6 +n/a' <<<"$rep")" 1
+# The list must still fire, or the exemption above has quietly disabled it.
+ok "a genuinely dark track is still named" \
+   "$(grep 'never produced a fix' <<<"$rep" | grep -c runtime-and-failures)" 1
+
+# A run written before the pipeline reported what did NOT run counts every tier track as an
+# opportunity, closed gates and failed tools included. That is an upper bound, and saying so is the
+# difference between a number somebody acts on and a number somebody acts on wrongly.
+echo '{"kind":"review","profile":"full","pipeline":2,"origin":"live","fixedBySource":{}}' \
+  | python3 "$SINK" --db "$R" >/dev/null 2>&1
+ok "an unverifiable denominator says so"   \
+   "$(python3 "$REPORT" --db "$R" --review 2>&1 | grep -c 'predate the record of')" 1
+
+# The alias map holds strings PRODUCED by another file. A rename there and the subtraction above
+# silently stops happening — no error, no empty column, just a denominator quietly too large again.
+# So the keys are checked against the script that emits them.
+aliases=$(python3 - <<'PYA'
+import importlib.util
+spec = importlib.util.spec_from_file_location("ss", "lib/skill-stats.py")
+ss = importlib.util.module_from_spec(spec); spec.loader.exec_module(ss)
+src = open("skills/task-review/task-review.workflow.js", encoding="utf-8").read()
+print(sum(1 for k in ss.HUNTER_ALIASES if f"'{k}'" not in src))
+PYA
+)
+ok "every alias key is a name the review emits" "$aliases" 0
+
+# --- whose unlabelled items are they -----------------------------------------
+# One total buries the only number worth acting on. An unlabelled item beside a LABELLED one is a
+# prompt shape this classifier cannot read — and a shape that goes unread costs its step on every
+# run it ever made. An unlabelled item in a run with no pipeline step at all is somebody else's
+# workflow, put through the same tool into the same store, and was never ours to label.
+I2="$TMP/items.db"
+echo '{"kind":"review","origin":"live"}' | python3 "$SINK" --db "$I2" >/dev/null 2>&1
+sqlite3 "$I2" "INSERT INTO items(wf_run_id,agent_id,label,tokens_in,tokens_out,tokens_cache) VALUES
+  ('wf_ours','a1','implement',1,1,1), ('wf_ours','a2',NULL,1,1,1),
+  ('wf_theirs','b1',NULL,1,1,1), ('wf_theirs','b2',NULL,1,1,1), ('wf_theirs','b3',NULL,1,1,1);"
+rep=$(python3 "$REPORT" --db "$I2" 2>&1)
+ok "the unlabelled total is still reported" "$(grep -c '4 item(s) carry no step label' <<<"$rep")" 1
+ok "the ones in a pipeline run are singled out" "$(grep -c '1 of them sit in a workflow run' <<<"$rep")" 1
+ok "the foreign ones are counted apart"     "$(grep -c '3 come from workflow runs with no pipeline step' <<<"$rep")" 1
+
 # --- importing the pre-SQLite archive ---------------------------------------
 A="$TMP/archive.jsonl"; I="$TMP/imported.db"
 printf '%s\n' \
