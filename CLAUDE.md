@@ -113,6 +113,15 @@ stays that skill's store. Rules that are load-bearing:
   is not, and one type covers many steps. Read from the scripts, never a table here, so a reworded
   prompt updates the mapping with the wording; an unmatched prompt stays **unlabelled** and is
   counted as such, because a wrong step name is averaged in silently while a gap is visible.
+  All three shapes a prompt is dispatched in are read — the literal passed to the call, the
+  `prompt:` beside its `label:` in a table of tracks, and the literal under a builder the call
+  passes by name — and a shape that goes unread costs its step every run it ever made: 995 of the
+  1,646 unlabelled items were `implement`, `find-bugs`, `build`, `source` and `judge`, and
+  `implement` alone turned out to be the most expensive step in the pipeline at 1.49B tokens.
+  A chunk two steps share names neither. A stored label is corrected only when it is a step these
+  same scripts can write — that one is this classifier's own earlier answer, so a disagreement is
+  it having improved; a label outside their vocabulary came from a `--label-source` run over older
+  scripts and is left alone.
 - **No fallback store.** A row the db rejects is lost. That is why inserts say
   `ON CONFLICT(<key>) DO NOTHING` and never `INSERT OR IGNORE`, which also swallows a `NOT NULL`
   violation — it hid exactly that bug once.

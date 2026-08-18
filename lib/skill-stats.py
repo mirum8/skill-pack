@@ -540,6 +540,11 @@ ITEM_COLUMNS = ("run_id", "wf_run_id", "agent_id", "agent_type", "label", "model
 # with the wording, and the failure mode of a rename is an unlabelled row — visible, and counted in
 # the report — rather than a confidently wrong one.
 LABEL_SIG_MIN = 28   # shorter chunks start matching more than one dispatch site
+INTERP = "\x00"     # where a `${…}` stood: the static text around it is what identifies a step
+# `label:` up to the first string in its value, so a step chosen by a ternary
+# (`label: attempt === 1 ? 'branch' : 'branch-retry'`) is read as the step it names first rather
+# than skipped. Bounded to the property's own value: it may not reach past a comma into the next.
+LABEL_RE = re.compile(r"""label:\s*[^,}\n]*?[`'"]([^`'"]*)""")
 # The pre-pack skill names, frozen. History was written by scripts that used them, and without this
 # every run before the rename classifies as unlabelled.
 LABEL_ALIASES = {"post-task-review": "task-review", "run-task-implement": "task-run",
@@ -557,27 +562,183 @@ def _label_norm(text):
     return re.sub(r"[^a-z0-9]+", "", t)
 
 
+def _skip_string(src, i, quote):
+    """The index just past a '…' or "…" string whose opening quote sat at i-1."""
+    while i < len(src):
+        if src[i] == "\\":
+            i += 2
+        elif src[i] == quote:
+            return i + 1
+        else:
+            i += 1
+    return i
+
+
+def _skip_expr(src, i):
+    """The index just past the `}` closing a brace that opened at i-1."""
+    depth = 1
+    while i < len(src) and depth:
+        c = src[i]
+        if c == "{":
+            depth += 1
+            i += 1
+        elif c == "}":
+            depth -= 1
+            i += 1
+        elif c in "'\"":
+            i = _skip_string(src, i + 1, c)
+        elif c == "`":
+            i = _scan_template(src, i + 1)[1]
+        elif c == "/" and src[i + 1:i + 2] == "/":
+            j = src.find("\n", i)
+            i = len(src) if j < 0 else j + 1
+        elif c == "/" and src[i + 1:i + 2] == "*":
+            j = src.find("*/", i)
+            i = len(src) if j < 0 else j + 2
+        else:
+            i += 1
+    return i
+
+
+def _scan_template(src, i):
+    """(text, index just past the closing backtick) for the template literal opened at i-1.
+
+    Hand-scanned rather than matched with a regex, because a prompt holds both escaped backticks
+    (\\`mvn package\\`) and nested `${… `…` …}` interpolations. Stopping at the first backtick
+    truncates a prompt to its opening words — "Run the build " — which is too short to name a step,
+    so the whole dispatch falls out of the report.
+    """
+    out, n = [], len(src)
+    while i < n:
+        c = src[i]
+        if c == "\\":
+            out.append(src[i + 1:i + 2])
+            i += 2
+        elif c == "`":
+            return "".join(out), i + 1
+        elif c == "$" and src[i + 1:i + 2] == "{":
+            out.append(INTERP)
+            i = _skip_expr(src, i + 2)
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out), n
+
+
+def _template_literals(src):
+    """[(start, end, text)] for every template literal in a script, in source order."""
+    lits, i, n = [], 0, len(src)
+    while i < n:
+        c = src[i]
+        if c == "/" and src[i + 1:i + 2] == "/":
+            j = src.find("\n", i)
+            i = n if j < 0 else j + 1
+        elif c == "/" and src[i + 1:i + 2] == "*":
+            j = src.find("*/", i)
+            i = n if j < 0 else j + 2
+        elif c in "'\"":
+            i = _skip_string(src, i + 1, c)
+        elif c == "`":
+            text, end = _scan_template(src, i + 1)
+            lits.append((i, end, text))
+            i = end
+        else:
+            i += 1
+    return lits
+
+
+def _step(raw):
+    """The step a `label:` names. `end-verify#${pass}`, `implement:${a.label}` and the docs-only
+    `find-bugs:docs` are one step each, not one per run and not one per track — the sub-track is
+    already in `agent_type`, and splitting a step by it leaves every slice too small to read."""
+    return re.sub(r"[#$:].*", "", raw).rstrip("-") or raw
+
+
+def _label_after(window):
+    """The step named by the opts object that follows a prompt argument, or None.
+
+    The window must OPEN with that object — a literal followed by anything else is not a prompt
+    being dispatched — and the search stops at the object's own closing brace, so a label can never
+    be lifted off the call below: a step name borrowed from a neighbour is precisely the
+    confidently-wrong answer this scheme exists to avoid. The brace is what bounds it, not the next
+    literal: a `label:` whose value is itself a template starts one a single character in.
+    """
+    text = re.sub(r"/\*.*?\*/|//[^\n]*", "", window[:800], flags=re.S)
+    if not re.match(r"\s*,\s*\{", text):
+        return None
+    opts = text.index("{")
+    m = LABEL_RE.search(text[opts:_skip_expr(text, opts + 1)])
+    return _step(m.group(1)) if m else None
+
+
+def _builder_labels(src):
+    """{name: step} for a dispatch whose prompt is a named builder — `agent(implBrief(a), {…})`.
+
+    The prompt is then a literal elsewhere in the file, under that builder's own definition.
+    """
+    out = {}
+    for m in re.finditer(r"\bagent\(\s*([A-Za-z_$][\w$]*)\s*(?:\([^()]*\))?\s*,", src):
+        label = _label_after(src[m.end() - 1:])
+        if label:
+            out.setdefault(m.group(1), set()).add(label)
+    # A builder dispatched under two different steps names neither of them.
+    return {n: next(iter(l)) for n, l in out.items() if len(l) == 1}
+
+
+def _builder_spans(src, lits):
+    """[(start, end, step)] over each named builder's definition, so the literals inside it are
+    claimed by the step that dispatches it."""
+    inside = lambda p: any(s < p < e for s, e, _ in lits)
+    tops = [m.start() for m in re.finditer(r"^\S", src, re.M) if not inside(m.start())]
+    spans = []
+    for name, label in _builder_labels(src).items():
+        m = re.search(r"^(?:const|let|var|function|async function)\s+" + re.escape(name) + r"\b",
+                      src, re.M)
+        if m:
+            spans.append((m.start(), next((t for t in tops if t > m.start()), len(src)), label))
+    return spans
+
+
 def label_signatures(paths):
-    """[(normalised literal chunk, label)] for every agent() dispatch, longest chunk first."""
-    sigs = []
+    """[(normalised literal chunk, label)] for every prompt a pipeline dispatches, longest first.
+
+    A prompt reaches its agent in one of three shapes, and all three are read here: the literal
+    handed straight to the call (`agent(`…`, { label })`), the literal held as a `prompt:` beside
+    its own `label:` in a table of tracks, and the literal under a named builder that the call
+    passes by name. A shape none of the three recognise contributes no signature, and its runs stay
+    unlabelled — which the report counts and prints.
+
+    A chunk two steps share is dropped rather than awarded to whichever sorted first.
+    """
+    sigs = {}
     for path in paths:
         try:
             src = open(path, encoding="utf-8", errors="replace").read()
         except OSError:
             continue
-        for m in re.finditer(r"agent\(\s*`", src):
-            body = src[m.end():m.end() + 8000]
-            end = body.find("`")
-            lm = re.search(r"label:\s*[`'\"]([^`'\"]*)", body)
-            if end <= 0 or not lm:
+        lits = _template_literals(src)
+        spans = _builder_spans(src, lits)
+        for k, (start, end, text) in enumerate(lits):
+            label = _label_after(src[end:])
+            if not label:
+                head = src[lits[k - 1][1] if k else 0:start]
+                if re.search(r"\bprompt:\s*$", head):
+                    # A track table pairs the two the other way round: `{ label: …, prompt: `…` }`.
+                    hits = list(LABEL_RE.finditer(head))
+                    label = _step(hits[-1].group(1)) if hits else None
+            if not label:
+                label = next((lb for s, e, lb in spans if s <= start < e), None)
+            if not label:
                 continue
-            # `end-verify#${pass}` and `implement:${a.label}` are one step each, not one per run.
-            label = re.sub(r"[#$].*", "", lm.group(1)) or lm.group(1)
-            for chunk in re.split(r"\$\{[^}]*\}", body[:end]):
+            # Split on the inline code spans too, not just the interpolations: `\`mvn package\``
+            # is the half of a sentence most likely to be reworded, and the static prose on either
+            # side of it identifies the step on its own.
+            for chunk in re.split(r"[%s`]" % INTERP, text):
                 n = _label_norm(chunk)
                 if len(n) >= LABEL_SIG_MIN:
-                    sigs.append((n[:90], label))
-    return sorted(sigs, key=lambda s: -len(s[0]))
+                    sigs.setdefault(n[:90], set()).add(label)
+    return sorted(((s, next(iter(l))) for s, l in sigs.items() if len(l) == 1),
+                  key=lambda s: -len(s[0]))
 
 
 def classify(prompt, sigs):
@@ -768,23 +929,36 @@ def mine_items(db, label_sources=()):
     # Rows mined before the classifier existed, or by a run whose scripts have since been
     # reworded, still carry no label — relabelling here means a signature added later reaches
     # history without re-reading half a gigabyte of transcripts.
+    #
+    # A row that already HAS a label is corrected only when the stored one is a step these same
+    # sources can write. That one is this classifier's own earlier answer, so a disagreement is it
+    # having got better. A label outside their vocabulary was written from somewhere else — a
+    # `--label-source` run over the scripts of the day — and this pass has nothing to say about it.
+    vocab = {label for _, label in label_sigs}
     con2 = connect(db)
-    relabelled = 0
+    relabelled = corrected = 0
     try:
         with con2:
-            for iid, prompt in con2.execute(
-                    "SELECT id, prompt FROM items WHERE label IS NULL AND prompt IS NOT NULL").fetchall():
+            known = " OR label IN (%s)" % ",".join("?" * len(vocab)) if vocab else ""
+            for iid, old, prompt in con2.execute(
+                    "SELECT id, label, prompt FROM items "
+                    "WHERE prompt IS NOT NULL AND (label IS NULL%s)" % known,
+                    sorted(vocab)).fetchall():
                 lab = classify(prompt, label_sigs)
-                if lab:
-                    con2.execute("UPDATE items SET label=? WHERE id=?", (lab, iid))
+                if not lab or lab == old:
+                    continue
+                con2.execute("UPDATE items SET label=? WHERE id=?", (lab, iid))
+                if old is None:
                     relabelled += 1
+                else:
+                    corrected += 1
         unlabelled = con2.execute("SELECT COUNT(*) FROM items WHERE label IS NULL").fetchone()[0]
     finally:
         con2.close()
     print(f"mine-items: {len(dirs)} workflow run(s) on disk; {added} item(s) inserted, "
           f"{skipped} already there; {runs_linked} linked by echoed run_id, "
           f"{linked_by_sig} by quoted payload; {relabelled} relabelled, "
-          f"{unlabelled} still unlabelled\n")
+          f"{corrected} corrected, {unlabelled} still unlabelled\n")
 
 
 def summarize_findings(db):

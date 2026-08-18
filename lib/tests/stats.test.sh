@@ -150,6 +150,56 @@ ok "and so does its pre-pack spelling"               "$(cls "${SCAN_PROMPT/\/r:c
 # because the gap is counted and reported while the wrong name is quietly averaged in.
 ok "an unrecognised prompt stays unlabelled" "$(cls 'do something entirely unrelated')" '<none>'
 
+# A prompt reaches its agent in three shapes, and one the classifier cannot read costs every run of
+# that step: those rows roll up under `general-purpose` beside the sink and the explorers, which is
+# the averaging this whole scheme exists to undo.
+BUILD_PROMPT='Run the build `mvn clean package` via the r:maven-build-runner agent.
+   green=true ONLY on a fully clean success (exit 0, zero failures). The green bar is
+   NEVER relaxed. If red, CLASSIFY every failure:'
+ok "an inline code span does not truncate a prompt"  "$(cls "$BUILD_PROMPT")" build
+
+BRANCH_PROMPT='Put the repo on the feature branch item-x, based on main.
+       Commit nothing, and do not touch any file — another agent may be writing the plan while you
+       run.'
+ok "a label picked by a ternary still names its step" "$(cls "$BRANCH_PROMPT")" branch
+
+# The prompt handed over by name (`agent(implBrief(a), { label })`): its literal lives under the
+# builder, a dispatch away from the label that names it.
+IMPL_PROMPT='Implement your slice of the plan at .task-plans/issue-1-x.md. READ THAT FILE FIRST — it holds
+   the Context, the acceptance criteria, and the TDD test plan, so you build what the plan intends
+   rather than your own reinterpretation.'
+ok "a prompt built by a named builder is its step"   "$(cls "$IMPL_PROMPT")" implement
+
+# And the pairing the other way round: a table of tracks carries `label:` beside the `prompt:` it
+# dispatches, so the label sits BEFORE the literal rather than after it.
+UI_PROMPT='You are the VISUAL half of the UI verification. A functional half runs in PARALLEL with you
+       and owns API, flow and log checks — do not repeat them, and do not wait for it.'
+ok "a track table pairs its prompt with its label"   "$(cls "$UI_PROMPT")" ui-visual
+
+# Two steps sharing a chunk name NEITHER of them. Awarding it to whichever sorted first would put
+# one step's cost under the other's name, and nothing in the report would show that it happened.
+FIXTURE="$TMP/two-steps.workflow.js"
+cat > "$FIXTURE" <<'JS'
+export const meta = { name: 'fixture' }
+await agent(`Re-run the suite and report what it printed, verbatim and in full.`,
+  { label: 'alpha', phase: 'A' })
+await agent(`Re-run the suite and report what it printed, verbatim and in full.`,
+  { label: 'beta', phase: 'B' })
+await agent(`Take the screenshots at three viewports and say what each one shows.`,
+  { label: 'gamma', phase: 'C' })
+JS
+in_fixture() { python3 - "$FIXTURE" "$1" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("ss", "lib/skill-stats.py")
+ss = importlib.util.module_from_spec(spec); spec.loader.exec_module(ss)
+print(ss.classify(sys.argv[2], ss.label_signatures([sys.argv[1]])) or "<none>")
+PY
+}
+ok "a chunk two steps share names neither" \
+   "$(in_fixture 'Re-run the suite and report what it printed, verbatim and in full.')" '<none>'
+ok "a chunk only one step uses still names it" \
+   "$(in_fixture 'Take the screenshots at three viewports and say what each one shows.')" gamma
+
 # --- importing the pre-SQLite archive ---------------------------------------
 A="$TMP/archive.jsonl"; I="$TMP/imported.db"
 printf '%s\n' \
