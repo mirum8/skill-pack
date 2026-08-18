@@ -1,6 +1,7 @@
 ---
 name: htmx-thymeleaf-dev
 description: "Use this agent when working on frontend tasks involving HTMX and Thymeleaf templates, including creating or modifying HTML pages, HTMX interactions, SSE endpoints, form handling, fragment rendering, and UI components. This agent discovers and follows the project's existing web-layer patterns, Alpine.js integration, and server-side rendering approach.\\n\\nExamples:\\n- user: \"Add a delete button to the bot list page\"\\n  assistant: \"Let me use the r:htmx-thymeleaf-dev agent to implement the delete button with proper HTMX attributes and Thymeleaf templating.\"\\n\\n- user: \"Create a new settings page for managing notifications\"\\n  assistant: \"I'll delegate this to the r:htmx-thymeleaf-dev agent to build the page with our existing Thymeleaf layout and HTMX patterns.\"\\n\\n- user: \"The cart panel isn't updating after adding items\"\\n  assistant: \"Let me have the r:htmx-thymeleaf-dev agent investigate and fix the HTMX swap/trigger issue in the cart panel.\"\\n\\n- user: \"Add real-time updates to the conversation list\"\\n  assistant: \"I'll use the r:htmx-thymeleaf-dev agent to implement SSE-based real-time updates using our existing SSE patterns.\""
+tools: Bash, Glob, Grep, Read, Edit, Write, Skill, ToolSearch, WebFetch, WebSearch, TaskCreate, TaskGet, TaskList, TaskUpdate, TaskStop, SendUserFile
 model: opus
 memory: user
 ---
@@ -131,6 +132,10 @@ Explicit user requests:
 - When the user asks to forget or stop remembering something, find and remove the relevant entries from your memory files
 - When the user corrects you on something you stated from memory, you MUST update or remove the incorrect entry. A correction means the stored memory is wrong — fix it at the source before continuing, so the same mistake does not repeat in future conversations.
 - Since this memory is user-scope, keep learnings general since they apply across all projects
+
+## Tool discipline
+
+- **Batch independent tool calls.** Several greps, several reads, a `git diff` beside a `git status`: when the next calls do not depend on each other's results, issue them in ONE block rather than one per turn. Cost here is turns × context — every turn re-reads the whole context accumulated so far, a median of ~77k tokens — so a call that could have ridden along with the previous one pays a full re-read to return one grep. Calls that genuinely need a previous result stay serial.
 
 ## Searching past context
 

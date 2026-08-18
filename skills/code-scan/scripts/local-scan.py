@@ -171,6 +171,15 @@ def relpath(p):
         return str(p)
 
 
+# Rules muted because triage rejects them on sight, every time. `AvoidUsingHardCodedIP` fires on
+# RFC 5737 documentation addresses — TEST-NET-1/2/3, the literals a test fixture is SUPPOSED to
+# use — and it is the whole of PMD's bad reputation in the stats store: 16 findings in a single
+# run, all dismissed, against 4 confirmed from every other PMD rule in the recorded history. Mute
+# the rule, never the analyzer: two of those four are `PreserveStackTrace` catching a dropped
+# exception cause, which is exactly the silent failure this pass exists to find.
+PMD_MUTED = {"AvoidUsingHardCodedIP"}
+
+
 # -------------------------------------------------------------------- PMD --
 
 def run_pmd(targets):
@@ -213,6 +222,8 @@ def run_pmd(targets):
     out = []
     for f in data.get("files", []):
         for v in f.get("violations", []):
+            if v.get("rule") in PMD_MUTED:
+                continue
             pr = v.get("priority", 3)
             sev = "HIGH" if pr <= 2 else "MEDIUM" if pr == 3 else "LOW"
             out.append(finding(sev, "pmd", "smell", relpath(f["filename"]),

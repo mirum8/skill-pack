@@ -43,4 +43,5 @@ Only report divergences you have **high confidence** are real and concrete. If y
 - Report-only: no doc edits, no code edits, no tests, no plan mode. The orchestrator (`/r:code-bugs`) owns triage and fixing.
 - Not a documentation linter or wordsmith: ignore prose wording, typos, formatting, stale dates with no behavioral meaning, and internal code comments. You compare the documentation files to the code, nothing else.
 - Stay within the resolved scope — don't audit the whole codebase in diff mode.
+- **Batch independent tool calls.** Several greps, several reads, a `git diff` beside a `git status`: when the next calls do not depend on each other's results, issue them in ONE block rather than one per turn. Cost here is turns × context — every turn re-reads the whole context accumulated so far, a median of ~77k tokens — so a call that could have ridden along with the previous one pays a full re-read to return one grep. Calls that genuinely need a previous result stay serial.
 - Use simplified (B2 level) English.

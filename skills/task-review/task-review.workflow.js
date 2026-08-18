@@ -97,6 +97,14 @@ const FINDINGS = {
       },
     },
     coverage: { type: 'string' }, // e.g. what /security-review actually reviewed
+    // Did the tool review the changeset it was HANDED, or one it resolved for itself?
+    // /security-review recomputes its own diff scope and ignores the argument on roughly one
+    // dispatch in seven (7 of 46 recorded), and the report that comes back is real, complete and
+    // about a different changeset than the one this review certifies. The hunter has always said
+    // so in `coverage`; nothing read it, so the track reported ran=true and the run banked a
+    // clean security review of a diff nobody security-reviewed. Optional and read as `!== false`:
+    // an unanswered field is a hunter that did not check, never a reason to invent a mismatch.
+    scopeMatched: { type: 'boolean' },
   },
 }
 const TRIAGE = {
@@ -105,6 +113,12 @@ const TRIAGE = {
   properties: {
     reviewNeeded: { type: 'boolean' },
     profile: { type: 'string', enum: ['light', 'standard', 'full'] }, // review tier — 'standard' absorbs uncertainty
+    // WHY that tier, in one line. `profile` says which one and `profileForced` says who picked
+    // it; neither says what decided it, so an over-rated run and a correctly rated one are the
+    // same row and the distribution can be read but never audited. Deliberately NOT required,
+    // like `securitySurface` above: an unanswered note is a gap in the record, never a reason to
+    // fail a triage that answered everything else.
+    profileReason: { type: 'string' },
     uiTouched: { type: 'boolean' },         // any frontend file changed -> the UI gate, in EVERY tier
     reason: { type: 'string' },
     changeIntent: { type: 'string' }, // 1-3 sentences: what this change is trying to do (fix subagents get it so they don't undo intentional work)
@@ -285,6 +299,17 @@ const RAN_CLAUSE = `
      all — set ran=false and leave findings empty. Never return ran=true with findings:[] for a
      run that failed: that reads as "reviewed, found nothing" and silently certifies nothing.`
 
+// Appended to the prompts of steps that dispatch a BUILT-IN agent (general-purpose, Explore).
+// The bundled agents under agents/ carry this rule in their own definition; the built-ins have no
+// file to carry it, so their only channel is the dispatch prompt. Cost in a subagent is
+// turns × context — every turn re-reads everything accumulated so far, a median of ~77k tokens —
+// so a call that could have ridden along with the previous one pays a full re-read to return one
+// grep. Measured over the stored transcripts, 22% of shell calls return under 200 characters.
+const BATCH_CLAUSE = `
+     Batch independent tool calls: when the next calls do not depend on each other's results —
+     several greps, several reads, a \`git diff\` beside a \`git status\` — issue them in ONE
+     block rather than one per turn. Calls that genuinely need a previous result stay serial.`
+
 // ------------------------------------------------------- find-bugs hunters ---
 // The hunters of /r:code-bugs Phase 2, spawned by THIS SCRIPT instead of beneath a single
 // "run /r:code-bugs" subagent. Only the FULL tier dispatches all four: standard takes the two a
@@ -441,7 +466,14 @@ const hunterPrompt = (h, scope) => {
      exhaustion, rate limiting, and secrets stored on disk outright. So name the scope it really
      covered (e.g. "the uncommitted working-tree diff", "the 15 unpushed commits") AND those
      limits, so nobody reads findings:[] as "this change is secure". Those excluded categories
-     are real risks — codex, the runtime-and-failures hunter and /r:code-scan cover them.${RAN_CLAUSE}`
+     are real risks — codex, the runtime-and-failures hunter and /r:code-scan cover them.
+     Last, set scopeMatched. The skill RESOLVES ITS OWN DIFF SCOPE and ignores the argument on
+     about one dispatch in seven: it reads the unpushed branch commits when it was handed the
+     working tree, or the reverse. So read back what its report says it covered, and compare that
+     to the scope above. Same changeset -> scopeMatched=true. A different one -> scopeMatched=false,
+     and name BOTH in 'coverage' (what you passed it, what it actually read). Do NOT re-run it and
+     do NOT try to force the scope — report the mismatch and stop. A clean report about the wrong
+     diff is the one result that looks exactly like a clean review and is not one.${RAN_CLAUSE}`
   }
   if (h.label === 'docs') {
     return `You are the DOCUMENTATION-CONSISTENCY hunter of a parallel bug scan over ${scope}.
@@ -493,6 +525,20 @@ async function hunterFanOut(scope, hunters, trackName) {
     log(`${trackName}: hunter(s) BLOCKED — ${missing.join(', ')}. The scan is INCOMPLETE; ` +
         `the other hunters' findings are still carried into triage, but this track is not a clean bill.`)
   }
+  // A hunter can come back ALIVE and having read the wrong thing. /security-review resolves its
+  // own diff scope and ignores the one it is handed on about one dispatch in seven, so the report
+  // is real, complete, and about a changeset this review is not certifying. Same conclusion as a
+  // blocked hunter — the scan did not cover this diff, so `ran` must not claim it did — but its
+  // OWN log line, because the two need opposite fixes: a blocked tool has to be made to run, a
+  // drifted one has to be made to read the right thing.
+  const drifted = hunters
+    .filter((h, i) => !blocked(hunts[i]) && hunts[i] && hunts[i].scopeMatched === false)
+    .map((h) => h.label)
+  if (drifted.length) {
+    log(`${trackName}: hunter(s) reviewed a DIFFERENT changeset than the one they were given — ` +
+        `${drifted.join(', ')}. Their report is real but it is not about this diff, so this track ` +
+        `is NOT a clean bill. See the coverage note for what each one actually read.`)
+  }
   const seen = new Set()
   const findings = []
   hunts.forEach((h, i) => {
@@ -514,11 +560,17 @@ async function hunterFanOut(scope, hunters, trackName) {
   const sec = secIdx >= 0 ? hunts[secIdx] : null
   // Three different states share one empty findings list, and they mean opposite things.
   // Whoever reads this summary must be able to tell them apart without the transcript.
+  // Never in front of a SKIPPED marker: skipped() tests this string with an anchored ^SKIPPED,
+  // and a prefix there would turn "the hunter was never dispatched" into "the track ran".
+  const secCov = (sec && typeof sec.coverage === 'string') ? sec.coverage : ''
+  const secDrift = drifted.includes('security') && !/^SKIPPED\b/.test(secCov)
   const securityNote = secIdx < 0
     ? 'security hunter NOT DISPATCHED — no security surface in this diff. Nothing was ' +
       'security-reviewed. This is a skip, not a clean bill.'
-    : (sec && sec.coverage) ||
-      (missing.includes('security') ? 'security hunter BLOCKED — nothing was security-reviewed' : '')
+    : (secDrift ? 'security hunter SCOPE MISMATCH — /security-review reviewed a different ' +
+                  'changeset than this diff; nothing security-reviewed THIS change. ' : '') +
+      (secCov ||
+       (missing.includes('security') ? 'security hunter BLOCKED — nothing was security-reviewed' : ''))
   // Every hunter's coverage note survives the merge, not just the security one. The hunt is
   // budgeted, and a hunter that runs out with a candidate still unconfirmed says so here. Dropping
   // that turns "I could not confirm the N+1 at OrderRepo:88" into silence, and silence from a
@@ -528,9 +580,16 @@ async function hunterFanOut(scope, hunters, trackName) {
     (hunters[i].label !== 'security' && h && typeof h.coverage === 'string' && h.coverage.trim())
       ? `${hunters[i].label}: ${h.coverage.trim()}` : '').filter(Boolean)
   return {
-    ran: missing.length === 0,
+    ran: missing.length === 0 && drifted.length === 0,
     findings,
     coverage: [securityNote, ...notes].filter(Boolean).join(' | '),
+    // The security half's own outcome, carried out separately because the merged `ran` and
+    // `coverage` cannot separate the four states that all leave findings:[] behind — and until
+    // they are separable, the 47 recorded dispatches that each returned nothing cannot say
+    // whether the diffs were clean or the track never reports anything at all.
+    security: secIdx < 0 ? 'not-dispatched'
+      : missing.includes('security') ? 'blocked'
+      : drifted.includes('security') ? 'scope-mismatch' : 'clean',
   }
 }
 
@@ -745,6 +804,11 @@ const triage = await reliable('triage', 'Triage', () => agent(
       static analysis and build+tests, and only gives up the /r:code-bugs pattern hunters plus
       the up-front adversarial + readability passes. A caller-provided profile OVERRIDES your call
       — echo it if given. Caller-provided profile: ${TIERS.includes(opts.profile) ? opts.profile : '(none — classify it)'}
+      Then set profileReason: ONE line naming what actually decided it — the file, seam or
+      operation you weighed, not a restatement of the tier. "it is a full change" is not a reason;
+      "read-modify-write on DealRepo with no lock" is. It is recorded and read back later to check
+      whether this classification holds up, so give the evidence rather than the verdict. Echoing
+      a caller-provided profile is itself a reason — say so.
    7. uiTouched — true iff any changed file is frontend: *.html/templates, *.css/*.scss,
       *.js/frontend *.ts, or under templates/, static/, resources/templates/, webapp/.
       Answer this carefully: it is the SOLE gate on the UI/runtime step in EVERY tier (the tier
@@ -1021,7 +1085,7 @@ phase('Review')
   () => hunterFanOut(scope, HUNTER_SET, hunterTrack),
   !wantQuality ? (() => undefined) : () => reliable('code-quality', 'Review', () => agent(
     `Invoke the /r:code-quality skill (Skill tool) over ${scope}; report-only. Return the
-     "worth fixing" readability/idiom findings as file:line + one line each.${RAN_CLAUSE}`,
+     "worth fixing" readability/idiom findings as file:line + one line each.${RAN_CLAUSE}${BATCH_CLAUSE}`,
     { label: 'code-quality', phase: 'Review', schema: FINDINGS, ...GP })),
 ])
 // Codex findings carry their source too, so triage sees the same shape on every report and the
@@ -1217,7 +1281,7 @@ if (!nothingToFix) {
     // Only now, and only into a tree the correctness fixer has finished writing.
     const fr = await fix(
       `Invoke the /r:code-refactor skill on the changed files ONLY, applying these readability
-       wins ${commitClause}:\n${fixList.readability.join('\n')}${intentBlock}`,
+       wins ${commitClause}:\n${fixList.readability.join('\n')}${intentBlock}${BATCH_CLAUSE}`,
       { label: 'fix-readability', phase: 'Fix', ...GP })
     if (blocked(fr)) {
       readabilityFixed = false
@@ -1353,7 +1417,7 @@ if (triage.buildTool !== 'none') {
 
        Then report: status (from findings.json: ok|error|skipped — a non-zero exit or
        status:error means an analyzer errored / none ran => NOT clean), whether it changed
-       any code, and which tools were skipped/errored.`,
+       any code, and which tools were skipped/errored.${BATCH_CLAUSE}`,
       { label: 'local-scan', phase: 'Local-scan', schema: SCAN, ...GP }))
     // Fail-closed, both ways. A dead scan agent must not fall through BOTH branches unlogged:
     // that turns a step the non-negotiables call mandatory into a silent no-op while the run still
@@ -1849,6 +1913,11 @@ const statsRow = {
   // decided" — the exact question it looks like it answers. The workflow already knows; it
   // just wasn't being written down.
   profileForced: TIERS.includes(opts.profile),
+  // The classifier's own justification, so the tier distribution can be audited instead of only
+  // counted. 21 of 26 classified runs land on 'full', and a step down from it is worth ~37M
+  // tokens measured (71.1M/run at full against 33.8M at standard) — which makes this the cheapest
+  // field in the row and the one that decides whether that 21 is a finding or a fact.
+  profileReason: short(triage.profileReason) || null,
   // Inferred, not observed: /r:task-run Step 5 is the only caller that passes deferCommit, so its
   // absence means a human invoked this directly. That matters because a direct invocation is
   // often a RE-review of a diff that was already reviewed and fixed once — its findings are not
@@ -1869,6 +1938,13 @@ const statsRow = {
   docDriftCount: fixed.docDrift.length,
   endVerify: endVerifyVerdict,
   endVerifyCount: endVerifyUnresolved.length,
+  // Four outcomes that leave the same trace in the store today: a clean review, a review of a
+  // DIFFERENT changeset, a tool that died, and a gate that never dispatched it. All 47 recorded
+  // dispatches returned findings:[], and with the four collapsed that number cannot tell a clean
+  // diff from a track that never reports anything. `tracksBlocked`/`tracksSkipped` carry the
+  // MERGED hunter track, never this half of it on its own.
+  security: profile === 'light' ? 'not-dispatched'
+    : (bugs && bugs.security) ? bugs.security : 'blocked',
   localScan,
   // Whether the scan REWROTE the code, which `localScan` alone cannot say: 'ok' covers both a scan
   // that found nothing and one that self-fixed — and only the second owes a rebuild and forces an
@@ -1955,6 +2031,13 @@ return {
   // ok | skipped (nothing JVM changed) | blocked (scan died/errored — NOT scanned) | n/a (no build tool).
   // Reported because /r:code-scan is mandatory in every tier: a caller has to be able to see that
   // the static pass did not actually happen, rather than infer it from a silent success.
+  // Four outcomes that leave the same trace in the store today: a clean review, a review of a
+  // DIFFERENT changeset, a tool that died, and a gate that never dispatched it. All 47 recorded
+  // dispatches returned findings:[], and with the four collapsed that number cannot tell a clean
+  // diff from a track that never reports anything. `tracksBlocked`/`tracksSkipped` carry the
+  // MERGED hunter track, never this half of it on its own.
+  security: profile === 'light' ? 'not-dispatched'
+    : (bugs && bugs.security) ? bugs.security : 'blocked',
   localScan,
   // true when the scan applied its own fixes, so the final diff contains machine-written code the
   // caller never saw in the fix-list; null when no scan completed. Same three states as the stats

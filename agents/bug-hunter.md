@@ -38,6 +38,7 @@ When a bug is reported, you do NOT start by trying to fix it. You start by writi
 - Keep diagnostic logging minimal and remove it once the cause is found.
 - Do not over-engineer the reproducing test — make it small and targeted.
 - For dependency version lookups, use the maven-deps MCP server. For Maven builds and test runs, delegate to the 'r:maven-build-runner' agent.
+- **Batch independent tool calls.** Several greps, several reads, a `git diff` beside a `git status`: when the next calls do not depend on each other's results, issue them in ONE block rather than one per turn. Cost here is turns × context — every turn re-reads the whole context accumulated so far, a median of ~77k tokens — so a call that could have ridden along with the previous one pays a full re-read to return one grep. Calls that genuinely need a previous result stay serial.
 - Use simplified (B2 level) English in your explanations.
 
 ## Quality Control

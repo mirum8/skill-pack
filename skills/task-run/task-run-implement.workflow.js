@@ -393,6 +393,17 @@ const blocked = (x) => !x || !!(x.blocked || x.ran === false)
 // spawned from this script can fan out beneath itself. Every fan-out is therefore
 // expressed here, in the script, as parallel()/loops.
 const GP = { agentType: 'general-purpose' }
+// Appended to the prompts of steps that dispatch a BUILT-IN agent (Explore, general-purpose, Plan).
+// The bundled agents under agents/ carry this rule in their own definition; the built-ins have no
+// file to carry it, so their only channel is the dispatch prompt. Cost in a subagent is
+// turns × context — every turn re-reads everything accumulated so far, a median of ~77k tokens —
+// so a call that could have ridden along with the previous one pays a full re-read to return one
+// grep. `explore` is where this bites hardest: it is the pack's most-dispatched step, and 22% of
+// its shell calls return under 200 characters.
+const BATCH_CLAUSE = `
+     Batch independent tool calls: when the next calls do not depend on each other's results —
+     several greps, several reads, a \`git diff\` beside a \`git status\` — issue them in ONE
+     block rather than one per turn. Calls that genuinely need a previous result stay serial.`
 // Run one fixed command and report what it printed. There is no branch, no classification and no
 // prose in the output — the comparison that uses it happens in THIS script, not in the agent — so
 // the cheapest model is the right one. Effort is moot at this tier and stays low for clarity.
@@ -780,7 +791,7 @@ ${inRepo}
      This list escalates the run to the heaviest review tier — the one that stops to have its plan
      challenged before code is written — so it should fire when the approach genuinely deserves
      that and stay quiet otherwise. \`RISKFLAGS: []\` is a real and common answer: return it whenever
-     the change stays clear of all five surfaces above.`,
+     the change stays clear of all five surfaces above.${BATCH_CLAUSE}`,
     // The label carries the slice INDEX, not just its first 24 characters. Three explorers on one
     // task routinely share an opening phrase ("Map the calculator…"), and when they do, three
     // identical rows in the progress tree make the one that died unidentifiable.
@@ -1282,7 +1293,7 @@ ${uiDesignNote}
        YOUR ENTIRE FINAL MESSAGE IS THE PLAN. Return the markdown itself and nothing else — no
        preamble, no "Here is the plan:", no closing remark, no fenced code block around the whole
        document. What you return is copied to disk verbatim and is what Codex reviews and what the
-       implementers build from, so anything that is not plan text becomes a line in the plan.`,
+       implementers build from, so anything that is not plan text becomes a line in the plan.${BATCH_CLAUSE}`,
       { label: 'planner', phase: 'Plan', agentType: 'Plan', ...PLAN_RUN }))
     if (blocked(plan) || typeof plan !== 'string' || !plan.trim()) return { stopped: 'planner-blocked' }
     planMarkdown = plan.trim()
@@ -1629,7 +1640,7 @@ ${b.items.map((f, n) => `         ${n + 1}. [${f.severity}][${f.rubric}] ${f.wha
          adjust a detail? Adding a test, correcting a file:LINE citation, tightening wording or
          filling a coverage gap is a detail. Set it true only for the first kind: it costs the run
          a second full Codex review of the rewritten plan, which is worth paying when the plan
-         really did change shape and is pure delay when it did not.`,
+         really did change shape and is pure delay when it did not.${BATCH_CLAUSE}`,
         { label: `judge#${pass}.${bi + 1}:${b.rubric}`, phase: 'Plan-review', schema: VERDICTS, ...GP, ...JUDGE_RUN }))))
 
     // Flatten back to one verdict per finding, in the original order. A missing 'n' — a batch that

@@ -535,6 +535,48 @@ test('at standard the blocked track is named for what actually ran, not "find-bu
   assert.match(logText, /security hunter: hunter\(s\) BLOCKED — security/)
 })
 
+test('a security hunter that read a DIFFERENT changeset is not a clean bill', async () => {
+  // The failure this locks down: /security-review resolves its own diff scope and ignores the one
+  // it was handed on about one dispatch in seven. The report comes back real, complete, ran=true
+  // and findings:[] — about a changeset this review is not certifying. Alive is not the same as
+  // on-scope, and only `scopeMatched` can tell them apart.
+  const { out, logText } = await run({
+    overrides: {
+      'find-bugs:security': {
+        ran: true, scopeMatched: false, findings: [],
+        coverage: 'asked for the working-tree diff; the skill read the 8 unpushed branch commits',
+      },
+    },
+  })
+  assert.ok(out.tracksBlocked.includes('find-bugs'))
+  assert.equal(out.security, 'scope-mismatch')
+  assert.match(logText, /reviewed a DIFFERENT changeset than the one they were given — security/)
+  // Distinct from BLOCKED on purpose: a dead tool has to be made to run, a drifted one has to be
+  // made to read the right thing, and one log line for both sends the reader after the wrong fix.
+  assert.ok(!/hunter\(s\) BLOCKED — security/.test(logText))
+})
+
+test('scopeMatched absent leaves the track clean — an unanswered field invents no mismatch', async () => {
+  // Fail-open, the same rule securitySurface uses. A hunter that did not check is a gap in the
+  // record; reading it as a mismatch would block every run made before the field existed.
+  const { out } = await run({
+    overrides: { 'find-bugs:security': { ran: true, findings: [], coverage: 'reviewed the working-tree diff' } },
+  })
+  assert.ok(!out.tracksBlocked.includes('find-bugs'))
+  assert.equal(out.security, 'clean')
+})
+
+test('the four security outcomes are distinguishable in the summary', async () => {
+  // All four leave findings:[] behind. Collapsed, 47 dispatches that each returned nothing cannot
+  // say whether the diffs were clean or the track never reports anything at all.
+  const gated = await run({ triage: baseTriage({ securitySurface: false }) })
+  assert.equal(gated.out.security, 'not-dispatched')
+  const dead = await run({ overrides: { 'find-bugs:security': null } })
+  assert.equal(dead.out.security, 'blocked')
+  const light = await run({ args: { profile: 'light' } })
+  assert.equal(light.out.security, 'not-dispatched')
+})
+
 test('the docs hunter is reported on its own, because it runs outside the barrier', async () => {
   // It is still a dispatched track: a caller has to be able to see that nothing checked the change
   // against the documentation. Being off the critical path is not the same as being optional.
