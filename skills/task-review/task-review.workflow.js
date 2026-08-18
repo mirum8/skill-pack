@@ -568,11 +568,15 @@ const MECHANICAL = { model: 'sonnet', effort: 'low' }
 // most of them and costs the same either way, because the model only matters once there is
 // something to classify.
 const BUILD_RUN = { model: 'sonnet', effort: 'medium' }
-// The post-local-scan rebuild is a build too, but not a classifying one: the tree was fully green
-// before local-scan ran, so the prompt can tell it that ANY failure here is in-scope by
-// construction. That is the whole judgement BUILD_RUN steps up to protect, and it is already made
-// — so this one stays on the runner agent's own tier.
-const REBUILD_RUN = { effort: 'medium' }
+// The post-local-scan rebuild is a build too, and it has nothing to CLASSIFY: the tree was fully
+// green before local-scan ran, so the prompt can tell it that any failure here is in-scope by
+// construction. That is the judgement BUILD_RUN steps up to protect, and it is already made — but
+// this call still makes the other one, green or red at all, and here that is the more consequential
+// of the two: a red halts the run outright and strands the diff, where in phase 4 it only opens a
+// fix loop. On the runner agents' own `haiku` tier that verdict comes from whatever the log looks
+// like; the tier below is what reliably captures `$?` instead. Three dispatches per review at most,
+// so buy it.
+const REBUILD_RUN = { model: 'sonnet', effort: 'medium' }
 // The UI deploy is not a build runner at all — it is a GP agent reading a command out of a skill
 // file and running a helper. It has its own tier so a change to BUILD_RUN above, which exists for
 // a judgement this step does not make, cannot move it by accident.
@@ -1253,10 +1257,25 @@ if (baselineBuilt) log('post-task-review: caller certified a clean green build i
 // The one case incremental is unsafe: a deleted/renamed source can leave a stale .class that
 // makes a genuinely broken build pass. Every rebuild prompt carries this escape hatch.
 const staleRule = `If any source file was DELETED or RENAMED since the last build, run \`${cleanCmd}\` instead — a removed source can leave a stale .class behind that would let a broken build pass.`
+// How a build agent decides green, stated once and carried by EVERY build prompt below. The exit
+// code is the verdict; the log only explains it. The reverse — grepping the log for a success
+// marker — cannot work here: the fast commands are quiet (`-q`), under which Maven and Gradle
+// print no `BUILD SUCCESS` line at all, so an agent looking for one finds nothing and is left
+// judging on the `[ERROR]` lines, which a fully green build has plenty of (tests that exercise
+// failure paths, and Surefire's `going to kill self fork JVM` shutdown notice at the tail). A
+// green build read as red is the expensive direction: it halts the run and leaves a finished,
+// green diff unmerged, with no tier above this call to disagree.
+const exitCodeRule = `Decide green from the process EXIT CODE, never from the log text: run the ` +
+  `command so the code is captured (\`<cmd> > <logfile> 2>&1; echo "EXIT=$?"\`) and read that. ` +
+  `EXIT=0 is green even when the log contains \`[ERROR]\`, \`FAILED\` or a stack trace — tests ` +
+  `that exercise failure paths log all three, and Surefire's "going to kill self fork JVM … after ` +
+  `System.exit(0)" is a shutdown-timing notice, not a failure. Under \`-q\` there is no ` +
+  `BUILD SUCCESS/BUILD SUCCESSFUL line to find, so its absence proves NOTHING — do not report red ` +
+  `because you could not grep one. A non-zero exit is red, and then the log says why.`
 // Handed to the later fixers (end-verify, UI minor) so they rebuild incrementally too. Told only
 // "ensure the build is green", a fixer picks its own command, and that is usually the clean one.
 const rebuildClause = triage.buildTool !== 'none'
-  ? `then rebuild via the ${triage.runnerAgent} agent with \`${fastCmd}\` (incremental — a clean baseline build already ran in this working tree) until green. ${staleRule}`
+  ? `then rebuild via the ${triage.runnerAgent} agent with \`${fastCmd}\` (incremental — a clean baseline build already ran in this working tree) until green. ${staleRule} ${exitCodeRule}`
   : 'then verify nothing is broken (no build tool was detected for this project).'
 phase('Build')
 let buildGreen = false
@@ -1266,8 +1285,9 @@ if (triage.buildTool !== 'none') {
     const b = await agent(
       `Run the build \`${i === 1 && !baselineBuilt ? cleanCmd : fastCmd}\` via the ${triage.runnerAgent} agent.
        ${i === 1 && !baselineBuilt ? 'This is the run\'s one clean build — it establishes the baseline.' : staleRule}
-       green=true ONLY on a fully clean success (BUILD SUCCESS / BUILD SUCCESSFUL, exit 0,
-       zero failures). The green bar is NEVER relaxed. If red, CLASSIFY every failure:
+       ${exitCodeRule}
+       green=true ONLY on a fully clean success (exit 0, zero failures). The green bar is
+       NEVER relaxed. If red, CLASSIFY every failure:
        - inScopeFailures: compile errors or test failures in code THIS turn changed
          (changed files: ${changed || 'derive from git diff'}). These are ours to fix.
        - preExistingFailures: failures UNRELATED to the diff — a test/class the change
@@ -1348,13 +1368,44 @@ if (triage.buildTool !== 'none') {
     } else if (scan.changedCode) {
       localScan = 'ok'
       scanChangedCode = true
-      const rb = await agent(`Rebuild via ${triage.runnerAgent}: \`${fastCmd}\` (incremental — the
-        clean baseline build already ran in this working tree). ${staleRule}
-        green=true ONLY on a fully clean success. The build was fully green before local-scan
-        ran, so ANY failure here is a regression from local-scan's own self-fixes (in-scope) —
-        report it; do not touch out-of-scope tests/code.`,
-        { label: 'rebuild', phase: 'Local-scan', schema: BUILD, agentType: triage.runnerAgent, ...REBUILD_RUN })
-      if (!rb || !rb.green) { log('post-task-review: rebuild after local-scan RED — stopping'); return { stopped: 'rebuild-red' } }
+      // Bounded like phase 4, and for the same reason phase 4 is: this rebuild's red is the only
+      // verdict in the routine that halts the run on a single agent's say-so, and a red that
+      // NAMES nothing is the exact shape a misread log takes. So a nameless red just re-runs the
+      // build — sending a fixer after failures nobody listed is how a green tree gets edited —
+      // while a red that names failures gets one surgical fix and one more build, since by
+      // construction those failures are local-scan's own.
+      // The loop is also the only thing that makes a false red recoverable. `resumeFromRunId`
+      // replays a cached agent result rather than re-running it (same prompt, same opts → cache
+      // hit), and the workflow guard forbids editing this script to force a re-run, so a single
+      // halting verdict would otherwise be final for the group. Attempts 2 and 3 are calls a
+      // stopped run never made, which is what a resume can still reach live.
+      let rebuildGreen = false
+      for (let i = 1; i <= 3; i++) {
+        const rb = await agent(`Rebuild via ${triage.runnerAgent}: \`${fastCmd}\` (incremental — the
+          clean baseline build already ran in this working tree). ${staleRule}
+          ${exitCodeRule}
+          green=true ONLY on a fully clean success. The build was fully green before local-scan
+          ran, so ANY failure here is a regression from local-scan's own self-fixes (in-scope) —
+          name it in 'inScopeFailures'; do not touch out-of-scope tests/code.`,
+          { label: `rebuild#${i}`, phase: 'Local-scan', schema: BUILD, agentType: triage.runnerAgent, ...REBUILD_RUN })
+        if (rb && rb.green) { rebuildGreen = true; break }
+        if (i === 3) break
+        const failed = ((rb && (rb.inScopeFailures || rb.failures)) || '').trim()
+        if (!failed) {
+          log(`post-task-review: rebuild#${i} RED but named no failure (or the agent died) — re-running the build rather than dispatching a fixer`)
+          continue
+        }
+        await agent(`The post-local-scan rebuild is red from local-scan's own self-fixes. Fix ONLY
+          these (surgical-fixer rules) and do NOT touch any pre-existing / out-of-scope test or
+          class to force a pass:\n${failed}
+          ${selfCheckClause}${noFullBuild} (This loop rebuilds and re-runs the suite as soon as you
+          return — that is what proves the failures are gone.)${intentBlock}`,
+          { label: `rebuild-fix#${i}`, phase: 'Local-scan', agentType: 'r:java-backend-developer' })
+      }
+      if (!rebuildGreen) {
+        log('post-task-review: rebuild after local-scan still RED after 3 attempts — stopping. To retry this step, run the review again on the branch; RESUMING this run replays the cached red verdict instead of rebuilding.')
+        return { stopped: 'rebuild-red' }
+      }
     } else {
       localScan = 'ok' // scanned clean, changed nothing — no rebuild owed
     }

@@ -74,7 +74,7 @@ async function run({ triage = baseTriage(), args = {}, overrides = {} } = {}) {
     if (l === 'codex' || l === 'code-quality' || l.startsWith('find-bugs:')) return CLEAN
     if (l === 'fix-triage') return { correctness: [], readability: [], docDrift: [] }
     if (l === 'stats') return { ok: true }
-    if (l.startsWith('build#') || l === 'rebuild') return { green: true }
+    if (l.startsWith('build#') || l.startsWith('rebuild#')) return { green: true }
     if (l === 'local-scan') return { status: 'ok', changedCode: false }
     if (l.startsWith('end-verify#')) return CLEAN
     if (l === 'ui-deploy') return { ok: true, url: 'http://localhost:18080' }
@@ -1097,6 +1097,67 @@ test('REGRESSION: local-scan computes its own branch-wide class list, not the Ph
   assert.ok(!p.includes(CHANGED), 'the Phase-0 changed-file list must not be injected into the scan prompt')
 })
 
+// ------------------------------------------------- the post-scan rebuild loop ---
+// A single red here halts the whole run, and the group's finished work goes unmerged. So the red
+// is bounded the way Phase 4's is, and a red that names nothing — the shape a misread log takes —
+// costs a re-run rather than a fixer let loose on a green tree.
+
+test('a rebuild that goes green on a later attempt does NOT stop the run', async () => {
+  let n = 0
+  const { out, counts } = await run({
+    overrides: {
+      'local-scan': { status: 'ok', changedCode: true },
+      'rebuild#': () => (++n === 1 ? { green: false, inScopeFailures: 'PricingTest' } : { green: true }),
+    },
+  })
+  assert.equal(out.stopped, undefined)
+  assert.equal(counts['rebuild#2'], 1)
+  assert.equal(counts['rebuild-fix#1'], 1, 'a NAMED failure earns one surgical fix before the retry')
+})
+
+test('a red that names no failure re-runs the build instead of dispatching a fixer', async () => {
+  let n = 0
+  const { out, counts, logText } = await run({
+    overrides: {
+      'local-scan': { status: 'ok', changedCode: true },
+      'rebuild#': () => (++n === 1 ? { green: false } : { green: true }),
+    },
+  })
+  assert.equal(out.stopped, undefined)
+  assert.equal(counts['rebuild#2'], 1)
+  assert.equal(counts['rebuild-fix#1'], undefined, 'nothing was named — there is nothing to fix')
+  assert.match(logText, /named no failure/)
+})
+
+test('a DEAD rebuild agent is the same case: re-run, never a fixer on nothing', async () => {
+  let n = 0
+  const { out, counts } = await run({
+    overrides: {
+      'local-scan': { status: 'ok', changedCode: true },
+      'rebuild#': () => (++n === 1 ? null : { green: true }),
+    },
+  })
+  assert.equal(out.stopped, undefined)
+  assert.equal(counts['rebuild-fix#1'], undefined)
+})
+
+test('still red after three attempts halts, and says a RESUME will not retry it', async () => {
+  // resumeFromRunId replays a cached agent result rather than re-running it, so a resume of a
+  // rebuild-red run replays the red verdict; the recovery is a fresh review on the branch.
+  const { out, counts, logText } = await run({
+    overrides: {
+      'local-scan': { status: 'ok', changedCode: true },
+      'rebuild#': { green: false, inScopeFailures: 'PricingTest' },
+    },
+  })
+  assert.equal(out.stopped, 'rebuild-red')
+  assert.equal(counts['rebuild#3'], 1)
+  assert.equal(counts['rebuild#4'], undefined, 'bounded — never "loop until green"')
+  assert.equal(counts['rebuild-fix#2'], 1)
+  assert.equal(counts['rebuild-fix#3'], undefined, 'the last attempt is a build, not another fix')
+  assert.match(logText, /RESUMING this run replays the cached red verdict/)
+})
+
 // ---------------------------------------------------------------- arg parsing ---
 
 test('a JSON-string arg is parsed, so deferCommit is not silently lost', async () => {
@@ -1298,15 +1359,32 @@ test('the pure command-runners run on haiku', async () => {
   }
 })
 
-test('the post-scan rebuild stays on the runner agent\'s own tier', async () => {
-  // It is a build, but not a classifying one: the tree was fully green before local-scan ran, so
-  // any failure here is in-scope by construction and the prompt says so. Nothing to classify means
-  // nothing to step the model up for.
+test('the post-scan rebuild steps up over the runner agent\'s haiku', async () => {
+  // It has nothing to classify — the tree was green before local-scan ran, so any failure here is
+  // in-scope by construction and the prompt says so. It still decides green vs red, and that
+  // verdict halts the run outright with no tier above it to disagree, which is what it is paid
+  // for: the tier that captures `$?` rather than judging an exit-0 build by its [ERROR] lines.
   const { opts, prompts } = await run({
     overrides: { 'local-scan': { status: 'ok', changedCode: true } },
   })
-  assert.equal(opts['rebuild'].model, undefined)
-  assert.match(prompts['rebuild'], /ANY failure here is a regression from local-scan's own self-fixes/)
+  assert.equal(opts['rebuild#1'].model, 'sonnet')
+  assert.match(prompts['rebuild#1'], /ANY failure here is a regression from local-scan's own self-fixes/)
+})
+
+test('every build prompt decides green from the exit code, not the log text', async () => {
+  // The fast commands are `-q`, under which there is no BUILD SUCCESS line to grep — so a prompt
+  // that does not name the exit code leaves the agent judging on `[ERROR]` lines alone.
+  const { prompts } = await run({
+    overrides: {
+      'local-scan': { status: 'ok', changedCode: true },
+      'find-bugs:logic': { ran: true, findings: [finding()] },
+      'fix-triage': { correctness: [{ item: `${CHANGED}:42 fix it`, source: 'logic' }] },
+    },
+  })
+  for (const l of ['build#1', 'rebuild#1']) {
+    assert.match(prompts[l], /Decide green from the process EXIT CODE, never from the log text/, l)
+    assert.match(prompts[l], /its absence proves NOTHING/, l)
+  }
 })
 
 test('the build that DOES classify steps up over the runner agent\'s haiku', async () => {
