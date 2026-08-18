@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repository is
 
-The source of `r`, a **skills-directory plugin** for Claude Code: 16 skills (`/r:<name>`) and the
+The source of `r`, a **skills-directory plugin** for Claude Code: 17 skills (`/r:<name>`) and the
 8 agents they dispatch. There is no application here — the "product" is prose (`SKILL.md`),
 workflow scripts, agent definitions and a hook, all loaded by Claude Code itself.
 
@@ -152,9 +152,12 @@ missing, the step is recorded as **skipped** and named, and the run continues.
   body mentions must be packed, bundled with Claude Code, or listed in the README as an external
   prerequisite — anything else is a name the model will try to invoke mid-run and fail to reach.
   New names are domain-first: `<domain>-<action>`, at most three kebab segments.
-- **Frontmatter.** Valid YAML, a `description` under 1,536 characters, and the whole listing cost
-  under 16,000. No two descriptions may open with nearly the same sentence.
-- **Structure.** Exactly 16 skill directories, two levels deep. Every bundled agent must be
+- **Frontmatter.** Valid YAML, a `description` under 1,536 characters, and the listing cost under
+  16,000. That total counts only skills the model can invoke: a `disable-model-invocation: true`
+  skill's description is *not in context* (it loads when you invoke it), so billing it buys
+  headroom by trimming a description nothing reads. `validate.py` names the excluded skills on
+  every run. No two descriptions may open with nearly the same sentence.
+- **Structure.** Exactly 17 skill directories, two levels deep. Every bundled agent must be
   dispatched by some skill. Every skill needs `evals/evals.json` with at least one `trigger` case
   and one `neighbour-exclusion` case. No build artefacts tracked.
 

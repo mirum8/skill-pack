@@ -6,6 +6,7 @@ from disagreeing about what "rewritten" means.
 
   BR-1  directory names match NAME_RE, domain first, <= 3 kebab segments
   BR-2  RENAME is exactly the sixteen pairs; an unmapped source dir is an error
+  BR-2  packed_skills() is RENAME's targets plus PACK_NATIVE — the whole pack
   BR-3  only the four bounded patterns in ref_patterns() are rewritten
   BR-5  a reference to a packed skill carries the "r:" prefix
   FR-19 absolute ~/.claude/skills/... paths become substituted variables
@@ -14,7 +15,7 @@ import re
 
 NAMESPACE = "r"
 DESC_CAP = 1536          # BR-4, per skill: len(description) + len(when_to_use)
-LISTING_CAP = 16000      # NFR-1, across all sixteen
+LISTING_CAP = 16000      # NFR-1, across the model-invocable skills only
 
 NAME_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+){0,2}$")
 
@@ -39,6 +40,24 @@ RENAME = {
     "spec-to-todo":       "spec-plan",
     "write-tests":        "tests-write",
 }
+
+# Skills born in the pack. They have no pre-pack original and never did, so they belong in
+# neither half of RENAME: putting one there would send install.sh hunting an ancestor that
+# never existed and make validate report an R-4 cut-over that has nothing to cut over from.
+# They are part of the pack all the same, which is what packed_skills() is for.
+PACK_NATIVE = frozenset({"issues-draft"})
+
+
+def packed_skills() -> set:
+    """Every skill directory the pack carries — renamed originals plus pack-native ones.
+
+    Layout, name-resolution and the r:-prefix rule all ask "is this one of ours", and the
+    answer has to include a skill that never had a flat twin. R-4's machinery deliberately
+    keeps reading RENAME alone: it counts *originals still installed elsewhere*, and a
+    pack-native skill contributes none.
+    """
+    return set(RENAME.values()) | set(PACK_NATIVE)
+
 
 # FR-5 / ADR-6 — the agents packed skills dispatch.
 AGENTS = [

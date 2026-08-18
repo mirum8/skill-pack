@@ -78,6 +78,21 @@ CASES = {
         "A judgement-based hunt is code-bugs' job; code-scan must not load, because it runs "
         "mechanical analyzers rather than reading for intent.",
     ),
+    # Pack-native, so it has no flat original and no drift baseline; the routing pair is
+    # authored here like every other. The suite's second trigger — a Russian paste with no
+    # skill name in it — is hand-written, a CASES row being one trigger.
+    "issues-draft": (
+        "the client sent this list of 16 changes for the portal — turn it into issues we can "
+        "work through, and tell me which ones are already done",
+        "issues-draft loads, splits the message into one item per ask keeping the sender's "
+        "numbering, verifies each against the codebase read-only, and writes issues-<slug>.md "
+        "with the actionable work plus issues-<slug>-notes.md with the questions, the "
+        "already-built findings and anything touching architecture or the estimate.",
+        "issues-fix",
+        "work through the list in issues.md and fix everything in it",
+        "A backlog file that already exists and needs fixing is issues-fix's job; issues-draft "
+        "must not load, because there is no free-text message to split, verify and write up.",
+    ),
     # The second trigger in this skill's suite — a file-backed backlog — is hand-written, because
     # a CASES row is one trigger and this skill routes off two different source shapes.
     "issues-fix": (

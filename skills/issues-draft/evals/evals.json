@@ -1,0 +1,67 @@
+{
+  "skill_name": "issues-draft",
+  "evals": [
+    {
+      "id": 0,
+      "name": "routing-triggers",
+      "kind": "trigger",
+      "prompt": "the client sent this list of 16 changes for the portal — turn it into issues we can work through, and tell me which ones are already done",
+      "expected_output": "issues-draft loads, splits the message into one item per ask keeping the sender's numbering, verifies each against the codebase read-only, and writes issues-<slug>.md with the actionable work plus issues-<slug>-notes.md with the questions, the already-built findings and anything touching architecture or the estimate.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 1,
+      "name": "routing-excludes-issues-fix",
+      "kind": "neighbour-exclusion",
+      "neighbour": "issues-fix",
+      "prompt": "work through the list in issues.md and fix everything in it",
+      "expected_output": "A backlog file that already exists and needs fixing is issues-fix's job; issues-draft must not load, because there is no free-text message to split, verify and write up — the items are already written down.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 2,
+      "name": "routing-triggers-russian-paste",
+      "kind": "trigger",
+      "prompt": "Приветствую еще раз,\n1. Везде заменить рабочее название Auto Import на «Карнетъ».\n2. Добавить возможность переименовывать созданную сделку.\n3. Уточните, пожалуйста, что означает пункт «Коммерческий транспорт» в профиле брокера.\nЕсли по каким-то пунктам текущая реализация уже отличается или изменение затрагивает архитектуру/смету, отметьте отдельно.\n\nразбери это по задачам",
+      "expected_output": "issues-draft loads on a non-English message with no explicit skill name. Items 1 and 2 are work and reach issues-<slug>.md with their Russian titles verbatim and English acceptance criteria; item 3 is a question and goes to the notes file answered from the code; the closing paragraph is a meta-instruction, not a backlog item, and shapes the notes file's architecture/estimate section instead.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 3,
+      "name": "routing-excludes-spec-plan",
+      "kind": "neighbour-exclusion",
+      "neighbour": "spec-plan",
+      "prompt": "take docs/billing/spec.html and break it into phases I can work through, with a done-when check for each",
+      "expected_output": "Turning a written specification into an ordered, phased plan is spec-plan's job; issues-draft must not load, because a spec is not a message full of asks and phases are not a verified backlog of discrete items.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 4,
+      "name": "already-built-goes-to-notes-not-backlog",
+      "kind": "behaviour",
+      "prompt": "Here's what came back from the client:\n1. Add a dark mode toggle to settings.\n2. The export button should produce CSV, not TSV.\nCheck these against the code and write them up.",
+      "expected_output": "Both asks are verified read-only against the codebase before anything is written. An ask the code has already implemented is routed to issues-<slug>-notes.md with the file:line showing where it lives, and is NOT written into issues-<slug>.md — the backlog file holds only items that are still real work, because /r:issues-fix spends a verifier on every unticked line it finds.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 5,
+      "name": "no-repo-declares-unverified",
+      "kind": "behaviour",
+      "prompt": "turn this into a backlog file: 1. faster search 2. remember my filters between visits 3. dark mode",
+      "expected_output": "With no codebase to read, the run continues as --no-verify rather than pretending to verify: the backlog is still written, every item is marked unverified in the notes file, and the report says the code was not read as its FIRST line. It never presents an unverified backlog as a verified one.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    }
+  ]
+}

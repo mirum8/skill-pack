@@ -71,7 +71,7 @@ def check_manifest():
 # --- FR-2, FR-3, BR-1, BR-2, ADR-4 ------------------------------------------
 def check_layout():
     dirs = skill_dirs()
-    expected = set(R.RENAME.values())
+    expected = R.packed_skills()
     if set(dirs) != expected:
         missing, extra = expected - set(dirs), set(dirs) - expected
         if missing:
@@ -88,9 +88,21 @@ def check_layout():
         fail("ADR-4", f"{os.path.relpath(p, REPO)} is three levels deep; skills/ is flat")
 
 
+# Claude Code accepts yes/no/on/off/1/0 for a boolean field as well as true/false, so a flag
+# tested with `is not True` reads `disable-model-invocation: 1` as absent — the skill would then
+# be billed for a description the router never sees AND pass FR-16 while doing it. One helper,
+# because two rules read this field and a disagreement between them is the bug.
+def invocable_by_model(data) -> bool:
+    v = data.get("disable-model-invocation")
+    if isinstance(v, str):
+        v = v.strip().lower() in {"true", "yes", "on", "1"}
+    return not bool(v)
+
+
 # --- FR-7, FR-8, FR-10, FR-16, BR-4, NFR-1 ----------------------------------
 def check_frontmatter():
     total = 0
+    free = []
     for d in skill_dirs():
         path = os.path.join(SKILLS, d, "SKILL.md")
         fm, _ = frontmatter(path)
@@ -111,13 +123,27 @@ def check_frontmatter():
             fail("FR-8/BR-4", f"{d} description+when_to_use is {len(desc)} chars, "
                               f"{len(desc) - R.DESC_CAP} over the {R.DESC_CAP} cap. The tail is "
                               "dropped from the listing and never reaches the model.")
-        total += min(len(desc), R.DESC_CAP)
-        if d in R.NO_AUTO_FIRE and data.get("disable-model-invocation") is not True:
+        # NFR-1 measures what the ROUTER pays, and a user-invocable-only skill costs it nothing.
+        # The frontmatter reference is explicit about the difference:
+        #   (default)                        Description always in context
+        #   disable-model-invocation: true   Description NOT in context, loads when you invoke
+        # So counting a flagged skill inflates the bill by a description nothing reads, and the
+        # pack pays for it in real routing surface — the cure is trimming a description that was
+        # already free. Excluded skills are named in the note, because a ceiling that quietly
+        # ignores part of the pack is a ceiling nobody can check.
+        if invocable_by_model(data):
+            total += min(len(desc), R.DESC_CAP)
+        else:
+            free.append(d)
+        if d in R.NO_AUTO_FIRE and invocable_by_model(data):
             fail("FR-16", f"{d} says in its own text that it must never fire on its own, "
                           "but carries no disable-model-invocation: true")
     if total > R.LISTING_CAP:
         fail("NFR-1", f"always-on listing cost is {total} chars, over the {R.LISTING_CAP} ceiling")
-    NOTES.append(f"always-on listing cost: {total} / {R.LISTING_CAP} chars")
+    note = f"always-on listing cost: {total} / {R.LISTING_CAP} chars"
+    if free:
+        note += (f" ({len(free)} user-invocable-only, not counted: {', '.join(sorted(free))})")
+    NOTES.append(note)
 
 
 # --- FR-4, BR-3, BR-5 -------------------------------------------------------
@@ -162,7 +188,7 @@ EXTERNAL = {"test-app", "agent-browser", "frontend-design", "skill-creator", "so
 # work. Not a dangling reference — the opposite of one.
 RETIRED = {"verify-diff", "verify-diff-agent"}
 SLASH = re.compile(r"(?<![A-Za-z0-9_-])/([a-z][a-z0-9-]{2,})(?![A-Za-z0-9_./-])")
-KNOWN = set(R.RENAME) | set(R.RENAME.values()) | BUNDLED | EXTERNAL | RETIRED
+KNOWN = set(R.RENAME) | R.packed_skills() | BUNDLED | EXTERNAL | RETIRED
 
 
 def candidates(text):
@@ -180,7 +206,7 @@ def candidates(text):
 
 
 def check_dangling():
-    packed = set(R.RENAME.values())
+    packed = R.packed_skills()
     unknown = {}
     for path in pack_text_files():
         text = open(path, encoding="utf-8", errors="ignore").read()
@@ -198,7 +224,7 @@ def check_dangling():
 def check_r_prefix():
     """BR-5 — a packed name written without the r: prefix would silently resolve
     to its flat twin outside the pack, which ADR-13 keeps installed forever."""
-    packed = set(R.RENAME.values())
+    packed = R.packed_skills()
     for path in pack_text_files():
         text = open(path, encoding="utf-8", errors="ignore").read()
         if path.endswith(".mjs"):

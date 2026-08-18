@@ -53,12 +53,13 @@ skills-directory case. Whether plugin discovery follows a *symlinked* entry is
 documented neither way, and it fails identically to a malformed manifest, so the
 pack does not rely on it.
 
-## The sixteen skills
+## The seventeen skills
 
 | command | does |
 |---|---|
 | `/r:task-run` | one unit of work end to end — plan, implement test-first, review, PR |
 | `/r:task-review` | the review pipeline over the current diff; never fires on its own |
+| `/r:issues-draft` | a free-text message → a verified `issues-<slug>.md` backlog + a reply |
 | `/r:issues-fix` | triage, group and fix a backlog — GitHub issues or a markdown list |
 | `/r:code-bugs` | hunt real defects, plus drift between the changes and the docs |
 | `/r:code-quality` | readability and idiom review; reports, never edits |
@@ -76,13 +77,14 @@ pack does not rely on it.
 
 Names are domain-first (`<domain>-<action>`, at most three kebab segments) so the
 alphabetically sorted `/` menu groups the families: `claudemd-*`, `code-*`,
-`spec-*`, `task-*`. `hexagonal-architecture` is the one exception — it is a
+`issues-*`, `spec-*`, `task-*`. `hexagonal-architecture` is the one exception — it is a
 rulebook rather than an action, and "hexagonal" is the word someone reaches for.
 
 `task-run` and `issues-fix` carry `disable-model-invocation: true` — each says
 in its own text that it must never fire on its own, and the frontmatter enforces
 that rather than trusting the prose. They stay invocable by name; they just will
-not auto-load, and they do not appear in the model's own list of skills.
+not auto-load, and their descriptions are not in context at all, which is why
+neither counts against the 16,000-character listing budget below.
 
 `task-review` says the same thing but carries no flag, on purpose. The flag is
 all-or-nothing: it blocks the Skill tool outright, so it cannot tell "the model
@@ -139,9 +141,9 @@ floors, because no lower bound was tested: `pmd` 7.26.0 · `spotbugs` 4.10.2 ·
 ```
 
 There is no CI, so `validate.sh` is the whole gate. It checks that the manifest
-parses with `name == "r"`, sixteen skill directories sit exactly two levels deep,
+parses with `name == "r"`, seventeen skill directories sit exactly two levels deep,
 every frontmatter is valid YAML with a `description` under the 1,536-character
-cap, the total listing cost stays under 16,000, no skill name is referenced
+cap, the listing cost of the model-invocable skills stays under 16,000, no skill name is referenced
 without its `r:` prefix, no reference dangles, every bundled agent is dispatched
 by some skill, every skill has an eval suite with both case kinds, no absolute
 path points into a skill directory, no build artefact is tracked, and no two
