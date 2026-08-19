@@ -218,9 +218,10 @@ test. Compare:
 the milestone — the implementer never sees that section. Repetition between the `**Design**` and
 the items it produced is expected and correct; it is not duplication to factor out.
 
-**`--shallow` stops after pass 1.** Milestones, leaves, `Depends on:` and the checklist, with no
-design pass and no contracts in the items — the build order alone. Use it when the code will be
-designed at execution time and the plan is only there to order the work.
+**`--shallow` stops after pass 1** — it skips Steps 3 and 3.5, not the rest. Milestones, leaves,
+`Depends on:` and the checklist, with no design pass and no contracts in the items: the build order
+alone. Use it when the code will be designed at execution time and the plan is only there to order
+the work. It still checks, still gates, still hands off, and still records (`mode: "shallow"`).
 
 ## Step 5 — write the leaf
 
@@ -304,6 +305,10 @@ are derived from contracts, so a wrong split makes both passes wrong together. I
 cheapest possible moment to fix — a re-split before writing costs one message; after writing it
 costs the whole document. One gate, here, and none after it.
 
+**If the user declines, write nothing and go straight to Step 10** with `mode: "declined"` and the
+counts you had drafted. A rejected decomposition is the one outcome this skill most needs to be
+able to see later, and it is invisible if a declined run simply ends.
+
 `--shallow` gates the same way. With `--yes`, skip it.
 
 ## Step 9 — hand off
@@ -330,6 +335,49 @@ or one leaf on its own:
 **Name what the graph found.** If any wave holds more than one unbuilt leaf, say so and say they
 can be built concurrently, one `/r:plan-run` session each — that is the return on writing the
 edges, and `/r:plan-run --dry-run` prints the exact commands.
+
+## Step 10 — record the run
+
+One line into the pack-wide store — counts only, never a document path, a milestone name or a leaf
+title. **Record even when the user declines at the gate**, with `mode: "declined"`: a decomposition
+that was proposed and rejected is the most informative row this skill can write, and dropping it
+leaves a store where every plan was a good one.
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
+{"skill":"r:spec-design","mode":"full","docsRead":0,"hadRequirements":false,
+ "milestones":0,"leaves":0,"waves":0,"maxWaveWidth":0,
+ "designChoicesAsked":0,"designChoicesRecorded":0,"checkerProblems":0,"openQuestions":0}
+STATS_JSON
+```
+
+`mode` is `full` | `shallow` | `declined`, and it is what keeps the other numbers comparable: a
+`--shallow` plan has no design pass, so counting its zero `designChoicesAsked` alongside a full
+one's would report the bar as stricter than it is.
+
+**`maxWaveWidth` is the number that judges the graph.** Writing a `Depends on:` line on every leaf
+costs something on every plan, and it buys exactly one thing: leaves that can be built at the same
+time. If the widest wave is 1 across many plans, the edges are being written and nothing is using
+them — either the decomposition is too linear or this project's work genuinely is, and both are
+worth knowing. `waves` beside it says whether that is a long chain or a wide one.
+
+**`designChoicesAsked` calibrates the Step 3.5 bar, and it is the field most likely to be read
+angrily.** The bar is meant to be narrow. Several questions per plan means it is too low and the
+skill is spending attention it should be spending deciding; zero across many plans means it is too
+high and choices are being made silently that a human would have wanted. `designChoicesRecorded`
+counts the ones that went to Open questions instead of being answered — under `--yes`, or when the
+user declined to choose.
+
+**`checkerProblems` is what `scripts/check_todo.py` reported on the first run**, before fixing.
+Consistently zero means the checker is not earning its place in Step 7; consistently high means
+this skill is producing plans it already knows how to check.
+
+**The cross-skill pair is `leaves` here against `phasesInPlan` in `/r:plan-run`'s rows.** That is
+the only way to see whether plans get written and then actually executed — a store full of plans
+with no runs is the failure neither skill can detect on its own.
+
+The script always exits `0` — a lost row is a lost row, never a failed run, and it must never change
+what was written. Never retry it.
 
 ## The downstream contract
 
