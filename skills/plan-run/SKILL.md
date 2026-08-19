@@ -166,8 +166,9 @@ Resolve first: none outstanding
 
 - **Tier** is `full` where the phase carries a `**Risk:**` line and blank otherwise (Step 3.3
   explains why a blank means *classified*, not *low*).
-- **`--dry-run`** → print this and **stop**. Nothing is built; no branch, no commit, and not a
-  character of the plan file.
+- **`--dry-run`** → print this, **record the run** (Step 4's stats line, `mode: "dry-run"`, with
+  `phasesInPlan` set and every other count zero), and **stop**. Nothing is built; no branch, no
+  commit, and not a character of the plan file.
 - **Otherwise** → present the run list and **pause for approval**, unless `--yes` was passed. At the
   gate the user can drop phases off either end, or stop to fix the plan first — which is the cheap
   moment to do it, since every note the checker raised is about a phase nobody has started yet.
@@ -355,6 +356,9 @@ For each phase:
    - **Never tick a phase that halted**, and never tick past it.
    - Report which phase stopped it, why, and the exact resume command:
      `/r:plan-run <plan> --from <n>`.
+   - **Then go to Step 4 and record the run** — a halt is a result, not a reason to skip the report.
+     `haltedAt` is the phase, `haltReason` the cause from the closed list there. A halted run that
+     records nothing is how the store comes to hold only successes.'
 
    **This is deliberately the opposite of `/r:issues-fix`, and the reason is the ordering.** There,
    items are independent, so one failure is one item's failure and the loop continues. Here Phase 5
@@ -462,6 +466,10 @@ worktree, since base cannot be checked out there). It builds nothing.
    merge is idempotent (step 1 skips anything already an ancestor), so re-running after a manual
    resolution is safe.
 
+Then **record the run** — Step 4's stats line with `mode: "land"`, `landed` set to what merged, and
+`phasesInRun: 0`, because a landing pass builds nothing. A conflict that stopped it is
+`haltReason: "merge-conflict"` with the phase in `haltedAt`.
+
 **About the plan file.** Every phase ticks it, so it is the one file every branch touches — which is
 why the wave collision check excludes it. In practice git merges the ticks cleanly, because separate
 phases occupy separate regions of the document. When two phases sit adjacent enough to conflict, the
@@ -497,21 +505,47 @@ already done, the phase that halted and why, and the phases never reached. **Say
 written back and what wasn't** — a phase merged with no tick is a phase the next run will offer
 again.
 
-Then record one line into the pack-wide store — counts only, never phase titles or plan paths:
+Then record one line into the pack-wide store — counts only, never phase titles or plan paths.
+**Every run records, including a halt, a `--dry-run` and a `--land`:**
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
-{"skill":"r:plan-run","phasesInPlan":0,"phasesInRun":0,"merged":0,"alreadyDone":0,"doneCheckRan":0,"haltedAt":null,"dryRun":false}
+{"skill":"r:plan-run","mode":"serial","phasesInPlan":0,"phasesInRun":0,"merged":0,"landed":0,
+ "alreadyDone":0,"doneCheckRan":0,"doneCheckFailed":0,"haltedAt":null,"haltReason":null}
 STATS_JSON
 ```
 
-The pair worth measuring is `phasesInRun` against `merged`, with `haltedAt` saying where the run
-died: that is how far a written plan actually survives contact with the code, which is the one number
-that says whether phased plans are worth executing this way at all. `alreadyDone` is what justifies
-the per-phase re-check — a re-check that never finds anything is a cost with no return, and one that
-finds a phase already delivered has just saved a whole implement-and-review pass. The script always
-exits `0` — a lost row is a lost row, never a failed run, and it must never change what was merged or
-ticked. Never retry it.
+**`mode` is what makes every other number readable**, and it is `serial` | `no-merge` | `land` |
+`dry-run`. Without it a `--no-merge` session records `merged: 0` — because it is *supposed* not to
+merge — and that is indistinguishable from a run whose merge failed. Same trap as a track that
+scores zero because its tier never dispatched it: absence of an action is not a failed action, and
+only the row itself can say which this was.
+
+**Count what this run actually did, and leave the rest at zero.** A `no-merge` session sets
+`phasesInRun` and `merged: 0`; a `land` pass sets `landed` and leaves `phasesInRun: 0`, because it
+builds nothing. A `dry-run` sets `phasesInPlan` and nothing else.
+
+**So read the concurrent flow across rows, never within one.** A wave built in three sessions and
+landed from the primary tree is *four* rows — three `no-merge` and one `land` — and no single one of
+them holds both halves. The question "how far does a plan survive contact with the code" is
+`phasesInRun` against `merged + landed` **summed over a plan's rows**; asked of one row it reads as
+a string of failures. This is the one metric here that a naive per-row average gets backwards.
+
+**`haltReason` is why, where `haltedAt` is only which phase.** A closed vocabulary, so it can be
+counted: `implement-stopped` | `review-blocked` | `tracks-blocked` | `build-red` | `done-when-failed`
+| `merge-conflict` | `dirty-base` | `recheck-blocked` | `slice-refused` | `workflow-unavailable`.
+The one worth separating from all the others is `review-blocked` — a review that ran and left part of
+the diff unread is a different failure from a build that went red, and it is the one that would
+otherwise have merged.
+
+**`doneCheckFailed` is the point of having a `Done when:` at all.** `doneCheckRan` says the command
+executed; only `doneCheckFailed` records the case the step exists for — a phase whose review passed
+and whose own check did not. If that number stays zero across many runs, the check is costing a
+command per phase and catching nothing; if it does not, it is catching what no reviewer could.
+`alreadyDone` justifies the per-phase re-check the same way.
+
+The script always exits `0` — a lost row is a lost row, never a failed run, and it must never change
+what was merged, landed or ticked. Never retry it.
 
 ## Non-negotiables
 
