@@ -16,7 +16,6 @@ description: >-
   run on its own (`/r:task-run "todo.md / Phase 3"`), a flat backlog of issues or bugs with no
   ordering between them (`/r:issues-fix`), writing the plan in the first place (`/r:spec-design`),
   or reviewing a diff (`/r:task-review`).
-effort: xhigh
 disable-model-invocation: true
 ---
 

@@ -114,9 +114,14 @@ def load_cases(only=None):
             if kind not in ROUTING_KINDS:
                 skipped.append((skill, name, "behaviour case — needs its fixture and a judge"))
                 continue
-            if kind == "trigger" and no_route:
-                skipped.append((skill, name,
-                                "disable-model-invocation: true — not routable by design"))
+            if no_route:
+                # BOTH kinds go, not just the trigger. The description of a flagged skill is not in
+                # the router's context at all, so it can never fire -- which makes its
+                # neighbour-exclusion cases pass without measuring anything. A case that can only
+                # return one answer is worse than no case: it inflates the pass count.
+                why = ("not routable by design" if kind == "trigger" else
+                       "not routable by design, so this exclusion passes trivially")
+                skipped.append((skill, name, f"disable-model-invocation: true — {why}"))
                 continue
             if not case.get("prompt"):
                 skipped.append((skill, name, "no prompt"))

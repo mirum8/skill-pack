@@ -18,6 +18,7 @@ description: >-
   NOT for building the plan — that's /r:plan-run or /r:task-run.
 model: opus
 effort: xhigh
+disable-model-invocation: true
 ---
 
 # Documents to a build plan

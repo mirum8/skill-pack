@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repository is
 
-The source of `r`, a **skills-directory plugin** for Claude Code: 17 skills (`/r:<name>`) and the
+The source of `r`, a **skills-directory plugin** for Claude Code: 18 skills (`/r:<name>`) and the
 8 agents they dispatch. There is no application here — the "product" is prose (`SKILL.md`),
 workflow scripts, agent definitions and a hook, all loaded by Claude Code itself.
 
@@ -47,11 +47,23 @@ lands in the wrong copy, where it works under the old name and is missing under 
 the old bare name still answers with the old behaviour. `install.sh` retires them from both roots
 (`--keep-originals` opts out) and `validate.sh` names whatever is left on every run. The roots and
 the names both come from `tools/rename_rules.py`, so a skill added to the pack is retired by that
-one edit. Until you have re-run the installer, check which path you are in before editing anything
+one edit. `RETIRED_PACKED` in the same table covers the other half — a *packed* name dropped by a
+later rename (`spec-plan` → `spec-design`). `rsync --delete` clears it from the pack root but never
+from the flat roots, where a copy sitting beside the pack keeps answering the old name with the old
+behaviour; `validate.py` additionally fails if any packed text still mentions a retired name. Until you have re-run the installer, check which path you are in before editing anything
 that exists under both names.
 
-Eval suites (`skills/*/evals/evals.json`) need a model, so they are not part of `validate.sh`. Run
-them deliberately after editing any `description`, and before a release.
+Eval suites (`skills/*/evals/evals.json`) need a model, so they are not part of `validate.sh`:
+`python3 tools/run-evals.py` runs them (`--dry-run` first; `--skill <name>` to focus). It scores only
+the two mechanical case kinds and names everything it skips — a behaviour case needs its fixture and
+a judge, and a `disable-model-invocation` skill's cases are untestable by design. Run it after
+editing any `description`, and before a release.
+
+**Read its output before believing it.** A sweep in an empty scratch directory cannot tell "the
+description drifted" from "the prompt named a codebase that wasn't there", and a result where every
+trigger fails and every exclusion passes means the instrument never fired, not that the pack broke.
+The runner redirects `CLAUDE_SKILL_STATS_DB` to a throwaway so a sweep never writes synthetic
+`invoke` rows into the store the convention below says to read.
 
 ## Layout and what ships
 
@@ -133,8 +145,15 @@ stays that skill's store. Rules that are load-bearing:
 - `~/.claude/skill-stats.jsonl` is the pre-SQLite archive: read by `--import-jsonl` once, never
   written.
 
-**Skills that must never self-trigger** (`task-run`, `issues-fix`) carry
+**Skills that must never self-trigger** (`task-run`, `issues-fix`, `plan-run`, `spec-design`) carry
 `disable-model-invocation: true` in frontmatter — the enforcement, not just a sentence in the body.
+Each of the four mutates the repo or a plan on a scale nobody wants arrived at by inference, so
+they are invoked deliberately or not at all. Two consequences follow and are easy to forget: their
+descriptions leave the listing budget entirely (they are not in the router's context), and **no
+prompt can route to them**, so their own `trigger` eval cases are untestable by design and their
+`neighbour-exclusion` cases pass without measuring anything — `tools/run-evals.py` skips both kinds
+and says why rather than counting them as passes.
+
 `task-review` must not self-trigger either, but carries **no** flag: the flag blocks the Skill tool
 outright and cannot tell an auto-load from a deliberate call, so it also blocked `task-run`'s
 mandatory Step 5 from invoking the review. There the rule lives in the description and the
