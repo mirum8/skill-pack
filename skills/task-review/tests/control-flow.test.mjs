@@ -1443,6 +1443,37 @@ test('a DEAD end-verify fixer cannot trigger a re-verify — it changed nothing'
   assert.equal(counts['ui-deploy'], 1, 'no edit landed, so nothing the halves read went stale')
 })
 
+test('an absent /test-app at deploy time is a SKIP, not a blocked track', async () => {
+  // `hasTestApp` is a model's answer to a one-line `test -f`, and on 2026-08-19 one triage of four
+  // answered true over a tree with no SKILL.md — the directory was there, full of screenshots.
+  // That run spent a prewarm, an 86s docker deploy and both halves before finding out. The deploy
+  // step now looks for the file itself, and an absent prerequisite is nobody's failure.
+  const { out, logText, counts } = await run({
+    triage: baseTriage({ uiTouched: true, hasTestApp: true, hasFrontend: true }),
+    overrides: {
+      'ui-deploy': { ok: false, missing: true, reason: '/test-app SKILL.md is not on disk' },
+    },
+  })
+  assert.equal(counts['ui-functional'], undefined, 'neither half is dispatched')
+  assert.equal(counts['ui-visual'], undefined)
+  assert.equal(out.ui.blocked, false, 'an absent prerequisite is not a broken tool')
+  assert.match(out.ui.missing, /not on disk/)
+  assert.match(logText, /UI verification SKIPPED/)
+  // The distinction the whole payload draws elsewhere: skipped is not blocked, and a reader must
+  // not be sent after a deploy that never failed.
+  assert.ok(!/UI verification NOT run — deploy failed/.test(logText))
+})
+
+test('a deploy that genuinely FAILED is still a blocked track, not a skip', async () => {
+  const { out, logText } = await run({
+    triage: baseTriage({ uiTouched: true, hasTestApp: true, hasFrontend: true }),
+    overrides: { 'ui-deploy': { ok: false, reason: 'health check never returned 200' } },
+  })
+  assert.equal(out.ui.blocked, true)
+  assert.equal(out.ui.missing, undefined)
+  assert.match(logText, /UI verification NOT run — deploy failed/)
+})
+
 test('a UI half that could not run contributes no finding row', async () => {
   // The failure this locks down, from the 2026-08-19 store: the functional half returned
   // "FUNCTIONAL VERIFICATION TRACK BLOCKED — the /test-app skill is not installed" as a finding

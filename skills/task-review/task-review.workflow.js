@@ -239,6 +239,15 @@ const DEPLOY = {
     ok: { type: 'boolean' },
     url: { type: 'string' },     // the helper-resolved BASE_URL — ephemeral in a worktree
     reason: { type: 'string' },  // one line, only when ok=false
+    // /test-app is not on disk after all. Distinct from every other ok=false because it is an
+    // absent PREREQUISITE, not a failure: the UI track is then SKIPPED, not blocked, and nobody
+    // should go looking for a broken deploy. It exists because `hasTestApp` is a model-supplied
+    // answer to a one-line `test -f`, and on 2026-08-19 one triage of four answered true over a
+    // tree where SKILL.md was absent (the directory was there, full of screenshots and e2e
+    // scripts, which is what an answer from impression sees). That run spent a prewarm, an 86s
+    // docker deploy and both halves before discovering it. This is the check that cannot be
+    // answered from impression: the step that needs the file looks for the file.
+    missing: { type: 'boolean' },
   },
 }
 // The shared diff every hunter reads (Phase 0b). Deliberately a PATH and a couple of counts, never
@@ -1710,11 +1719,17 @@ let uiSummary = { skipped: true }
 let ui = null
 let uiDead = []
 let uiReasons = []
+let uiMissing = ''
 // Hoisted for the same reason as `ui` above: the stats row is assembled outside this block, and
 // the UI fixer's outcome is part of what that row claims.
 let minorFixed = false
-// The /test-app presence gate was answered back in Phase 0 (triage step 5b) — it is one `test -f`,
-// and spending a whole subagent round-trip on it put a needless hop on the critical path.
+// The /test-app presence gate is answered TWICE, and deliberately. Phase 0 (triage step 5b) gives
+// the cheap early answer that keeps a project with no /test-app off this path entirely — but it is
+// a MODEL answering a one-line `test -f`, and an answer from impression sees the test-app directory
+// (screenshots, e2e scripts) and says yes over a tree with no SKILL.md in it. Measured 2026-08-19:
+// one triage of four did exactly that, and the run spent a prewarm, an 86s docker deploy and both
+// halves before the halves discovered it. So the deploy step re-checks before it spends anything,
+// and an absent file there is a SKIP, not a blocked track.
 // Deploy + both halves only. The teardown, the fixes and the issue filing all happen AFTER the
 // barrier below, because they must not race the end-verify's own fixers over the same files.
 const uiTrack = async () => {
@@ -1735,6 +1750,14 @@ const uiTrack = async () => {
     // {ok:false, reason} comes back once — a broken deploy is never retried three times.
     const dep = await reliable('ui-deploy', 'UI', () => agent(
       `Bring the app up for UI verification and return its base URL. You do NOT test anything.
+       0. FIRST, confirm the skill this whole track depends on is actually on disk:
+            test -f "$(git rev-parse --show-toplevel)/.claude/skills/test-app/SKILL.md"
+          If it is NOT there, return ok=false with missing=true and that path in 'reason', and do
+          nothing else — no prewarm, no deploy, no containers. The tier gate that got you here is
+          a model's answer to this same one-line test, and an answer from impression sees the
+          test-app DIRECTORY (screenshots, e2e scripts) and says yes. You are the step that needs
+          the file, so you are the one that has to look for it. A gitignored, locally-scaffolded
+          SKILL.md counts — this is a disk check, and git has no opinion here.
        1. Read \`.claude/skills/test-app/SKILL.md\` and its \`references/subagent-prompt.md\` for
           the redeploy command (the REBUILD_NOTE), the HEALTH_CHECK_CMD, and the default BASE_URL.
        2. Deploy ONLY through the helper — never the raw redeploy command. The helper is what keeps
@@ -1752,7 +1775,17 @@ const uiTrack = async () => {
        collide with the main stack, which is the whole failure this helper exists to prevent.`,
       { label: 'ui-deploy', phase: 'UI', schema: DEPLOY, ...GP, ...DEPLOY_RUN }))
 
-    if (!dep || !dep.ok || !dep.url) {
+    if (dep && dep.missing) {
+      // An absent prerequisite is a SKIP, not a failure — the same distinction tracksSkipped and
+      // tracksBlocked draw everywhere else in this payload. Nothing broke; there is simply no
+      // /test-app in this project to run. Recording it as blocked sends a reader after a deploy
+      // that never failed, and (the expensive half) the deploy already did not happen.
+      uiMissing = (dep.reason || '').trim() || '/test-app is not installed in this project'
+      log(`post-task-review: UI verification SKIPPED — ${uiMissing}. Nothing was verified in a ` +
+          `browser; this is a skip, not a clean bill. Scaffold it with /r:test-app-create if the ` +
+          `UI half of this review is meant to run.`)
+      ui = { ran: false, findings: [], coverage: `SKIPPED — ${uiMissing}` }
+    } else if (!dep || !dep.ok || !dep.url) {
       // A failed deploy is a blocked TRACK, not a clean UI pass. ran=false makes blocked() true,
       // so tracksBlocked names it and nothing downstream reads this as "the UI was verified".
       log(`post-task-review: UI verification NOT run — deploy failed (${(dep && dep.reason) || 'no usable result'}).`)
@@ -1904,6 +1937,9 @@ try {
     uiSummary = {
       ran: ui && ui.ran, minorFixed: minorFixed ? minor.length : 0,
       majorFiled: major.length, blocked: blocked(ui),
+      // An absent /test-app, in the deploy step's own words. Set only when the file really was
+      // not on disk, so it also records that the early gate and the real check disagreed.
+      ...(uiMissing ? { missing: uiMissing } : {}),
       // Which half fell over, so a "UI blocked" line in the stats store can be read without the
       // transcript: a dead visual half and a dead functional half mean very different coverage.
       blockedHalves: uiDead,
