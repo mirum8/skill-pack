@@ -357,6 +357,56 @@
           "text": "Under --yes the recommended option is taken and recorded in Open questions with its alternative, never silently applied"
         }
       ]
+    },
+    {
+      "id": 13,
+      "name": "codex-plan-review-runs-and-is-triaged",
+      "prompt": "/r:spec-design docs/billing/spec.html",
+      "fixture": null,
+      "expected_output": "With the Codex plugin installed, the finished draft is challenged by the REAL Codex against the five-item rubric before the gate. Findings are verified against the documents and the code first; verified major ones are fixed, minor and stylistic ones noted but not rewritten, false ones dismissed with a reason. Raised / applied / dismissed all reach the gate and the report. It never points Codex at a diff.",
+      "assertions": [
+        {
+          "id": "real_tool",
+          "text": "The real Codex runs over the plan DOCUMENT — never /r:code-adversarial, never a run.sh, never an LLM imitation"
+        },
+        {
+          "id": "verified",
+          "text": "Each finding is checked against the documents and the real code before anything is changed"
+        },
+        {
+          "id": "major_only",
+          "text": "Verified major findings are fixed; minor or stylistic ones are noted, not rewritten"
+        },
+        {
+          "id": "audit_trail",
+          "text": "Raised, applied and dismissed are all reported — a plan whose findings were all dismissed does not read like a clean one"
+        },
+        {
+          "id": "bounded",
+          "text": "At most one re-review, and only when the decomposition actually changed"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "name": "codex-absent-is-a-named-skip",
+      "prompt": "/r:spec-design docs/billing/spec.html",
+      "fixture": null,
+      "expected_output": "With no Codex plugin installed, the review step is skipped and SAID to be skipped — at the gate, in the report, and as codexReview:\"skipped\" in the stats row. The plan is still written. No stand-in reviewer is substituted and the step is never reported as done.",
+      "assertions": [
+        {
+          "id": "not_a_failure",
+          "text": "A missing Codex plugin skips the step and the run continues to the gate"
+        },
+        {
+          "id": "named",
+          "text": "The skip is stated at the gate and in the report, and recorded as codexReview: skipped"
+        },
+        {
+          "id": "no_stand_in",
+          "text": "No imitation review is substituted, and the step is never reported as completed"
+        }
+      ]
     }
   ]
 }

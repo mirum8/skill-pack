@@ -11,11 +11,11 @@ description: >-
   Stack-agnostic — it follows whatever the documents already decided, and takes an optional
   free-text argument for what the documents cannot say: priorities, a deadline, what to defer,
   constraints to respect. Where a design decision is genuinely open and would change the
-  contracts or the split, it asks rather than picking one quietly. Use on "/r:spec-design",
-  "turn this spec into a plan", "break these docs into phases", "what's the build order", "plan
-  this out with the design detail", "which parts can we build in parallel". Add --shallow for the
-  build order alone, with no design pass. NOT for writing the spec — that's /r:spec-brainstorm;
-  NOT for building the plan — that's /r:plan-run or /r:task-run.
+  contracts or the split, it asks rather than picking one quietly. The finished draft is
+  challenged by the real Codex before you see it, where installed — findings verified, the major
+  ones fixed, all three lists reported. Invoked deliberately as "/r:spec-design" — never routed
+  to. Add --shallow for the build order alone, with no design pass. NOT for writing the spec —
+  that's /r:spec-brainstorm; NOT for building the plan — that's /r:plan-run or /r:task-run.
 model: opus
 effort: xhigh
 disable-model-invocation: true
@@ -270,6 +270,62 @@ Both go in an unnumbered **`## Resolve first`** above the milestones, each with 
 which leaf it blocks. Unnumbered keeps them out of `/r:task-run`'s reach — it looks for
 `### Phase N` — while leaving them where the person reading the plan will see them.
 
+## Step 6.5 — Codex challenges the plan
+
+The draft is complete and nothing is on disk. Before the user sees it, have the **real Codex**
+challenge it — a second reader that did not write the decomposition and has no stake in it.
+
+**Only if Codex is installed.** It is the pack's one optional prerequisite, so resolve it first and
+treat absence as a **named skip**, never a failure and never a stand-in:
+
+```sh
+C="$HOME/.claude/plugins/marketplaces/openai-codex/plugins/codex/scripts/codex-companion.mjs"
+[ -f "$C" ] || C="$(ls -1d "$HOME"/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs 2>/dev/null | sort -V | tail -n1)"
+[ -n "$C" ] && [ -f "$C" ] && echo "codex: $C" || echo "codex: absent"
+```
+
+Absent → skip the step, say so at the gate and in the report, record `codexReview: "skipped"`, and
+carry on. A skipped review reported as a review is worse than no review at all.
+
+**Review the plan DOCUMENT, not a diff.** Run `/codex:rescue` with the draft and the rubric below.
+Do **not** reach for `/r:code-adversarial` or its `run.sh`: those review a git diff, there is no
+diff here, and running one from a Codex-backed context makes Codex re-enter the wrapper that
+launches Codex. If the review outlives the foreground window, call the companion directly instead —
+`node "$C" task --wait --write=false --effort medium "<the rubric prompt>"` — which is what
+`task-run` does for the same job and for the same reason.
+
+**The rubric — five questions, fixed.** A fixed list is what makes two runs comparable and stops the
+review wandering into prose style:
+
+1. **Coverage** — does every story in the documents reach a leaf, and does the v1 line actually ship
+   something usable?
+2. **The graph** — is any leaf buildable only after something numbered later? Does any edge claim a
+   dependency that isn't real, forcing work to be serial that needn't be?
+3. **The contracts** — do the milestone `Design` sections contradict each other, the documents, or
+   the existing code? Is any schema, endpoint or signature wrong for what it has to do?
+4. **Self-containment** — pick leaves at random: could an implementer build one from *its own block
+   alone*? Anything that silently needs the milestone above it is a defect.
+5. **Buildability and size** — is anything numbered that produces a decision rather than a diff? Is
+   any leaf too large for one session, or so small it should fold into a neighbour?
+
+**Verify every finding before acting on it.** Codex has read the plan, not always the project. Check
+each against the documents and the real code, and classify:
+
+- **major + relevant** → **fix it**, and re-check what the fix touched. A wrong dependency edge, a
+  contract that contradicts the schema, a story with no leaf, an item that cannot be built from its
+  own block — these change what gets built and are worth a rewrite now, when nothing is on disk.
+- **minor, or a matter of taste** → note it, do not rewrite. A plan churned over style costs a pass
+  and changes nothing an implementer would notice.
+- **not real** → dismiss it, with the reason.
+
+**Carry all three lists out.** Raised, applied, dismissed — into the gate and the report. Drop them
+and "Codex raised three majors and every one was dismissed" reads exactly like "Codex found
+nothing", which are opposite facts about the plan.
+
+**Re-review once, and only if the decomposition changed** — a leaf added, removed or re-split, or an
+edge moved. That catches a fix that opened a fresh hole. It does not loop until the plan is
+flawless: one bounded pass, then the gate, where a human reads it anyway.
+
 ## Step 7 — check it
 
 ```sh
@@ -293,7 +349,10 @@ Then four judgments a script can't make:
 ## Step 8 — the gate
 
 **Before writing anything to disk, show the decomposition and wait.** Milestones, leaf titles,
-the graph, the wave table — **and the open design choices from Step 3.5** — then stop for a yes.
+the graph, the wave table, **what Codex raised and what you did about it (Step 6.5)** — **and the
+open design choices from Step 3.5** — then stop for a yes. Say plainly when the Codex review was
+skipped for want of the plugin; an unreviewed plan and a reviewed-and-clean one must not look
+alike at the one moment a human is deciding.
 
 Both go in the same interruption, because they are the same decision seen twice: a design choice
 that changes the contracts usually changes which leaves exist, so answering it and approving the
@@ -347,7 +406,8 @@ leaves a store where every plan was a good one.
 python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
 {"skill":"r:spec-design","mode":"full","docsRead":0,"hadRequirements":false,
  "milestones":0,"leaves":0,"waves":0,"maxWaveWidth":0,
- "designChoicesAsked":0,"designChoicesRecorded":0,"checkerProblems":0,"openQuestions":0}
+ "designChoicesAsked":0,"designChoicesRecorded":0,"checkerProblems":0,"openQuestions":0,
+ "codexReview":"ran","codexRaised":0,"codexApplied":0,"codexDismissed":0}
 STATS_JSON
 ```
 
@@ -367,6 +427,13 @@ skill is spending attention it should be spending deciding; zero across many pla
 high and choices are being made silently that a human would have wanted. `designChoicesRecorded`
 counts the ones that went to Open questions instead of being answered — under `--yes`, or when the
 user declined to choose.
+
+**`codexReview` is `ran` | `skipped` | `blocked`, and it is the field that stops a missing plugin
+reading as a clean plan.** `skipped` means Codex is not installed; `blocked` means it is and the
+review still could not produce a critique — a different problem with a different fix, and averaging
+them together hides both. `codexRaised` against `codexApplied` is the one that says whether this
+step earns its cost: a reviewer whose findings are all dismissed is costing a pass per plan and
+changing nothing, and a reviewer whose findings are all applied is one nobody is verifying.
 
 **`checkerProblems` is what `scripts/check_todo.py` reported on the first run**, before fixing.
 Consistently zero means the checker is not earning its place in Step 7; consistently high means
@@ -394,6 +461,10 @@ Everything else is for the human and the implementer's head start, not for a par
 
 - Never invent a story the documents don't contain, and never reword one — including from the
   free-text requirements, which say what to build first, never what to build.
+- Never fake the Codex review, substitute an imitation of it, or report a skipped one as done.
+  Never point it at `/r:code-adversarial` or a `run.sh` — those review a diff and there is none.
+- Never apply a Codex finding without verifying it against the documents and the real code, and
+  never rewrite the plan for a minor or stylistic one.
 - Never silently resolve a design choice that met the Step 3.5 bar. Ask, or record the decision and
   its alternative in Open questions. Never both silently decide and leave no trace.
 - Never re-decide the stack. The documents chose it.
