@@ -15,6 +15,14 @@ REAL_HOME=$HOME
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 pass=0; fail=0
 
+# How many skill directories a full install must land. Derived from the registry
+# rather than written here, because the registry is already the single source of
+# truth for what the pack contains — validate.py checks skills/ against it, and
+# this suite checks the INSTALLED tree against it, so the two ends of the copy
+# are pinned to the same list. Hardcoding the number instead means every skill
+# added to the pack fails four unrelated installer cases with an off-by-one.
+SKILLS_EXPECTED=$(python3 -c 'import sys; sys.path.insert(0, "tools"); import rename_rules; print(len(rename_rules.packed_skills()))')
+
 # Snapshot the real home before anything runs, so the last cases can prove it
 # was untouched by comparison rather than by assertion. The pack may legitimately
 # be installed there, so what is asserted is "unchanged", never "absent" — an
@@ -81,7 +89,7 @@ H=$(newhome fresh)
 out=$(run "$H" --no-deps)
 D="$H/.claude/skills/r"
 has  "the manifest lands"                          "$D/.claude-plugin/plugin.json"
-is   "seventeen skills land"                         "$(ls "$D/skills" | wc -l | tr -d ' ')" 17
+is   "every skill lands"                             "$(ls "$D/skills" | wc -l | tr -d ' ')" "$SKILLS_EXPECTED"
 is   "nine agents land"                            "$(ls "$D/agents" | wc -l | tr -d ' ')" 9
 has  "the guard hook lands"                        "$D/hooks/guard-workflow.py"
 has  "the stats hook lands"                        "$D/hooks/record-skill-run.py"
@@ -123,7 +131,7 @@ is "the unrelated hook survives" \
 out=$(run "$H" --no-deps)
 is   "a second run reports an update, not an install" "$(grep -c 'Updated in place' <<<"$out")" 1
 is   "a second run names /reload-plugins"          "$(grep -c 'reload-plugins' <<<"$out")" 1
-is   "seventeen skills, still"                       "$(ls "$D/skills" | wc -l | tr -d ' ')" 17
+is   "every skill, still"                            "$(ls "$D/skills" | wc -l | tr -d ' ')" "$SKILLS_EXPECTED"
 is   "the second guard removal is a no-op"         "$(grep -c 'nothing to remove' <<<"$out")" 1
 
 # --- 7. the copy DELETES what the repo dropped ------------------------------
@@ -170,7 +178,7 @@ is   "the no-rsync PATH really has no rsync" \
      "$(PATH="$TMP/nopath" command -v rsync >/dev/null 2>&1 && echo found || echo absent)" absent
 out=$(HOME="$H4" PATH="$TMP/nopath" bash "$REPO/install.sh" --no-deps 2>&1)
 is   "without rsync it falls back to cp -R"        "$(grep -c '\$ cp -R' <<<"$out")" 6
-is   "and still lands seventeen skills"              "$(ls "$H4/.claude/skills/r/skills" | wc -l | tr -d ' ')" 17
+is   "and still lands every skill"                   "$(ls "$H4/.claude/skills/r/skills" | wc -l | tr -d ' ')" "$SKILLS_EXPECTED"
 # Running any packed python leaves a __pycache__ in the REPO, and the repo gitignores it — so
 # neither copy path may carry one into the installed pack.
 mkdir -p "$REPO/lib/__pycache__" && touch "$REPO/lib/__pycache__/probe.pyc"
@@ -207,7 +215,7 @@ is    "it reports what it retired"                       "$(grep -c 'superseded 
 # The realpath guard earns its place here: one of the roots scanned IS the directory the pack
 # installs into, so a loop without it could delete the payload written moments earlier.
 has   "the pack it just wrote is untouched"              "$H7/.claude/skills/r/skills/task-run/SKILL.md"
-is    "the pack still holds all seventeen skills"          "$(ls "$H7/.claude/skills/r/skills" | wc -l | tr -d ' ')" 17
+is    "the pack still holds every skill"                   "$(ls "$H7/.claude/skills/r/skills" | wc -l | tr -d ' ')" "$SKILLS_EXPECTED"
 
 # --- 11. --keep-originals opts out ------------------------------------------
 H8=$(newhome keep)

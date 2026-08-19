@@ -32,6 +32,25 @@ Detected in this order, from the argument:
 Neither a file nor a usable tracker, or two candidates with nothing to choose between them: **ask**.
 This is the one place the run stops for input; after the gate it never asks again.
 
+## A phased plan is not a backlog — hand it to `/r:plan-run`
+
+Before accepting any file source, check it for `### Phase N` headings. A file that has them is a
+**phased implementation plan**, and this skill is the wrong tool for it: say so, name
+`/r:plan-run <path>`, and stop. This catches an explicit argument (`/r:issues-fix todo.md`) and
+discovery alike, and discovery is where it matters most — `todo.md` sits in the list above, so a repo
+holding a plan and no other list file lands here by default.
+
+The damage is quiet, which is why it is worth a check rather than a note. Nothing errors: the file
+adapter reads a plan's `- [ ]` lines perfectly well and hands each one over as an individual item.
+What is lost is everything the plan wrote down. The phase boundary goes, so items that were one
+session's work scatter across separate branches. The **order** goes — and a plan's order is a
+dependency chain, so a backlog run may build Phase 5's items before Phase 3's. And the `Files:`,
+`Risk:` and `Done when:` lines beside each phase go unread, after which Step 2 pays a verification
+subagent per item to re-derive `touches` and `risk` that were sitting two lines above.
+
+A flat checklist named `todo.md` with no `### Phase` headings is a perfectly good backlog for this
+skill. It is the phase structure that decides, not the filename.
+
 ## The file adapter
 
 **What counts as an item.** One item per line for checklist and bullet lines — `- [ ] …`,

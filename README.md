@@ -53,7 +53,7 @@ skills-directory case. Whether plugin discovery follows a *symlinked* entry is
 documented neither way, and it fails identically to a malformed manifest, so the
 pack does not rely on it.
 
-## The seventeen skills
+## The eighteen skills
 
 | command | does |
 |---|---|
@@ -68,6 +68,7 @@ pack does not rely on it.
 | `/r:code-refactor` | restructure behind a behaviour-locking test |
 | `/r:spec-brainstorm` | idea → one `spec.html`: domain model, user stories, modules, stack, API |
 | `/r:spec-plan` | spec → phased `todo.md` with runnable done-when checks |
+| `/r:plan-run` | build a whole `todo.md` phase by phase, halting at the first that fails |
 | `/r:hexagonal-architecture` | Hexagonal Lite boundaries: what lives in core, what a module may import |
 | `/r:tests-write` | JVM test conventions; loads proactively on Java/Kotlin work |
 | `/r:test-app-create` | scaffold a project-local `/test-app` for the detected stack |
@@ -141,7 +142,7 @@ floors, because no lower bound was tested: `pmd` 7.26.0 · `spotbugs` 4.10.2 ·
 ```
 
 There is no CI, so `validate.sh` is the whole gate. It checks that the manifest
-parses with `name == "r"`, seventeen skill directories sit exactly two levels deep,
+parses with `name == "r"`, eighteen skill directories sit exactly two levels deep,
 every frontmatter is valid YAML with a `description` under the 1,536-character
 cap, the listing cost of the model-invocable skills stays under 16,000, no skill name is referenced
 without its `r:` prefix, no reference dangles, every bundled agent is dispatched

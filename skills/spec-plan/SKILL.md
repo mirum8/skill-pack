@@ -151,11 +151,17 @@ agent. Say which phase each one blocks.
 Then the next command:
 
 ```
-/r:task-run docs/<topic>/todo.md "Phase 1"
+/r:task-run "docs/<topic>/todo.md / Phase 1"
 ```
 
 noting that phases flagged money, auth, persistence, concurrency or security should run with `--full`. Only
 numbered phases go to `/r:task-run`; nothing under `Resolve first` does.
+
+For the whole plan rather than one phase, name `/r:plan-run docs/<topic>/todo.md` instead: it runs every
+unticked phase in the order you numbered them, reads each phase's `Risk:` for the review tier and runs its
+`Done when:` after the review, and stops at the first phase that fails rather than building the next one on
+top of it. That is what makes the three required fields above worth writing — `Risk:`, `Done when:` and the
+`- [ ]` checklist are read straight off the page by the runner, not re-derived.
 
 ## The downstream contract
 

@@ -40,13 +40,16 @@ any trailing `/` from path arguments (Claude Code's `@backlog.md` arrives verbat
 
 - **A path to an existing file** (`issues.md`, `docs/bugs.md`) → the **file** source. Read it, take
   every item that isn't already done. This is the shape a hand-kept list of issues, features and
-  bugs arrives in, and the only one that can be **written back to without a network**.
+  bugs arrives in, and the only one that can be **written back to without a network**. A file
+  carrying `### Phase N` headings is a *phased plan*, not a backlog — hand it to `/r:plan-run` and
+  stop; the reference says what a backlog run silently destroys about one.
 - **Issue numbers or URLs** (`#42 57 https://github.com/o/r/issues/9`) → the **GitHub** source, using
   exactly those refs and skipping discovery. They still go through verification, clustering and the
   gate.
 - **No argument** → GitHub discovery (open issues labeled `bug`) when the repo has a GitHub remote
   and `gh` is authenticated; otherwise the first list file found at the repo root — `issues.md`,
-  `bugs.md`, `todo.md`, `backlog.md` — **named to the user before it is used**. Neither available, or
+  `bugs.md`, `todo.md`, `backlog.md` — **named to the user before it is used**, and checked for
+  `### Phase N` headings first, since a repo whose only list file is a plan lands here by default. Neither available, or
   two candidates with nothing to choose between them: **ask**. This is the one place the run stops
   for input.
 - **Multi-line text that reads as a list** → the **inline** source: each line is an item. Deliberately

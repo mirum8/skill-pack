@@ -1,0 +1,58 @@
+{
+  "skill_name": "plan-run",
+  "evals": [
+    {
+      "id": 0,
+      "name": "routing-triggers",
+      "kind": "trigger",
+      "prompt": "work through docs/billing/todo.md and build all the remaining phases",
+      "expected_output": "plan-run loads, reads docs/billing/todo.md, takes every unticked ### Phase N block in numeric order, shows the run list with each phase's tier and Done when: for approval, then builds them one at a time through the implement and review Workflows — merging each and ticking its boxes, and halting the whole run at the first phase that fails.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 1,
+      "name": "routing-excludes-task-run",
+      "kind": "neighbour-exclusion",
+      "neighbour": "task-run",
+      "prompt": "implement Phase 3 of todo.md",
+      "expected_output": "One named phase handed over directly is task-run's job; plan-run must not load, because there is no sequence of phases to carry through in order and nothing for the halt-on-failure rule to protect.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 2,
+      "name": "routing-excludes-issues-fix",
+      "kind": "neighbour-exclusion",
+      "neighbour": "issues-fix",
+      "prompt": "work through the list in issues.md and fix everything in it",
+      "expected_output": "A flat backlog of independent items is issues-fix's job — it verifies each against the code, groups items one change can fix together, and a failed group never stops the loop. plan-run must not load: there are no ### Phase headings, no dependency order to respect, and grouping is exactly what plan-run refuses to do.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 3,
+      "name": "routing-excludes-spec-plan",
+      "kind": "neighbour-exclusion",
+      "neighbour": "spec-plan",
+      "prompt": "take docs/billing/spec.html and break it into phases with a done-when check for each",
+      "expected_output": "Writing the plan is spec-plan's job; plan-run must not load, because there is no todo.md to execute yet — it consumes the phases spec-plan produces.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 4,
+      "name": "routing-triggers-resume",
+      "kind": "trigger",
+      "prompt": "carry on with the implementation plan from phase 4, I fixed what phase 3 got wrong",
+      "expected_output": "plan-run loads and resolves this to --from 4: it starts at Phase 4 whatever the earlier checkboxes say, never re-runs phases 1-3, and runs the rest in numeric order. This is the resume path a halted run reports.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    }
+  ]
+}
