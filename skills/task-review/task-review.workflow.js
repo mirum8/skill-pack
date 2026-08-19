@@ -208,11 +208,11 @@ const UIRES = {
     // Where a half that could NOT run says why. It exists so the blockage has somewhere to go
     // that is not `findings`: handed no such field, a blocked half writes its blockage as a
     // finding instead, and a finding is a thing this pipeline FIXES and RECORDS. That is not
-    // hypothetical — on 2026-08-19 "FUNCTIONAL VERIFICATION TRACK BLOCKED — the /test-app skill
-    // is not installed" arrived tagged fixSize=minor, was dispatched to the UI fixer as work,
-    // counted in minorFixed, and stored as verdict=confirmed/fixed=true. It is the only
-    // ui-functional row in the store, so the report reads a blocked track as a 100%-precision
-    // one. A blockage is the absence of a judgement, and must never be recorded as one.
+    // hypothetical — a "VERIFICATION TRACK BLOCKED, /test-app is not installed" entry arrives
+    // tagged fixSize=minor, is dispatched to the UI fixer as work, counted in minorFixed, and
+    // stored as verdict=confirmed/fixed=true. It is the only ui-functional row the store holds,
+    // which makes a blocked track read as a 100%-precision one. A blockage is the absence of a
+    // judgement, and must never be recorded as one.
     blockedReason: { type: 'string' },
     findings: {
       type: 'array',
@@ -241,12 +241,15 @@ const DEPLOY = {
     reason: { type: 'string' },  // one line, only when ok=false
     // /test-app is not on disk after all. Distinct from every other ok=false because it is an
     // absent PREREQUISITE, not a failure: the UI track is then SKIPPED, not blocked, and nobody
-    // should go looking for a broken deploy. It exists because `hasTestApp` is a model-supplied
-    // answer to a one-line `test -f`, and on 2026-08-19 one triage of four answered true over a
-    // tree where SKILL.md was absent (the directory was there, full of screenshots and e2e
-    // scripts, which is what an answer from impression sees). That run spent a prewarm, an 86s
-    // docker deploy and both halves before discovering it. This is the check that cannot be
-    // answered from impression: the step that needs the file looks for the file.
+    // should go looking for a broken deploy.
+    //
+    // The check exists because a `test-app` DIRECTORY is not evidence of a `test-app` SKILL. The
+    // skill is one SKILL.md beside gitignored artifacts it accumulates — e2e scripts, screenshots,
+    // credentials — which stay behind when the definition does not, so the directory reads as a
+    // live skill with no skill in it. Measured: one triage in four answers `hasTestApp` true over
+    // that shape, and the run pays a pre-warm, an 86s docker deploy and both UI halves before the
+    // halves report the file gone. This is the check that cannot be answered from impression: the
+    // step that needs the file looks for the file.
     missing: { type: 'boolean' },
   },
 }
@@ -443,9 +446,9 @@ let docListClause = 'Locate the docs yourself with Glob over the filesystem (nev
 // "If a PR number, branch name, or file path was passed as an argument, review that target
 // instead" — three shapes, and a prose scope sentence is none of them. Handed one, the skill
 // discards it and falls through to its default `git diff @{upstream}...HEAD`, which on any branch
-// carrying earlier commits is a changeset this review is not certifying. Measured 2026-08-19:
-// 3 of 3 dispatches came back scopeMatched=false, each naming the unpushed branch commits as what
-// it actually read. So pass the changed FILE PATHS — the one shape of the three that names this
+// carrying earlier commits is a changeset this review is not certifying. Measured: 3 of 3
+// dispatches handed a scope sentence come back scopeMatched=false, each naming the unpushed
+// branch commits as what it actually read. So pass the changed FILE PATHS — the one shape of the three that names this
 // diff and nothing else. Set after triage; the value here is the fallback for a triage that
 // listed no files, where the prose scope at least keeps the call well-formed.
 let securityTarget = null
@@ -483,8 +486,8 @@ const hunterPrompt = (h, scope) => {
      shapes: a PR number, a branch name, or a file path. Anything else it discards, and then
      resolves its own scope as \`git diff @{upstream}...HEAD\` — the unpushed branch commits, which
      on any branch carrying earlier work is NOT this diff. That is the failure this argument
-     exists to prevent, and it is not hypothetical: on 2026-08-19 all three dispatches came back
-     having reviewed the branch commits instead of the change under review.
+     exists to prevent, and it is not hypothetical: measured, 3 of 3 dispatches handed a scope
+     sentence came back having reviewed the branch commits, not the change under review.
      Passing it also keeps the track affordable. Called with no argument the skill works its scope
      out for itself and inlines the whole branch history — git status, the full changed-file list,
      every commit message — into its own prompt: measured at ~27k characters per run, worst case
@@ -1725,11 +1728,11 @@ let uiMissing = ''
 let minorFixed = false
 // The /test-app presence gate is answered TWICE, and deliberately. Phase 0 (triage step 5b) gives
 // the cheap early answer that keeps a project with no /test-app off this path entirely — but it is
-// a MODEL answering a one-line `test -f`, and an answer from impression sees the test-app directory
-// (screenshots, e2e scripts) and says yes over a tree with no SKILL.md in it. Measured 2026-08-19:
-// one triage of four did exactly that, and the run spent a prewarm, an 86s docker deploy and both
-// halves before the halves discovered it. So the deploy step re-checks before it spends anything,
-// and an absent file there is a SKIP, not a blocked track.
+// a MODEL answering a one-line `test -f` over a directory that survives its own SKILL.md — the
+// gitignored e2e scripts, screenshots and credentials beside it stay when the definition does not.
+// Measured: one triage in four answers true over that residue, and the run pays a pre-warm, an 86s
+// docker deploy and both halves before they report the file gone. So the deploy step re-checks
+// before it spends anything, and an absent file there is a SKIP, not a blocked track.
 // Deploy + both halves only. The teardown, the fixes and the issue filing all happen AFTER the
 // barrier below, because they must not race the end-verify's own fixers over the same files.
 const uiTrack = async () => {
@@ -1754,10 +1757,12 @@ const uiTrack = async () => {
             test -f "$(git rev-parse --show-toplevel)/.claude/skills/test-app/SKILL.md"
           If it is NOT there, return ok=false with missing=true and that path in 'reason', and do
           nothing else — no prewarm, no deploy, no containers. The tier gate that got you here is
-          a model's answer to this same one-line test, and an answer from impression sees the
-          test-app DIRECTORY (screenshots, e2e scripts) and says yes. You are the step that needs
-          the file, so you are the one that has to look for it. A gitignored, locally-scaffolded
-          SKILL.md counts — this is a disk check, and git has no opinion here.
+          a model's answer to this same one-line test, taken over a directory that outlives the
+          skill: the gitignored e2e scripts, screenshots and credentials beside SKILL.md stay put
+          when the definition does not, so the directory reads as a live skill when there is none.
+          You are the step that needs the file, so you are the one that has to look for it — and
+          look for SKILL.md specifically, never for the directory. A gitignored, locally-scaffolded
+          SKILL.md counts: this is a disk check, and git has no opinion here.
        1. Read \`.claude/skills/test-app/SKILL.md\` and its \`references/subagent-prompt.md\` for
           the redeploy command (the REBUILD_NOTE), the HEALTH_CHECK_CMD, and the default BASE_URL.
        2. Deploy ONLY through the helper — never the raw redeploy command. The helper is what keeps
@@ -1781,9 +1786,11 @@ const uiTrack = async () => {
       // /test-app in this project to run. Recording it as blocked sends a reader after a deploy
       // that never failed, and (the expensive half) the deploy already did not happen.
       uiMissing = (dep.reason || '').trim() || '/test-app is not installed in this project'
+      // Names the absent file and stops. How a project came to be without one, and how it wants
+      // it back, are that project's business — a review that starts prescribing recovery is
+      // guessing about a tree it knows only through one `test -f`.
       log(`post-task-review: UI verification SKIPPED — ${uiMissing}. Nothing was verified in a ` +
-          `browser; this is a skip, not a clean bill. Scaffold it with /r:test-app-create if the ` +
-          `UI half of this review is meant to run.`)
+          `browser; this is a skip, not a clean bill.`)
       ui = { ran: false, findings: [], coverage: `SKIPPED — ${uiMissing}` }
     } else if (!dep || !dep.ok || !dep.url) {
       // A failed deploy is a blocked TRACK, not a clean UI pass. ran=false makes blocked() true,

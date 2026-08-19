@@ -362,8 +362,8 @@ test('the security hunter is handed the changed FILE PATHS as /security-review\'
   // different changeset. /security-review's Phase 0 honours an argument only as a PR number, a
   // branch name, or a file path, and discards anything else — then falls through to its own
   // `git diff @{upstream}...HEAD`, which on a branch carrying earlier commits is not this diff.
-  // Handed a prose scope SENTENCE it drifted on 3 of 3 dispatches on 2026-08-19, each reporting
-  // clean about code nobody had asked it to read.
+  // Handed a prose scope SENTENCE it drifts on 3 of 3 measured dispatches, each reporting clean
+  // about code nobody asked it to read.
   const { prompts } = await run()
   assert.match(prompts['find-bugs:security'],
     new RegExp(`args: "${CHANGED.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}"`))
@@ -1444,10 +1444,10 @@ test('a DEAD end-verify fixer cannot trigger a re-verify — it changed nothing'
 })
 
 test('an absent /test-app at deploy time is a SKIP, not a blocked track', async () => {
-  // `hasTestApp` is a model's answer to a one-line `test -f`, and on 2026-08-19 one triage of four
-  // answered true over a tree with no SKILL.md — the directory was there, full of screenshots.
-  // That run spent a prewarm, an 86s docker deploy and both halves before finding out. The deploy
-  // step now looks for the file itself, and an absent prerequisite is nobody's failure.
+  // `hasTestApp` is a model's answer to a one-line `test -f`, and one triage in four answers true
+  // over a tree with no SKILL.md — the directory is still there, full of screenshots. That run pays
+  // a pre-warm, an 86s docker deploy and both halves before finding out. The deploy step looks for
+  // the file itself, and an absent prerequisite is nobody's failure.
   const { out, logText, counts } = await run({
     triage: baseTriage({ uiTouched: true, hasTestApp: true, hasFrontend: true }),
     overrides: {
@@ -1475,11 +1475,11 @@ test('a deploy that genuinely FAILED is still a blocked track, not a skip', asyn
 })
 
 test('a UI half that could not run contributes no finding row', async () => {
-  // The failure this locks down, from the 2026-08-19 store: the functional half returned
-  // "FUNCTIONAL VERIFICATION TRACK BLOCKED — the /test-app skill is not installed" as a finding
-  // tagged fixSize=minor. It was dispatched to the UI fixer as work, counted in minorFixed, and
-  // stored as verdict=confirmed/fixed=true — the only ui-functional row in the store, which made
-  // the report read a blocked track as a 100%-precision one. The blockage now has its own field.
+  // The failure this locks down: a half with nowhere to say "I could not run" returns
+  // "VERIFICATION TRACK BLOCKED, /test-app is not installed" as a finding tagged fixSize=minor.
+  // It is then dispatched to the UI fixer as work, counted in minorFixed, and stored as
+  // verdict=confirmed/fixed=true — the only ui-functional row the store holds, which makes a
+  // blocked track read as a 100%-precision one. The blockage has its own field instead.
   const { out } = await run({
     triage: baseTriage({ uiTouched: true, hasTestApp: true, hasFrontend: true }),
     overrides: {
