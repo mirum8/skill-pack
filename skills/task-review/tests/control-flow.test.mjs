@@ -575,12 +575,60 @@ test('a security hunter that read a DIFFERENT changeset is not a clean bill', as
       },
     },
   })
-  assert.ok(out.tracksBlocked.includes('find-bugs'))
   assert.equal(out.security, 'scope-mismatch')
   assert.match(logText, /reviewed a DIFFERENT changeset than the one they were given — security/)
   // Distinct from BLOCKED on purpose: a dead tool has to be made to run, a drifted one has to be
   // made to read the right thing, and one log line for both sends the reader after the wrong fix.
   assert.ok(!/hunter\(s\) BLOCKED — security/.test(logText))
+  // The RECORD has to make that same distinction, not just the log. Collapsed into tracksBlocked
+  // this reads as "the bug scan failed" — sending a reader after a tool that is not broken, while
+  // hiding that the pattern and docs hunters completed and produced findings.
+  assert.deepEqual(out.tracksDrifted, ['find-bugs (security)'])
+  assert.ok(!out.tracksBlocked.includes('find-bugs'))
+})
+
+test('a drifted track is still disqualifying — it just says so in its own field', async () => {
+  // tracksDrifted is not a softer tracksBlocked. Both mean the change has a surface nothing
+  // looked at, and issues-fix's merge gate reads both; only the fix each one asks for differs.
+  const { out } = await run({
+    overrides: {
+      'find-bugs:security': { ran: true, scopeMatched: false, findings: [], coverage: 'read the branch commits' },
+    },
+  })
+  assert.equal(out.reviewed, true)
+  assert.ok(out.tracksDrifted.length > 0, 'the drift is recorded somewhere a caller can gate on')
+})
+
+test('a track that is BOTH blocked and drifted is named in both lists', async () => {
+  // Two hunters failing two different ways is not one failure. Reporting only the first would
+  // leave the other unfixed, and they need opposite fixes.
+  const { out } = await run({
+    overrides: {
+      'find-bugs:security': { ran: true, scopeMatched: false, findings: [], coverage: 'wrong changeset' },
+      'find-bugs:logic': null,
+    },
+  })
+  assert.ok(out.tracksBlocked.includes('find-bugs'), 'the dead hunter still blocks the track')
+  assert.deepEqual(out.tracksDrifted, ['find-bugs (security)'])
+})
+
+test('below full tier the drifted entry does not repeat the hunter it is already named for', async () => {
+  const { out } = await run({
+    args: { profile: 'standard' },
+    overrides: {
+      'find-bugs:security': { ran: true, scopeMatched: false, findings: [], coverage: 'wrong changeset' },
+    },
+  })
+  assert.deepEqual(out.tracksDrifted, ['security hunter'])
+  assert.ok(!out.tracksBlocked.includes('security hunter'))
+})
+
+test('a track with no hunter fan-out keeps landing in tracksBlocked', async () => {
+  // codex, docs and code-quality are one agent each, not a fan-out, so they carry no hunter-level
+  // detail. The split must not quietly drop them out of the list their failure has always been in.
+  const { out } = await run({ overrides: { codex: null } })
+  assert.ok(out.tracksBlocked.includes('codex'))
+  assert.deepEqual(out.tracksDrifted, [])
 })
 
 test('scopeMatched absent leaves the track clean — an unanswered field invents no mismatch', async () => {
@@ -1393,6 +1441,47 @@ test('a DEAD end-verify fixer cannot trigger a re-verify — it changed nothing'
     },
   })
   assert.equal(counts['ui-deploy'], 1, 'no edit landed, so nothing the halves read went stale')
+})
+
+test('a UI half that could not run contributes no finding row', async () => {
+  // The failure this locks down, from the 2026-08-19 store: the functional half returned
+  // "FUNCTIONAL VERIFICATION TRACK BLOCKED — the /test-app skill is not installed" as a finding
+  // tagged fixSize=minor. It was dispatched to the UI fixer as work, counted in minorFixed, and
+  // stored as verdict=confirmed/fixed=true — the only ui-functional row in the store, which made
+  // the report read a blocked track as a 100%-precision one. The blockage now has its own field.
+  const { out } = await run({
+    triage: baseTriage({ uiTouched: true, hasTestApp: true, hasFrontend: true }),
+    overrides: {
+      'ui-functional': { ran: false, blockedReason: '/test-app is not installed', findings: [] },
+      'ui-visual': { ran: true, findings: [] },
+    },
+  })
+  assert.equal(out.ui.ran, false)
+  assert.ok(out.ui.blockedHalves.includes('ui-functional'))
+  // The reason is recorded, so a reader can tell an absent /test-app from a stack that would not
+  // come up — one is setup, the other a real failure, and they need opposite responses.
+  assert.match(out.ui.blockedReasons.join(' '), /test-app is not installed/)
+  assert.equal(out.ui.minorFixed, 0, 'nothing was fixed — nothing was found')
+})
+
+test('minorFixed reflects the fixer returning, not the fixSize tag', async () => {
+  // Read off the tag alone, `fixed` claims a repair on every run where the fixer died — the one
+  // shape of this record that cannot be checked later, since a dead agent leaves no diff to read.
+  const uiFinding = { title: 'hint wraps at 390px', where: 'form.html:205', fixSize: 'minor' }
+  const live = await run({
+    triage: baseTriage({ uiTouched: true, hasTestApp: true, hasFrontend: true }),
+    overrides: { 'ui-visual': { ran: true, findings: [uiFinding] } },
+  })
+  assert.equal(live.out.ui.minorFixed, 1)
+
+  const deadFixer = await run({
+    triage: baseTriage({ uiTouched: true, hasTestApp: true, hasFrontend: true }),
+    overrides: {
+      'ui-visual': { ran: true, findings: [uiFinding] },
+      'ui-fix-minor': null,
+    },
+  })
+  assert.equal(deadFixer.out.ui.minorFixed, 0, 'a dead fixer fixed nothing')
 })
 
 test('teardown still runs when a UI half dies inside the barrier', async () => {

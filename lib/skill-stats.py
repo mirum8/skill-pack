@@ -131,18 +131,44 @@ HUNTER_ALIASES = {
 }
 
 
+def drifted_names(row):
+    """The hunter names inside `tracksDrifted`, whose entries read `find-bugs (security)`.
+
+    A drifted track ran its tool and got a real report about the WRONG changeset, so for a
+    denominator it is exactly a track that did not run: it had no chance to find anything in this
+    diff. Counting it as an opportunity is what made `security` read as 26 dispatches with 0 fixes
+    and land on the retirement list, when it had never been pointed at the diff at all.
+
+    The parenthetical is the authority when present, because it names the hunter that drifted
+    rather than the track that contains it; below full tier the track is already named for its one
+    hunter and there is no parenthetical to read."""
+    out = []
+    for entry in row.get("tracksDrifted") or []:
+        if not isinstance(entry, str):
+            continue
+        inner = re.search(r"\(([^)]*)\)", entry)
+        if inner:
+            out.extend(h.strip() for h in inner.group(1).split(",") if h.strip())
+        else:
+            out.append(entry.strip())
+    return out
+
+
 def missed_tracks(row):
     """The tracks this row dispatched on paper and never actually ran — a per-diff gate closed
-    (`tracksSkipped`) or the tool failed (`tracksBlocked`). The two are different in meaning and
-    are reported apart, but they are the same thing to a denominator: the track had no chance to
-    produce a fix, so counting the run as an opportunity divides its yield by a diff it never saw.
+    (`tracksSkipped`), the tool failed (`tracksBlocked`), or it ran and read a different changeset
+    (`tracksDrifted`). The three are different in meaning and are reported apart, but they are the
+    same thing to a denominator: the track had no chance to produce a fix on THIS diff, so counting
+    the run as an opportunity divides its yield by a diff it never saw.
 
     A name that maps to nothing is left alone rather than guessed at. That leaves the denominator
     too generous, which under-states the track — the safe direction, because the number is read to
     decide what to delete."""
     tier = tier_tracks(row)
     out = set()
-    for name in list(row.get("tracksSkipped") or []) + list(row.get("tracksBlocked") or []):
+    for name in (list(row.get("tracksSkipped") or [])
+                 + list(row.get("tracksBlocked") or [])
+                 + drifted_names(row)):
         if name in tier:
             out.add(name)
         else:
@@ -549,6 +575,21 @@ def summarize_reviews(rows):
     if blocked:
         print("blocked tracks  (the tool did not run — these runs certified less than they look)")
         for t, n in blocked.most_common():
+            print(f"  {t:<26}{n:>4}")
+        print()
+
+    # Reported apart from `blocked` because the two need opposite fixes, and because this one is
+    # the easier to miss: the tool ran, returned a real report, and reviewed a changeset nobody
+    # asked about. Nothing in the run looks wrong.
+    drifted = collections.Counter()
+    for r in reviews:
+        for t in r.get("tracksDrifted") or []:
+            drifted[t] += 1
+    if drifted:
+        print("drifted tracks  (the tool RAN and read a different changeset — a clean report about")
+        print("                 code this review never certified; make it read the right thing,")
+        print("                 re-running it unchanged reproduces the same wrong-diff result)")
+        for t, n in drifted.most_common():
             print(f"  {t:<26}{n:>4}")
         print()
 

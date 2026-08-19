@@ -116,6 +116,19 @@ stays that skill's store. Rules that are load-bearing:
 - **`findings.verdict` is the point.** A track whose findings triage rejects scores the same zero
   in `fixedBySource` as a track that finds nothing, so both pipelines record what they *dismissed*.
   A blocked triage records no verdicts at all — absence of a judgement is not a judgement of zero.
+  The inverse is just as wrong and is the easier mistake to make: a **blockage must never be
+  recorded as a finding**. A UI half handed no field for "I could not run" writes the blockage into
+  `findings`, where it is dispatched to a fixer as work and stored as `confirmed`/`fixed` — which is
+  how the store's only `ui-functional` row came to be a blocked track reading as 100% precision.
+  Every report-only track therefore gets its own channel for that (`blockedReason`, `coverage`),
+  and `fixed` is derived from the fixer returning, never from a finding's own size tag.
+- **A track fails to certify in two ways, and they need opposite fixes.** `tracksBlocked` is a tool
+  that did not run; `tracksDrifted` is a tool that ran, returned a real report, and read a
+  *different changeset* (the `/security-review` scope trap). Equally disqualifying — `issues-fix`'s
+  merge gate reads both — but a blocked tool has to be made to run while a drifted one has to be
+  made to read the right thing, and re-running a drifted track unchanged just reproduces the same
+  clean report about the same wrong diff. Both also subtract from a track's denominator in
+  `skill-stats.py`: a track that never saw this diff had no opportunity to find anything in it.
 - **`items` is mined, never recorded.** Claude Code persists every workflow run under
   `<session>/subagents/workflows/wf_*/`; `--mine-items` reads the prompts, results, models, tokens
   and timestamps from there, so the pipelines pay nothing at run time. They could not do it

@@ -205,6 +205,15 @@ const UIRES = {
   required: ['ran', 'findings'],
   properties: {
     ran: { type: 'boolean' },                 // false => confirmation line was the ❌ form
+    // Where a half that could NOT run says why. It exists so the blockage has somewhere to go
+    // that is not `findings`: handed no such field, a blocked half writes its blockage as a
+    // finding instead, and a finding is a thing this pipeline FIXES and RECORDS. That is not
+    // hypothetical — on 2026-08-19 "FUNCTIONAL VERIFICATION TRACK BLOCKED — the /test-app skill
+    // is not installed" arrived tagged fixSize=minor, was dispatched to the UI fixer as work,
+    // counted in minorFixed, and stored as verdict=confirmed/fixed=true. It is the only
+    // ui-functional row in the store, so the report reads a blocked track as a 100%-precision
+    // one. A blockage is the absence of a judgement, and must never be recorded as one.
+    blockedReason: { type: 'string' },
     findings: {
       type: 'array',
       items: {
@@ -600,6 +609,15 @@ async function hunterFanOut(scope, hunters, trackName) {
       ? `${hunters[i].label}: ${h.coverage.trim()}` : '').filter(Boolean)
   return {
     ran: missing.length === 0 && drifted.length === 0,
+    // Which hunters produced that `ran`, and by which of the two failures. `ran` deliberately
+    // collapses them — every caller that must not treat this as a clean bill reads it and needs
+    // no more — but the RECORD must not, because the two need opposite fixes: a blocked tool has
+    // to be made to run, a drifted one has to be made to read the right thing. Collapsed into one
+    // `tracksBlocked: ['find-bugs']`, a drifted security hunter reads as "the bug scan failed"
+    // and sends someone looking for a broken tool that isn't broken — while the three hunters
+    // that did complete, and the findings they produced, are invisible.
+    blockedHunters: missing,
+    driftedHunters: drifted,
     findings,
     coverage: [securityNote, ...notes].filter(Boolean).join(' | '),
     // The security half's own outcome, carried out separately because the merged `ran` and
@@ -1691,6 +1709,10 @@ ${priorPass.findings.map(f => `         - ${f.file}:${f.line} [${f.category}] ${
 let uiSummary = { skipped: true }
 let ui = null
 let uiDead = []
+let uiReasons = []
+// Hoisted for the same reason as `ui` above: the stats row is assembled outside this block, and
+// the UI fixer's outcome is part of what that row claims.
+let minorFixed = false
 // The /test-app presence gate was answered back in Phase 0 (triage step 5b) — it is one `test -f`,
 // and spending a whole subagent round-trip on it put a needless hop on the critical path.
 // Deploy + both halves only. The teardown, the fixes and the issue filing all happen AFTER the
@@ -1753,7 +1775,15 @@ const uiTrack = async () => {
        MUST open with the confirmation line — \`✅ Invoked the real /test-app skill …\` if it ran,
        or \`❌ Did NOT run …\` with the reason if it didn't — and set ran=false in that ❌ case.
        If /test-app produces no output within a bounded wait, stop waiting: return the ❌ line
-       rather than blocking the run.${uiIntent}`
+       rather than blocking the run.
+       WHEN YOU SET ran=false, PUT THE REASON IN blockedReason AND RETURN findings: []. A blockage
+       is NOT a finding. Do not tag it fixSize, do not phrase it as a defect, and do not put the
+       missing tool, the dead stack or the absent skill in 'where' — everything in \`findings\` is
+       dispatched to a fixer as work and stored as an adjudicated result, so a blockage that
+       arrives as a finding is recorded as a defect somebody found and fixed. The orchestrator
+       already records a blocked half from your ran flag; blockedReason is what tells it why.
+       Findings you genuinely observed still belong in \`findings\` even when ran=false — a half
+       that fell back to another route and saw something real should report it.${uiIntent}`
       const halves = [
         { label: 'ui-functional', session: 'ptr-func', prompt:
       `You are the FUNCTIONAL half of the UI verification. A visual half runs in PARALLEL with you
@@ -1806,6 +1836,10 @@ const uiTrack = async () => {
         reliable(h.label, 'UI', () => agent(h.prompt,
           { label: h.label, phase: 'UI', schema: UIRES, agentType: 'r:bug-hunter-ui', ...VERIFY }))))
       uiDead = halves.filter((h, i) => blocked(parts[i])).map((h) => h.label)
+      uiReasons = halves
+        .map((h, i) => (blocked(parts[i]) && parts[i] && parts[i].blockedReason)
+          ? `${h.label}: ${parts[i].blockedReason}` : '')
+        .filter(Boolean)
       if (uiDead.length) {
         log(`post-task-review: UI half BLOCKED — ${uiDead.join(', ')}. The UI track is INCOMPLETE; ` +
             `the surviving half's findings still flow into triage, but this is not a clean bill.`)
@@ -1854,19 +1888,29 @@ try {
   const findings = (ui && ui.findings) || []
   const minor = findings.filter(f => f.fixSize === 'minor')
   const major = findings.filter(f => f.fixSize === 'major')
-  if (minor.length) await agent(`Fix these minor UI/runtime defects (surgical), ${rebuildClause}
+  // Whether the fixer actually came back, not whether the finding was TAGGED minor. Derived from
+  // the tag alone, `fixed` says a defect was repaired on every run where the fixer died — the one
+  // shape of this record that cannot be checked later, since a dead agent leaves no diff to read.
+  let minorFixer = null
+  if (minor.length) minorFixer = await agent(`Fix these minor UI/runtime defects (surgical), ${rebuildClause}
     Then redeploy and re-verify once:\n${minor.map(f => `${f.where}: ${f.title} — ${f.suggestedFix}`).join('\n')}${intentBlock}`,
     { label: 'ui-fix-minor', phase: 'UI', agentType: triage.hasFrontend ? 'r:htmx-thymeleaf-dev' : 'r:java-backend-developer', ...FIX_RUN })
   if (major.length) await agent(`File one GitHub issue per major UI finding via \`gh issue create\`
     (preflight gh auth + a github remote; best-effort --label bug, retry without on failure). If gh
     is unusable, write a grouped HTML report under .claude/skills/test-app/bugs/ instead. Findings:
     ${JSON.stringify(major)}`, { label: 'ui-file-major', phase: 'UI', ...GP, ...MECHANICAL })
+  minorFixed = minor.length > 0 && !!minorFixer
   if (uiWanted && triage.hasTestApp) {
     uiSummary = {
-      ran: ui && ui.ran, minorFixed: minor.length, majorFiled: major.length, blocked: blocked(ui),
+      ran: ui && ui.ran, minorFixed: minorFixed ? minor.length : 0,
+      majorFiled: major.length, blocked: blocked(ui),
       // Which half fell over, so a "UI blocked" line in the stats store can be read without the
       // transcript: a dead visual half and a dead functional half mean very different coverage.
       blockedHalves: uiDead,
+      // Why, in the halves' own words. Without it a reader has the fact of a blocked track and
+      // no way to tell an absent /test-app from a stack that would not come up — one is setup,
+      // the other is a real failure, and they need opposite responses.
+      blockedReasons: uiReasons,
     }
   }
 } finally {
@@ -1907,7 +1951,27 @@ const TRACKS = [['codex', codex, wantCodexUpfront],
                 [hunterTrack, bugs, profile !== 'light'],
                 ['docs', docs, profile !== 'light'],
                 ['code-quality', quality, wantQuality]]
-const tracksBlocked = TRACKS.filter(([, r, ran]) => ran && blocked(r)).map(([n]) => n)
+// A track fails to certify in two ways, and `blocked()` cannot tell them apart because `ran`
+// deliberately collapses both. Split them HERE, at the only point that still knows which hunter
+// caused it. Both mean the same thing to a caller deciding whether to merge — the change has a
+// surface nothing looked at — so `tracksDrifted` is as disqualifying as `tracksBlocked`, and
+// issues-fix's merge gate reads both. What differs is the fix each one asks for.
+// A track with no hunter-level detail (codex, docs, code-quality — one agent, not a fan-out)
+// keeps the old behaviour and lands in tracksBlocked, which is where its failure has always been.
+const hunterDetail = (r) => !!(r && (Array.isArray(r.blockedHunters) || Array.isArray(r.driftedHunters)))
+const blockedOf = (r) => (r && r.blockedHunters) || []
+const driftedOf = (r) => (r && r.driftedHunters) || []
+const tracksBlocked = TRACKS.filter(([, r, ran]) =>
+  ran && blocked(r) && (!hunterDetail(r) || blockedOf(r).length)).map(([n]) => n)
+// Named per TRACK, like tracksBlocked, but carrying the hunter too: "find-bugs (security)" is
+// the whole diagnosis, and without the hunter name a reader has to open the transcript to learn
+// which of three or four hunters read the wrong thing. Below full tier the track is already named
+// for its single hunter ('security hunter'), so the suffix would only repeat it.
+const tracksDrifted = TRACKS.filter(([, r, ran]) => ran && driftedOf(r).length)
+  .map(([n, r]) => {
+    const who = driftedOf(r).filter((h) => !n.includes(h))
+    return who.length ? `${n} (${who.join(', ')})` : n
+  })
 // Named separately from tracksBlocked so a caller can tell an absent optional prerequisite
 // from a tool that failed. Both mean the step did not run; only one is anybody's fault.
 //
@@ -1969,6 +2033,7 @@ const statsRow = {
   uiTouched,
   scope: opts.scope === 'all' ? 'all' : 'diff',
   tracksBlocked,
+  tracksDrifted,
   tracksSkipped,
   fixedBySource,
   fixedCorrectness: fixed.correctness.length + endVerifyFixed,
@@ -2023,9 +2088,13 @@ const statsRow = {
     ...endVerifyUnresolved.map((e) => ({
       track: 'end-verify', verdict: 'confirmed', fixed: false, description: short(e),
     })),
+    // `fixed` comes from whether the UI fixer actually returned, never from the fixSize tag: the
+    // tag is the finding's own claim about how big its fix would be, and reading it as "it was
+    // fixed" records a repair on every run where the fixer died. A major finding is filed as an
+    // issue, not fixed, so it is false by construction here.
     ...((ui && Array.isArray(ui.findings)) ? ui.findings : []).map((f) => ({
       track: `ui-${f.lens || 'functional'}`, severity: f.fixSize,
-      verdict: 'confirmed', fixed: f.fixSize === 'minor',
+      verdict: 'confirmed', fixed: f.fixSize === 'minor' && minorFixed,
       description: short(`${f.title || ''} — ${f.where || ''}`),
     })),
   ],
@@ -2052,6 +2121,7 @@ return {
   // Only tracks this tier dispatched can be reported blocked. A track the tier never ran is not
   // a failure, and naming it here would tell a caller a tool died when nothing did.
   tracksBlocked,
+  tracksDrifted,
   tracksSkipped,
   // What each finding track actually bought: correctness items that survived triage, keyed by the
   // track that found them. This is the number that can retire a track on evidence instead of
