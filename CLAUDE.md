@@ -137,11 +137,18 @@ stays that skill's store. Rules that are load-bearing:
 - **No fallback store.** A row the db rejects is lost. That is why inserts say
   `ON CONFLICT(<key>) DO NOTHING` and never `INSERT OR IGNORE`, which also swallows a `NOT NULL`
   violation — it hid exactly that bug once.
-- **The hook is registered on *two* events** because the two ways to reach a skill are disjoint in
-  the transcript (`PostToolUse`/`Skill` for a model invocation, `UserPromptSubmit` for a typed
-  `/r:<name>`); dropping either silently halves the coverage. It records only `r:` names, always
-  exits 0 and always prints nothing — on `UserPromptSubmit` stdout is injected into the
-  conversation and a non-zero exit blocks the prompt.
+- **The hook watches *three* routes**, because no one of them sees the others and dropping any
+  silently costs that share of the coverage: `PostToolUse`/`Skill` for a model invocation,
+  `PostToolUse`/`Workflow` for a pipeline run by its canonical `scriptPath` or workflow `name`,
+  and `UserPromptSubmit` for a typed `/r:<name>`. The `Workflow` route is not optional — it is the
+  *primary* path for both pipelines, since `issues-fix` drives them by `scriptPath` and forbids the
+  Skill route; without it `task-review` had 82 outcome rows against 0 invokes. The routes **chain**
+  (a typed `/r:x` also produces a Skill call; a Skill call on either pipeline is followed by that
+  skill's markdown dispatching its Workflow), so the hook drops a second sighting of the same
+  `(session, skill)` by a *different* route inside 5 minutes — same route twice is two real
+  invocations and both are kept. It records only `r:` names, always exits 0 and always prints
+  nothing — on `UserPromptSubmit` stdout is injected into the conversation and a non-zero exit
+  blocks the prompt.
 - `~/.claude/skill-stats.jsonl` is the pre-SQLite archive: read by `--import-jsonl` once, never
   written.
 

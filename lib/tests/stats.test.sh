@@ -90,8 +90,6 @@ out=$(hook '{"hook_event_name":"UserPromptSubmit","prompt":"/r:code-quality chec
 ok "a typed /r: command is recorded"       "$(q "$H" "select via from runs where skill='r:code-quality'")" slash
 ok "still nothing on stdout"               "${#out}" 0
 
-# The two events are DISJOINT in the transcript — a typed command produces no tool call at all —
-# so both registrations are load-bearing and neither needs de-duplicating against the other.
 hook '{"hook_event_name":"UserPromptSubmit","prompt":"just a normal message"}'
 hook '{"hook_event_name":"UserPromptSubmit","prompt":"tell me about /r:code-bugs"}'
 hook '{"hook_event_name":"PostToolUse","tool_name":"Skill","tool_input":{"skill":"security-review"}}'
@@ -100,6 +98,45 @@ ok "an ordinary prompt records nothing"    "$(q "$H" "select count(*) from runs"
 hook 'garbage'; ok "garbage input still exits 0" "$?" 0
 hook '{"hook_event_name":"PostToolUse"}'; ok "a payload with no tool_input exits 0" "$?" 0
 ok "nothing was written by any of those"   "$(q "$H" "select count(*) from runs")" 2
+
+# --- the Workflow route -----------------------------------------------------
+# `/r:issues-fix` runs both pipelines by scriptPath and explicitly forbids the Skill route, so
+# without this route the pack's two most expensive skills have no invoke row on their primary path.
+W="$TMP/wf.db"
+wf() { echo "$1" | CLAUDE_SKILL_STATS_DB="$W" python3 "$HOOK" 2>/dev/null; }
+wf '{"hook_event_name":"PostToolUse","tool_name":"Workflow","tool_input":{"scriptPath":"/any/pack/skills/task-review/task-review.workflow.js"},"session_id":"s1"}'
+ok "a pipeline scriptPath is recorded"     "$(q "$W" "select skill from runs")" r:task-review
+ok "its route is named separately"         "$(q "$W" "select via from runs")" workflow
+wf '{"hook_event_name":"PostToolUse","tool_name":"Workflow","tool_input":{"name":"run-task-implement"},"session_id":"s2"}'
+ok "so is the workflow name form"          "$(q "$W" "select skill from runs where session_id='s2'")" r:task-run
+# Only the two pipelines. Any other workflow on the machine is not this pack's to count.
+wf '{"hook_event_name":"PostToolUse","tool_name":"Workflow","tool_input":{"scriptPath":"/x/some-other.workflow.js"},"session_id":"s3"}'
+wf '{"hook_event_name":"PostToolUse","tool_name":"Workflow","tool_input":{"name":"something-else"},"session_id":"s3"}'
+ok "a foreign workflow records nothing"    "$(q "$W" "select count(*) from runs")" 2
+
+# --- de-duplication across routes -------------------------------------------
+# The routes chain: a typed `/r:x` also produces a Skill call, and a Skill call on either pipeline
+# is followed by that skill's markdown dispatching its own Workflow. Each chain is ONE invocation
+# seen twice, and counting both inflates the only number this store exists to produce.
+D2="$TMP/dedup.db"
+dd() { echo "$1" | CLAUDE_SKILL_STATS_DB="$D2" python3 "$HOOK" 2>/dev/null; }
+dd '{"hook_event_name":"UserPromptSubmit","prompt":"/r:task-review","session_id":"z1"}'
+dd '{"hook_event_name":"PostToolUse","tool_name":"Skill","tool_input":{"skill":"r:task-review"},"session_id":"z1"}'
+dd '{"hook_event_name":"PostToolUse","tool_name":"Workflow","tool_input":{"scriptPath":"/p/skills/task-review/task-review.workflow.js"},"session_id":"z1"}'
+ok "one invocation down the chain is 1 row" "$(q "$D2" "select count(*) from runs")" 1
+ok "and it keeps the route it arrived by"   "$(q "$D2" "select via from runs")" slash
+# Two sightings by the SAME route are two real invocations — the model called it twice.
+dd '{"hook_event_name":"PostToolUse","tool_name":"Skill","tool_input":{"skill":"r:tests-write"},"session_id":"z1"}'
+dd '{"hook_event_name":"PostToolUse","tool_name":"Skill","tool_input":{"skill":"r:tests-write"},"session_id":"z1"}'
+ok "same route twice stays two rows"        "$(q "$D2" "select count(*) from runs where skill='r:tests-write'")" 2
+# A different session is a different run, however close together the two arrive.
+dd '{"hook_event_name":"PostToolUse","tool_name":"Workflow","tool_input":{"scriptPath":"/p/skills/task-review/task-review.workflow.js"},"session_id":"z2"}'
+ok "another session is not a duplicate"     "$(q "$D2" "select count(*) from runs where skill='r:task-review'")" 2
+# Without a session id the routes cannot be correlated at all, so the row is kept: a duplicate is
+# a number that can still be corrected, a dropped row is gone (there is no fallback store).
+dd '{"hook_event_name":"UserPromptSubmit","prompt":"/r:code-scan"}'
+dd '{"hook_event_name":"PostToolUse","tool_name":"Skill","tool_input":{"skill":"r:code-scan"}}'
+ok "no session id means record, not guess"  "$(q "$D2" "select count(*) from runs where skill='r:code-scan'")" 2
 
 # --- the reporter -----------------------------------------------------------
 rep=$(python3 "$REPORT" --db "$H" 2>&1)

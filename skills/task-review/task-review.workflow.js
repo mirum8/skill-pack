@@ -420,6 +420,17 @@ let diffClause = 'Run `git diff HEAD` yourself, ONCE, to see the change — no p
 // triage is already walking this repo — so triage lists the docs once and they arrive here. The
 // value below is the fallback for a triage that found none to hand over.
 let docListClause = 'Locate the docs yourself with Glob over the filesystem (never `git ls-files` — doc files are often gitignored).'
+// What the security hunter passes /security-review as its argument, and the ONE thing that decides
+// whether that track reviews this diff or a different one. The bundled skill's Phase 0 reads:
+// "If a PR number, branch name, or file path was passed as an argument, review that target
+// instead" — three shapes, and a prose scope sentence is none of them. Handed one, the skill
+// discards it and falls through to its default `git diff @{upstream}...HEAD`, which on any branch
+// carrying earlier commits is a changeset this review is not certifying. Measured 2026-08-19:
+// 3 of 3 dispatches came back scopeMatched=false, each naming the unpushed branch commits as what
+// it actually read. So pass the changed FILE PATHS — the one shape of the three that names this
+// diff and nothing else. Set after triage; the value here is the fallback for a triage that
+// listed no files, where the prose scope at least keeps the call well-formed.
+let securityTarget = null
 const hunterPrompt = (h, scope) => {
   // The order and the budget are the point. Left to itself a hunter explores first and reads the
   // change late: measured over 151 stored `logic` runs the median one opens twelve whole source
@@ -447,12 +458,19 @@ const hunterPrompt = (h, scope) => {
      impact, in one line. Report-only: write no tests, fix nothing.${RAN_CLAUSE}`
   if (h.label === 'security') {
     return `You are the SECURITY hunter of a parallel bug scan over ${scope}.
-     Invoke the REAL /security-review skill (Skill tool) and PASS THE SCOPE AS ITS ARGUMENT:
-       Skill(skill: "security-review", args: ${JSON.stringify(scope)})
-     Passing it matters. Called with no argument the skill works its scope out for itself and
-     inlines the whole branch history — git status, the full changed-file list, every commit
-     message — into its own prompt: measured at ~27k characters per run, worst case 47k. That is
-     most of what has made this the most expensive track in the review.
+     Invoke the REAL /security-review skill (Skill tool) and PASS THIS EXACT ARGUMENT:
+       Skill(skill: "security-review", args: ${JSON.stringify(securityTarget || scope)})
+     Pass it verbatim — do not reword it, do not summarise the file list, do not replace it with a
+     sentence describing the scope. The skill's Phase 0 honours an argument in exactly three
+     shapes: a PR number, a branch name, or a file path. Anything else it discards, and then
+     resolves its own scope as \`git diff @{upstream}...HEAD\` — the unpushed branch commits, which
+     on any branch carrying earlier work is NOT this diff. That is the failure this argument
+     exists to prevent, and it is not hypothetical: on 2026-08-19 all three dispatches came back
+     having reviewed the branch commits instead of the change under review.
+     Passing it also keeps the track affordable. Called with no argument the skill works its scope
+     out for itself and inlines the whole branch history — git status, the full changed-file list,
+     every commit message — into its own prompt: measured at ~27k characters per run, worst case
+     47k. That is most of what has made this the most expensive track in the review.
      Do NOT hand-roll a "security analysis" and do NOT substitute a pattern checklist — a
      checklist is not a security review, and returning one is the failure this dedicated hunter
      exists to prevent. Equally, do NOT re-derive the diff yourself with git/bash once the skill
@@ -467,13 +485,14 @@ const hunterPrompt = (h, scope) => {
      covered (e.g. "the uncommitted working-tree diff", "the 15 unpushed commits") AND those
      limits, so nobody reads findings:[] as "this change is secure". Those excluded categories
      are real risks — codex, the runtime-and-failures hunter and /r:code-scan cover them.
-     Last, set scopeMatched. The skill RESOLVES ITS OWN DIFF SCOPE and ignores the argument on
-     about one dispatch in seven: it reads the unpushed branch commits when it was handed the
-     working tree, or the reverse. So read back what its report says it covered, and compare that
-     to the scope above. Same changeset -> scopeMatched=true. A different one -> scopeMatched=false,
-     and name BOTH in 'coverage' (what you passed it, what it actually read). Do NOT re-run it and
-     do NOT try to force the scope — report the mismatch and stop. A clean report about the wrong
-     diff is the one result that looks exactly like a clean review and is not one.${RAN_CLAUSE}`
+     Last, set scopeMatched. The argument above is what makes the skill read this diff, but it is
+     the skill that decides whether to honour it, so VERIFY rather than assume: read back what its
+     report says it covered and compare that to the scope above. Same changeset -> scopeMatched=true.
+     A different one -> scopeMatched=false, and name BOTH in 'coverage' (what you passed it, what it
+     actually read). Do NOT re-run it and do NOT try to force the scope by hand — report the mismatch
+     and stop. A clean report about the wrong diff is the one result that looks exactly like a clean
+     review and is not one, which is why this check stays even now that the argument is a shape the
+     skill is documented to accept.${RAN_CLAUSE}`
   }
   if (h.label === 'docs') {
     return `You are the DOCUMENTATION-CONSISTENCY hunter of a parallel bug scan over ${scope}.
@@ -941,6 +960,16 @@ if (Array.isArray(triage.docFiles) && triage.docFiles.length) {
     `The docs in this project have already been located for you — check these, and do not spend ` +
     `shell calls re-discovering the tree:\n     ${triage.docFiles.join('\n     ')}\n     ` +
     `If a doc you clearly need is missing from that list, Glob for that one file.`
+}
+
+// The security hunter's argument (see securityTarget above): triage already listed the changed
+// files, and that list is the only argument shape /security-review will accept that names THIS
+// diff. Space-separated so it reads as a path list whichever way the skill parses it. Left null
+// for scope 'all', where there is no diff to name and the whole project genuinely is the target,
+// and for a triage that returned no files — in both cases the prose scope is the honest argument
+// even though the skill will resolve its own, and scopeMatched still reports what happened.
+if (opts.scope !== 'all' && Array.isArray(triage.changedFiles) && triage.changedFiles.length) {
+  securityTarget = triage.changedFiles.join(' ')
 }
 
 const DOCS_HUNTER = HUNTERS.find((h) => h.label === 'docs')

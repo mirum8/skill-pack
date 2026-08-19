@@ -414,7 +414,8 @@ def summarize_skills(rows):
             print()
         if outcome_only:
             print(f"ran, but with no invocation recorded: {', '.join(outcome_only)}")
-            print("  (the skill reported an outcome while the hook was not yet live — its runs")
+            print("  (the skill reported an outcome that no invoke row accounts for — the hook was")
+            print("   not yet live, or the run arrived by a route it did not yet watch. Its runs")
             print("   are real, its run COUNT is not, so read the outcome table for these)")
             print()
 

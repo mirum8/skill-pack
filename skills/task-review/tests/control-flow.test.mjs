@@ -357,6 +357,33 @@ test('the pattern hunters use the lean sweep agent, never the single-bug investi
   assert.equal(opts['find-bugs:docs'].agentType, 'r:bug-hunter-docs')
 })
 
+test('the security hunter is handed the changed FILE PATHS as /security-review\'s argument', async () => {
+  // The one argument shape that decides whether this track reviews the diff under review or a
+  // different changeset. /security-review's Phase 0 honours an argument only as a PR number, a
+  // branch name, or a file path, and discards anything else — then falls through to its own
+  // `git diff @{upstream}...HEAD`, which on a branch carrying earlier commits is not this diff.
+  // Handed a prose scope SENTENCE it drifted on 3 of 3 dispatches on 2026-08-19, each reporting
+  // clean about code nobody had asked it to read.
+  const { prompts } = await run()
+  assert.match(prompts['find-bugs:security'],
+    new RegExp(`args: "${CHANGED.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}"`))
+  // The prose scope must not be what reaches the skill, on any path through this prompt.
+  assert.doesNotMatch(prompts['find-bugs:security'], /args: "the current git diff/)
+  // Verifying is not the same as forcing: the hunter still reads back what the report covered,
+  // because it is the skill that decides whether to honour the argument.
+  assert.match(prompts['find-bugs:security'], /set scopeMatched/)
+})
+
+test('with no file list to name, the security argument falls back rather than going empty', async () => {
+  // Two ways to arrive here: scope 'all' (there is no diff, the project genuinely is the target)
+  // and a triage that returned no files. Neither may produce a malformed or empty argument — the
+  // skill would then resolve its own scope with nothing said about it, which is the silent version
+  // of the drift. scopeMatched still reports what actually happened.
+  const { prompts } = await run({ triage: baseTriage({ changedFiles: [] }) })
+  assert.match(prompts['find-bugs:security'], /args: "the current git diff \(working tree \+ staged\)"/)
+  assert.doesNotMatch(prompts['find-bugs:security'], /args: ""/)
+})
+
 // ------------------------------------------------------ the shared diff pack ---
 // Each hunter is a fresh context, so unpointed each derives the change itself — 10–17 shell calls
 // apiece, and NOT to the same answer: stored runs show `git diff HEAD`, `git diff` and

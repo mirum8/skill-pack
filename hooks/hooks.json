@@ -14,7 +14,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Skill",
+        "matcher": "Skill|Workflow",
         "hooks": [
           {
             "type": "command",
