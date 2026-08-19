@@ -16,6 +16,7 @@ set -uo pipefail
 
 missing_mandatory=0
 missing_optional=0
+gh_ready=0
 
 # $1 label  $2 command to probe  $3 install line  $4 mandatory|optional
 report() {
@@ -44,18 +45,22 @@ report python3       python3       "brew install python"              mandatory
 report node          node          "brew install node"                mandatory
 report agent-browser agent-browser "npm i -g agent-browser && agent-browser install" mandatory
 
-# gh has to be authenticated, not merely present: task-run resolves issue sources and
-# opens PRs through it, and issues-fix gates its whole loop on `gh auth status` whenever
-# the backlog is a GitHub one, so an unauthenticated gh fails later, not here. A run whose
-# source is a markdown list needs none of it — this stays mandatory for the pack, not for
-# every run.
-if report gh gh "brew install gh" mandatory; then
+# gh is optional because GitHub is one source among several, not the floor: task-run also
+# runs from a todo phase, a list item or free text and finishes with a local `--skip-pr`
+# merge, and issues-fix falls back to the list file at the repo root whenever there is no
+# GitHub remote or no authenticated gh. What its absence costs is named rather than worked
+# around — issue sources, `gh pr create`, and closing issues on merge.
+#
+# Authentication is checked at the same tier, not a stricter one: gh present but logged out
+# reaches exactly as far as gh absent, and both fail at the point of use rather than here.
+if report gh gh "brew install gh" optional; then
   if ! gh auth status >/dev/null 2>&1; then
-    missing_mandatory=$((missing_mandatory + 1))
-    printf '  \033[31m✗\033[0m %-14s %-9s present but NOT authenticated — run: gh auth login\n' \
-      "gh auth" mandatory
+    missing_optional=$((missing_optional + 1))
+    printf '  \033[33m!\033[0m %-14s %-9s present but NOT authenticated — run: gh auth login\n' \
+      "gh auth" optional
   else
-    printf '  \033[32m✓\033[0m %-14s %-9s authenticated\n' "gh auth" mandatory
+    gh_ready=1
+    printf '  \033[32m✓\033[0m %-14s %-9s authenticated\n' "gh auth" optional
   fi
 fi
 
@@ -89,6 +94,13 @@ fi
 if (( missing_optional )); then
   echo "All mandatory prerequisites present. $missing_optional optional one(s) absent — the"
   echo "affected step is recorded as SKIPPED and the run continues (FR-22). It is never faked."
+  if (( ! gh_ready )); then
+    echo
+    echo "Without a usable gh, GitHub is simply not one of the sources. task-run runs from a todo"
+    echo "phase, a list item or free text and finishes by merging the feature branch, and issues-fix"
+    echo "reads the list file at the repo root. Only issue sources, gh pr create and issue-closing"
+    echo "are unavailable, and each is reported as such rather than improvised."
+  fi
 else
   echo "All prerequisites present."
 fi

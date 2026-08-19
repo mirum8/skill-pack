@@ -984,10 +984,17 @@ waiting points
     one is missing.</p>
     <p class="gwt">Given a machine, when the script runs, then it reports each of
     <code>pmd</code>, <code>spotbugs</code>, <code>semgrep</code>, <code>python3</code>,
-    <code>node</code>, <code>gh</code> (present <em>and</em> authenticated), and
-    <code>agent-browser</code> as mandatory, and the <code>codex</code> plugin as optional; and it
+    <code>node</code> and <code>agent-browser</code> as mandatory, and <code>gh</code> (present
+    <em>and</em> authenticated) and the <code>codex</code> plugin as optional; and it
     prints the install command for anything missing. Given only the <code>codex</code> plugin missing,
-    then it warns and exits zero.</p>
+    or only <code>gh</code>, then it warns and exits zero.</p>
+    <p class="gwt"><code>gh</code> is optional because GitHub is one source among several, not the
+    floor: <code>task-run</code> also runs from a todo phase, a list item or free text and finishes by
+    merging the feature branch, and <code>issues-fix</code> falls back to the list file at the repo
+    root. Its absence costs issue sources, <code>gh pr create</code> and issue-closing — named, in the
+    script's own output and again at the point of use, never worked around. Authentication sits at the
+    same tier rather than a stricter one, because <code>gh</code> present but logged out reaches exactly
+    as far as <code>gh</code> absent.</p>
     <p class="gwt"><b>This requirement was rewritten, and the reason matters more than the text.</b>
     It previously demanded per-skill prerequisite checking that <em>already exists upstream</em> and is
     better than an install-time check, because it fires at the moment of need with the context to say
@@ -1820,7 +1827,7 @@ waiting points
           <td>All prerequisites mandatory (today's shape) · all prerequisites optional and documented only</td>
           <td><b>Better:</b> matches how the pack actually fails — a machine without <code>semgrep</code> or a browser silently loses review coverage, while a machine without Codex loses one clearly-named step. It also lets the pack install on a machine that has no Codex licence at all. <b>Worse:</b> the installer now provisions software (<span class="rid">R-12</span>), and making Codex optional is a behaviour change to an immutable pipeline (<span class="rid">R-11</span>). Making everything mandatory was rejected because it blocks install on any machine without Codex; making everything optional was rejected because silent partial review is the failure mode this pack exists to prevent.</td>
           <td>Codex becoming a hard dependency of a step that has no honest skipped state, or an analyzer becoming installable only by hand</td>
-          <td><code>check-prereqs.sh</code> (<span class="rid">FR-15</span>) exits non-zero with only a mandatory prerequisite missing, and exits zero with only Codex missing</td>
+          <td><code>check-prereqs.sh</code> (<span class="rid">FR-15</span>) exits non-zero with only a mandatory prerequisite missing, and exits zero with only Codex or only <code>gh</code> missing</td>
         </tr>
       </tbody>
     </table>

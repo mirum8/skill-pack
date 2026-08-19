@@ -112,14 +112,25 @@ goes through `agent-browser`.
 | tool | for | install |
 |---|---|---|
 | `pmd`, `spotbugs`, `semgrep` | `code-scan` | `brew install pmd spotbugs semgrep` |
-| `gh` (authenticated) | `task-run` issue sources and PRs; `issues-fix` against GitHub | `brew install gh && gh auth login` |
 | `agent-browser` | UI verification | `npm i -g agent-browser && agent-browser install` |
 | `node`, `python3` | workflow scripts, analyzers | — |
 
-**Optional** — the `codex` plugin from the `openai-codex` marketplace, used by
-`code-adversarial`. Absent, the step is recorded as **skipped** and named, and the
-run continues. It is never satisfied by a model-written substitute: a skipped step
-reported as a review is worse than no review at all.
+**Optional** — absent, what is lost is **named** and the run continues. Neither is ever
+satisfied by a model-written substitute: a skipped step reported as a review is worse than
+no review at all.
+
+| tool | for | absent |
+|---|---|---|
+| `gh` (authenticated) | `task-run` issue sources and PRs; `issues-fix` against GitHub | GitHub stops being one of the sources |
+| `codex` plugin | `code-adversarial` | the step is recorded as **skipped** and named |
+
+The pack runs end to end **without GitHub**. `task-run` takes a todo phase, a list item or
+free text as its source and finishes by merging the feature branch instead of opening a PR;
+`issues-fix` reads the list file at the repo root. Only issue sources, `gh pr create` and
+closing issues on merge need `gh`, and each says so rather than improvising — which is why
+it is not mandatory: a machine without it loses one source, not the pipeline.
+
+The `codex` plugin comes from the `openai-codex` marketplace:
 
 ```
 /plugin marketplace add openai-codex
