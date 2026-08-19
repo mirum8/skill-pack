@@ -169,7 +169,7 @@ else
   note "none registered — nothing to remove"
 fi
 
-step "superseded flat originals"
+step "superseded skill names (flat originals + retired packed names)"
 # R-4 / ADR-13. The pack renames every skill it carries (run-task -> task-run, find-bugs ->
 # code-bugs, …) and installs them under one namespaced root. The pre-pack originals keep their old
 # FLAT names in the roots below, so while they survive every packed skill has a twin: an edit can
@@ -183,7 +183,13 @@ step "superseded flat originals"
 # that can drift apart. If the table cannot be read, retire NOTHING and say so: a delete loop
 # running on an empty list of names is the one outcome here that is worse than doing nothing.
 if (( RETIRE )); then
-  ORIG_NAMES=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import rename_rules as R; print("\n".join(sorted(R.RENAME)))' "$REPO/tools" 2>/dev/null)
+  # Two kinds of superseded name, retired by the same loop because the damage is the same.
+  #   RENAME keys      the pre-pack flat originals (find-bugs, run-task, spec-to-todo, ...)
+  #   RETIRED_PACKED   packed names dropped by a later rename (spec-plan -> spec-design)
+  # rsync --delete clears a retired packed name from the pack root, but never from the FLAT roots,
+  # and ~/.claude/skills/spec-plan sits beside the pack rather than inside it. Left there it still
+  # answers /r:spec-plan with the old behaviour while every edit lands in the new skill.
+  ORIG_NAMES=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import rename_rules as R; print("\n".join(sorted(set(R.RENAME) | set(R.RETIRED_PACKED))))' "$REPO/tools" 2>/dev/null)
   ORIG_ROOTS=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import rename_rules as R; print("\n".join(R.ORIGINAL_ROOTS))' "$REPO/tools" 2>/dev/null)
   if [[ -z $ORIG_NAMES || -z $ORIG_ROOTS ]]; then
     warn "could not read tools/rename_rules.py — nothing was retired."
@@ -211,13 +217,13 @@ if (( RETIRE )); then
       done <<< "$ORIG_NAMES"
     done <<< "$ORIG_ROOTS"
     if (( RETIRED )); then
-      ok "$RETIRED superseded original(s) retired — the pack is now the only copy"
+      ok "$RETIRED superseded name(s) retired — the pack is now the only copy"
     else
       note "none found — the pack is already the only copy"
     fi
   fi
 else
-  note "skipped (--keep-originals) — the old flat names still resolve to the old skills"
+  note "skipped (--keep-originals) — the superseded names still resolve to the old skills"
 fi
 
 step "next"

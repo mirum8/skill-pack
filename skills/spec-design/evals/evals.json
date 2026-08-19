@@ -293,6 +293,70 @@
       "files": [],
       "fixture": null,
       "assertions": []
+    },
+    {
+      "id": 10,
+      "name": "requirements-steer-order-not-scope",
+      "prompt": "/r:spec-design docs/billing/spec.html \"payouts first, we demo in two weeks; the admin UI can wait, and add SSO login\"",
+      "fixture": null,
+      "expected_output": "The free text reorders the plan: payout leaves land in the first milestone and the admin UI moves to a later one. 'Add SSO login' is work no document describes, so it does NOT become a leaf — it goes to Open questions saying it needs a spec first. Every story the spec does contain still reaches a leaf.",
+      "assertions": [
+        {
+          "id": "steers_order",
+          "text": "Payout work is ordered first and the admin UI deferred to a later milestone"
+        },
+        {
+          "id": "no_invention",
+          "text": "SSO login does not become a leaf — it reaches Open questions as work no document specifies"
+        },
+        {
+          "id": "no_scope_loss",
+          "text": "Every user story in the spec still reaches a leaf",
+          "check": "script"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "name": "requirements-contradicting-the-spec",
+      "prompt": "/r:spec-design docs/billing/spec.html \"skip the refund flow entirely\"",
+      "fixture": null,
+      "expected_output": "The spec's v1 line requires the refund flow, so the instruction contradicts it. That reaches Open questions for the user to settle rather than being applied silently — a v1 story is not deferred on a one-line aside.",
+      "assertions": [
+        {
+          "id": "surfaces_conflict",
+          "text": "The contradiction between the free text and the spec's v1 line is raised, not resolved quietly"
+        },
+        {
+          "id": "no_silent_drop",
+          "text": "The refund flow is not silently removed from v1"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "name": "open-design-choice-is-asked-not-guessed",
+      "prompt": "/r:spec-design docs/billing/spec.html",
+      "fixture": null,
+      "expected_output": "The spec names an idempotency requirement but never says how. That meets the bar — undetermined, two defensible options, and it changes the contracts — so the choice (unique constraint vs outbox) is put to the user at the gate with a recommendation and what each costs, rather than picked silently. Naming, column order and test-framework choices are NOT asked about.",
+      "assertions": [
+        {
+          "id": "asks",
+          "text": "The undetermined design choice is put to the user at the gate, with the options and a recommendation"
+        },
+        {
+          "id": "one_interruption",
+          "text": "It is asked together with the decomposition, not as a separate round of questions"
+        },
+        {
+          "id": "no_trivia",
+          "text": "No question about naming, column order, or a choice the code or CLAUDE.md already answers"
+        },
+        {
+          "id": "recorded_if_unanswered",
+          "text": "Under --yes the recommended option is taken and recorded in Open questions with its alternative, never silently applied"
+        }
+      ]
     }
   ]
 }

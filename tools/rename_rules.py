@@ -41,6 +41,20 @@ RENAME = {
     "write-tests":        "tests-write",
 }
 
+# Packed names this pack no longer carries, because the skill was renamed: retired -> replacement.
+#
+# `rsync -a --delete` already clears the pack root, but only on a machine that has re-run
+# install.sh — and it never touched the flat roots, where a packed name could have been copied by
+# hand. Worse, the old name keeps RESOLVING: a stale skills/r/skills/spec-plan answers /r:spec-plan
+# with the previous behaviour, and prose that still says the old name reaches it, so an edit lands
+# in the live skill while the run uses the retired one. That is R-4 all over again, one level in.
+#
+# One entry retires the name from every root, and validate.py asserts it is neither a live skill
+# directory nor a name the pack still mentions.
+RETIRED_PACKED = {
+    "spec-plan": "spec-design",
+}
+
 # Skills born in the pack. They have no pre-pack original and never did, so they belong in
 # neither half of RENAME: putting one there would send install.sh hunting an ancestor that
 # never existed and make validate report an R-4 cut-over that has nothing to cut over from.

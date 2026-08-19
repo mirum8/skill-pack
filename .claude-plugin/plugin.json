@@ -1,10 +1,17 @@
 {
   "name": "r",
-  "displayName": "r — personal skill pack",
+  "displayName": "r \u2014 personal skill pack",
   "version": "1.0.0",
-  "description": "17 personal engineering skills and the 8 agents they dispatch.",
-  "author": { "name": "mirum8" },
+  "description": "18 personal engineering skills and the 8 agents they dispatch.",
+  "author": {
+    "name": "mirum8"
+  },
   "repository": "https://github.com/mirum8/skill-pack",
   "license": "MIT",
-  "keywords": ["skills", "review", "tdd", "claudemd"]
+  "keywords": [
+    "skills",
+    "review",
+    "tdd",
+    "claudemd"
+  ]
 }

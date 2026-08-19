@@ -205,13 +205,20 @@ seed_original "$H7" .agents/skills fix-gh-issues
 seed_original "$H7" .agents/skills find-bugs
 seed_original "$H7" .agents/skills sonar                 # not a pack original — must survive
 seed_original "$H7" .agents/skills commit --no-skill     # right name, not a skill — must survive
+# A RETIRED PACKED name, which is the other half of the same failure and reaches the flat roots by
+# a different route. rsync --delete clears spec-plan from the pack root; nothing ever cleared a
+# copy sitting BESIDE the pack, where it keeps answering /r:spec-plan with the old behaviour.
+seed_original "$H7" .claude/skills spec-plan
 out=$(run "$H7" --no-deps)
 hasnt "an original under ~/.claude/skills is retired"    "$H7/.claude/skills/run-task"
 hasnt "an original under ~/.agents/skills is retired"    "$H7/.agents/skills/fix-gh-issues"
 hasnt "every packed name is retired, not just one"       "$H7/.agents/skills/find-bugs"
 has   "a skill the pack does not carry is left alone"    "$H7/.agents/skills/sonar"
 has   "a same-named directory with no SKILL.md is left alone" "$H7/.agents/skills/commit"
-is    "it reports what it retired"                       "$(grep -c 'superseded original(s) retired' <<<"$out")" 1
+hasnt "a retired PACKED name is retired from a flat root" "$H7/.claude/skills/spec-plan"
+hasnt "and never reappears inside the pack"              "$H7/.claude/skills/r/skills/spec-plan"
+has   "its replacement is what the pack carries"         "$H7/.claude/skills/r/skills/spec-design/SKILL.md"
+is    "it reports what it retired"                       "$(grep -c 'superseded name(s) retired' <<<"$out")" 1
 # The realpath guard earns its place here: one of the roots scanned IS the directory the pack
 # installs into, so a loop without it could delete the payload written moments earlier.
 has   "the pack it just wrote is untouched"              "$H7/.claude/skills/r/skills/task-run/SKILL.md"

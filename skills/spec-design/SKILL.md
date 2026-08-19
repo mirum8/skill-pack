@@ -8,7 +8,10 @@ description: >-
   doc) plus any other documents you point at, and writes one todo.md. Every leaf declares what it
   depends on, so the plan is a graph: it says which units may be built at the same time, and
   refuses a wave whose members would collide on a file. One leaf is exactly one /r:task-run.
-  Stack-agnostic — it follows whatever the documents already decided. Use on "/r:spec-design",
+  Stack-agnostic — it follows whatever the documents already decided, and takes an optional
+  free-text argument for what the documents cannot say: priorities, a deadline, what to defer,
+  constraints to respect. Where a design decision is genuinely open and would change the
+  contracts or the split, it asks rather than picking one quietly. Use on "/r:spec-design",
   "turn this spec into a plan", "break these docs into phases", "what's the build order", "plan
   this out with the design detail", "which parts can we build in parallel". Add --shallow for the
   build order alone, with no design pass. NOT for writing the spec — that's /r:spec-brainstorm;
@@ -41,6 +44,35 @@ dangling pointer: the contract it names is simply absent. `check_todo.py` report
 
 This is also what makes the design pass worth running at all: the contract *becomes* the checklist,
 so it reaches the implementer through the path that already exists. Nothing needs wiring.
+
+## Invocation
+
+`/r:spec-design [<doc>...] ["<requirements>"] [--shallow] [--yes]`
+
+- **`<doc>...`** — the documents to read. Several is normal and expected. Omitted, they are
+  discovered (Step 1).
+- **`"<requirements>"`** — optional free text for **what the documents cannot say**: what matters
+  most, what to defer, a deadline, a constraint to respect, a part to leave alone.
+
+  ```
+  /r:spec-design docs/billing/spec.html "payouts first, we demo in two weeks; admin UI can wait"
+  /r:spec-design docs/billing/spec.html "don't touch the legacy importer, and keep v1 to one module"
+  ```
+
+  **It steers, it never adds.** Ordering, the v1 line, what lands in a later milestone, how far to
+  split — all fair game. Requirements the documents do not contain are not: a stated priority is
+  the user telling you what to build *first*, not a story you may invent to build. If the free text
+  names work no document describes, it goes to Open questions with a note that it needs a spec,
+  the same as any other gap.
+
+  **If it contradicts the documents, that is an Open question too** — not a silent override. "Skip
+  the admin UI" against a spec whose v1 line requires it is exactly the disagreement a human has to
+  settle, and quietly deferring a v1 story is how a plan ships something nobody agreed to.
+
+- **`--shallow`** — stop after pass 1: the build order alone, no design contracts (Step 4).
+- **`--yes`** — skip the gate (Step 8). It does not skip the questions in Step 3.5: an unresolved
+  design choice is recorded in Open questions with the option taken and why, so the decision is
+  visible even when nobody was there to make it.
 
 ## Step 1 — find and read the documents
 
@@ -127,6 +159,44 @@ are imagined, and an imagined citation is worse than none — it reads exactly l
 reuse map is explicitly "the evidence you explored rather than imagined". This document must not
 counterfeit that. Approach prose, algorithms and pseudocode are out for the same reason: they are a
 diff plan against a codebase that does not exist yet.
+
+## Step 3.5 — ask about the design choices you cannot settle
+
+Pass 2 makes real decisions, and some of them the documents do not determine. **Where a choice is
+genuinely open and the answer would change the plan, ask — do not pick one quietly.**
+
+The bar is all three, together:
+
+1. **The documents do not settle it.** Not "they are vague" — you have read them and the answer is
+   genuinely absent. A decision the spec already made is not open, however much you would have
+   chosen differently.
+2. **Two or more options are defensible**, and reasonable engineers on this project would disagree.
+3. **The choice changes the plan** — the contracts, how leaves split, the graph, or the v1 line.
+
+What that looks like: sync call versus a queue between two modules · one table with a type column
+versus separate tables · idempotency by unique constraint versus an outbox · soft delete versus
+hard · whether an integration is stubbed in v1 or built for real · which module owns a shared
+concept the spec names only once.
+
+**What it is not.** Naming, column order, whether a helper is static, which test framework the repo
+already uses, anything the code or `CLAUDE.md` answers by looking. If you would not put it in a
+design review, do not ask about it. A skill that asks six questions to write one plan spends the
+user's attention on things it should have decided, and the next thing they do is stop reading.
+
+**Ask them together, once, at the gate.** Carry each open choice into Step 8 and put it to the user
+alongside the decomposition — that is one interruption for both, and the two are related: an
+answer that changes the contracts often changes the split too, and nothing is on disk yet, so
+redoing a pass costs a message.
+
+State each one as: the decision · the options · what each costs · which you would take and why.
+**Give a recommendation.** A question with no lean makes the user do the analysis you just did, and
+you are the one who has read the documents and the code.
+
+**Never invent an answer to a question you decided was worth asking.** If the run is unattended
+(`--yes`), or the user declines to choose, take your recommended option, build the plan on it, and
+record it in Open questions: the decision, the alternative, and what would have to be true for the
+alternative to win. A design choice nobody made is fine; one nobody can *find* is not — the leaves
+below it were shaped by it, and a later reader needs to know which.
 
 ## Step 4 — pass 3: the leaf checklists
 
@@ -221,7 +291,12 @@ Then four judgments a script can't make:
 ## Step 8 — the gate
 
 **Before writing anything to disk, show the decomposition and wait.** Milestones, leaf titles,
-the graph, and the wave table — then stop for a yes.
+the graph, the wave table — **and the open design choices from Step 3.5** — then stop for a yes.
+
+Both go in the same interruption, because they are the same decision seen twice: a design choice
+that changes the contracts usually changes which leaves exist, so answering it and approving the
+split are one act. Ask the design questions with `AskUserQuestion` where the options are discrete;
+each one carries your recommendation and what it costs.
 
 The decomposition is what every later pass hangs off: contracts are written per milestone and items
 are derived from contracts, so a wrong split makes both passes wrong together. It is also the
@@ -268,7 +343,10 @@ Everything else is for the human and the implementer's head start, not for a par
 
 ## Never do this
 
-- Never invent a story the documents don't contain, and never reword one.
+- Never invent a story the documents don't contain, and never reword one — including from the
+  free-text requirements, which say what to build first, never what to build.
+- Never silently resolve a design choice that met the Step 3.5 bar. Ask, or record the decision and
+  its alternative in Open questions. Never both silently decide and leave no trace.
 - Never re-decide the stack. The documents chose it.
 - Never write `file:LINE` or a reuse map — those are `/r:task-run`'s planner's, written against
   real code.

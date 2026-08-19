@@ -301,6 +301,29 @@ def check_agents():
                          "match its filename — dispatch resolves by name")
 
 
+def check_retired_names():
+    """A packed name dropped by a rename must be gone from the pack AND unmentioned by it.
+
+    Two failures, both silent. A live directory under the retired name means the pack ships both
+    skills and /r:<old> keeps answering with the old behaviour. A surviving MENTION is worse: the
+    model reads it, invokes a name that resolves to a stale flat copy on some machines and to
+    nothing on others, and the run either does the wrong thing or dies mid-way.
+    """
+    packed = R.packed_skills()
+    for old, new_name in sorted(R.RETIRED_PACKED.items()):
+        if old in packed or os.path.isdir(os.path.join(SKILLS, old)):
+            fail("BR-2", f"skills/{old} is retired (renamed to {new_name}) but still exists in "
+                         f"the pack — remove the directory or drop it from RETIRED_PACKED")
+        if new_name not in packed:
+            fail("BR-2", f"{old} is retired in favour of {new_name}, which is not a packed skill")
+        pat = re.compile(rf"(?<![A-Za-z0-9_-]){re.escape(old)}(?![A-Za-z0-9_-])")
+        for path in pack_text_files():
+            text = open(path, encoding="utf-8", errors="ignore").read()
+            if pat.search(text):
+                fail("BR-2", f"{os.path.relpath(path, REPO)} still names the retired skill "
+                             f"{old!r} — it was renamed to {new_name}")
+
+
 # --- FR-11 ------------------------------------------------------------------
 def check_evals():
     for d in skill_dirs():
@@ -558,6 +581,7 @@ def main():
 
     check_manifest()
     check_layout()
+    check_retired_names()
     check_frontmatter()
     check_references()
     check_r_prefix()
