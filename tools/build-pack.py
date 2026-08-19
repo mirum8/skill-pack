@@ -54,7 +54,7 @@ DESCRIPTIONS = {
         "unclear), full when the approach itself needs reviewing or the change touches auth, money, "
         "persistence, concurrency or security. Every tier builds, tests, runs mandatory static "
         "analysis, and gets a Codex review of the final diff. NOT for: writing a plan only (that's "
-        "/r:spec-brainstorm or /r:spec-plan), reviewing an existing diff (that's /r:task-review), "
+        "/r:spec-brainstorm or /r:spec-design), reviewing an existing diff (that's /r:task-review), "
         "or one-off edits you'd just make directly."
     ),
 }

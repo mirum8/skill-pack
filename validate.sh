@@ -50,6 +50,15 @@ else
 fi
 
 echo
+echo "==> plan graph (edges, waves, collisions, --slice preflight)"
+if out=$(bash skills/spec-design/tests/check_todo.test.sh 2>&1); then
+  printf '  ✓ %s\n' "$(tail -1 <<<"$out" | tr -s ' ')"
+else
+  rc=1
+  sed 's/^/  /' <<<"$out"
+fi
+
+echo
 echo "==> stats store (sink, hook, reporter)"
 if out=$(bash lib/tests/stats.test.sh 2>&1); then
   printf '  ✓ %s\n' "$(tail -1 <<<"$out" | tr -s ' ')"

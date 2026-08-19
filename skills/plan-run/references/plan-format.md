@@ -1,6 +1,6 @@
 # The plan format — what this skill reads, and what it writes back
 
-`/r:plan-run` executes a plan file. `/r:spec-plan` writes the canonical shape, but a plan written by
+`/r:plan-run` executes a plan file. `/r:spec-design` writes the canonical shape, but a plan written by
 hand or by another tool is executable too, and the difference between them is entirely how much a
 phase block states versus how much has to be classified. This file is the whole of that contract.
 
@@ -29,7 +29,7 @@ phase block states versus how much has to be classified. This file is the whole 
 | `**Depends on:**` | no | read it, but the numbering is what orders the run |
 
 **Only a `### Phase N` heading makes something buildable.** That is the line between "an agent can do
-this" and "a person must", and `/r:spec-plan` puts everything on the wrong side of it under
+this" and "a person must", and `/r:spec-design` puts everything on the wrong side of it under
 `## Resolve first`. Never promote an unnumbered entry into the run list, and never number one
 yourself.
 

@@ -34,11 +34,11 @@
     },
     {
       "id": 3,
-      "name": "routing-excludes-spec-plan",
+      "name": "routing-excludes-spec-design",
       "kind": "neighbour-exclusion",
-      "neighbour": "spec-plan",
+      "neighbour": "spec-design",
       "prompt": "take docs/billing/spec.html and break it into phases I can work through, with a done-when check for each",
-      "expected_output": "Turning a written specification into an ordered, phased plan is spec-plan's job; issues-draft must not load, because a spec is not a message full of asks and phases are not a verified backlog of discrete items.",
+      "expected_output": "Turning a written specification into an ordered, phased plan is spec-design's job; issues-draft must not load, because a spec is not a message full of asks and phases are not a verified backlog of discrete items.",
       "files": [],
       "fixture": null,
       "assertions": []

@@ -35,11 +35,11 @@
     },
     {
       "id": 3,
-      "name": "routing-excludes-spec-plan",
+      "name": "routing-excludes-spec-design",
       "kind": "neighbour-exclusion",
-      "neighbour": "spec-plan",
+      "neighbour": "spec-design",
       "prompt": "take docs/billing/spec.html and break it into phases with a done-when check for each",
-      "expected_output": "Writing the plan is spec-plan's job; plan-run must not load, because there is no todo.md to execute yet — it consumes the phases spec-plan produces.",
+      "expected_output": "Writing the plan is spec-design's job; plan-run must not load, because there is no todo.md to execute yet — it consumes the phases spec-design produces.",
       "files": [],
       "fixture": null,
       "assertions": []

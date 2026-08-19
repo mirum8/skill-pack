@@ -1,11 +1,11 @@
 {
-  "skill_name": "spec-to-todo",
-  "notes": "Fixtures are real spec.html files produced by /r:spec-brainstorm, kept in brainstorm-workspace/iteration-1. Each run points the skill at one and checks the resulting todo.md. Mechanical assertions are checked by scripts/check_todo.py --spec <the spec>; the rest are judgment. The skill must not re-decide anything the spec already settled.",
+  "skill_name": "spec-design",
+  "notes": "Fixtures are real spec.html files produced by /r:spec-brainstorm, kept in brainstorm-workspace/iteration-1. Each run points the skill at one and checks the resulting todo.md. Mechanical assertions are checked by scripts/check_todo.py --spec <the spec>, which also verifies the dependency graph, the derived waves and leaf self-containment; the rest are judgment. The skill must not re-decide anything the documents already settled, and must not write file:LINE or a reuse map — those are /r:task-run's planner's, written against real code.",
   "evals": [
     {
       "id": 0,
       "name": "enterprise-spec-to-plan",
-      "prompt": "/r:spec-plan docs/fraud-detection-platform/spec.html",
+      "prompt": "/r:spec-design docs/fraud-detection-platform/spec.html",
       "fixture": "../../brainstorm-workspace/iteration-1/enterprise-antifraud/with_skill/outputs/docs/fraud-detection-platform",
       "expected_output": "todo.md beside the spec. 18-35 phases grouped under named milestones, 10-18 in v1. Every FR in the spec reaches a phase. Phases touching money, auth, persistence or concurrency carry a Risk line. Unknowns whose mitigation is 'investigate', and any non-engineering work, appear under '## Resolve first' with an owner and the phase they block — not as numbered phases.",
       "assertions": [
@@ -60,13 +60,41 @@
           "id": "buildable",
           "text": "Every numbered phase is work a coding agent can branch, implement and open a PR for",
           "check": "script"
+        },
+        {
+          "id": "depends_on",
+          "text": "Every leaf carries a Depends on line ('—' when it has none), and no leaf depends on a higher-numbered leaf",
+          "check": "script"
+        },
+        {
+          "id": "no_cycle",
+          "text": "The dependency graph is acyclic",
+          "check": "script"
+        },
+        {
+          "id": "wave_safety",
+          "text": "No two leaves in the same derived wave name the same file",
+          "check": "script"
+        },
+        {
+          "id": "self_contained",
+          "text": "No leaf item defers to the milestone Design section — /r:task-run lifts only the leaf's own block",
+          "check": "script"
+        },
+        {
+          "id": "contracts",
+          "text": "Each milestone's Design section carries schema with real column types and indexes, endpoint signatures with status codes, types and module boundaries"
+        },
+        {
+          "id": "no_imagined_cites",
+          "text": "No file:LINE reference and no reuse map anywhere — those are written at execution time against real code"
         }
       ]
     },
     {
       "id": 1,
       "name": "small-spec-to-plan",
-      "prompt": "/r:spec-plan docs/plant-watering-tracker/spec.html",
+      "prompt": "/r:spec-design docs/plant-watering-tracker/spec.html",
       "fixture": "../../brainstorm-workspace/iteration-1/small-plant-tracker/with_skill/outputs/docs/plant-watering-tracker",
       "expected_output": "A short plan: 3-6 phases, 3-5 in v1. No spike unless the spec names a real high/high unknown. No Files lines required, since the codebase doesn't exist yet.",
       "assertions": [
@@ -102,7 +130,7 @@
     {
       "id": 2,
       "name": "existing-codebase-plan",
-      "prompt": "/r:spec-plan docs/returns-refunds/spec.html",
+      "prompt": "/r:spec-design docs/returns-refunds/spec.html",
       "fixture": "../../brainstorm-workspace/iteration-1/feature-returns-refunds/with_skill/outputs/wholesale-orders",
       "expected_output": "Reads the repo before writing phases. Every phase carries a Files line naming real existing paths. Migrations start at V2 because V1__init.sql is already applied. Respects the outbox pattern and the no-comments convention from CLAUDE.md.",
       "assertions": [
@@ -137,6 +165,26 @@
         {
           "id": "conventions",
           "text": "Honours the repo's CLAUDE.md rules (outbox, append-only Flyway, no code comments)"
+        },
+        {
+          "id": "depends_on",
+          "text": "Every leaf carries a Depends on line ('—' when it has none), and no leaf depends on a higher-numbered leaf",
+          "check": "script"
+        },
+        {
+          "id": "no_cycle",
+          "text": "The dependency graph is acyclic",
+          "check": "script"
+        },
+        {
+          "id": "wave_safety",
+          "text": "No two leaves in the same derived wave name the same file",
+          "check": "script"
+        },
+        {
+          "id": "self_contained",
+          "text": "No leaf item defers to the milestone Design section — /r:task-run lifts only the leaf's own block",
+          "check": "script"
         }
       ]
     },
@@ -166,7 +214,7 @@
       "name": "routing-triggers",
       "kind": "trigger",
       "prompt": "break this spec into phases with a runnable done-when check for each",
-      "expected_output": "spec-plan loads, reads the spec, and writes a phased todo.md with stable ids, real file paths and a check that can actually be run.",
+      "expected_output": "spec-design loads, reads the spec, and writes a phased todo.md with stable ids, real file paths and a check that can actually be run.",
       "files": [],
       "fixture": null,
       "assertions": []
@@ -177,7 +225,71 @@
       "kind": "neighbour-exclusion",
       "neighbour": "spec-brainstorm",
       "prompt": "I have an idea for a bot that watches our deploys — how should I build it?",
-      "expected_output": "Designing something that has not been specified yet is spec-brainstorm's job; spec-plan must not load, because there is no spec to phase.",
+      "expected_output": "Designing something that has not been specified yet is spec-brainstorm's job; spec-design must not load, because there is no spec to phase.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 6,
+      "name": "shallow-skips-the-design-pass",
+      "prompt": "/r:spec-design docs/plant-watering-tracker/spec.html --shallow",
+      "fixture": "../../brainstorm-workspace/iteration-1/small-plant-tracker/with_skill/outputs/docs/plant-watering-tracker",
+      "expected_output": "The build order alone: milestones, leaves, Depends on and checklists, with no milestone Design sections and no code-level contracts in the items. The graph is still complete, so the wave table is still derived.",
+      "assertions": [
+        {
+          "id": "no_design",
+          "text": "No milestone carries a Design section"
+        },
+        {
+          "id": "graph_intact",
+          "text": "Every leaf still carries Depends on, and the wave table is still derivable",
+          "check": "script"
+        },
+        {
+          "id": "items_plain",
+          "text": "Checklist items name the work without the schema/endpoint/signature detail the full pass adds"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "name": "several-documents-that-disagree",
+      "prompt": "/r:spec-design docs/billing/spec.html docs/billing/pricing-prd.md",
+      "fixture": null,
+      "expected_output": "Reads both, says what it took from each, and where the two disagree records it under Open questions rather than silently picking one. Neither document's requirements go missing.",
+      "assertions": [
+        {
+          "id": "reads_both",
+          "text": "Names both documents and what was taken from each"
+        },
+        {
+          "id": "no_silent_pick",
+          "text": "A disagreement between the documents reaches Open questions, never a quiet resolution"
+        },
+        {
+          "id": "no_loss",
+          "text": "Requirements from the second document reach leaves too"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "name": "routing-triggers-parallelism-ask",
+      "kind": "trigger",
+      "prompt": "turn these docs into a build plan and tell me which parts we can build in parallel",
+      "expected_output": "spec-design loads, decomposes the documents into milestones and leaf phases, writes a Depends on line on every leaf, and reports the derived wave table naming which leaves may be built concurrently.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 9,
+      "name": "routing-excludes-plan-run",
+      "kind": "neighbour-exclusion",
+      "neighbour": "plan-run",
+      "prompt": "work through docs/billing/todo.md and build all the remaining phases",
+      "expected_output": "Executing a plan that already exists is plan-run's job; spec-design must not load, because there is nothing to decompose — the phases are already written.",
       "files": [],
       "fixture": null,
       "assertions": []

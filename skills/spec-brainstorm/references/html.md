@@ -74,7 +74,7 @@ Two conventions worth holding, because they are what a reader scans for:
 - **Terminal states get `--olive` when they are a success and `--gray-500` when they are not.**
   A reader should be able to find the leaks — entities with no terminal state — by looking.
 - **One `<h3>` per user story, and nothing else at that level inside that section.** The `<h3>`
-  text *is* the story's handle: `scripts/check_spec.py` reads it, and `/r:spec-plan` carries it
+  text *is* the story's handle: `scripts/check_spec.py` reads it, and `/r:spec-design` carries it
   verbatim into every `Implements:` line. Sub-headings elsewhere in the document are fine; inside
   User stories an `<h3>` means "this is a story".
 

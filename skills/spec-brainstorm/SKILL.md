@@ -13,7 +13,7 @@ description: >-
   industry actually builds this. Use --feature for a feature inside an existing repo
   ("/r:spec-brainstorm --feature let users export invoices as CSV") - it reads the code first.
   --continue resumes an unfinished or under-interviewed document. NOT for the phased
-  implementation plan - that's /r:spec-plan.
+  implementation plan - that's /r:spec-design.
 model: opus
 effort: xhigh
 ---
@@ -25,9 +25,10 @@ the domain is and what to build in it — plus `interview-notes.md`, the answer 
 
 **The ceiling.** This document describes the domain model, user stories, key flows, modules and
 services, named technologies, and the API. It stops there. No column types, no indexes, no code,
-no build order. Ordering the work is `/r:spec-plan`, which reads this document and writes
-`todo.md` beside it; writing the code is `/r:task-run`. Don't write phases here — two plans drift
-within a day.
+no build order — those belong to `/r:spec-design`, which reads this document and writes `todo.md`
+beside it: it decides the build order *and* the design contracts (schema with real types and
+indexes, endpoint signatures, module boundaries) that this document deliberately stops short of.
+Writing the code is `/r:task-run`. Don't write phases here — two plans drift within a day.
 
 **It fits the project it is given.** There is no depth question and no size flag. A weekend tool
 has no integrations and no operations material, so those sections don't exist in its document; a
@@ -174,7 +175,7 @@ written, which is the expensive moment.
   was.
 
 The document must carry **user stories with stable bold names** and a stated **v1 line**.
-`/r:spec-plan` consumes both; a document without them cannot be turned into a plan that traces
+`/r:spec-design` consumes both; a document without them cannot be turned into a plan that traces
 back to anything.
 
 ## Step 4 — check the output
@@ -245,7 +246,7 @@ Four rules make resuming safe:
    moving. Offer them back as questions — that's most of the value of continuing.
 3. **Open questions get re-triaged.** Anything the user can answer in one line is now a question.
 4. **Story names are frozen.** A renamed story silently breaks every `Implements:` line in a plan
-   `/r:spec-plan` may already have built. New stories append.
+   `/r:spec-design` may already have built. New stories append.
 
 ### After each batch, re-derive the gaps — then offer three choices
 
@@ -287,7 +288,7 @@ Summarize the folder, the mode used, the sections and diagrams included, every r
 `assumed` rather than asked, and anything left in Open questions. Then give the next command:
 
 ```
-/r:spec-plan docs/<topic>/spec.html
+/r:spec-design docs/<topic>/spec.html
 ```
 
 which turns the document into a phased plan beside it. Offer to refine any section or diagram first
@@ -310,6 +311,6 @@ which turns the document into a phased plan beside it. Offer to refine any secti
 - Never state a price, quota, limit or version you did not read this session.
 - Never introduce a module, service or technology no story forces.
 - Never write schema columns, indexes, code or build phases — that is below this document's ceiling.
-- Never write a `todo.md` here — that's `/r:spec-plan`.
+- Never write a `todo.md` here — that's `/r:spec-design`.
 - Never object twice to the same decision.
 - Never claim research ran when it didn't, and never run it without `--explain`.

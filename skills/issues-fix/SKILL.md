@@ -12,7 +12,7 @@ description: >-
   "clear out the bug tracker", "check the issues and fix what's broken", or hands over a list of
   issues, features or bugs — a tracker, a file or a paste — and wants them verified and fixed, not
   just one known bug. NOT for: a single specific bug you already understand (hand that straight to
-  `/r:task-run`), writing a plan only (`/r:spec-plan`), or reviewing an existing diff
+  `/r:task-run`), writing a plan only (`/r:spec-design`), or reviewing an existing diff
   (`/r:task-review`).
 effort: xhigh
 disable-model-invocation: true

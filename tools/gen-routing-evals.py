@@ -129,19 +129,19 @@ CASES = {
         "help me architect a service that syncs invoices to our accounting system",
         "spec-brainstorm loads, interviews for the missing decisions, researches prior art, "
         "and writes docs/<topic>/spec.html plus architecture.html.",
-        "spec-plan",
+        "spec-design",
         "turn the spec we wrote into a phased todo I can work through",
-        "Turning a written spec into an ordered plan is spec-plan's job; spec-brainstorm "
+        "Turning a written spec into an ordered plan is spec-design's job; spec-brainstorm "
         "must not load, because the specification already exists.",
     ),
-    "spec-plan": (
+    "spec-design": (
         "break this spec into phases with a runnable done-when check for each",
-        "spec-plan loads, reads the spec, and writes a phased todo.md with stable ids, real "
+        "spec-design loads, reads the spec, and writes a phased todo.md with stable ids, real "
         "file paths and a check that can actually be run.",
         "spec-brainstorm",
         "I have an idea for a bot that watches our deploys — how should I build it?",
         "Designing something that has not been specified yet is spec-brainstorm's job; "
-        "spec-plan must not load, because there is no spec to phase.",
+        "spec-design must not load, because there is no spec to phase.",
     ),
     "task-review": (
         "/r:task-review",

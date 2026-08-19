@@ -7,11 +7,14 @@ description: >-
   `Risk:` and runnable `Done when:`, so nothing is re-derived and phases are never reordered or
   folded together. Each phase is re-checked against the current code just before it runs — an
   earlier phase may already have delivered it — then implemented test-first, reviewed at the depth
-  its `Risk:` line asks for, and merged into the base as one commit carrying its ticks. Use on
-  "/r:plan-run", "work through todo.md", "build the whole plan", "run all the remaining phases",
-  "implement the plan end to end", "carry on with the plan from phase 4". NOT for: a single phase
+  its `Risk:` line asks for, and merged into the base as one commit carrying its ticks. Where the
+  plan's dependency graph says two phases share no dependency and no file, they can be built at the
+  same time in separate sessions — `--no-merge` in a detached worktree each, then `--land` to merge
+  them in order. Use on "/r:plan-run", "work through todo.md", "build the whole plan", "run all the
+  remaining phases", "implement the plan end to end", "carry on with the plan from phase 4",
+  "build these phases in parallel". NOT for: a single phase
   run on its own (`/r:task-run "todo.md / Phase 3"`), a flat backlog of issues or bugs with no
-  ordering between them (`/r:issues-fix`), writing the plan in the first place (`/r:spec-plan`),
+  ordering between them (`/r:issues-fix`), writing the plan in the first place (`/r:spec-design`),
   or reviewing a diff (`/r:task-review`).
 effort: xhigh
 disable-model-invocation: true
@@ -52,11 +55,11 @@ Four things shape the whole design:
 
 ## Invocation
 
-`/r:plan-run [<plan>] [--from <phase>] [--to <phase>] [--yes] [--dry-run]`
+`/r:plan-run [<plan>] [--from <n>] [--to <n>] [--phases <n,n>] [--no-merge] [--land] [--yes] [--dry-run]`
 
 **`<plan>`** is the path to the plan file. Strip a leading `@` and any trailing `/` (Claude Code's
 `@todo.md` arrives verbatim). With no argument, look for one and **name what you found before using
-it**: `docs/*/todo.md` first (where `/r:spec-plan` writes, beside the spec), then `todo.md`,
+it**: `docs/*/todo.md` first (where `/r:spec-design` writes, beside the spec), then `todo.md`,
 `PLAN.md` or `IMPLEMENTATION.md` at the repo root. Nothing found, or two candidates with nothing to
 choose between them: **ask**. This is the one place the run stops for input that isn't the gate.
 
@@ -65,10 +68,19 @@ choose between them: **ask**. This is the one place the run stops for input that
   step past a phase you have decided to defer or do by hand.
 - **`--to <phase>`** → stop after this phase. `--from 4 --to 6` runs exactly three. Use it to take a
   plan's `v1 (MVP)` block in one sitting and leave `Advanced` for later.
+- **`--phases <n,n>`** → run exactly these phases, whatever their position. The primitive `--from`
+  and `--to` are sugar over; it is also how one session takes a single leaf out of a wave so the
+  rest of that wave runs beside it in other sessions.
+- **`--no-merge`** → build, review, run `Done when:`, tick and commit on the phase branch — then
+  stop, leaving it unmerged. This is the concurrent-session mode; see
+  [Running phases concurrently](#running-phases-concurrently). It changes nothing before the merge.
+- **`--land`** → merge the phase branches finished by concurrent sessions into the base, in phase
+  order. Runs only from the primary working tree, and does no building of its own.
 - **`--yes`** → skip the approval gate and run every phase in the list. It does **not** disable the
   halt: a failed phase still stops the run.
-- **`--dry-run`** → read the plan, run the plan check, print the run list, then **stop**. Never
-  touches git and never edits a character of the plan file. This is the safe preview.
+- **`--dry-run`** → read the plan, run the plan check, print the run list **and the wave table with
+  the commands that would run its phases concurrently**, then **stop**. Never touches git and never
+  edits a character of the plan file. This is the safe preview.
 
 Phase identifiers are the numbers (`--from 4`). Accept a title too when the user gives one, but
 resolve it to a number before anything else uses it — the number is what the handoff string carries.
@@ -92,11 +104,11 @@ has already read is a very different thing from a `--yes` run nobody looked at.
   work uncommitted until a single final commit, so pre-existing changes would be swept into a
   phase's commit and into its reviewed diff. This covers the plan file itself, which is usually
   tracked right here — a half-edited plan is exactly the change that must not ride along.
-- **Run the plan check** — `/r:spec-plan` ships the checker that reads a plan the way this skill
+- **Run the plan check** — `/r:spec-design` ships the checker that reads a plan the way this skill
   executes one:
 
   ```sh
-  python3 "${CLAUDE_PLUGIN_ROOT}/skills/spec-plan/scripts/check_todo.py" <plan>
+  python3 "${CLAUDE_PLUGIN_ROOT}/skills/spec-design/scripts/check_todo.py" <plan>
   ```
 
   It reports numbering gaps and repeats, phases with no `Done when:`, oversized phases, vague tasks,
@@ -126,7 +138,7 @@ Take every `### Phase N` block, in **numeric order**, and keep per phase:
   for it), and it never resurrects a phase before it.
 
 **`## Resolve first` is a gate, not a phase.** Anything unticked under that heading is work that
-needs a *person* — an unknown to settle, a contract to sign, a decision to make — and `/r:spec-plan`
+needs a *person* — an unknown to settle, a contract to sign, a decision to make — and `/r:spec-design`
 puts it there precisely to keep it out of an agent's reach. If it holds unticked entries, **list
 them with the phase each one says it blocks, and stop for the user**, unless every blocked phase
 falls outside the run list. Never treat one as buildable and never number it yourself.
@@ -178,6 +190,11 @@ For each phase:
    If a previous phase left the tree dirty, **do not plow ahead** — that is a halt (Step 3.7), not
    something to clean up and carry on through.
 
+   Under **`--no-merge`** this is `git checkout --detach <base>` instead: the run is in a linked
+   worktree, where `<base>` cannot be claimed by name while the primary tree holds it. Detaching
+   gives the same clean tree at the same commit, and the implement Workflow branches off it exactly
+   as it would anywhere else.
+
 2. **Re-check the phase against the code — now, not up front.** Spawn **one** read-only `Explore`
    agent with the phase block and ask it three questions:
 
@@ -196,7 +213,7 @@ For each phase:
      **halt** (Step 3.7). A plan whose premises have moved needs a person or a re-plan, not an
      implementer guessing.
    - **`build`** — carry `note` and `filesActual` into the next step as context. Paths drifting is
-     normal and is **not** `blocked`: `/r:spec-plan` writes `Files:` before the code exists.
+     normal and is **not** `blocked`: `/r:spec-design` writes `Files:` before the code exists.
 
    **This check belongs here, per phase, and cannot be hoisted into one parallel sweep at the start.**
    Phase 5's premises do not exist until Phase 4 has landed, so a sweep run before the loop would be
@@ -216,7 +233,7 @@ For each phase:
    defined as the arm with no written criteria to lift. Branch: `phase-<slug>`. **Hand it the
    reference, never the body.**
 
-   **Pass `profile: "full"` when and only when the phase carries a `**Risk:**` line.** `/r:spec-plan`
+   **Pass `profile: "full"` when and only when the phase carries a `**Risk:**` line.** `/r:spec-design`
    writes that line only for auth, money, persistence, concurrency and security — the surfaces
    `/r:task-run` escalates on — and omits it rather than writing "Risk: low". So a phase without one
    is a phase the planner made **no** claim about, and forcing a tier there would override a
@@ -321,14 +338,19 @@ For each phase:
    - **Idempotent merge into base:** if `git merge-base --is-ancestor <pb> <base>` it is already
      merged — skip. Otherwise `git checkout <base> && git merge --no-ff <pb>`, then delete the
      branch. **If the merge conflicts, stop and surface it — never force it.** That is a halt.
+
+     **Under `--no-merge`, stop here instead** — no merge, no branch deletion — and report the
+     branch name. The commit carrying the code and the ticks is already on it; `--land` merges it
+     from the primary tree later. Nothing earlier in this step changes: the phase is still reviewed,
+     still done-checked, still ticked, still one commit.
    - **A plan file outside the repo, or untracked, has no commit to ride in.** Tick it anyway and
      **say so in the report**: that is the one case where reverting a phase leaves the plan still
      claiming the work is done.
 
 7. **Halt, or continue.** On success, record the phase and move to the next one. On any halt —
    `{ stopped: … }` from the implement half, an unavailable `Workflow` tool, a blocked or red review,
-   a failed `Done when:`, a merge conflict, a dirty base, a `blocked` re-check — **stop the whole
-   run**:
+   a failed `Done when:`, a merge conflict, a dirty base, a `blocked` re-check, a refused `--slice`
+   preflight — **stop the whole run**:
    - Restore a clean base branch. Leave the failed phase's branch in place, unmerged, so the user can
      look at it; name the branch in the report.
    - **Never tick a phase that halted**, and never tick past it.
@@ -340,6 +362,112 @@ For each phase:
    is written against what Phase 4 produced, so carrying on past a failure builds real code on a
    premise that isn't true — and it does it silently, because everything after the break still
    compiles and still merges.
+
+## Running phases concurrently
+
+Leaves in the same wave have no dependency between them and share no file, so they can be built at
+the same time — one `/r:plan-run` session each. What makes that safe is entirely mechanical, and it
+is worth knowing why before using it.
+
+**The git constraint that decides the shape.** A linked worktree cannot check out `<base>` by name
+while the primary tree holds it — git refuses with *"'main' is already used by worktree at …"*. So
+Step 3.6's `git checkout <base> && git merge --no-ff` **cannot run from a concurrent session at
+all**. What is allowed is *detaching*: `git worktree add --detach <path> <base>` gives a clean tree
+at base without claiming the ref, and the implement Workflow then branches off it normally.
+
+That single fact settles everything else: concurrent sessions build and commit, they never merge,
+and a separate `--land` pass merges from the primary tree.
+
+**One session, one worktree, always.** Two sessions in one working directory destroy each other
+immediately — each checks out branches and leaves an uncommitted tree the other is about to stage.
+It is also the first thing anyone will try, so it is a preflight refusal rather than a warning.
+
+### Preflight — whenever `--no-merge` is passed
+
+1. **Refuse from the primary working tree.** Detect it:
+
+   ```sh
+   [ "$(git rev-parse --git-dir)" != "$(git rev-parse --git-common-dir)" ]   # true => linked worktree
+   ```
+
+   In the primary tree, **stop** and print the `git worktree add --detach` command instead of
+   running. A `--no-merge` run there would leave the user's own checkout sitting on a phase branch
+   with a finished commit and no merge — recoverable, but exactly the confusion this mode exists to
+   avoid.
+
+2. **Verify the slice against the graph**, using the same checker:
+
+   ```sh
+   python3 "${CLAUDE_PLUGIN_ROOT}/skills/spec-design/scripts/check_todo.py" <plan> --slice <n,n>
+   ```
+
+   It answers only the concurrency question — a dependency not built yet, a dependency inside the
+   same slice, a shared file — and stays quiet about plan quality, because refusing to start over a
+   missing `Implements:` line would be noise at the worst moment. A non-zero exit is a **stop**: a
+   slice that ignores the graph is precisely the failure this whole mode exists to prevent. If the
+   checker is missing, say so and **stop anyway** — this is the one place a named skip is not good
+   enough, because nothing else checks it.
+
+### What changes inside the loop
+
+Only two steps, and only under `--no-merge`:
+
+- **Step 3.1** becomes `git checkout --detach <base>` rather than a branch checkout, since the
+  branch name is unavailable in a worktree. The tree must still be clean.
+- **Step 3.6** stops after the commit: no merge, no branch deletion. Report the branch name.
+
+Everything between them — the re-check, both Workflows, the `Done when:` check, the tick, the
+single commit — is unchanged. A concurrent session is not a lesser run.
+
+### The commands, which `--dry-run` prints
+
+```
+Wave 3 — 3 leaves, none sharing a file. Run concurrently, one session each:
+
+  git worktree add --detach ../billing-p5 main
+  cd ../billing-p5 && /r:plan-run docs/billing/todo.md --phases 5 --no-merge
+
+  git worktree add --detach ../billing-p6 main
+  cd ../billing-p6 && /r:plan-run docs/billing/todo.md --phases 6 --no-merge
+
+  git worktree add --detach ../billing-p9 main
+  cd ../billing-p9 && /r:plan-run docs/billing/todo.md --phases 9 --no-merge
+
+Then, from the primary tree:
+  /r:plan-run docs/billing/todo.md --land
+```
+
+Print these only for a wave with **more than one unbuilt leaf**. A wave of one is the common case
+and the honest answer there is that there is nothing to parallelise; a table of hopeful commands
+over single-leaf waves buries the waves where it actually pays.
+
+## `--land` — merging what the concurrent sessions built
+
+Runs **from the primary working tree only** (the same detection, inverted: refuse from a linked
+worktree, since base cannot be checked out there). It builds nothing.
+
+1. **Find the finished branches.** `git branch --list 'phase-*'`, keeping those where
+   `git merge-base --is-ancestor <branch> <base>` is false.
+2. **Map each branch to its phase.** Branches are named `phase-<slug>`, not `phase-<n>`, so read
+   the marker the run already wrote (Step 3.6): `git show <branch>:<plan>` and find the heading
+   carrying `<!-- built: <branch> -->`. Its number is the phase.
+
+   **A branch with no marker is not a finished phase — skip it and say so.** It is a run that
+   halted, or someone else's branch that happens to match the glob. Guessing which phase it was
+   would merge unreviewed work.
+3. **Merge in ascending phase order**, one at a time: `git merge --no-ff <branch>`, then delete the
+   branch. Ascending order is a valid dependency order, because the plan's numbering is a
+   topological sort of the graph.
+4. **On a conflict, stop and surface it — never force it.** Report which branch, leave it in place
+   and unmerged, and name the ones already landed so a re-run continues rather than repeats. The
+   merge is idempotent (step 1 skips anything already an ancestor), so re-running after a manual
+   resolution is safe.
+
+**About the plan file.** Every phase ticks it, so it is the one file every branch touches — which is
+why the wave collision check excludes it. In practice git merges the ticks cleanly, because separate
+phases occupy separate regions of the document. When two phases sit adjacent enough to conflict, the
+resolution is always **both sides' ticks**: each branch ticked what it genuinely built, and neither
+tick invalidates the other.
 
 ## Step 4 — Report
 
@@ -388,10 +516,16 @@ ticked. Never retry it.
 
 ## Non-negotiables
 
-- **The plan's order is the run's order.** Phases run one at a time, in numeric order, never in
-  parallel, never reordered, and never folded together. A phase is written against what the earlier
-  ones produced, so grouping two phases into one change — the thing `/r:issues-fix` exists to do —
-  is here a way to build a commit you cannot revert by halves against premises you never checked.
+- **The plan's order is the run's order.** Within a session, phases run one at a time, in numeric
+  order, never reordered and never folded together. A phase is written against what the earlier ones
+  produced, so grouping two phases into one change — the thing `/r:issues-fix` exists to do — is
+  here a way to build a commit you cannot revert by halves against premises you never checked.
+- **Concurrency is across sessions, never inside one, and only where the graph allows it.** Two
+  leaves may be built at the same time when the plan says they share no dependency and no file —
+  each in its own detached worktree, with `--no-merge`, verified by the checker's `--slice`
+  preflight first. The reason for the original prohibition is unchanged: two runs sharing a working
+  tree or a base ref destroy each other. What changed is that the preflight now enforces it instead
+  of a blanket ban — a slice run in one directory, or one the graph refuses, is a **stop**.
 - **A failed phase halts the whole run.** Not the phase's failure, the run's. Restore a clean base,
   leave the failed branch unmerged, never tick it, and report the `--from N` that resumes. Building
   Phase 5 on a Phase 4 that failed its build, its review or its `Done when:` is the single worst

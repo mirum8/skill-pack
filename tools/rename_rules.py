@@ -37,7 +37,7 @@ RENAME = {
     "post-task-review":   "task-review",
     "refactor":           "code-refactor",
     "run-task":           "task-run",
-    "spec-to-todo":       "spec-plan",
+    "spec-to-todo":       "spec-design",
     "write-tests":        "tests-write",
 }
 

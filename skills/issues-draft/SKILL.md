@@ -10,7 +10,7 @@ description: >-
   language. Use when the user pastes or points at a message full of asks — "turn this into issues",
   "make a backlog out of this email", "check these against the code and write them up", "разбери
   эти правки". NOT for: working through a backlog that already exists (`/r:issues-fix`), designing
-  something nobody has specified (`/r:spec-brainstorm`), or phasing a written spec (`/r:spec-plan`).
+  something nobody has specified (`/r:spec-brainstorm`), or phasing a written spec (`/r:spec-design`).
 effort: high
 ---
 

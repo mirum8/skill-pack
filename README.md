@@ -67,8 +67,8 @@ pack does not rely on it.
 | `/r:code-adversarial` | the real Codex review, never an imitation of it |
 | `/r:code-refactor` | restructure behind a behaviour-locking test |
 | `/r:spec-brainstorm` | idea → one `spec.html`: domain model, user stories, modules, stack, API |
-| `/r:spec-plan` | spec → phased `todo.md` with runnable done-when checks |
-| `/r:plan-run` | build a whole `todo.md` phase by phase, halting at the first that fails |
+| `/r:spec-design` | docs → `todo.md`: milestones, design contracts, leaves, and a dependency graph |
+| `/r:plan-run` | build a whole `todo.md` phase by phase; non-overlapping phases can run in parallel sessions |
 | `/r:hexagonal-architecture` | Hexagonal Lite boundaries: what lives in core, what a module may import |
 | `/r:tests-write` | JVM test conventions; loads proactively on Java/Kotlin work |
 | `/r:test-app-create` | scaffold a project-local `/test-app` for the detected stack |
@@ -149,9 +149,10 @@ without its `r:` prefix, no reference dangles, every bundled agent is dispatched
 by some skill, every skill has an eval suite with both case kinds, no absolute
 path points into a skill directory, no build artefact is tracked, and no two
 descriptions open with nearly the same sentence. Then it runs the two workflow
-test suites, `claude plugin validate`, the guard's behaviour tests, the stats
-store's, and the installer's. The whole run is a few seconds; `SKIP_INSTALL_TEST=1`
-drops the slowest part.
+test suites, `claude plugin validate`, the guard's behaviour tests, the plan
+graph's (edges, derived waves, same-wave file collisions and the concurrency
+preflight), the stats store's, and the installer's. The whole run is a few
+seconds; `SKIP_INSTALL_TEST=1` drops the slowest part.
 
 ### Layout
 

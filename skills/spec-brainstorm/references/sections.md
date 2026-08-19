@@ -37,9 +37,10 @@ that's wrong."*
 
 **The ceiling.** This document describes modules, services, technologies, user stories and the
 API. It does not go below that: no column types, no indexes, no code, no build order, no
-step-by-step walkthrough. Ordering the work is `/r:spec-plan`'s job; writing it is
-`/r:task-run`'s. A section that starts specifying `VARCHAR(255)` has left this document's
-altitude.
+step-by-step walkthrough. Everything one level down — the schema with real types and indexes, the
+endpoint signatures, the build order — is `/r:spec-design`'s job; writing the code is
+`/r:task-run`'s. A section that starts specifying `VARCHAR(255)` has left this document's altitude
+and is writing `spec-design`'s design pass a day early, from less evidence.
 
 ---
 
@@ -55,7 +56,7 @@ altitude.
 | 6 | **Modules & structure** | See §6. The cut, what each module owns, how they talk, and a context/container SVG. |
 | 7 | **Technologies** | See §7. Named products with versions, one line of why each, and what it rules out later. |
 | 8 | **API** | See §8. Endpoints, commands or screens — whichever this system actually has. |
-| 9 | The v1 line | Which stories ship first and which are deferred, **as capabilities, not phases**. `/r:spec-plan` turns this into an ordered plan; writing phases here would create a second one. |
+| 9 | The v1 line | Which stories ship first and which are deferred, **as capabilities, not phases**. `/r:spec-design` turns this into an ordered plan; writing phases here would create a second one. |
 | 10 | Risks, assumptions & open questions | Risks: what could go wrong · likelihood · impact · what you'd do · the trigger to revisit. Every overruled objection lands here with its accepted risk. Assumptions: what · why · what breaks if wrong · how to confirm. Open questions in the four-field shape from `interview.md` §9. |
 
 **Also mandatory whenever an existing system is touched:** a rollout section — expand →
@@ -118,7 +119,7 @@ Money is always minor units with an ISO 4217 code. Say so once, here.
 
 ## 5. User stories
 
-The unit of scope, and the handle `/r:spec-plan` builds phases against. **Grouped by actor**,
+The unit of scope, and the handle `/r:spec-design` builds phases against. **Grouped by actor**,
 each in the same shape:
 
 > **Match an invoice against its receipt**
@@ -132,7 +133,7 @@ Three rules:
 - **The name is the handle, and in the HTML it is an `<h3>`.** One `<h3>` per story inside the
   User stories section, nothing else at that level. It must be unique in the document, and it is
   what a phase's `Implements:` line carries verbatim — `scripts/check_spec.py` and
-  `/r:spec-plan` both read the `<h3>` text. Keep names stable across a `--continue`; new stories
+  `/r:spec-design` both read the `<h3>` text. Keep names stable across a `--continue`; new stories
   append.
 - **Every story has acceptance criteria** in Given/When/Then. A story without them is a wish,
   and `scripts/check_spec.py` reports it.

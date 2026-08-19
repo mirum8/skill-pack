@@ -1,6 +1,6 @@
 {
   "skill_name": "brainstorm",
-  "notes": "Each eval carries a persona because the runner has no human to answer AskUserQuestion; the runner answers as the persona and logs the Q&A to transcript.md. The deliverable is one spec.html plus interview-notes.md — there is no second HTML file, and todo.md belongs to /r:spec-plan. Evals 0 and 1 are the same unfamiliar domain with and without --explain, so the pair isolates exactly what the flag adds: without it there must be no research and no teaching sections. Eval 0 doubles as the sizing test — a two-person project must not grow integrations or operations material. Eval 2 is the repo path, eval 3 the resume path, which starts from a fixture whose ledger claims rows are answered that nothing evidences. Mechanical assertions are checked by scripts/check_spec.py; the rest are judgment.",
+  "notes": "Each eval carries a persona because the runner has no human to answer AskUserQuestion; the runner answers as the persona and logs the Q&A to transcript.md. The deliverable is one spec.html plus interview-notes.md — there is no second HTML file, and todo.md belongs to /r:spec-design. Evals 0 and 1 are the same unfamiliar domain with and without --explain, so the pair isolates exactly what the flag adds: without it there must be no research and no teaching sections. Eval 0 doubles as the sizing test — a two-person project must not grow integrations or operations material. Eval 2 is the repo path, eval 3 the resume path, which starts from a fixture whose ledger claims rows are answered that nothing evidences. Mechanical assertions are checked by scripts/check_spec.py; the rest are judgment.",
   "evals": [
     {
       "id": 0,
@@ -16,7 +16,7 @@
         },
         {
           "id": "no_todo",
-          "text": "Does NOT write todo.md — that is /r:spec-plan's job",
+          "text": "Does NOT write todo.md — that is /r:spec-design's job",
           "check": "script"
         },
         {
@@ -249,11 +249,11 @@
     },
     {
       "id": 5,
-      "name": "routing-excludes-spec-plan",
+      "name": "routing-excludes-spec-design",
       "kind": "neighbour-exclusion",
-      "neighbour": "spec-plan",
+      "neighbour": "spec-design",
       "prompt": "turn the spec we wrote into a phased todo I can work through",
-      "expected_output": "Turning a written specification into an ordered plan is spec-plan's job; spec-brainstorm must not load, because the document already exists.",
+      "expected_output": "Turning a written specification into an ordered plan is spec-design's job; spec-brainstorm must not load, because the document already exists.",
       "files": [],
       "fixture": null,
       "assertions": []

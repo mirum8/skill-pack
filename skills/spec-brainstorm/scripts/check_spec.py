@@ -26,7 +26,9 @@ FILEISH = re.compile(r"\b[\w][\w./-]*\.(?:java|kt|kts|py|ts|tsx|js|jsx|sql|go|rb
                      r"yaml|yml|xml|json|gradle|toml|md|html|css|tf|proto)\b(:\d+)?")
 
 # The document's ceiling: modules, technologies, stories, API. Anything below it belongs to
-# /r:spec-plan or /r:task-run, and its arrival is what turns a design doc into a bad schema.
+# /r:spec-design's design pass (schema, signatures, boundaries) or to /r:task-run. Its arrival
+# here is what turns a design doc into a bad schema: decided before the build order exists, so
+# without knowing which decisions are even shared between the units that will use them.
 BELOW_CEILING = [(r"\bVARCHAR\s*\(", "column types"), (r"\bNOT NULL\b", "column constraints"),
                  (r"\bCREATE\s+(TABLE|INDEX)\b", "DDL"), (r"\bALTER\s+TABLE\b", "DDL"),
                  (r"\bPhase\s+\d+\s*[—–:-]", "build phases")]
@@ -54,11 +56,11 @@ def section(t, *words):
 
 
 def check_stories(t, out):
-    """Story names are the handle /r:spec-plan builds phases against, so they have to be
+    """Story names are the handle /r:spec-design builds phases against, so they have to be
     findable and each has to say when it is done."""
     blk = section(t, "user stor", "stories")
     if not blk:
-        out("spec.html", "no 'User stories' section — /r:spec-plan has nothing to build phases "
+        out("spec.html", "no 'User stories' section — /r:spec-design has nothing to build phases "
                          "against, and the v1 line has nothing to name")
         return []
 
@@ -86,7 +88,7 @@ def check_stories(t, out):
 def check_v1(t, names, out):
     blk = section(t, "v1", "scope")
     if not blk:
-        out("spec.html", "no v1 section — say which stories ship first; /r:spec-plan has nothing "
+        out("spec.html", "no v1 section — say which stories ship first; /r:spec-design has nothing "
                          "to order phases against without it")
         return
     prose = strip(blk)
