@@ -286,6 +286,47 @@ test('a triage that dismisses EVERY finding is logged, and buys one adjudication
   assert.equal(out.stopped, undefined)
 })
 
+test('a dismissed MAJOR buys the re-review even when other findings were accepted', async () => {
+  // The gap a whole-pass gate leaves: three findings accepted and a major thrown out reads
+  // downstream exactly like a clean review, and the triage is the only judgement here with nothing
+  // after it. F(2) tags finding 1 major, so dismissing it while accepting finding 2 is that shape.
+  const { out, logText, counts, prompts } = await run({
+    review: (pass) => ({ ran: true, findings: pass === 1 ? F(2) : [] }),
+    planfix: OK_FIX,
+    verdict: (_p, i) => i === 1
+      ? { real: false, why: 'the plan already covers this at line 40' }
+      : { real: true, why: 'holds', fix: 'add the empty-file test' },
+  })
+  assert.equal(counts['codex-plan-review#2'], 1, 'a dismissed major must be answerable by the reviewer')
+  assert.match(logText, /dismissed a MAJOR finding/)
+  // A plan that WAS revised must not be described as untouched — that is the other delta branch.
+  assert.match(prompts['codex-plan-review#2'], /revised in response/)
+  assert.doesNotMatch(prompts['codex-plan-review#2'], /the plan in front of you is UNCHANGED/)
+  assert.match(prompts['codex-plan-review#2'], /Did each accepted fix actually land/)
+  assert.equal(out.stopped, undefined)
+})
+
+test('a dismissed MINOR alone does not buy a re-review', async () => {
+  // The gate ranks, it does not fire on any dismissal: at a measured ~2.2 dismissals a run that
+  // would be a second Codex pass on nearly every full-tier run. MIXED accepts the major and drops
+  // the minor, which is the ordinary shape.
+  const { out, counts } = await run({ review: OK_REVIEW, planfix: OK_FIX, verdict: MIXED })
+  assert.equal(counts['codex-plan-review#2'], undefined)
+  assert.equal(out.planReview.raised, 2)
+})
+
+test('a dismissed major still buys only ONE re-review, never a loop', async () => {
+  const { counts } = await run({
+    review: { ran: true, findings: F(2) },
+    planfix: OK_FIX,
+    verdict: (_p, i) => i === 1
+      ? { real: false, why: 'covered already' }
+      : { real: true, why: 'holds', fix: 'add the test' },
+  })
+  assert.equal(counts['codex-plan-review#2'], 1)
+  assert.equal(counts['codex-plan-review#3'], undefined)
+})
+
 test('a re-review that re-raises a dismissed finding sends it back through triage', async () => {
   const { out, counts } = await run({
     review: (pass) => ({ ran: true, findings: pass === 1 ? F(2) : F(1) }),

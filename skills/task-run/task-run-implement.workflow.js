@@ -1673,11 +1673,15 @@ ${b.items.map((f, n) => `         ${n + 1}. [${f.severity}][${f.rubric}] ${f.wha
     // disappear because an agent fell over, which is the failure mode every other track here is
     // built to refuse. It goes to the editor as an explicit "decide on the plan text alone".
     const accepted = [], rejected = [], unjudged = []
+    let dismissedMajor = false
     review.findings.forEach((f) => {
       const v = verdicts.get(f)
       if (!v || typeof v.real !== 'boolean') unjudged.push(f)
       else if (v.real) accepted.push({ f, fix: v.fix || v.why, changesApproach: !!v.changesApproach })
-      else rejected.push(`${f.what} — ${v.why}`)
+      else {
+        rejected.push(`${f.what} — ${v.why}`)
+        if (f.severity === 'major') dismissedMajor = true
+      }
     })
     planReview.dropped.push(...rejected)
     review.findings.forEach((f) => {
@@ -1698,7 +1702,8 @@ ${b.items.map((f, n) => `         ${n + 1}. [${f.severity}][${f.rubric}] ${f.wha
     // Derived from the judges, not reported by the editor. Deliberately NOT gated on Codex's
     // `major` tag: severity is Codex's guess about the FINDING, while this is the judge's read of
     // the FIX it just wrote, which is the better-informed of the two. Gating the informed signal
-    // behind the less informed one would be backwards.
+    // behind the less informed one would be backwards. `dismissedMajor` below DOES read severity,
+    // and for the same reason: there the judge wrote no fix, so the tag is all there is.
     const approachChanged = accepted.some((a) => a.changesApproach)
     if (accepted.length || unjudged.length) {
       const fix = await reliable(`plan-fix#${pass}`, 'Plan-review', () => agent(
@@ -1741,7 +1746,7 @@ ${b.items.map((f, n) => `         ${n + 1}. [${f.severity}][${f.rubric}] ${f.wha
     if (!accepted.length && rejected.length && !unjudged.length) {
       log(`run-task-implement: plan review pass ${pass} dismissed EVERY finding — the plan is unchanged by the review`)
     }
-    // Two things buy the one re-review, and only one of them involves a revised plan:
+    // Three things buy the one re-review, and only the first involves a revised plan:
     //   approachChanged — a judge says the fix it accepted sent the plan down a different route,
     //                     so the rewrite needs a look.
     //   dismissedAll    — the judges kept NOTHING. The plan is untouched and the review has in
@@ -1750,11 +1755,30 @@ ${b.items.map((f, n) => `         ${n + 1}. [${f.severity}][${f.rubric}] ${f.wha
     //                     as likely to mean "Codex raised five false positives" as "the triage
     //                     talked itself out of five real ones", and nothing downstream can tell
     //                     the two apart — the plan reads identically either way.
+    //   dismissedMajor  — the same overruling, one finding at a time. A pass that accepts three
+    //                     findings and throws out a major reads downstream exactly like a clean
+    //                     review of a good plan, and the triage is the only judgement in this run
+    //                     with nothing after it. Whole-pass agreement is not what makes a
+    //                     dismissal answerable; the finding's weight is.
+    //
+    // Severity gates THIS and not `approachChanged`, and the two rules only look contradictory.
+    // Where a judge accepted a finding it wrote a fix, and its read of that fix is better informed
+    // than Codex's guess about the finding — so `changesApproach` wins there. A DISMISSED finding
+    // has no fix: the judge produced a reason and nothing else, and Codex's tag is then the only
+    // ranking signal in existence. Ranking matters here because the alternative — re-reviewing on
+    // any dismissal at all — buys a second Codex pass on most full-tier runs (a measured 58
+    // dismissals across 26 implement runs, ~2.2 a run, against 360 findings folded in).
+    //
+    // Argued from mechanism, not yet from measurement: only 14 plan findings carry a rubric and
+    // severity in the store so far, 2 of them dismissals. Every judged finding now records both,
+    // so `skill-stats.py`'s precision-by-track rows are what say whether this pass earns its slot.
     const dismissedAll = !accepted.length && !unjudged.length && rejected.length > 0
-    if ((!approachChanged && !dismissedAll) || pass === 2) break
+    if ((!approachChanged && !dismissedAll && !dismissedMajor) || pass === 2) break
     log(approachChanged
       ? 'run-task-implement: an accepted fix changed the approach — one re-review of the revised plan'
-      : 'run-task-implement: the triage kept none of the findings — one re-review to adjudicate the dismissals')
+      : dismissedAll
+        ? 'run-task-implement: the triage kept none of the findings — one re-review to adjudicate the dismissals'
+        : 'run-task-implement: the triage dismissed a MAJOR finding — one re-review to adjudicate it')
     // Carry pass 1's findings AND what the triage did with them: the re-review checks the fixes
     // landed and the dismissals were fair, instead of re-deriving the critique from scratch.
     const again = await askCodex(2, { findings: review.findings, applied, dropped: rejected })
