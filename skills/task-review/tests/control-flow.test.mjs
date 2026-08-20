@@ -887,6 +887,63 @@ test('a fixer that THROWS does not end a run with the build, scan and end-verify
   assert.equal(out.fixed.correctness, 0)
 })
 
+// -------------------------------------------------------- reuse-index refresh ---
+//
+// The refresh is bookkeeping that runs at the END of the review on purpose: the fix phase above
+// has just changed the code its anchors point at. These lock the two things that make it safe to
+// have in the pipeline at all — it is dispatched, and it cannot take the review down with it.
+
+test('the reuse-index refresh runs once, after the fix phase, at the mechanical tier', async () => {
+  const { counts, opts, order } = await run()
+  assert.equal(counts['reuse-index'], 1)
+  // Sonnet/low: above the stats sink's haiku because merging a new entry is a judgement, far
+  // below the hunters because on most runs there is nothing new to merge.
+  assert.equal(opts['reuse-index'].model, 'sonnet')
+  assert.equal(opts['reuse-index'].effort, 'low')
+  assert.equal(opts['reuse-index'].agentType, 'general-purpose')
+  // Ordering is the whole reason this step lives here rather than in run-task's implement half.
+  assert.ok(order.indexOf('reuse-index') > order.indexOf('local-scan'),
+    'the refresh must read the tree the fix phase and scan left behind, not the one before them')
+})
+
+test('the refresh is told to MERGE and to no-op without an index — never to create one', async () => {
+  const { prompts } = await run()
+  const p = prompts['reuse-index']
+  assert.match(p, /reuse-index\/scripts\/reuse-index\.py/)
+  assert.match(p, /--plans \.task-plans/)
+  assert.match(p, /MERGE/)
+  assert.match(p, /No index file[\s\S]*?you are done/)
+  assert.match(p, /Do not create one/)
+  assert.match(p, /[Nn]ever delete an entry silently\s+and never regenerate/)
+  // It must never be mistaken for a fixer: this runs after end-verify, and an "improvement" here
+  // would land unreviewed in the task's single commit.
+  assert.match(p, /Never edit code here/)
+})
+
+test('a dead refresh (null) never fails the review', async () => {
+  const { out } = await run({ overrides: { 'reuse-index': null } })
+  assert.equal(out.reviewed, true)
+  assert.equal(out.stopped, undefined)
+  assert.equal(out.build, 'green')
+  assert.deepEqual(out.tracksBlocked, [])
+})
+
+test('a THROWING refresh never fails the review either', async () => {
+  const { out } = await run({
+    overrides: { 'reuse-index': () => { throw new Error('no python3 on PATH') } },
+  })
+  assert.equal(out.reviewed, true)
+  assert.equal(out.stopped, undefined)
+  assert.deepEqual(out.tracksBlocked, [])
+})
+
+test('the refresh is not a track — it never appears in the stats row', async () => {
+  const { prompts } = await run()
+  const row = JSON.parse(prompts['stats'].match(/\{"kind":"review".*\}/)[0])
+  assert.ok(!(row.findings || []).some((f) => (f.track || '').includes('reuse')),
+    'bookkeeping is not a finding source; recording it would invent a track with no verdicts')
+})
+
 test('the stats row is written once, with counts rather than finding text', async () => {
   const { counts, prompts } = await run()
   assert.equal(counts['stats'], 1)

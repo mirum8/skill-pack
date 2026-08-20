@@ -2157,6 +2157,51 @@ PTR_STATS_JSON
   // caller is running at — for a /r:task-run chain, Opus, to run one `python3 script <<EOF`.
   { label: 'stats', phase: 'End-verify', ...GP, ...ECHO })
 
+// Keep the project's reuse index fed. This lives HERE, at the end of the review, rather than in
+// run-task's implement half, for three reasons that all point the same way: /r:issues-fix drives
+// both pipelines by scriptPath and never loads run-task's SKILL.md, so only a step inside a
+// workflow is on every route; the implement half stops at Build, before the fix phase below has
+// finished changing the code, so anchors verified there go stale inside the same run; and this
+// pipeline always runs under deferCommit, so what it writes lands in the task's single commit
+// rather than trailing it.
+//
+// It is a MERGE, never a rebuild, and it no-ops unless an index already exists — the first build
+// does the full clustering pass and is a deliberate `/r:reuse-index` by hand. On a standalone
+// review with no new plan it still earns its slot: it re-verifies every anchor against the tree
+// the fix phase just changed.
+//
+// Sonnet/low rather than the stats sink's haiku, because merging a newly-qualifying entry is a
+// judgement; far below the hunters, because on most runs there is nothing new to merge.
+// try/catch, not reliable(): reliable() RETRIES, and this step must not. It is the last thing
+// the script does before handing back its summary, so an untrapped throw here would discard a
+// completed review — a blockage recorded as a failure of the work it came after.
+try {
+await agent(
+  `Bookkeeping — if anything goes wrong, say so and return; do NOT retry, do NOT fix anything,
+   and do NOT treat it as a failure of the review. Never edit code here.
+
+   Keep this project's reuse index current, if it HAS one. From the repo root:
+
+   1. Find the index: a tracked reference doc named like \`reuse-index.md\` that this project's
+      root CLAUDE.md points at, else under docs/. **No index file, or no .task-plans/ corpus =>
+      you are done. Say which and return.** Do not create one; the first build is a deliberate
+      /r:reuse-index run that does a full clustering pass.
+   2. Run the mechanical half over the corpus:
+
+      python3 "${PACK}/skills/reuse-index/scripts/reuse-index.py" \\
+        --plans .task-plans --repo . --index <the index you found>
+
+   3. \`changed: false\` => return "index current", write nothing.
+      Otherwise MERGE per "${PACK}/skills/reuse-index/references/output-format.md": existing
+      entries keep their prose and only their Cited counts refresh; entries in \`new\` are added
+      to the right section; \`stale\` anchors are re-resolved from the script's candidates where
+      that is unambiguous, and otherwise left in place and marked. Never delete an entry silently
+      and never regenerate the file.
+
+   Return one line: entries added, counts moved, anchors re-resolved, anything a human must judge.`,
+  { label: 'reuse-index', phase: 'End-verify', ...GP, ...MECHANICAL })
+} catch { /* the index is bookkeeping; a review that ran is not undone by it */ }
+
 return {
   reviewed: true,
   profile,

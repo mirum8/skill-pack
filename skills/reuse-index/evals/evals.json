@@ -1,0 +1,87 @@
+{
+  "skill_name": "reuse-index",
+  "evals": [
+    {
+      "id": 0,
+      "name": "routing-triggers",
+      "kind": "trigger",
+      "prompt": "we've got a pile of planning notes in .task-plans that nobody reads — build me an index of the canonical examples in this codebase out of them",
+      "expected_output": "reuse-index loads, runs its extraction script over the plan corpus, keeps only exemplars two or more distinct plans cited, verifies each anchor against the current tree, and writes one grouped reference doc beside the project's other reference docs.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 1,
+      "name": "routing-triggers-refresh",
+      "kind": "trigger",
+      "prompt": "refresh the reuse index",
+      "expected_output": "reuse-index loads and merges rather than rebuilds: existing entries keep their prose with only their Cited counts refreshed, newly-qualifying exemplars are added, and moved anchors are re-resolved. If nothing changed it says so and writes nothing.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 2,
+      "name": "routing-excludes-claudemd-compact",
+      "kind": "neighbour-exclusion",
+      "neighbour": "claudemd-compact",
+      "prompt": "our CLAUDE.md has grown to 900 lines — trim it down to what actually earns its place",
+      "expected_output": "Shrinking an existing CLAUDE.md is claudemd-compact's job; reuse-index must not load, because it mines a plan corpus into a NEW reference doc and never edits CLAUDE.md beyond proposing a single pointer line.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 3,
+      "name": "routing-excludes-code-quality",
+      "kind": "neighbour-exclusion",
+      "neighbour": "code-quality",
+      "prompt": "review whether this code follows our existing conventions and is idiomatic for the project",
+      "expected_output": "Judging whether written code follows the project's conventions is code-quality's job; reuse-index must not load, because it catalogues where the conventions LIVE rather than reviewing any code against them.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 4,
+      "name": "threshold-keeps-one-off-trivia-out",
+      "kind": "behaviour",
+      "prompt": "build the reuse index for this project",
+      "expected_output": "An exemplar cited by only ONE plan is excluded and named in the report as below-threshold, not written into the doc. One plan reaching for a file is a choice under one task's pressure; two plans independently reaching for it is a convention. Every excluded candidate is named with its reason, because a silent drop is how an index starts lying about its coverage.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 5,
+      "name": "surviving-file-with-vanished-pattern-is-dropped",
+      "kind": "behaviour",
+      "prompt": "refresh the reuse index",
+      "expected_output": "A candidate whose file still resolves but whose named symbols are no longer anywhere in it is dropped and reported: the pattern was refactored away and only the file survived. Anchors carry a path plus a symbol and never a line number, since paths survive refactors and line numbers do not.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 6,
+      "name": "no-corpus-stops-instead-of-inventing",
+      "kind": "behaviour",
+      "prompt": "/r:reuse-index",
+      "expected_output": "With no plan corpus present, the run says so and stops. It does NOT fall back to reading the codebase and inventing an index from scratch — the doc's whole claim is that entries were independently reached for by real plans, and an index without that evidence would assert something untrue.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 7,
+      "name": "wires-the-pointer-into-claudemd",
+      "kind": "behaviour",
+      "prompt": "build the reuse index for this project",
+      "expected_output": "After writing the index, ONE line pointing at it is added to the root CLAUDE.md reference list, in that list's existing wording and position, and the path is verified to resolve. Entries are never copied into CLAUDE.md — a module-level file that already lists examples gets a sentence pointing at the full set, not a duplicate of it. An index nothing points at is a file nobody opens.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    }
+  ]
+}

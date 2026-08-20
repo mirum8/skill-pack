@@ -458,6 +458,19 @@ LINES=$([ -f "$ROOT" ] && wc -l < "$ROOT" || echo 0)
 
 When **both** hold, dispatch `/r:claudemd-compact --auto` in a **`general-purpose` subagent** (it needs the `Skill` tool to invoke the skill; wrapping it keeps the compaction's discovery/inventory bulk out of your context, and a subagent structurally can't prompt — which is what makes the run genuinely unattended). Brief it to run `--auto` over this repo's CLAUDE.md hierarchy and return the short after-the-fact report (root size before → after, what moved where, and the evidence-backed "Removed (stale)" list). Surface that report in the final summary.
 
+**9b-2 — Keep the reuse index current, if the project has one.** A project that carries a reuse index (a tracked reference doc of canonical examples, named like `reuse-index.md` and pointed at from the root `CLAUDE.md`, else under `docs/`) has it fed from here — at the *end* of the review, because the fix phase above has just changed the code the index's anchors point at, and because this routine runs under `deferCommit`, so the update lands in the task's single commit rather than trailing it.
+
+**No index file, or no `.task-plans/` corpus → skip silently with a one-line note.** Never create one here: the first build is a deliberate `/r:reuse-index` run that does a full clustering pass over the whole corpus.
+
+Otherwise run the mechanical half and merge what it reports:
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/reuse-index/scripts/reuse-index.py \
+  --plans .task-plans --repo . --index <the index you found>
+```
+
+`changed: false` → say "index current" and **write nothing**. Otherwise **merge**, per `${CLAUDE_PLUGIN_ROOT}/skills/reuse-index/references/output-format.md`: existing entries keep their prose and only their `Cited` counts refresh, entries in `new` are added to the right section, and `stale` anchors are re-resolved from the script's candidates where that is unambiguous and otherwise left in place and marked. **Never delete an entry silently and never regenerate the file** — a pattern that moved and a pattern that died need opposite responses, and only the reader can tell which happened. Like 9b, this can never fail the review.
+
 **9c — Record one line of statistics.** Every tier and track decision in this routine was argued from mechanism, never measured — so no track can be retired on evidence, only on opinion. Fix that by appending one row per run:
 
 ```bash
