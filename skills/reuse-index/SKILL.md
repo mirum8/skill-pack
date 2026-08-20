@@ -116,6 +116,37 @@ Verify the path you wrote resolves before finishing — a broken pointer is wors
   or folded into another entry. A silent drop is how an index starts lying about its coverage.
 - stale anchors re-resolved, and the ones needing a human
 
+## Step 6 — Record the run
+
+Last thing, after the report — one line into the pack-wide store, so this skill's yield is measured
+rather than assumed. It is the only way to answer the question this skill exists for: does a corpus
+of plans actually converge on shared patterns, or does every task reach for something new?
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
+{"skill":"r:reuse-index","corpus":0,"plansWithMap":0,"minCited":2,"candidates":0,
+ "entriesNew":0,"entriesMerged":0,"citedMoved":0,"staleReresolved":0,"staleNeedingHuman":0,
+ "pointerAdded":false,"wrote":false,"dryRun":false,"blockedReason":null,
+ "findings":[{"track":"reuse-index","file":"src/main/java/.../DealService.java","verdict":"confirmed",
+              "description":"cited by 4 plans — entered as <entry name>"}]}
+STATS_JSON
+```
+
+One `findings` entry per candidate the script handed you, `verdict: "confirmed"` for the ones that
+became entries and `dismissed` for every one you dropped — below threshold, file gone, pattern gone,
+folded into another entry — with the reason as the `description`. The dismissals are the more
+useful half: a corpus whose candidates are mostly noise and a corpus with nothing in it both write
+one line and no entries, and only the verdicts tell them apart.
+
+**A run that could not mine anything records `blockedReason` and NO findings.** `no-corpus`, zero
+plans, or a script that failed is an absence of judgement, not a judgement that nothing qualified —
+recording it as zero candidates would put "this project has no shared patterns" into the store on
+the strength of a directory that was never there. `changed: false` is the opposite case and a real
+result: the candidates were judged, the index already said so, and `wrote` is `false`.
+
+Keep each `description` to one line; the payload travels in this step's prompt. The script always
+exits `0`: a record that does not get written is a lost record, not a failed run. Never retry it.
+
 ## Non-negotiables
 
 - **The threshold is evidence, not a knob to reach for.** Below it, the doc fills with one-off
