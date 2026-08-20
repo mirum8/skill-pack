@@ -4,8 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repository is
 
-The source of `r`, a **skills-directory plugin** for Claude Code: 18 skills (`/r:<name>`) and the
-8 agents they dispatch. There is no application here — the "product" is prose (`SKILL.md`),
+The source of `r`, a **skills-directory plugin** for Claude Code: 19 skills (`/r:<name>`) and the
+9 agents they dispatch. There is no application here — the "product" is prose (`SKILL.md`),
 workflow scripts, agent definitions and a hook, all loaded by Claude Code itself.
 
 **The repo and the installed pack are two separate copies.** `install.sh` copies, it does not
@@ -70,7 +70,7 @@ The runner redirects `CLAUDE_SKILL_STATS_DB` to a throwaway so a sweep never wri
 ```
 .claude-plugin/plugin.json   identity + namespace (name must stay "r")
 skills/<name>/SKILL.md       the skill; plus references/ scripts/ tests/ evals/
-agents/<name>.md             the 8 agents skills dispatch to
+agents/<name>.md             the 9 agents skills dispatch to
 hooks/                       hooks.json + guard-workflow.py + record-skill-run.py
 lib/                         pack-wide stats sink + reporter, shared by every skill
 tools/                       build/validation scripts — NOT shipped
@@ -205,9 +205,11 @@ missing, the step is recorded as **skipped** and named, and the run continues.
   skill's description is *not in context* (it loads when you invoke it), so billing it buys
   headroom by trimming a description nothing reads. `validate.py` names the excluded skills on
   every run. No two descriptions may open with nearly the same sentence.
-- **Structure.** Exactly 17 skill directories, two levels deep. Every bundled agent must be
-  dispatched by some skill. Every skill needs `evals/evals.json` with at least one `trigger` case
-  and one `neighbour-exclusion` case. No build artefacts tracked.
+- **Structure.** The skill directories are exactly the set `tools/rename_rules.py` names, two
+  levels deep — the map is the rule, not a count, and a stale count here reads as an instruction
+  to delete a skill. Every bundled agent must be dispatched by some skill. Every skill needs
+  `evals/evals.json` with at least one `trigger` case and one `neighbour-exclusion` case. No
+  build artefacts tracked.
 
 ## Conventions
 
