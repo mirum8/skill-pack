@@ -58,6 +58,17 @@ ok "malformed input wrote nothing"         "$(q "$D" "select count(*) from runs"
 python3 "$SINK" --db /nonexistent-root/x/s.db </dev/null >/dev/null 2>&1
 ok "an unwritable store still exits 0"     "$?" 0
 
+# An eval sweep redirects CLAUDE_SKILL_STATS_DB so its synthetic runs never touch the real store.
+# The hook honours it; so must the sink, or a sweep is isolated for `invoke` rows and writes its
+# `result` rows straight into the store every convention here says to read before deciding anything.
+E="$TMP/redirected.db"
+echo '{"skill":"r:code-quality","findings":[]}' \
+  | CLAUDE_SKILL_STATS_DB="$E" python3 "$SINK" >/dev/null 2>&1
+ok "the sink honours CLAUDE_SKILL_STATS_DB" "$(q "$E" "select skill from runs")" r:code-quality
+echo '{"skill":"r:code-scan","findings":[]}' \
+  | CLAUDE_SKILL_STATS_DB=/nonexistent-root/x/s.db python3 "$SINK" --db "$E" >/dev/null 2>&1
+ok "--db still wins over the env var"      "$(q "$E" "select count(*) from runs")" 2
+
 # A finding with no verdict is UNRESOLVED — nobody judged it. Defaulting it to either confirmed or
 # dismissed would invent the judgement that is missing, which is the failure this table exists to
 # make impossible.

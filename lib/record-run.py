@@ -187,7 +187,11 @@ def write(rec: dict, db: str) -> str:
 
 
 def main() -> int:
-    db = DEFAULT_DB
+    # The hook resolves the store the same way, and both must: an eval sweep redirects
+    # CLAUDE_SKILL_STATS_DB to a throwaway so its synthetic runs never reach the real store, and a
+    # reader that honours the redirect for `invoke` rows but not for `result` rows lets exactly
+    # half of a sweep through — into the store the conventions say to read before changing anything.
+    db = os.path.expanduser(os.environ.get("CLAUDE_SKILL_STATS_DB") or DEFAULT_DB)
     argv = sys.argv[1:]
     if "--db" in argv:
         i = argv.index("--db")
