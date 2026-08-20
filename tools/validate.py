@@ -423,6 +423,29 @@ def check_paths():
                           "stop rather than certify a review it never performed.")
 
 
+# --- FR-2 -------------------------------------------------------------------
+# Every `skills/*/scripts/*.sh` is invoked as a bare quoted path — the pipelines dispatch
+# `"${PACK}/skills/code-adversarial/scripts/run.sh" --wait` and the prompt forbids the agent from
+# inspecting the script's directory or altering the command. Without the exec bit that path exits
+# 126, and what happens next is the agent's improvisation: on the good day it retries under `bash`
+# and the review still runs, on the bad day it obeys the prompt and the track is recorded blocked —
+# a review that certified less than it looks. Both modes matter: `install.sh` copies with
+# `rsync -a`/`cp -R`, which carries the working-tree mode, while a fresh clone gets git's.
+def check_script_modes():
+    for sh in sorted(glob.glob(os.path.join(SKILLS, "*", "scripts", "*.sh"))):
+        rel = os.path.relpath(sh, REPO)
+        if not os.access(sh, os.X_OK):
+            fail("FR-2", f"{rel} is not executable — it is invoked as a bare path and will exit 126")
+        try:
+            mode = subprocess.run(["git", "ls-files", "-s", "--", rel], cwd=REPO,
+                                  capture_output=True, text=True).stdout.split()
+        except OSError:
+            continue
+        if mode and mode[0] != "100755":
+            fail("FR-2", f"{rel} is tracked as {mode[0]}, so a fresh clone gets it without the "
+                         "exec bit and every invocation exits 126")
+
+
 # --- FR-12 ------------------------------------------------------------------
 def check_vendored():
     lic = os.path.join(SKILLS, "spec-brainstorm", "references", "html-effectiveness", "LICENSE")
@@ -592,6 +615,7 @@ def main():
     check_artifacts()
     check_paths()
     check_home_paths()
+    check_script_modes()
     check_vendored()
     check_near_duplicates()
     check_drift(args.source, args.refresh_drift_baseline)
