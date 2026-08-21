@@ -235,6 +235,205 @@ EOF
 slice "an unbuilt dependency refuses the slice" "2"   1
 slice "and so does a slice holding both ends"   "1,2" 1
 
+# ---------------------------------------------------------------------------------------------
+# The rewrite layer: --against (a plan may be re-derived, but never over work that has landed)
+# and --design (the spine and the contracts beside it are one document in two files).
+# ---------------------------------------------------------------------------------------------
+
+prev()   { cat > "$TMP/prev.md"; }
+design() { cat > "$TMP/design.md"; }
+
+# against <name> <pattern> — the rewrite check reports it
+against() {
+  local out; out=$(python3 "$CHECK" "$TMP/todo.md" --against "$TMP/prev.md" 2>&1)
+  grep -qiE "$2" <<<"$out" && ok "$1" || bad "$1" "no match for /$2/ in:${out:0:400}"
+}
+# against_silent <name> <pattern>
+against_silent() {
+  local out; out=$(python3 "$CHECK" "$TMP/todo.md" --against "$TMP/prev.md" 2>&1)
+  grep -qiE "$2" <<<"$out" && bad "$1" "unexpected /$2/ in:${out:0:400}" || ok "$1"
+}
+# designs <name> <pattern>
+designs() {
+  local out; out=$(python3 "$CHECK" "$TMP/todo.md" --design "$TMP/design.md" 2>&1)
+  grep -qiE "$2" <<<"$out" && ok "$1" || bad "$1" "no match for /$2/ in:${out:0:400}"
+}
+
+# The plan every --against case is rewritten FROM: Phase 1 landed, Phase 2 never started.
+executed_plan() {
+  cat <<'EOF'
+### Phase 1 — Ledger schema <!-- built: phase-ledger-schema -->
+**Implements:** S
+**Depends on:** —
+**Files:** `a.java` (new)
+- [x] `V1__ledger.sql` creates `ledger_entry`
+**Done when:** `mvn test` is green.
+
+### Phase 2 — Payout webhook
+**Implements:** S
+**Depends on:** Phase 1
+**Files:** `b.java` (new)
+- [ ] does `b`
+**Done when:** `mvn test` is green.
+EOF
+}
+
+echo
+echo "== a rewrite that re-splits only UNBUILT work =="
+prev < <(executed_plan)
+plan <<'EOF'
+### Phase 1 — Ledger schema <!-- built: phase-ledger-schema -->
+**Implements:** S
+**Depends on:** —
+**Files:** `a.java` (new)
+- [x] `V1__ledger.sql` creates `ledger_entry`
+**Done when:** `mvn test` is green.
+
+### Phase 2 — Payout webhook store
+**Implements:** S
+**Depends on:** Phase 1
+**Files:** `b.java` (new)
+- [ ] does `b`
+**Done when:** `mvn test` is green.
+
+### Phase 3 — Payout webhook endpoint
+**Implements:** S
+**Depends on:** Phase 2
+**Files:** `c.java` (new)
+- [ ] does `c`
+**Done when:** `mvn test` is green.
+EOF
+against_silent "a re-split of unbuilt work is not reported" "frozen|landed work|renumbered"
+
+echo
+echo "== a rewrite that drops a leaf carrying landed work =="
+prev < <(executed_plan)
+plan <<'EOF'
+### Phase 1 — Payout webhook
+**Implements:** S
+**Depends on:** —
+**Files:** `b.java` (new)
+- [ ] does `b`
+**Done when:** `mvn test` is green.
+EOF
+against "a dropped frozen leaf is reported" "gone from the rewrite"
+
+echo
+echo "== a rewrite that renumbers a leaf carrying landed work =="
+prev < <(executed_plan)
+plan <<'EOF'
+### Phase 1 — Payout webhook
+**Implements:** S
+**Depends on:** —
+**Files:** `b.java` (new)
+- [ ] does `b`
+**Done when:** `mvn test` is green.
+
+### Phase 2 — Ledger schema <!-- built: phase-ledger-schema -->
+**Implements:** S
+**Depends on:** —
+**Files:** `a.java` (new)
+- [x] `V1__ledger.sql` creates `ledger_entry`
+**Done when:** `mvn test` is green.
+EOF
+against "a renumbered frozen leaf is reported" "renumbered to Phase 2"
+
+echo
+echo "== a rewrite that loses a tick =="
+prev < <(executed_plan)
+plan <<'EOF'
+### Phase 1 — Ledger schema <!-- built: phase-ledger-schema -->
+**Implements:** S
+**Depends on:** —
+**Files:** `a.java` (new)
+- [ ] `V1__ledger.sql` creates `ledger_entry`
+**Done when:** `mvn test` is green.
+
+### Phase 2 — Payout webhook
+**Implements:** S
+**Depends on:** Phase 1
+**Files:** `b.java` (new)
+- [ ] does `b`
+**Done when:** `mvn test` is green.
+EOF
+against "an un-ticked item is reported" "gone or un-ticked"
+
+echo
+echo "== a rewrite of an UNNUMBERED plan, where only the ticks can be preserved =="
+prev <<'EOF'
+## Sprint 2
+- [x] ledger table lands
+- [ ] do the webhook thing
+EOF
+plan <<'EOF'
+### Phase 1 — Payout webhook
+**Implements:** S
+**Depends on:** —
+**Files:** `b.java` (new)
+- [ ] does `b`
+**Done when:** `mvn test` is green.
+EOF
+against "a tick lost from a hand-written plan is reported" "ticked item from the previous plan is gone"
+
+echo
+echo "== the contracts file beside the plan =="
+plan <<'EOF'
+## Milestone 1 — Ledger
+
+### Phase 1 — Ledger schema
+**Implements:** S
+**Depends on:** —
+**Files:** `a.java` (new)
+- [ ] `V1__ledger.sql` creates `ledger_entry`
+**Done when:** `mvn test` is green.
+
+## Milestone 2 — Payouts
+
+### Phase 2 — Payout webhook
+**Implements:** S
+**Depends on:** Phase 1
+**Files:** `b.java` (new)
+- [ ] does `b`
+**Done when:** `mvn test` is green.
+EOF
+design <<'EOF'
+## Milestone 1 — Ledger
+- Schema `ledger_entry` — `id uuid primary key`
+EOF
+designs "a milestone with no contracts section is reported" "no '## Milestone 2' section"
+
+design <<'EOF'
+## Milestone 1 — Ledger
+- Schema `ledger_entry` — `id uuid primary key`
+
+## Milestone 2 — Payouts
+- API `POST /webhooks/payout` → `200`
+
+## Milestone 3 — Reporting
+- Schema `report`
+EOF
+designs "a contracts section with no milestone is reported" "no milestone in the plan"
+
+echo
+echo "== contracts left inline while a design file sits beside the plan =="
+plan <<'EOF'
+## Milestone 1 — Ledger
+**Design**
+- Schema `ledger_entry` — `id uuid primary key`
+
+### Phase 1 — Ledger schema
+**Implements:** S
+**Depends on:** —
+**Files:** `a.java` (new)
+- [ ] `V1__ledger.sql` creates `ledger_entry`
+**Done when:** `mvn test` is green.
+EOF
+design <<'EOF'
+## Milestone 1 — Ledger
+- Schema `ledger_entry` — `id uuid primary key`
+EOF
+designs "two copies of one contract are reported" "still carries an inline"
+
 echo
 printf '  %d passed, %d failed\n' "$pass" "$fail"
 [[ $fail == 0 ]]

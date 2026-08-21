@@ -2,9 +2,14 @@
 """Check a generated todo.md for the defects a read-through misses.
 
     python3 check_todo.py docs/<topic>/todo.md [--spec docs/<topic>/spec.html]
+                                               [--design docs/<topic>/design.md]
+    python3 check_todo.py docs/<topic>/todo.md --against <the-plan-being-replaced.md>
     python3 check_todo.py docs/<topic>/todo.md --slice 5,9
 
 With --spec, also checks that every user story in the spec reaches a phase.
+With --design, checks the plan's spine against the contracts file beside it.
+With --against, checks that a REWRITE preserved every leaf that already carries landed work -- the
+ticks, the numbers and the built markers a half-executed plan is the only record of.
 With --slice, answers one question instead: may these leaves run CONCURRENTLY, each in its own
 worktree? That is /r:plan-run's preflight, and it is a different question from "is this plan any
 good" -- so it reports only the two things that make a slice unsafe (an unbuilt dependency, a
@@ -142,15 +147,137 @@ def wave_table(by_wave, done_of, files_of, plan_name):
     return "\n".join(lines)
 
 
+BUILT = re.compile(r"<!--\s*built:\s*([^\s>]+?)\s*-->")
+MILESTONE = re.compile(r"^##\s+Milestone\s+(\d+)\s*[—-]\s*(.+)$", re.M)
+
+
+def phase_blocks(text):
+    """(num, title, slug, block) per leaf, in document order. `title` has the built-marker and any
+    done tick stripped; `slug` is the marker's value, which /r:plan-run writes when a leaf lands."""
+    heads = re.findall(r"^###\s+Phase\s+(\d+)\s*[—-]\s*(.+)$", text, re.M)
+    blocks = re.split(r"(?=^###\s+Phase\s+\d+)", text, flags=re.M)[1:]
+    out = []
+    for (n, raw), b in zip(heads, blocks):
+        m = BUILT.search(raw)
+        title = " ".join(BUILT.sub("", raw).replace("✅", " ").split())
+        out.append((int(n), title, m.group(1) if m else None, b))
+    return out
+
+
+def ticked_items(block):
+    """Ticked item text, inner whitespace collapsed. Collapsed rather than byte-identical because a
+    rewrite may re-wrap a line -- but the WORDS are the identity, the same rule /r:plan-run uses to
+    re-locate an item it is about to tick."""
+    return [" ".join(i.split()) for i in re.findall(r"^\s*-\s*\[[xX]\]\s*(.+)$", block, re.M)]
+
+
+def check_against(prev_text, new_text, out):
+    """The mechanical guard on the freeze rule.
+
+    A leaf carrying a tick, or a '<!-- built: -->' marker, is the record of work that shipped: its
+    number is what '--from N', the branch and the PR all name, and its ticks are what stop
+    /r:plan-run rebuilding it. A rewrite may re-split, renumber or drop anything UNBUILT freely --
+    that is the point of rewriting -- so this reads only the frozen set, and says nothing about the
+    rest.
+    """
+    prev = phase_blocks(prev_text)
+    if not prev:
+        # An unnumbered plan (a hand-written backlog) has no leaves to match, but its ticks still
+        # record landed work. Check survival globally: the numbering did not exist to preserve.
+        survived = set(ticked_items(new_text))
+        for it in ticked_items(prev_text):
+            if it not in survived:
+                out(f"a ticked item from the previous plan is gone: {it[:60]!r}. It records work "
+                    f"that landed -- a rewrite carries every tick over, or the plan claims the "
+                    f"work is still to do.")
+        return
+
+    new = phase_blocks(new_text)
+    by_num = {n: (t, b) for n, t, _, b in new}
+    by_title, by_slug = {}, {}
+    for n, t, slug, _ in new:
+        by_title.setdefault(t.lower(), n)
+        if slug:
+            by_slug[slug] = n
+
+    for n, title, slug, b in prev:
+        ticks = ticked_items(b)
+        if not ticks and not slug:
+            continue                      # unbuilt: free to be re-split, renumbered or dropped
+        # Matched on the built marker first, then the title. A frozen leaf that answers to neither
+        # is gone -- and a frozen leaf that was merely RETITLED reads exactly the same way, which
+        # is correct: both lose the identity '--from N', the branch and the PR body all name, and
+        # both are fixed by putting it back.
+        if slug and slug in by_slug:
+            tgt = by_slug[slug]
+        elif title.lower() in by_title:
+            tgt = by_title[title.lower()]
+        else:
+            out(f"Phase {n} — {title}: carries landed work and is gone from the rewrite (dropped, "
+                f"or retitled, which is the same loss). A leaf with a tick is frozen: it is the "
+                f"record of what shipped, not a proposal.")
+            continue
+        if tgt != n:
+            out(f"Phase {n} — {title}: renumbered to Phase {tgt}. A frozen leaf keeps its number "
+                f"-- '--from {n}', the branch and the PR body all name it.")
+        nb = by_num[tgt][1]
+        kept = ticked_items(nb)
+        for it in ticks:
+            if it not in kept:
+                out(f"Phase {n} — {title}: ticked item {it[:52]!r} is gone or un-ticked in the "
+                    f"rewrite. /r:plan-run reads the items to decide what is already built.")
+        if slug and not BUILT.search(nb.splitlines()[0]):
+            out(f"Phase {n} — {title}: the '<!-- built: {slug} -->' marker was dropped. It is how "
+                f"the plan says where the change went.")
+
+
+def check_design(plan_text, design_p, out):
+    """The plan is the spine; the contracts live beside it, one '## Milestone N' section each.
+
+    Nothing MACHINE-readable is in the design file -- /r:task-run lifts a leaf block and never reads
+    upward or outward -- so a drift here costs a human reader, never a build. That is exactly why it
+    needs checking: nothing else would ever notice.
+    """
+    if not design_p.exists():
+        out(f"missing: {design_p} — the contracts live beside the plan, one '## Milestone N' "
+            f"section per milestone")
+        return
+    plan_ms = {int(n): " ".join(t.split()) for n, t in MILESTONE.findall(plan_text)}
+    des_ms = {int(n): " ".join(t.split()) for n, t in
+              MILESTONE.findall(design_p.read_text(encoding="utf-8", errors="replace"))}
+    if not plan_ms:
+        out(f"--design was given but the plan has no '## Milestone N — name' headings to match "
+            f"{design_p.name} against")
+    for n, t in sorted(plan_ms.items()):
+        if n not in des_ms:
+            out(f"Milestone {n} — {t}: no '## Milestone {n}' section in {design_p.name}. Its "
+                f"leaves were derived from contracts a reader now cannot find.")
+        elif des_ms[n].lower() != t.lower():
+            out(f"Milestone {n}: the plan calls it {t!r}, {design_p.name} calls it {des_ms[n]!r} "
+                f"— one of them was renamed alone.")
+    for n, t in sorted(des_ms.items()):
+        if n not in plan_ms:
+            out(f"{design_p.name} has a '## Milestone {n} — {t}' section with no milestone in the "
+                f"plan — contracts for leaves that do not exist.")
+    if re.search(r"^\*\*Design\*\*", plan_text, re.M):
+        out(f"the plan still carries an inline '**Design**' section while {design_p.name} sits "
+            f"beside it — two copies of one contract drift apart silently. Move it.")
+
+
 def main():
     args = sys.argv[1:]
     if not args:
-        print("usage: check_todo.py <todo.md> [--spec <spec.html>] [--slice <n,n>]")
+        print("usage: check_todo.py <todo.md> [--spec <spec.html>] [--design <design.md>] "
+              "[--against <previous-todo.md>] [--slice <n,n>]")
         return 2
     todo_p = Path(args[0])
-    spec_p, slice_req = None, None
+    spec_p, slice_req, design_p, prev_p = None, None, None, None
     if "--slice" in args:
         slice_req = {int(n) for n in re.findall(r"\d+", args[args.index("--slice") + 1])}
+    if "--design" in args:
+        design_p = Path(args[args.index("--design") + 1])
+    if "--against" in args:
+        prev_p = Path(args[args.index("--against") + 1])
     if "--spec" in args:
         spec_p = Path(args[args.index("--spec") + 1])
     elif todo_p.parent.joinpath("spec.html").exists():
@@ -324,6 +451,15 @@ def main():
         print(f"slice {sorted(slice_req)} is safe to run concurrently "
               f"({n_leaf} {'leaf' if n_leaf == 1 else 'leaves'}, no shared files, every dependency built)")
         return 0
+
+    # --- the two files, and the plan this one replaces ---------------------------
+    if design_p is not None:
+        check_design(t, design_p, out)
+    if prev_p is not None:
+        if not prev_p.exists():
+            out(f"missing: {prev_p} — nothing to compare the rewrite against")
+        else:
+            check_against(prev_p.read_text(encoding="utf-8", errors="replace"), t, out)
 
     stated = declared_waves(t)
     if stated is not None:

@@ -53,7 +53,7 @@ skills-directory case. Whether plugin discovery follows a *symlinked* entry is
 documented neither way, and it fails identically to a malformed manifest, so the
 pack does not rely on it.
 
-## The eighteen skills
+## The nineteen skills
 
 | command | does |
 |---|---|
@@ -67,7 +67,7 @@ pack does not rely on it.
 | `/r:code-adversarial` | the real Codex review, never an imitation of it |
 | `/r:code-refactor` | restructure behind a behaviour-locking test |
 | `/r:spec-brainstorm` | idea → one `spec.html`: domain model, user stories, modules, stack, API |
-| `/r:spec-design` | docs → `todo.md`: milestones, design contracts, leaves, and a dependency graph |
+| `/r:spec-design` | docs → `todo.md` + `design.md`: milestones, contracts, leaves and a dependency graph; rewrites a plan that already exists rather than overwriting it |
 | `/r:plan-run` | build a whole `todo.md` phase by phase; non-overlapping phases can run in parallel sessions |
 | `/r:hexagonal-architecture` | Hexagonal Lite boundaries: what lives in core, what a module may import |
 | `/r:tests-write` | JVM test conventions; loads proactively on Java/Kotlin work |
@@ -75,17 +75,20 @@ pack does not rely on it.
 | `/r:git-commit` | group the working tree into logical Conventional Commits |
 | `/r:claudemd-compact` | compact and de-stale a CLAUDE.md hierarchy |
 | `/r:claudemd-patch` | insert the standard rule blocks and the test-writing hook |
+| `/r:reuse-index` | mine the plan corpus into one doc naming the canonical example of each pattern |
 
 Names are domain-first (`<domain>-<action>`, at most three kebab segments) so the
 alphabetically sorted `/` menu groups the families: `claudemd-*`, `code-*`,
 `issues-*`, `spec-*`, `task-*`. `hexagonal-architecture` is the one exception — it is a
 rulebook rather than an action, and "hexagonal" is the word someone reaches for.
 
-`task-run` and `issues-fix` carry `disable-model-invocation: true` — each says
-in its own text that it must never fire on its own, and the frontmatter enforces
-that rather than trusting the prose. They stay invocable by name; they just will
-not auto-load, and their descriptions are not in context at all, which is why
-neither counts against the 16,000-character listing budget below.
+`task-run`, `issues-fix`, `plan-run` and `spec-design` carry
+`disable-model-invocation: true` — each says in its own text that it must never
+fire on its own, and the frontmatter enforces that rather than trusting the
+prose. Each mutates the repo or a plan on a scale nobody wants arrived at by
+inference. They stay invocable by name; they just will not auto-load, and their
+descriptions are not in context at all, which is why none of the four counts
+against the 16,000-character listing budget below.
 
 `task-review` says the same thing but carries no flag, on purpose. The flag is
 all-or-nothing: it blocks the Skill tool outright, so it cannot tell "the model

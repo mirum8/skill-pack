@@ -1,6 +1,6 @@
 {
   "skill_name": "spec-design",
-  "notes": "Fixtures are real spec.html files produced by /r:spec-brainstorm, kept in brainstorm-workspace/iteration-1. Each run points the skill at one and checks the resulting todo.md. Mechanical assertions are checked by scripts/check_todo.py --spec <the spec>, which also verifies the dependency graph, the derived waves and leaf self-containment; the rest are judgment. The skill must not re-decide anything the documents already settled, and must not write file:LINE or a reuse map — those are /r:task-run's planner's, written against real code.",
+  "notes": "Fixtures are real spec.html files produced by /r:spec-brainstorm, kept in brainstorm-workspace/iteration-1. Each run points the skill at one and checks the resulting todo.md. Mechanical assertions are checked by scripts/check_todo.py --spec <the spec>, which also verifies the dependency graph, the derived waves and leaf self-containment; the rest are judgment. The skill must not re-decide anything the documents already settled, and must not write file:LINE or a reuse map — those are /r:task-run's planner's, written against real code. A rewrite case checks the other half: an existing plan is an input, so what a run must NOT do is renumber, re-split, retitle or un-tick a leaf that already carries landed work — check_todo.py --against is the mechanical half of that, and the labelling of inferred fields at the gate is the judgment half.",
   "evals": [
     {
       "id": 0,
@@ -405,6 +405,81 @@
         {
           "id": "no_stand_in",
           "text": "No imitation review is substituted, and the step is never reported as completed"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "name": "existing-plan-is-rewritten-not-overwritten",
+      "prompt": "/r:spec-design docs/billing/spec.html",
+      "fixture": null,
+      "files": [
+        "docs/billing/spec.html — three user stories, one of them added since the plan was written",
+        "docs/billing/todo.md — packed shape (inline **Design**), Phases 1-4 ticked with <!-- built: --> markers, Phases 5-8 untouched"
+      ],
+      "expected_output": "The run is a REWRITE, not a fresh plan: it names the shape it found (packed), freezes Phases 1-4 verbatim, re-splits or drops only unbuilt leaves, gives the new story a leaf numbered above the highest frozen one, moves the contracts into design.md, and shows the migration counts at the gate before anything is written.",
+      "assertions": [
+        {
+          "id": "not_overwritten",
+          "text": "The existing todo.md is read as an input; the draft is written to a scratch path and only moved into place after the gate",
+          "check": "script"
+        },
+        {
+          "id": "shape_named",
+          "text": "The input shape (packed) is named to the user before the rewrite begins"
+        },
+        {
+          "id": "frozen_intact",
+          "text": "check_todo.py --against the previous plan reports nothing: no frozen leaf renumbered, retitled, dropped or un-ticked",
+          "check": "script"
+        },
+        {
+          "id": "contracts_moved",
+          "text": "design.md carries one '## Milestone N' section per milestone and the plan carries no inline **Design**",
+          "check": "script"
+        },
+        {
+          "id": "new_story_appended",
+          "text": "The story added since the last plan gets a leaf numbered above the highest frozen phase, not inserted among them"
+        },
+        {
+          "id": "migration_shown",
+          "text": "The gate shows frozen / re-split / added / dropped / inferred counts, and names the dropped leaves individually"
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "name": "hand-written-backlog-is-labelled-not-laundered",
+      "prompt": "/r:spec-design docs/billing/spec.html todo.md",
+      "fixture": null,
+      "files": [
+        "docs/billing/spec.html — two user stories",
+        "todo.md — a foreign backlog: '## Sprint 2' headings, bare checkboxes, one ticked, no Implements/Depends on/Done when anywhere"
+      ],
+      "expected_output": "The foreign plan is converted: numbers assigned in document order, the ticked item's leaf frozen and annotated with the metadata it lacked, and every field the skill supplied (milestone grouping, edges, Implements names) listed as INFERRED at the gate. No Done when is invented to satisfy the checker.",
+      "assertions": [
+        {
+          "id": "tick_survives",
+          "text": "The ticked item's wording survives into the rewritten plan",
+          "check": "script"
+        },
+        {
+          "id": "frozen_annotated",
+          "text": "The frozen leaf gains Implements/Depends on/Done when without its number, title or tick changing"
+        },
+        {
+          "id": "inference_labelled",
+          "text": "Every inferred milestone, edge and Implements name is named as inferred at the gate, item by item rather than as a count"
+        },
+        {
+          "id": "no_invented_check",
+          "text": "No 'Done when' names a command the project cannot run; where none could be derived, the leaf is left without one and the checker's complaint is surfaced",
+          "check": "script"
+        },
+        {
+          "id": "numbers_are_document_order",
+          "text": "Phase numbers follow the order the backlog was written in, not a re-prioritisation"
         }
       ]
     }
