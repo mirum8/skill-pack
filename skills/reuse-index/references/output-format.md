@@ -23,10 +23,14 @@ drifts from the first, and the whole point of one index is that there is one.
 
 ## Voice
 
-The doc describes **itself and the codebase**. It never mentions the plan corpus it was mined
-from, the pipelines, or this skill. A file written into someone's repo describes what it is, not
-the tooling that produced it. Its own header says it is a hand-maintained reference and how to
-add an entry, in the register of the project's other reference docs.
+The doc describes **the codebase**, and links the plan behind each entry. What it does not do is
+narrate its own machinery: it never explains that it was mined from a corpus, never names the
+pipelines, never mentions this skill. The distinction is between a **link** and a **story** — a
+`Plan` cell pointing at `.task-plans/<slug>.md` is a reference to a tracked project artifact the
+reader can open, the same kind of thing as the code paths in the other columns; a sentence
+explaining how the index gets built would be the tooling describing itself, which is what a repo
+document must not do. Its own header says it is a hand-maintained reference and how to add an
+entry, in the register of the project's other reference docs — not how it was generated.
 
 ## Sections
 
@@ -47,9 +51,9 @@ alphabetically by pattern.
 ## Entry format
 
 ```markdown
-| Pattern | Canonical example | Reach for it when | Cited |
-|---|---|---|---|
-| Race-free native upsert | `jpa-adapter/.../calculator/CurrencyRateJpaRepository` — `on conflict … do update` | A write two requests can race | 4 |
+| Pattern | Canonical example | Reach for it when | Cited | Plan |
+|---|---|---|---|---|
+| Race-free native upsert | `jpa-adapter/.../calculator/CurrencyRateJpaRepository` — `on conflict … do update` | A write two requests can race | 4 | [currency-rate-upsert](.task-plans/currency-rate-upsert.md), [rate-sync-backfill](.task-plans/rate-sync-backfill.md) |
 ```
 
 - **Pattern** — what the reader is looking for, in their words, not the file's. "Race-free native
@@ -62,6 +66,12 @@ alphabetically by pattern.
   reader scans.
 - **Cited** — how many distinct plans independently reached for this exemplar. It is the evidence
   for the entry's presence and tells a future editor which lines are load-bearing.
+- **Plan** — a link to every plan that cited the exemplar, one markdown link per plan
+  (`[<slug>](.task-plans/<slug>.md)`), comma-separated. This is the trail back from a distilled
+  convention to the full task context it was drawn from — the reasoning, the tradeoffs, the
+  single-cited exemplars this doc filtered out. The count is the same evidence as `Cited`,
+  itemized, so the two always agree. Like `Cited`, this cell is **derived, not authored**: it is
+  rebuilt from the exemplar's citing plans on every write, never hand-edited.
 
 **Entries are patterns, not files.** One file often carries several: a controller can supply the
 download plumbing, the logging style, and the repopulate-the-view-after-catch shape as three
@@ -73,7 +83,10 @@ entry, worded once.
 The doc is its own state file — the anchors and the `Cited` counts are all a refresh needs, so
 there is no marker file and nothing that can fall out of sync with it.
 
-1. **Existing entries keep their prose.** Only `Cited` is refreshed. Hand edits survive, always.
+1. **Existing entries keep their prose.** Only `Cited` and `Plan` are refreshed, together, from
+   the script's citing-plan list for that exemplar — they are the same evidence counted and
+   itemized, so they move as one. Everything a human wrote — the pattern name, the "reach for it
+   when", any hand-edited anchor — survives untouched.
 2. **New entries** are the ones that crossed the threshold since the last pass. This is the only
    part that needs judgment, and on most refreshes it is empty.
 3. **Stale anchors are fixed where possible, reported otherwise.** When the symbol re-resolves

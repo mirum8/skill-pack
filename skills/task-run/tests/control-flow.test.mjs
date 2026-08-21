@@ -1469,6 +1469,17 @@ test('the planner CANNOT write — the file lands via a separate sandboxed scrib
   assert.match(prompts['plan-write'], /Do not edit any\s+other file/)
 })
 
+test('the scribe does NOT gitignore the plan — plans are tracked and committed', async () => {
+  // The invariant behind the reuse-index's clickable plan links: a plan committed with the task is
+  // reachable for every teammate, a gitignored one is a dead link for everyone but the author. So
+  // the scribe must not add ".task-plans/" to .gitignore, and must clear a stale entry a prior
+  // version left behind.
+  const { prompts } = await run({ review: OK_REVIEW, planfix: OK_FIX })
+  assert.doesNotMatch(prompts['plan-write'], /listed in \.gitignore|append\s+the line/)
+  assert.match(prompts['plan-write'], /Do NOT add "\.task-plans\/" to \.gitignore/)
+  assert.match(prompts['plan-write'], /remove that line so the plan can be committed/)
+})
+
 test('the LIGHT planner is general-purpose, and that is only safe because light has no plan review', async () => {
   // Worth stating rather than assuming: the structural read-only guarantee covers the standard/full
   // planner, not this one — `plan-light` has always run on a `*`-tools type. It happens to be the

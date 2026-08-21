@@ -1035,7 +1035,7 @@ if (classifyOnly) {
 // It depends on nothing the plan or its review produces, only on Phase 0's branch/base, yet it used
 // to sit between the plan editor and the implementers — a whole serial agent round trip on the
 // critical path to run one `git checkout -b`. Start it here instead and collect it below. What it
-// overlaps with is the plan scribe writing `.task-plans/<slug>.md` and appending to `.gitignore`,
+// overlaps with is the plan scribe writing `.task-plans/<slug>.md`,
 // which is safe in both directions: `git checkout -b <new> <base>` moves HEAD to the same commit
 // and therefore does not touch the working tree at all. On a RESUME the checkout is a real one that
 // could, but a resume skips planning entirely, so nothing runs alongside it.
@@ -1379,9 +1379,11 @@ ${uiDesignNote}
      source: ${src.kind === 'issue' ? `issue ${rawSource}` : rawSource}
      base: ${src.base}
 
-     First \`mkdir -p .task-plans\` and make sure ".task-plans/" is listed in .gitignore — append
-     the line if it is missing. Plans are scratch space and are never committed. Do not edit any
-     other file.
+     First \`mkdir -p .task-plans\`. Do NOT add ".task-plans/" to .gitignore — plans are tracked
+     now: this file is committed with the rest of the task at finish, and the reuse-index links
+     back to it, so a gitignored plan would be a dead link for everyone but you. If a prior run
+     left ".task-plans/" in .gitignore, remove that line so the plan can be committed.
+     Do not edit any other file (beyond the plan and that one .gitignore line).
 
      COPY THE PLAN BODY BYTE FOR BYTE. You are a scribe, not an editor: no re-wrapping, no
      reformatting or "tidying" of markdown, no fixing what looks like a typo, no summarising, no

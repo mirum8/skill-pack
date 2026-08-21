@@ -37,6 +37,12 @@ convention. Only the second kind goes in the doc.
 - `/r:reuse-index --plans <dir>` — a corpus somewhere other than `.task-plans/`.
 - `/r:reuse-index --min-cited <n>` — override the 2-plan threshold.
 - `/r:reuse-index --dry-run` — report what would change; write nothing.
+- `/r:reuse-index --rebuild` — ignore the existing index and regenerate it from scratch, a full
+  clustering pass that **overwrites** the current doc. This is the merge's escape hatch, for when
+  a refresh cannot get you there: adopting a format change (a new column like `Plan`), or a doc
+  that has drifted. It discards any prose hand-written into the current doc, so reach for it only
+  on a doc you are willing to regenerate — a merge is the safe default and this is the deliberate
+  exception.
 
 Read `${CLAUDE_SKILL_DIR}/references/output-format.md` before writing anything. It holds the
 section layout, the entry format, the merge rules, and what must be left out.
@@ -55,12 +61,20 @@ It prints JSON: `corpus`, `candidates` (each with `cited`, `citedBy`, resolved `
 `symbols` its rows named and which of them `symbolsVerified` in the file today), plus `new`,
 `countChanged`, `stale` and `unresolved` when an index was passed.
 
+**On `--rebuild`, run the script *without* `--index`** — you are regenerating, not diffing, so the
+existing doc's counts are irrelevant and passing it would only surface a `changed: false` you are
+about to ignore. Still locate the existing doc (below) so you overwrite it in place, and treat
+every candidate as a fresh entry: this is the **New index** path in Step 3, pointed at the old
+file. The two stops below do not apply to a rebuild.
+
 - `{"error": "no-corpus"}` or zero plans → **say so and stop.** There is nothing to mine, and that
   is a finding, not a failure.
 - `changed: false` → **say so and stop.** The index is current. Do not rewrite a file to no effect.
+  (Not on `--rebuild`, which omits `--index` and so never reports this.)
 
 Locate the index the way the project would: a reference-doc directory it already tracks and
-already points at from its root `CLAUDE.md`; `docs/` only if there is none.
+already points at from its root `CLAUDE.md`; `docs/` only if there is none. On `--rebuild` this is
+also how you find the doc to overwrite.
 
 ## Step 1 — Read the rows
 
@@ -80,16 +94,20 @@ several distinct shapes. Group by layer, from the resolved paths.
 
 ## Step 3 — Write or merge
 
-**New index:** write the whole doc per the reference.
+**New index (and any `--rebuild`):** write the whole doc per the reference, overwriting the located
+file if one is there. A rebuild is a fresh clustering pass — it keeps no prose from the old doc.
 
-**Existing index:** merge — existing entries keep their prose and only their `Cited` refreshes;
-`new` entries are added into their section; `stale` anchors are re-resolved from the script's
-`candidates` list where that is unambiguous, and otherwise marked and reported. Never delete an
-entry silently: a pattern that moved and a pattern that died need opposite responses, and only the
-reader can tell which happened.
+**Existing index:** merge — existing entries keep their prose and only their `Cited` and `Plan`
+cells refresh (both rebuilt from the candidate's `citedBy`); `new` entries are added into their
+section; `stale` anchors are re-resolved from the script's `candidates` list where that is
+unambiguous, and otherwise marked and reported. Never delete an entry silently: a pattern that
+moved and a pattern that died need opposite responses, and only the reader can tell which happened.
 
-The doc names no tooling — not `.task-plans`, not the pipelines, not this skill. It describes the
-codebase and itself.
+Each entry carries a `Plan` cell linking the plans that cited its exemplar
+(`[<slug>](.task-plans/<slug>.md)`, from `citedBy`) — the trail back to the full task context.
+Beyond those links the doc narrates no tooling: it does not explain that it was mined from a
+corpus, name the pipelines, or mention this skill. Linking a tracked plan file is a reference; a
+sentence about how the index is built would be the tooling describing itself, and that stays out.
 
 ## Step 4 — Wire it up, so something actually reaches it
 
@@ -111,7 +129,7 @@ Verify the path you wrote resolves before finishing — a broken pointer is wors
 ## Step 5 — Report
 
 - corpus size, how many plans carried a reuse map, how many candidates met the threshold
-- entries written, entries merged, `Cited` counts that moved
+- entries written, entries merged, `Cited` counts (and their `Plan` links) that moved
 - **every candidate that did not make it, and why** — below threshold, file gone, pattern gone,
   or folded into another entry. A silent drop is how an index starts lying about its coverage.
 - stale anchors re-resolved, and the ones needing a human

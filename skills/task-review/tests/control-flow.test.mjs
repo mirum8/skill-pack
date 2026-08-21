@@ -963,6 +963,30 @@ test('what triage REJECTED reaches the stats row, and never the fixer', async ()
   assert.doesNotMatch(prompts['fix-correctness'] || '', /unreachable branch/)
 })
 
+test('appliedFindings returns the real findings for the plan, dismissed ones filtered out', async () => {
+  // The caller (run-task) writes these into the plan file as a "## Post-review changes" section
+  // so the tracked, index-linked plan records what the review CHANGED. A dismissed finding never
+  // touched the code, so putting it in the plan would claim a change that did not happen — it must
+  // be dropped here, exactly as it is kept OUT of the fixer. The stats row keeps counts; this
+  // carries the finding bodies the plan needs, from the same roll-up.
+  const { out } = await run({
+    overrides: {
+      'fix-triage-readability': { readability: [], dismissed: [] },
+      'fix-triage': {
+        correctness: [{ item: 'RateSheetImporter:42 guard the last row', source: 'logic' }],
+        dismissed: [{ item: 'RateSheetImporter:88 unreachable branch', source: 'security' }],
+        readability: [], docDrift: [],
+      },
+    },
+  })
+  assert.ok(Array.isArray(out.appliedFindings))
+  assert.ok(out.appliedFindings.every((f) => f.verdict !== 'dismissed'),
+    'a dismissed finding in the plan would record a change that never happened')
+  const kept = out.appliedFindings.find((f) => f.track === 'logic')
+  assert.ok(kept && kept.fixed === true && /guard the last row/.test(kept.description))
+  assert.ok(!out.appliedFindings.some((f) => /unreachable branch/.test(f.description)))
+})
+
 test('a BLOCKED triage records no verdicts rather than "rejected nothing"', async () => {
   // Absence of a judgement and a judgement of zero rejections are different claims, and only one
   // of them is evidence about a track.

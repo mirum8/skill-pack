@@ -2172,6 +2172,17 @@ await agent(
   { label: 'reuse-index', phase: 'End-verify', ...GP, ...MECHANICAL })
 } catch { /* the index is bookkeeping; a review that ran is not undone by it */ }
 
+// The real findings, itemized, for the caller to fold into the plan file. run-task appends these
+// as a "## Post-review changes" section on `.task-plans/<slug>.md` (tracked now, and linked from
+// the reuse-index), so the committed plan records what the review CHANGED, not only what was
+// planned. Reuses the same per-finding objects the stats sink builds, minus the dismissed ones:
+// a dismissed finding was judged not real and never touched the code, so it does not belong in
+// the plan's record of the build. The stats sink is unchanged — this is a second, richer reader
+// of the same roll-up, kept off the store because the store keeps counts, never finding bodies.
+const appliedFindings = statsRow.findings
+  .filter((f) => f.verdict !== 'dismissed')
+  .map(({ track, verdict, fixed, description }) => ({ track, verdict, fixed, description }))
+
 return {
   reviewed: true,
   profile,
@@ -2217,6 +2228,9 @@ return {
   // The unresolved remainder, verbatim. Empty on 'passed'/'skipped'. This is the difference
   // between surfacing a defect to the caller and swallowing it.
   endVerifyFindings: endVerifyUnresolved,
+  // Every real finding this review acted on ({ track, verdict, fixed, description }), for the
+  // caller to write into the plan file as a "## Post-review changes" section before the commit.
+  appliedFindings,
   ui: uiSummary,
   step9: 'main-agent', // record learnings (9a) + gated /r:claudemd-compact --auto (9b) run after this returns
 }

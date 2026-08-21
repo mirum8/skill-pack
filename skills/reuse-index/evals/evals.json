@@ -6,7 +6,7 @@
       "name": "routing-triggers",
       "kind": "trigger",
       "prompt": "we've got a pile of planning notes in .task-plans that nobody reads — build me an index of the canonical examples in this codebase out of them",
-      "expected_output": "reuse-index loads, runs its extraction script over the plan corpus, keeps only exemplars two or more distinct plans cited, verifies each anchor against the current tree, and writes one grouped reference doc beside the project's other reference docs.",
+      "expected_output": "reuse-index loads, runs its extraction script over the plan corpus, keeps only exemplars two or more distinct plans cited, verifies each anchor against the current tree, and writes one grouped reference doc beside the project's other reference docs. Each entry also carries a Plan column linking the plans that cited its exemplar.",
       "files": [],
       "fixture": null,
       "assertions": []
@@ -16,7 +16,7 @@
       "name": "routing-triggers-refresh",
       "kind": "trigger",
       "prompt": "refresh the reuse index",
-      "expected_output": "reuse-index loads and merges rather than rebuilds: existing entries keep their prose with only their Cited counts refreshed, newly-qualifying exemplars are added, and moved anchors are re-resolved. If nothing changed it says so and writes nothing.",
+      "expected_output": "reuse-index loads and merges rather than rebuilds: existing entries keep their prose with only their Cited counts and Plan links refreshed together, newly-qualifying exemplars are added, and moved anchors are re-resolved. If nothing changed it says so and writes nothing.",
       "files": [],
       "fixture": null,
       "assertions": []
