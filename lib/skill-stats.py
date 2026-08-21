@@ -1322,9 +1322,19 @@ def summarize_cost(db):
             "       AVG(duration_ms) d "
             "FROM items WHERE label IS NOT NULL GROUP BY k ORDER BY tk DESC LIMIT 12").fetchall()
         if rows:
-            print(f"  {'step':<26}{'runs':>6}{'tokens':>14}{'avg secs':>10}")
+            # The effort each step ran at, beside its cost. A step whose pinned depth was changed
+            # reads as two tiers here for as long as history holds both, which is what makes the
+            # change visible at all: the tokens and seconds columns average the old runs into the
+            # new ones, and a re-tiered step that looks unchanged is usually one whose new runs are
+            # still a handful against months of old ones.
+            efforts = collections.defaultdict(collections.Counter)
+            for k, e in con.execute("SELECT label, effort FROM items "
+                                    "WHERE label IS NOT NULL AND effort IS NOT NULL"):
+                efforts[k][e] += 1
+            print(f"  {'step':<26}{'runs':>6}{'tokens':>14}{'avg secs':>10}   effort")
             for k, cnt, tk, d in rows:
-                print(f"  {k:<26}{cnt:>6}{(tk or 0):>14,}{(d or 0) / 1000:>10.0f}")
+                mix = " · ".join(f"{e} {n}" for e, n in efforts[k].most_common()) or "—"
+                print(f"  {k:<26}{cnt:>6}{(tk or 0):>14,}{(d or 0) / 1000:>10.0f}   {mix}")
         # Said out loud rather than left as a shortfall in the table above. The label is recovered
         # from the prompt, so a run recorded by a script the pack no longer ships classifies as
         # nothing — that is missing attribution, not a step that cost nothing.

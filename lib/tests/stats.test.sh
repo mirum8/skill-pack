@@ -352,6 +352,18 @@ ok "the unlabelled total is still reported" "$(grep -c '4 item(s) carry no step 
 ok "the ones in a pipeline run are singled out" "$(grep -c '1 of them sit in a workflow run' <<<"$rep")" 1
 ok "the foreign ones are counted apart"     "$(grep -c '3 come from workflow runs with no pipeline step' <<<"$rep")" 1
 
+# The cost table carries the EFFORT each step ran at, because that is the only place a re-tiered
+# step is visible: tokens and seconds average the old depth into the new one, so a step whose pin
+# just moved looks unchanged until its new runs outnumber months of old ones.
+sqlite3 "$I2" "INSERT INTO items(wf_run_id,agent_id,label,effort,tokens_in,tokens_out,tokens_cache)
+  VALUES ('wf_ours','a3','fix-correctness','high',1,1,1), ('wf_ours','a4','fix-correctness','medium',1,1,1),
+         ('wf_ours','a5','fix-correctness','medium',1,1,1);"
+rep=$(python3 "$REPORT" --db "$I2" 2>&1)
+ok "the cost table names the effort mix"    "$(grep -cE '^  fix-correctness .*medium 2 . high 1$' <<<"$rep")" 1
+# A step whose items never recorded an effort must read as unknown, not as the session default —
+# guessing one would invent the number this column exists to show.
+ok "an unrecorded effort is a dash"         "$(grep -cE '^  implement .* —$' <<<"$rep")" 1
+
 # --- implement depth ---------------------------------------------------------
 # The depth table is the instrument behind the implementers' pinned effort: it buckets each
 # implement run by the effort mined off its items and prints what the review found afterwards. It

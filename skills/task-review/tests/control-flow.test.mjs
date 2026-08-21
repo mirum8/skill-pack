@@ -303,11 +303,13 @@ test('Phase 0 triage reads the diff into a schema, so it runs at medium', async 
   assert.equal(opts['triage'].effort, 'medium')
 })
 
-test('fixers run at the implementers\' floor; the agents that JUDGE keep the top tier', async () => {
+test('fixers never run deeper than the implementers; the agents that JUDGE keep the top tier', async () => {
   const { opts } = await run({
     overrides: { 'fix-triage': { correctness: [finding()], readability: [], docDrift: [] } },
   })
-  assert.equal(opts['fix-correctness'].effort, 'high')
+  // A patch is strictly less than the plan-following change it patches, so this tracks IMPL_RUN in
+  // task-run-implement.workflow.js as a ceiling — never above it.
+  assert.equal(opts['fix-correctness'].effort, 'medium')
   // fix-triage decides what is a false positive — that judgement is re-formed by nothing
   // downstream, so it is never pinned below the inherited tier.
   assert.equal(opts['fix-triage'].effort, undefined)

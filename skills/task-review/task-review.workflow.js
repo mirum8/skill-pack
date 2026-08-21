@@ -678,11 +678,20 @@ const CODEX_RUN = { effort: 'medium' }
 // /r:code-scan and a Codex end-verify, and the caller can force a tier outright.
 const TRIAGE_RUN = { effort: 'medium' }
 // A fixer is handed a finding, a file and a line, and told to make the smallest change that fixes
-// it. That is strictly less than an implementer, which follows a whole plan — and run-task pins its
-// implementers at `high`. So `high` is the floor here, not a cut: what it removes is the top tier
-// on work whose hard thinking (is this finding real? what should change?) already happened in
-// triage. Deliberately not applied to fix-triage, which is where that thinking lives.
-const FIX_RUN = { effort: 'high' }
+// it. That is strictly less than an implementer, which follows a whole plan — so the implementers'
+// pinned depth is the CEILING here, never a floor to sit above: a patch applied deeper than the
+// code it patches was written is depth spent on the wrong step. run-task pins them at `medium`
+// (see IMPL_RUN there, and read `implement depth` in lib/skill-stats.py before moving either).
+// What that removes is reasoning on work whose hard thinking — is this finding real, what should
+// change — already happened in triage, which is why this is deliberately NOT applied to
+// fix-triage, where that thinking lives.
+//
+// It is the pack's second-largest block of tokens after the implementers themselves: ui-fix-minor
+// 583M over 61 runs, fix-correctness 487M over 50, end-verify-fix 238M over 42. A fixer that is
+// too shallow is also the most VISIBLE failure in the pipeline — a bad patch fails the build, then
+// end-verify, then the next review reports it — so a regression here surfaces in a run or two
+// rather than hiding in the diff.
+const FIX_RUN = { effort: 'medium' }
 // The UI verifiers are the one JUDGING track where xhigh does not pay for itself. Measured over
 // 59 stored r:bug-hunter-ui transcripts: 66% of their wall time was model time, spread over a median
 // of 86 turns (p90 144) at ~4.2s of thinking each — and the large majority of those turns drive a
