@@ -120,9 +120,10 @@ test('light tier skips the up-front fan-out but always end-verifies', async () =
 test('standard tier runs Codex --mode review + the security hunter only', async () => {
   const { out, counts, prompts, logText } = await run({ args: { profile: 'standard' } })
   assert.equal(out.profile, 'standard')
-  // The one hunter a diff review cannot stand in for: the real /security-review. The docs hunter
-  // also runs at this tier, but outside the barrier — it feeds a list handed to the user, so
-  // nothing downstream waits on it.
+  // Security is the hunter standard keeps while trading away its siblings: a missed N+1 degrades
+  // a page, a missed injection or authorization hole is exploitable and nothing later re-derives
+  // it. The docs hunter also runs here, but outside the barrier — it feeds a list handed to the
+  // user, so nothing downstream waits on it.
   assert.equal(counts['find-bugs:security'], 1)
   assert.equal(counts['find-bugs:docs'], 1)
   // The pattern hunters are what standard trades for the Codex read.
@@ -314,21 +315,21 @@ test('fixers run at the implementers\' floor; the agents that JUDGE keep the top
   assert.equal(opts['local-scan'].effort, undefined)
 })
 
-test('the pattern hunters run below the top tier; security keeps it', async () => {
+test('every pattern hunter runs below the top tier, security included', async () => {
   // A pattern hunter is asked whether the diff matches shapes in the one reference file it was
   // handed — real judgement, but bounded by that file, unlike fix-triage (what is a false
-  // positive?) or code-quality (what reads well?). Yield says the same: 0.88 / 0.37 fixes per run
-  // against 1.33 for codex, which already runs at `medium` because Codex does its thinking.
+  // positive?) or code-quality (what reads well?). Yield says the same: 0.71 / 0.31 fixes per run
+  // against 0.79 for codex, which already runs at `medium` because Codex does its thinking.
   const { opts } = await run()
   assert.equal(opts['find-bugs:logic'].effort, 'high')
   assert.equal(opts['find-bugs:runtime-and-failures'].effort, 'high')
   // Doc drift is never auto-fixed — it resolves to a decision the USER owns — so this hunter
   // matches code against written statements rather than adjudicating anything.
   assert.equal(opts['find-bugs:docs'].effort, 'medium')
-  // The security hunter's cost is the real /security-review it invokes, not its own reasoning,
-  // and it is already gated twice. Trimming depth here saves little and risks the most
-  // expensive class of miss, so it stays on the inherited tier.
-  assert.equal(opts['find-bugs:security'].effort, undefined)
+  // Asserted as 'high', never as undefined: r:bug-hunter-pattern's own frontmatter already pins
+  // `high`, so an unpinned row would sit at high while the tier tables claimed xhigh and this
+  // assertion stayed green on the lie. The pin is what makes the claim and the run agree.
+  assert.equal(opts['find-bugs:security'].effort, 'high')
 })
 
 test('the docs hunter is the one hunter pinned to a cheaper MODEL, not just a lower effort', async () => {
@@ -348,40 +349,24 @@ test('the pattern hunters use the lean sweep agent, never the single-bug investi
   // and it fights this job: under it the median `logic` run reads twelve whole files before it
   // ever runs git diff. These hunters do a sweep, and the agent has to agree with the prompt.
   const { opts } = await run()
-  assert.equal(opts['find-bugs:logic'].agentType, 'r:bug-hunter-pattern')
-  assert.equal(opts['find-bugs:runtime-and-failures'].agentType, 'r:bug-hunter-pattern')
-  // The two specialised hunters are unaffected — only r:bug-hunter-security has the `Skill` tool
-  // that invokes the REAL /security-review, and swapping it is how that track silently becomes a
-  // checklist read.
-  assert.equal(opts['find-bugs:security'].agentType, 'r:bug-hunter-security')
+  for (const h of ['logic', 'runtime-and-failures', 'security']) {
+    assert.equal(opts[`find-bugs:${h}`].agentType, 'r:bug-hunter-pattern',
+      `the ${h} hunter must sweep, not investigate`)
+  }
+  // The docs hunter is the one specialist left: it reads the doc tree as well as the diff.
   assert.equal(opts['find-bugs:docs'].agentType, 'r:bug-hunter-docs')
 })
 
-test('the security hunter is handed the changed FILE PATHS as /security-review\'s argument', async () => {
-  // The one argument shape that decides whether this track reviews the diff under review or a
-  // different changeset. /security-review's Phase 0 honours an argument only as a PR number, a
-  // branch name, or a file path, and discards anything else — then falls through to its own
-  // `git diff @{upstream}...HEAD`, which on a branch carrying earlier commits is not this diff.
-  // Handed a prose scope SENTENCE it drifts on 3 of 3 measured dispatches, each reporting clean
-  // about code nobody asked it to read.
+test('the security hunter reads its own pattern file, not a bundled skill', async () => {
+  // The failure this replaced: the track used to hand the bundled /security-review skill a scope
+  // argument. That skill builds its diff from four bash commands substituted into its prompt
+  // before the model ever runs, all pinned to `git diff origin/HEAD...`, and its body carries no
+  // argument placeholder at all — so the argument was discarded and the track judged the branch
+  // commits instead of this diff. 49 dispatches, 0 findings. Nothing may reach for it again.
   const { prompts } = await run()
-  assert.match(prompts['find-bugs:security'],
-    new RegExp(`args: "${CHANGED.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}"`))
-  // The prose scope must not be what reaches the skill, on any path through this prompt.
-  assert.doesNotMatch(prompts['find-bugs:security'], /args: "the current git diff/)
-  // Verifying is not the same as forcing: the hunter still reads back what the report covered,
-  // because it is the skill that decides whether to honour the argument.
-  assert.match(prompts['find-bugs:security'], /set scopeMatched/)
-})
-
-test('with no file list to name, the security argument falls back rather than going empty', async () => {
-  // Two ways to arrive here: scope 'all' (there is no diff, the project genuinely is the target)
-  // and a triage that returned no files. Neither may produce a malformed or empty argument — the
-  // skill would then resolve its own scope with nothing said about it, which is the silent version
-  // of the drift. scopeMatched still reports what actually happened.
-  const { prompts } = await run({ triage: baseTriage({ changedFiles: [] }) })
-  assert.match(prompts['find-bugs:security'], /args: "the current git diff \(working tree \+ staged\)"/)
-  assert.doesNotMatch(prompts['find-bugs:security'], /args: ""/)
+  assert.match(prompts['find-bugs:security'], /references\/security\.md/)
+  assert.match(prompts['find-bugs:security'], /Your categories: Injection & Untrusted Input/)
+  assert.doesNotMatch(prompts['find-bugs:security'], /security-review/)
 })
 
 // ------------------------------------------------------ the shared diff pack ---
@@ -399,7 +384,7 @@ test('the diff is captured once, after triage, and every hunter is pointed at th
   assert.ok(order.indexOf('diff-pack') < order.indexOf('find-bugs:logic'))
   // Cheapest tier: it runs one fixed command and reports a path. It decides nothing.
   assert.equal(opts['diff-pack'].model, 'haiku')
-  for (const h of ['logic', 'runtime-and-failures', 'docs']) {
+  for (const h of ['security', 'logic', 'runtime-and-failures', 'docs']) {
     assert.match(prompts[`find-bugs:${h}`], /\/tmp\/review\.patch/,
       `the ${h} hunter must read the shared capture`)
     assert.match(prompts[`find-bugs:${h}`], /Do NOT re-derive it/)
@@ -444,7 +429,7 @@ test('a hunter that stops short is heard — its coverage note survives the merg
   const { prompts } = await run({
     overrides: {
       'find-bugs:logic': { ran: true, findings: [], coverage: 'possible N+1 at OrderRepo:88, not confirmed' },
-      'find-bugs:security': { ran: true, findings: [], coverage: 'reviewed the working-tree diff; excludes DoS' },
+      'find-bugs:security': { ran: true, findings: [], coverage: 'read the captured diff; excludes DoS and capacity rate limiting' },
     },
   })
   // Both reach triage, and the security note still leads (skipped() tests it with an anchored ^).
@@ -456,7 +441,7 @@ test('the hunt is ordered and bounded — diff first, then a budget', async () =
   // The clauses that pay for themselves: cost here is turns × context, and the stored runs spent
   // both on orientation before the change was ever opened.
   const { prompts } = await run()
-  for (const h of ['logic', 'runtime-and-failures']) {
+  for (const h of ['security', 'logic', 'runtime-and-failures']) {
     const p = prompts[`find-bugs:${h}`]
     assert.match(p, /Read the change FIRST/)
     assert.match(p, /about 12 tool calls/)
@@ -563,15 +548,15 @@ test('at standard the blocked track is named for what actually ran, not "find-bu
 })
 
 test('a security hunter that read a DIFFERENT changeset is not a clean bill', async () => {
-  // The failure this locks down: /security-review resolves its own diff scope and ignores the one
-  // it was handed on about one dispatch in seven. The report comes back real, complete, ran=true
-  // and findings:[] — about a changeset this review is not certifying. Alive is not the same as
-  // on-scope, and only `scopeMatched` can tell them apart.
+  // The failure this locks down: a hunter whose prepared capture was missing derives the change
+  // itself, lands on a different changeset, and comes back real, complete, ran=true and
+  // findings:[] — about code this review is not certifying. Alive is not the same as on-scope,
+  // and only `scopeMatched` can tell them apart.
   const { out, logText } = await run({
     overrides: {
       'find-bugs:security': {
         ran: true, scopeMatched: false, findings: [],
-        coverage: 'asked for the working-tree diff; the skill read the 8 unpushed branch commits',
+        coverage: 'was handed the working-tree capture; judged the 8 unpushed branch commits instead',
       },
     },
   })
@@ -642,8 +627,9 @@ test('scopeMatched absent leaves the track clean — an unanswered field invents
 })
 
 test('the four security outcomes are distinguishable in the summary', async () => {
-  // All four leave findings:[] behind. Collapsed, 47 dispatches that each returned nothing cannot
-  // say whether the diffs were clean or the track never reports anything at all.
+  // All four leave findings:[] behind. Collapsed, a run of dispatches that each returned nothing
+  // cannot say whether the diffs were clean or the track never reports anything at all — the
+  // question 49 dispatches of the previous tool could not answer.
   const gated = await run({ triage: baseTriage({ securitySurface: false }) })
   assert.equal(gated.out.security, 'not-dispatched')
   const dead = await run({ overrides: { 'find-bugs:security': null } })
@@ -677,10 +663,10 @@ test('doc drift comes straight from the docs hunter, never through triage', asyn
 })
 
 // --------------------------------------------- the security hunter's own gate ---
-// Measured over 19 dispatches in one project: 0 findings, ~232k cache-write tokens each. Not
-// because it was broken — /security-review reports only HIGH/MEDIUM issues it is >80% sure are
-// exploitable, only for what a change NEWLY adds, and it excludes DoS, resource exhaustion, rate
-// limiting and secrets-on-disk outright. On a CSS or copy diff it has nothing it can say.
+// The hunt is a full parallel subagent — 1.53M cache tokens and about 200s — matching a diff
+// against injection sinks, authorization checks, credential handling and data exposure. On a CSS
+// or copy diff there is no hunk any of those patterns can apply to, so the gate saves the whole
+// dispatch. It fails OPEN, which matters more now that this track can actually return findings.
 
 test('no security surface in the diff means the security hunter is not dispatched', async () => {
   const { counts, logText } = await run({ triage: baseTriage({ securitySurface: false }) })
@@ -741,20 +727,14 @@ test('at standard with no security surface, no hunter is dispatched inside the b
   assert.match(logText, /security hunter SKIPPED/)
 })
 
-test('the security hunter passes its scope to the skill and does not re-derive the diff', async () => {
-  // Called bare, /security-review inlines the whole branch history into its own prompt — ~27k
-  // chars, worst 47k — and the hunter then re-reads the diff by hand (~13 shell calls, 0 extra
-  // findings). Both are pure token burn.
-  const { prompts } = await run()
-  const p = prompts['find-bugs:security']
-  assert.match(p, /Skill\(skill: "security-review", args: /)
-  assert.match(p, /do NOT re-derive the diff yourself/)
-})
-
-test("the security hunter must report what its tool REFUSES to look at", async () => {
+test('the security hunter must report what it did NOT look for', async () => {
+  // This track's empty result is the one that gets read as a verdict on the whole change, so its
+  // brief has to name the boundary and not just the scope. The categories after "What NOT to
+  // report" in security.md are real risks other tracks own; nobody may read findings:[] here as
+  // "this change is secure".
   const p = (await run()).prompts['find-bugs:security']
-  assert.match(p, /coverage' MUST SAY WHAT THIS TOOL WILL NOT REPORT/)
-  for (const excluded of [/denial of service/i, /rate limiting/i, /80% sure/]) {
+  assert.match(p, /'coverage' MUST name what you did NOT look for/)
+  for (const excluded of [/denial of service/i, /rate limiting/i, /not a clean bill of health/i]) {
     assert.match(p, excluded)
   }
 })

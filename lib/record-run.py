@@ -57,7 +57,11 @@ DESC_CAP = 400
 # add the matching entry to TRACK_REVS in skill-stats.py.
 #   1 — the original five hunters
 #   2 — concurrency + silent-failures merged into runtime-and-failures
-PIPELINE_REV = 2
+#   3 — `security` stopped wrapping the bundled /security-review and became a pattern hunter over
+#       security.md. Same track name, same tier membership, entirely different tool — so the rev
+#       is what stops rev-1/2 rows (49 dispatches, 0 findings, on a tool that read the wrong diff)
+#       from being counted as this hunter's evidence and retiring it before it has run once.
+PIPELINE_REV = 3
 
 # The two skills that identify themselves by `kind` rather than by name — every row the store held
 # before it went pack-wide, and anything still sending the older payload.

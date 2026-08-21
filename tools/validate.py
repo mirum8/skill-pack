@@ -325,6 +325,27 @@ def check_retired_names():
 
 
 # --- FR-11 ------------------------------------------------------------------
+def check_retired_agents():
+    """An agent the pack dropped must be gone from agents/ AND unmentioned by the pack.
+
+    check_agents() cannot catch this. Its orphan test asks whether the name appears anywhere in
+    the pack corpus, and an agent's own file is IN that corpus, so it can never fail for a shipped
+    agent. Once the name leaves AGENTS the BARE_AGENT pattern stops matching it too — so at the
+    moment a stale `r:bug-hunter-security` becomes a dispatch to a flat twin outside the pack, or
+    to nothing, nothing else is looking for it. This is.
+    """
+    for name in sorted(R.RETIRED_AGENTS):
+        if name in R.AGENTS or os.path.isfile(os.path.join(REPO, "agents", f"{name}.md")):
+            fail("ADR-6", f"agent {name} is retired but still shipped — delete agents/{name}.md "
+                          f"or drop it from RETIRED_AGENTS")
+        pat = re.compile(rf"(?<![A-Za-z0-9_-]){re.escape(name)}(?![A-Za-z0-9_-])")
+        for path in pack_text_files():
+            for i, line in enumerate(open(path, encoding="utf-8", errors="ignore"), 1):
+                if pat.search(line):
+                    fail("ADR-6", f"{os.path.relpath(path, REPO)}:{i} still names the retired "
+                                  f"agent {name!r} — it dispatches to a stale copy or to nothing")
+
+
 def check_evals():
     for d in skill_dirs():
         path = os.path.join(SKILLS, d, "evals", "evals.json")
@@ -605,6 +626,7 @@ def main():
     check_manifest()
     check_layout()
     check_retired_names()
+    check_retired_agents()
     check_frontmatter()
     check_references()
     check_r_prefix()

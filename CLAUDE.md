@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this repository is
 
 The source of `r`, a **skills-directory plugin** for Claude Code: 19 skills (`/r:<name>`) and the
-9 agents they dispatch. There is no application here — the "product" is prose (`SKILL.md`),
+8 agents they dispatch. There is no application here — the "product" is prose (`SKILL.md`),
 workflow scripts, agent definitions and a hook, all loaded by Claude Code itself.
 
 **The repo and the installed pack are two separate copies.** `install.sh` copies, it does not
@@ -70,7 +70,7 @@ The runner redirects `CLAUDE_SKILL_STATS_DB` to a throwaway so a sweep never wri
 ```
 .claude-plugin/plugin.json   identity + namespace (name must stay "r")
 skills/<name>/SKILL.md       the skill; plus references/ scripts/ tests/ evals/
-agents/<name>.md             the 9 agents skills dispatch to
+agents/<name>.md             the 8 agents skills dispatch to
 hooks/                       hooks.json + guard-workflow.py + record-skill-run.py
 lib/                         pack-wide stats sink + reporter, shared by every skill
 tools/                       build/validation scripts — NOT shipped
@@ -124,7 +124,8 @@ stays that skill's store. Rules that are load-bearing:
   and `fixed` is derived from the fixer returning, never from a finding's own size tag.
 - **A track fails to certify in two ways, and they need opposite fixes.** `tracksBlocked` is a tool
   that did not run; `tracksDrifted` is a tool that ran, returned a real report, and read a
-  *different changeset* (the `/security-review` scope trap). Equally disqualifying — `issues-fix`'s
+  *different changeset* — a hunter whose prepared diff capture was missing derives the change
+  itself and can resolve somewhere else. Equally disqualifying — `issues-fix`'s
   merge gate reads both — but a blocked tool has to be made to run while a drifted one has to be
   made to read the right thing, and re-running a drifted track unchanged just reproduces the same
   clean report about the same wrong diff. Both also subtract from a track's denominator in
@@ -147,6 +148,15 @@ stays that skill's store. Rules that are load-bearing:
   same scripts can write — that one is this classifier's own earlier answer, so a disagreement is
   it having improved; a label outside their vocabulary came from a `--label-source` run over older
   scripts and is left alone.
+- **Implementer depth is a claim under measurement, not a default.** `IMPL_RUN` in
+  `task-run-implement.workflow.js` pins the implementers at `medium`, and the `implement depth`
+  table is what decides whether that holds: it buckets every implement run by the effort mined off
+  its items and prints the paired review's yield beside it. The `high` baseline it is read against
+  is 2.11 correctness and 3.48 readability fixes per paired review, at 20.9M tokens and 1022s per
+  implementer agent — the pack's most expensive step. Read the table before moving the pin either
+  way, and read both halves: a cheaper implementer that pushes work into `fix-correctness` and
+  `end-verify-fix` has moved cost, not saved it. The pairing is positional (same repo, the next
+  pipeline-invoked review inside 12h), so it is a strong guess and never a recorded fact.
 - **No fallback store.** A row the db rejects is lost. That is why inserts say
   `ON CONFLICT(<key>) DO NOTHING` and never `INSERT OR IGNORE`, which also swallows a `NOT NULL`
   violation — it hid exactly that bug once.
@@ -182,6 +192,15 @@ non-negotiables — don't "fix" it back.
 **Real tools, or a named skip.** The pipelines call `gh`, the real Codex review, real build runners,
 `agent-browser`, `code-scan`. Never substitute a model-written prose imitation. When a tool is
 missing, the step is recorded as **skipped** and named, and the run continues.
+
+The test is whether the thing runs a real binary or a different model — and the bundled
+`/security-review` is neither, which is why the security track does NOT call it. It is a markdown
+prompt whose diff comes from four bash commands substituted in before the model runs, all pinned
+to `git diff origin/HEAD...`, with no argument placeholder anywhere in its body: a scope handed to
+it is discarded, and it never sees uncommitted work at all. Measured over 49 dispatches: 47
+reports, **0 findings**, and 5 of the 6 that checked reported reviewing a different changeset.
+`security` is a `r:bug-hunter-pattern` over `code-bugs/references/security.md`, reading the same
+captured diff as every other hunter. Reinstating the skill would re-open the hole, not close one.
 
 ## Rules `validate.sh` enforces (edit within them)
 

@@ -78,13 +78,22 @@ AGENTS = [
     "bug-hunter",
     "bug-hunter-docs",
     "bug-hunter-pattern",
-    "bug-hunter-security",
     "bug-hunter-ui",
     "gradle-build-runner",
     "htmx-thymeleaf-dev",
     "java-backend-developer",
     "maven-build-runner",
 ]
+
+# Agents the pack no longer ships. AGENTS is the shipped set, so a deleted agent simply drops out
+# of it — and out of validate.py's BARE_AGENT pattern with it, which takes the tripwire away at the
+# exact moment a leftover reference becomes dangerous. A bare or r:-prefixed mention that survives
+# resolves to a flat twin under ~/.claude/agents on some machines and to "agent type not found" on
+# others, and either way that track of a fan-out is gone. So the name is retired here rather than
+# forgotten, and validate.py fails on any pack text that still carries it.
+RETIRED_AGENTS = frozenset({
+    "bug-hunter-security",
+})
 
 # Old names that are also ordinary English. BR-3's backtick pattern is skipped
 # for these; see ref_patterns().

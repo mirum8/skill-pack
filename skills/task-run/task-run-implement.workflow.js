@@ -471,15 +471,25 @@ const PLAN_LIGHT_RUN = { model: 'opus', effort: 'high' }
 // not the whole change, and this document is reviewed downstream (by Codex at full tier, and by the
 // review's visual half against the rendered pages) rather than being the last word.
 const DESIGN_RUN = { model: 'opus', effort: 'high' }
-// The implementers were the one track that pinned nothing, so their depth came from the SESSION —
-// xhigh when entered through /r:task-run (whose frontmatter sets it), but whatever the caller
-// happened to be running at when this script is called directly, which SKILL.md explicitly invites
-// callers like /r:issues-fix to do. The same workflow wrote code at a different depth depending on
-// the entry point, silently. Pin it instead: `high` is a real floor for work that follows a plan
-// built at opus/xhigh, challenged by Codex, and re-read afterwards by /r:task-review. The model
-// is named here too — the two specialized types already declare opus, so this only lifts the
-// `general` fallback to match them rather than letting it inherit the session's model.
-const IMPL_RUN = { model: 'opus', effort: 'high' }
+// The implementers' depth is PINNED here rather than inherited from the session — unpinned, the
+// same workflow writes code at xhigh when entered through /r:task-run (whose frontmatter sets it)
+// and at whatever the caller happened to be running when the script is invoked directly, which
+// SKILL.md explicitly invites callers like /r:issues-fix to do. One depth, whatever the entry.
+//
+// `medium` is the pinned depth, and it is a claim UNDER MEASUREMENT rather than a settled default:
+// these agents follow a plan built at opus/xhigh, challenged by Codex and re-read afterwards by
+// /r:task-review, so the argument is that the judgement left to them is bounded. What the plan
+// cannot do for them is real too — observing red-before-green, deciding a [RED] test that passes
+// is a weak test rather than a formality, and setting blockedOn when the plan is wrong — so the
+// question is empirical. `implement depth` in lib/skill-stats.py answers it: it buckets every
+// implement run by the effort mined off its items and prints what the review found afterwards
+// beside it. The baseline it is measured against is `high`: 68 implementer agents over 41 runs,
+// 1.46B tokens, 1047s each — the pack's most expensive step. READ THAT TABLE before moving this
+// either way; a cheaper implementer that pushes work into fix-correctness and end-verify-fix has
+// moved cost rather than saved it. The model is named here too — the two specialized types already
+// declare opus, so this only lifts the `general` fallback to match them rather than letting it
+// inherit the session's model.
+const IMPL_RUN = { model: 'opus', effort: 'medium' }
 // Triage is SPLIT, not one agent, and the two halves want different depths. Collapsed into a
 // single xhigh agent that judges every finding and rewrites the plan, it measures 11 minutes and
 // 122k tokens on a real run, most of it re-deriving a code map the explorers already produced.
@@ -668,7 +678,7 @@ ${inRepo}
       light); "small" wording alone does not earn "light" (a one-line auth-role change is full).
 
       When you are unsure, answer "standard" — it keeps a real Codex read of the diff, the real
-      /security-review, doc-drift checking, static analysis, build+tests and a Codex read of the
+      the security hunter, doc-drift checking, static analysis, build+tests and a Codex read of the
       final diff, and gives up the plan review, the three find-bugs pattern hunters and the
       polish passes. The plan review is what "full" is really for. "full" is a claim that the
       APPROACH needs challenging before code is written, not a shrug. The one case that IS a
@@ -861,7 +871,7 @@ const looksLikeEvidence = (w) => typeof w === 'string' && w.trim().length >= 6 &
 // Dropping is the safer direction here on purpose. An over-fire costs a full run on every task —
 // which is how the tier collapsed to "always full" in the first place — while a missed escalation
 // costs the plan review and the pattern hunters, and standard still runs the real Codex diff read,
-// /security-review, static analysis, build + tests and the Codex end-verify.
+// the security hunter, static analysis, build + tests and the Codex end-verify.
 const HEDGED = /\b(if|may|might|could|likely|possibly|potentially|perhaps|probably|suspect|assuming)\b/i
 const asserts = (w) => typeof w === 'string' && w.trim().length >= 6 && !HEDGED.test(w)
 const countedFlag = (f) => !!f && RISK_SURFACES.includes(f.surface) && looksLikeEvidence(f.where) && asserts(f.why)

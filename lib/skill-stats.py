@@ -43,6 +43,12 @@ Three honesty caveats the summary repeats, because they decide whether a zero me
     standard-tier run because standard does not dispatch it — the per-track table
     therefore reports opportunities (runs where the track ran) alongside hits.
 
+`implement depth` asks the one question the cost table cannot: whether the implementers can be run
+cheaper. It buckets each implement run by the reasoning EFFORT mined off its items and prints what
+the review found afterwards beside it, so a saving that merely moved work into fix-correctness and
+end-verify-fix is visible as such. The review it pairs is a positional guess — same repo, the next
+pipeline-invoked review inside 12h — because nothing records which run a review read.
+
 The local-scan track is absent from that table by construction, not by scoring zero: it applies
 its own fixes instead of handing them to triage, so no fix can be attributed to it. Its
 yield is the separate self-fix line below the status counts.
@@ -58,7 +64,7 @@ import re
 import sqlite3
 import sys
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 DEFAULT_DB = os.path.expanduser("~/.claude/skill-stats.db")
 JSONL_ARCHIVE = os.path.expanduser("~/.claude/skill-stats.jsonl")
@@ -89,6 +95,12 @@ KIND_SKILL = {"review": "r:task-review", "implement": "r:task-run"}
 # rev 1 — the original five hunters.
 # rev 2 — `concurrency` + `silent-failures` merged into `runtime-and-failures` (they returned 0.25
 #         and 0.12 fixes/run for two whole contexts re-reading the same diff).
+# rev 3 — `security` became a pattern hunter over security.md instead of a wrapper around the
+#         bundled /security-review. The membership below is IDENTICAL to rev 2 on purpose: no
+#         track was added, removed or merged. The rev exists because the *tool* changed, and
+#         without the boundary this hunter inherits 27 rev-1/2 runs at 0.00 fixes/run measured on
+#         a tool that read a different changeset every time — the exact false evidence the
+#         retirement list acts on.
 TRACK_REVS = {
     1: {
         "light":    set(),
@@ -96,6 +108,11 @@ TRACK_REVS = {
         "full":     {"codex", "security", "docs", "logic", "concurrency", "silent-failures"},
     },
     2: {
+        "light":    set(),
+        "standard": {"codex", "security", "docs"},
+        "full":     {"codex", "security", "docs", "logic", "runtime-and-failures"},
+    },
+    3: {
         "light":    set(),
         "standard": {"codex", "security", "docs"},
         "full":     {"codex", "security", "docs", "logic", "runtime-and-failures"},
@@ -638,6 +655,164 @@ def summarize_reviews(rows):
         print("NOTE: every row here is back-filled, so the per-track table is empty by")
         print("construction. It fills in as instrumented reviews accumulate.")
 
+
+# ---------------------------------------------------------------- implement depth ---
+# `implement` is the pack's most expensive step, and the reasoning EFFORT its agents run at is a
+# real lever on that cost — so whether a cheaper implementer buys the saving or merely moves the
+# work downstream into fix-correctness and end-verify-fix has to be measured rather than argued.
+#
+# Nothing is recorded for this. `items.effort` is mined off disk with the rest of the item row, so
+# the comparison reaches every run already made, the high-effort baseline included — which is the
+# whole reason it can answer the question at all rather than starting a count from today.
+#
+# Two things it cannot see, both named in the output rather than left for the reader to assume:
+#   * A run that stops early — the plan judged wrong, the build still red after three attempts —
+#     never reaches the sink, so it leaves items behind and no run row. It is counted in the cost
+#     columns and cannot be paired, so a depth that raises the STOP rate shows up here as reviews
+#     going missing, not as worse reviews.
+#   * The pairing is positional: a review has no field naming the implement run it reviewed, so it
+#     is matched by repo and time. A pair is a strong guess, not a recorded fact.
+PAIR_WINDOW = timedelta(hours=12)
+EFFORT_ORDER = ("low", "medium", "high", "xhigh", "mixed", "unrecorded")
+# The review's own record of having been driven by the pipeline. A review invoked DIRECTLY is
+# usually a re-review of an already-fixed diff — the section above says so — and pairing one to an
+# implement run would credit that run with a second pass's findings.
+PIPELINE_CALLERS = {"run-task", "task-run", "r:task-run"}
+
+
+def _when(row):
+    """A row's timestamp as an aware datetime, or None. Naive stamps are read as UTC — every
+    writer stamps UTC, and a mixed comparison raises rather than sorting wrongly."""
+    try:
+        t = datetime.fromisoformat(str(row.get("ts")).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+
+def impl_depth_groups(db):
+    """One entry per workflow run that dispatched implementers: its effort, cost and build-fixes."""
+    con = connect(db, create=False)
+    if con is None:
+        return {}
+    try:
+        groups = {}
+        for wf, rid, label, effort, tok, ms in con.execute(
+                "SELECT wf_run_id, run_id, label, effort, "
+                "       COALESCE(tokens_in,0)+COALESCE(tokens_out,0)+COALESCE(tokens_cache,0), "
+                "       COALESCE(duration_ms,0) "
+                "FROM items WHERE label IN ('implement','build-fix')"):
+            g = groups.setdefault(wf, {"efforts": set(), "run_id": None, "agents": 0,
+                                       "tokens": 0, "ms": 0, "buildFixes": 0})
+            if rid:
+                g["run_id"] = rid
+            # A build-fix is the same agent at the same depth editing the code it just wrote, so it
+            # is an OUTCOME of the depth, not a sample of it: counted, never bucketed.
+            if label == "build-fix":
+                g["buildFixes"] += 1
+                continue
+            g["efforts"].add(effort)
+            g["agents"] += 1
+            g["tokens"] += tok or 0
+            g["ms"] += ms or 0
+        for g in groups.values():
+            named = {e for e in g["efforts"] if e}
+            g["effort"] = ("unrecorded" if not named else
+                           named.pop() if len(named) == 1 else "mixed")
+        return {wf: g for wf, g in groups.items() if g["agents"]}
+    finally:
+        con.close()
+
+
+def pair_reviews(impls, reviews):
+    """Match each implement run to the review that followed it: same repo, next in time, inside the
+    window, each review claimed once. Returns {run_id: review}."""
+    free = sorted((r for r in reviews
+                   if _when(r) and r.get("invokedBy") in PIPELINE_CALLERS
+                   and r.get("origin") != "backfill"),
+                  key=_when)
+    taken, pairs = set(), {}
+    for imp in sorted((i for i in impls if _when(i)), key=_when):
+        at = _when(imp)
+        for r in free:
+            if id(r) in taken or r.get("repo") != imp.get("repo"):
+                continue
+            gap = _when(r) - at
+            if gap < timedelta(0):
+                continue
+            if gap > PAIR_WINDOW:
+                break
+            taken.add(id(r))
+            pairs[imp.get("run_id")] = r
+            break
+    return pairs
+
+
+def summarize_impl_depth(db, rows):
+    """Cost and downstream yield per implementer depth — the answer to 'can we run them cheaper?'"""
+    groups = impl_depth_groups(db)
+    if not groups:
+        return
+    impls = {r.get("run_id"): r for r in rows if r.get("kind") == "implement" and r.get("run_id")}
+    pairs = pair_reviews(list(impls.values()), [r for r in rows if r.get("kind") == "review"])
+
+    buckets = {}
+    for g in groups.values():
+        b = buckets.setdefault(g["effort"], {"runs": 0, "agents": 0, "tokens": 0, "ms": 0,
+                                             "buildFixes": 0, "tiers": collections.Counter(),
+                                             "reviews": []})
+        b["runs"] += 1
+        b["agents"] += g["agents"]
+        b["tokens"] += g["tokens"]
+        b["ms"] += g["ms"]
+        b["buildFixes"] += g["buildFixes"]
+        run = impls.get(g["run_id"])
+        if run:
+            b["tiers"][run.get("profile") or "<none>"] += 1
+            review = pairs.get(g["run_id"])
+            if review:
+                b["reviews"].append(review)
+
+    order = [e for e in EFFORT_ORDER if e in buckets]
+    print("implement depth   (effort is mined from the items — the pipeline records nothing extra)")
+    print(f"  {'effort':<12}{'runs':>6}{'agents':>8}{'avg Mtok':>10}{'avg secs':>10}"
+          f"{'build-fix/run':>15}   tiers")
+    for e in order:
+        b = buckets[e]
+        tiers = " · ".join(f"{k} {v}" for k, v in b["tiers"].most_common()) or "—"
+        print(f"  {e:<12}{b['runs']:>6}{b['agents']:>8}"
+              f"{b['tokens'] / b['agents'] / 1_000_000:>10.1f}"
+              f"{b['ms'] / b['agents'] / 1000:>10.0f}"
+              f"{b['buildFixes'] / b['runs']:>15.2f}   {tiers}")
+
+    print()
+    print(f"  what the review found next   (same repo, within {int(PAIR_WINDOW.total_seconds() // 3600)}h, "
+          f"pipeline-invoked reviews only)")
+    print(f"  {'effort':<12}{'paired':>8}{'correctness/run':>17}{'readability/run':>17}"
+          f"{'end-verify passed':>20}")
+    for e in order:
+        rev = buckets[e]["reviews"]
+        if not rev:
+            print(f"  {e:<12}{0:>8}{'—':>17}{'—':>17}{'—':>20}")
+            continue
+        cor = sum(r.get("fixedCorrectness") or 0 for r in rev) / len(rev)
+        rea = sum(r.get("fixedReadability") or 0 for r in rev) / len(rev)
+        ev = [r for r in rev if r.get("endVerify")]
+        passed = sum(1 for r in ev if r.get("endVerify") == "passed")
+        print(f"  {e:<12}{len(rev):>8}{cor:>17.2f}{rea:>17.2f}"
+              f"{(f'{passed}/{len(ev)}' if ev else '—'):>20}")
+
+    total = sum(b["runs"] for b in buckets.values())
+    unpaired = total - sum(len(b["reviews"]) for b in buckets.values())
+    print()
+    print(f"  {unpaired} of {total} implement run(s) have no review beside them: a run that")
+    print("  stopped early never reaches the sink, and a review invoked directly is a re-review of")
+    print("  an already-fixed diff rather than a first read of this one.")
+    thin = [e for e in order if e not in ("mixed", "unrecorded") and buckets[e]["runs"] < 10]
+    if thin:
+        print("  Thin sample (<10 runs): " + ", ".join(thin) +
+              " — read these as a direction to keep watching, not a verdict.")
+    print()
 
 # Where Claude Code persists one workflow run: a journal of every item's return value, plus a full
 # transcript and a metadata file per agent. Nothing in the pack has to record any of this — mining
@@ -1222,6 +1397,7 @@ def main():
         print("=" * 72)
         print()
     summarize_reviews(rows)
+    summarize_impl_depth(db, rows)
     return 0
 
 

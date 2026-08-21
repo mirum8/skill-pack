@@ -24,7 +24,7 @@ These are the classic rules that get applied mechanically and do more harm than 
 ## Out of scope for this skill (route elsewhere, don't report here)
 
 - **Bugs / correctness / edge cases** → `/r:code-bugs`. If you spot a genuine bug while reading, mention it briefly as a note, but it is not this skill's deliverable.
-- **Security issues** → `/security-review`.
+- **Security issues** → `/r:code-bugs`' security hunter.
 - **Performance** (N+1, unbounded fetch) → that's `/r:code-bugs`' performance category.
 - **Things only a compiled static analyzer should catch** (dead code a compiler flags, library-version lints) → `/sonar`.
 - **Pure formatting / whitespace / import order** → a formatter's job, not a review's.

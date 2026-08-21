@@ -394,7 +394,7 @@ test('implementers pin model+effort, so depth cannot depend on the calling sessi
     review: OK_REVIEW, planfix: OK_FIX,
   })
   for (const l of ['implement:backend', 'implement:frontend']) {
-    assert.equal(both.optsBy[l].effort, 'high', `${l} must pin effort`)
+    assert.equal(both.optsBy[l].effort, 'medium', `${l} must pin effort`)
     assert.equal(both.optsBy[l].model, 'opus', `${l} must pin model`)
   }
 
@@ -403,7 +403,7 @@ test('implementers pin model+effort, so depth cannot depend on the calling sessi
     review: OK_REVIEW, planfix: OK_FIX,
   })
   assert.equal(fallback.optsBy['implement:general'].agentType, 'general-purpose')
-  assert.equal(fallback.optsBy['implement:general'].effort, 'high')
+  assert.equal(fallback.optsBy['implement:general'].effort, 'medium')
   assert.equal(fallback.optsBy['implement:general'].model, 'opus')
 })
 

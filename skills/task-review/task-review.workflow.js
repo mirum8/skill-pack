@@ -96,14 +96,13 @@ const FINDINGS = {
         },
       },
     },
-    coverage: { type: 'string' }, // e.g. what /security-review actually reviewed
-    // Did the tool review the changeset it was HANDED, or one it resolved for itself?
-    // /security-review recomputes its own diff scope and ignores the argument on roughly one
-    // dispatch in seven (7 of 46 recorded), and the report that comes back is real, complete and
-    // about a different changeset than the one this review certifies. The hunter has always said
-    // so in `coverage`; nothing read it, so the track reported ran=true and the run banked a
-    // clean security review of a diff nobody security-reviewed. Optional and read as `!== false`:
-    // an unanswered field is a hunter that did not check, never a reason to invent a mismatch.
+    coverage: { type: 'string' }, // what this hunter actually read, and what it will not report
+    // Did the hunter review the changeset it was HANDED, or one it resolved for itself? Every
+    // hunter is pointed at one shared diff capture, and told to fall back to `git diff HEAD` only
+    // if that file is missing or empty — so a hunter CAN come back alive, complete, and reporting
+    // on a changeset this review does not certify. That report is real and it is about the wrong
+    // code, which looks exactly like a clean one. Optional and read as `!== false`: an unanswered
+    // field is a hunter that did not check, never a reason to invent a mismatch.
     scopeMatched: { type: 'boolean' },
   },
 }
@@ -134,9 +133,9 @@ const TRIAGE = {
     // hunter on every run. Optional: an empty or missing list just means the hunter globs for
     // them itself, which is what it did before.
     docFiles: { type: 'array', items: { type: 'string' } },
-    // Does the diff touch anything /security-review could have an opinion about? Deliberately
-    // NOT required, and read as `!== false` below: an unanswered gate runs the hunter. A missing
-    // field must never be the reason a security review was skipped.
+    // Does the diff touch anything the security patterns could match? Deliberately NOT required,
+    // and read as `!== false` below: an unanswered gate runs the hunter. A missing field must
+    // never be the reason a security review was skipped.
     securitySurface: { type: 'boolean' },
   },
 }
@@ -351,9 +350,8 @@ const BATCH_CLAUSE = `
 // orchestrating owns the fan-out, because no level below it can perform one.
 //
 // `refs` is where each hunter's pattern file lives; hunters read only their own file, which is
-// what keeps five parallel reads cheap. r:bug-hunter-pattern has Bash/Glob/Grep/Read (enough to run
-// `git diff` itself), r:bug-hunter-security additionally has `Skill` (that is why the security
-// track is its own type — it must invoke the REAL /security-review, never a checklist read).
+// what keeps four parallel reads cheap. r:bug-hunter-pattern has Bash/Glob/Grep/Read — enough to
+// run `git diff` itself, and nothing else it would be tempted to reach for.
 //
 // WHY THE PATTERN HUNTERS ARE `r:bug-hunter-pattern` AND NOT `r:bug-hunter`. The agent has to agree
 // with the job, or it quietly does the other one. `r:bug-hunter` is the /r:code-bugs single-bug
@@ -372,10 +370,10 @@ const BATCH_CLAUSE = `
 // handed one reference file of known failure shapes and asked whether the diff matches any of
 // them — real judgement, but bounded by the file it was given, which is a different job from
 // deciding what is a false positive (fix-triage) or what "well-designed" means (code-quality).
-// The measured yield says the same thing: over 10 instrumented runs, logic returned 0.88 fixes
-// per run, concurrency 0.25 and silent-failures 0.12, against 1.33 for codex and 1.56 for the
-// end-verify — both of which run at `medium` because CODEX does their thinking. `high` keeps the
-// hunt and stops paying the top tier for a bounded pattern match.
+// The measured yield says the same thing: logic returns 0.71 fixes per run over 24 runs and
+// runtime-and-failures 0.31 over 16, against 0.79 for codex and 0.84 for the end-verify — both of
+// which run at `medium` because CODEX does their thinking. `high` keeps the hunt and stops paying
+// the top tier for a bounded pattern match.
 //
 // The `docs` hunter goes lower still, to `medium`, because its output is not a judgement the
 // pipeline acts on: doc drift resolves to update-doc / update-code / confirm-intent, which is the
@@ -385,10 +383,12 @@ const BATCH_CLAUSE = `
 // deliberately excluded from the fix-list. Retiring it on that number would be measuring the
 // metric, not the hunter.)
 //
-// `security` deliberately keeps the inherited top tier: its cost is the real /security-review
-// skill it invokes, not the wrapper's own reasoning, and it is already gated twice (tier +
-// securitySurface). Trimming depth there would save little and risks the one track whose misses
-// are the most expensive.
+// `security` is a pattern hunter like the other two and takes the same `high`. Pin it EXPLICITLY
+// rather than letting it inherit: r:bug-hunter-pattern's own frontmatter already says `high`, so
+// an unpinned row would sit at `high` while every table here claimed the top tier, and the
+// control-flow test asserting `effort === undefined` would stay green on a lie. After this pin no
+// hunter runs at xhigh — the tracks that keep it are the ones that adjudicate rather than match
+// (fix-triage, code-quality, /r:code-scan's triage, the readability refactor).
 const PATTERN_HUNT = { effort: 'high' }
 // The docs hunter is the one track whose MODEL is pinned down, not just its effort. Every hunter
 // agent carries `model: opus` in its own frontmatter, so an effort pin alone leaves the top model
@@ -404,8 +404,8 @@ const DOC_HUNT = { model: 'sonnet', effort: 'medium' }
 const refsDir = () => `${PACK}/skills/code-bugs/references`
 // `concurrency` and `silent-failures` are ONE hunter, and the reason is how fan-out is billed:
 // every extra subagent is a fresh context that re-reads the diff and the surrounding source from
-// scratch, and with no shared prefix it re-writes its whole cache (the security hunter alone is
-// measured at ~232k cache-write tokens per dispatch). Two agents therefore cost roughly twice one
+// scratch, and with no shared prefix it re-writes its whole cache (a pattern hunter is measured at
+// 1.53M cache tokens and 198s per dispatch over 32 runs). Two agents therefore cost roughly twice one
 // for the same diff — while together these two return 0.37 fixes per run, the weakest pair in the
 // pipeline. Keeping them merged keeps BOTH pattern files and both category sets, and pays the
 // diff-reading cost once. Splitting a hunter is worth it when each half has enough to find that
@@ -419,14 +419,31 @@ const refsDir = () => `${PACK}/skills/code-bugs/references`
 // the best-yielding pattern track (0.92 fixes/run) for another ~15%. The levers that actually pay
 // are the ones below: a leaner agent, a hunt that reads the diff first and stops, and one shared
 // diff so N hunters don't each orient themselves from scratch.
+// `security` leads the list, and the position is load-bearing: the dedup below is
+// first-hunter-wins by array order, three hunters now read the SAME diff against pattern files
+// written in the same house style, and a boundary-validation hunk matches both `security.md` and
+// logic-and-flow.md's boundary patterns. Whoever is listed first takes the attribution — and
+// `fixedBySource.security` is the exact counter the retirement list reads, so losing those ties
+// would keep scoring the track at zero for findings it actually made.
 const HUNTERS = [
+  { label: 'security', agentType: 'r:bug-hunter-pattern', ref: 'security.md',
+    focus: 'Injection & Untrusted Input, Authentication & Authorization (including auth-relevant rate limiting), Secrets & Credentials, Sensitive Data Exposure — newly introduced and high-confidence exploitable only',
+    // The one hunter whose empty result gets read as a verdict on the whole change, so its
+    // 'coverage' has to state the boundary and not just the scope. Everything after "What NOT to
+    // report" in security.md is a real risk this track does not own; the summary must be able to
+    // say so, or findings:[] reads as "this change is secure".
+    note: `'coverage' MUST name what you did NOT look for, not only what you read: this hunt is
+     newly-introduced, high-confidence-exploitable issues only, and denial of service, resource
+     exhaustion, capacity rate limiting, missing hardening and dependency CVEs are out of scope
+     here (codex, the runtime-and-failures hunter and /r:code-scan cover those). An empty findings
+     list is not a clean bill of health, and it has been read as one.`,
+    ...PATTERN_HUNT },
   { label: 'logic', agentType: 'r:bug-hunter-pattern', ref: 'logic-and-flow.md',
     focus: 'Wrong Business Logic, Implementation Mistakes, Broken Flows', ...PATTERN_HUNT },
   { label: 'runtime-and-failures', agentType: 'r:bug-hunter-pattern',
     ref: ['concurrency-data-and-performance.md', 'silent-failures-and-java.md'],
     focus: 'Data Corruption, Concurrency Issues, Resource & Connection Issues, Performance & Scalability (N+1, unbounded fetches, pool exhaustion), Silent Failures, Language-Specific Patterns',
     ...PATTERN_HUNT },
-  { label: 'security', agentType: 'r:bug-hunter-security', ref: null, focus: 'Security' },
   { label: 'docs', agentType: 'r:bug-hunter-docs', ref: 'documentation-consistency.md',
     focus: 'Documentation Consistency', ...DOC_HUNT },
 ]
@@ -441,25 +458,14 @@ let diffClause = 'Run `git diff HEAD` yourself, ONCE, to see the change — no p
 // triage is already walking this repo — so triage lists the docs once and they arrive here. The
 // value below is the fallback for a triage that found none to hand over.
 let docListClause = 'Locate the docs yourself with Glob over the filesystem (never `git ls-files` — doc files are often gitignored).'
-// What the security hunter passes /security-review as its argument, and the ONE thing that decides
-// whether that track reviews this diff or a different one. The bundled skill's Phase 0 reads:
-// "If a PR number, branch name, or file path was passed as an argument, review that target
-// instead" — three shapes, and a prose scope sentence is none of them. Handed one, the skill
-// discards it and falls through to its default `git diff @{upstream}...HEAD`, which on any branch
-// carrying earlier commits is a changeset this review is not certifying. Measured: 3 of 3
-// dispatches handed a scope sentence come back scopeMatched=false, each naming the unpushed
-// branch commits as what it actually read. So pass the changed FILE PATHS — the one shape of the three that names this
-// diff and nothing else. Set after triage; the value here is the fallback for a triage that
-// listed no files, where the prose scope at least keeps the call well-formed.
-let securityTarget = null
 const hunterPrompt = (h, scope) => {
   // The order and the budget are the point. Left to itself a hunter explores first and reads the
   // change late: measured over 151 stored `logic` runs the median one opens twelve whole source
   // files before it ever runs git diff, reaches the diff around turn 31, and finishes at turn 49
   // holding ~93k tokens of context. Cost here is turns × context, so that preamble — not the
   // reasoning, not the reference file, not this prompt — is the largest line item in the review.
-  // The clauses below are the shape the security hunter's own prompt already uses ("do NOT
-  // re-derive the diff … ~13 extra shell calls per run that produced no extra finding").
+  // The clauses below cost nothing and are worth about a dozen shell calls a run: a hunter that
+  // re-derives a diff it was already handed produced no extra finding in any measured run.
   const common = `You are one hunter of a parallel bug scan over ${scope}.
      ${diffClause}
      Work in this order, and keep it tight:
@@ -476,45 +482,13 @@ const hunterPrompt = (h, scope) => {
      Report ONLY findings you have HIGH confidence are actually broken — no style, no
      naming, no "could be better", no theoretical risks. Each finding: file, line,
      category, and 'what' = what the code does now vs what it should do + the production
-     impact, in one line. Report-only: write no tests, fix nothing.${RAN_CLAUSE}`
-  if (h.label === 'security') {
-    return `You are the SECURITY hunter of a parallel bug scan over ${scope}.
-     Invoke the REAL /security-review skill (Skill tool) and PASS THIS EXACT ARGUMENT:
-       Skill(skill: "security-review", args: ${JSON.stringify(securityTarget || scope)})
-     Pass it verbatim — do not reword it, do not summarise the file list, do not replace it with a
-     sentence describing the scope. The skill's Phase 0 honours an argument in exactly three
-     shapes: a PR number, a branch name, or a file path. Anything else it discards, and then
-     resolves its own scope as \`git diff @{upstream}...HEAD\` — the unpushed branch commits, which
-     on any branch carrying earlier work is NOT this diff. That is the failure this argument
-     exists to prevent, and it is not hypothetical: measured, 3 of 3 dispatches handed a scope
-     sentence came back having reviewed the branch commits, not the change under review.
-     Passing it also keeps the track affordable. Called with no argument the skill works its scope
-     out for itself and inlines the whole branch history — git status, the full changed-file list,
-     every commit message — into its own prompt: measured at ~27k characters per run, worst case
-     47k. That is most of what has made this the most expensive track in the review.
-     Do NOT hand-roll a "security analysis" and do NOT substitute a pattern checklist — a
-     checklist is not a security review, and returning one is the failure this dedicated hunter
-     exists to prevent. Equally, do NOT re-derive the diff yourself with git/bash once the skill
-     has run: it already holds the changeset, and re-reading it by hand was measured at ~13 extra
-     shell calls per run that produced no extra finding. One \`git diff --stat\` to name the scope
-     is enough. Report its vulnerabilities as findings with category 'security'.
-     'coverage' MUST SAY WHAT THIS TOOL WILL NOT REPORT, not just what it read. An empty result
-     here is not a clean bill, and it has already been misread as one: the skill reports only
-     HIGH/MEDIUM issues it is >80% sure are exploitable, only for what the change NEWLY
-     introduces (never pre-existing concerns), and it EXCLUDES denial of service, resource
-     exhaustion, rate limiting, and secrets stored on disk outright. So name the scope it really
-     covered (e.g. "the uncommitted working-tree diff", "the 15 unpushed commits") AND those
-     limits, so nobody reads findings:[] as "this change is secure". Those excluded categories
-     are real risks — codex, the runtime-and-failures hunter and /r:code-scan cover them.
-     Last, set scopeMatched. The argument above is what makes the skill read this diff, but it is
-     the skill that decides whether to honour it, so VERIFY rather than assume: read back what its
-     report says it covered and compare that to the scope above. Same changeset -> scopeMatched=true.
-     A different one -> scopeMatched=false, and name BOTH in 'coverage' (what you passed it, what it
-     actually read). Do NOT re-run it and do NOT try to force the scope by hand — report the mismatch
-     and stop. A clean report about the wrong diff is the one result that looks exactly like a clean
-     review and is not one, which is why this check stays even now that the argument is a shape the
-     skill is documented to accept.${RAN_CLAUSE}`
-  }
+     impact, in one line. Report-only: write no tests, fix nothing.
+     Last, set scopeMatched — it is what tells this run whether you read the change it is
+     certifying. true if the diff you actually judged is the one named above; false if you ended
+     up on a different changeset (the prepared capture was missing or empty and your own git
+     command resolved somewhere else), and then name BOTH in 'coverage'. A complete report about
+     the wrong diff looks exactly like a clean one, which is the whole reason this field exists.
+     Leave it unset if you did not check — an unanswered field invents no mismatch.${RAN_CLAUSE}`
   if (h.label === 'docs') {
     return `You are the DOCUMENTATION-CONSISTENCY hunter of a parallel bug scan over ${scope}.
      ${diffClause}
@@ -535,12 +509,12 @@ const hunterPrompt = (h, scope) => {
   const refList = refs.map((r) => `${refsDir()}/${r}`).join(' and ')
   return `Read ${refList} — those are the patterns you own; read ${refs.length > 1 ? 'those files' : 'only that file'}
      and no other reference file.${refs.length > 1
-       ? ` They are two lists of failure shapes for ONE hunt: make a single pass over the diff
-     looking for anything in either list, rather than two passes. Weight them by what the change
+       ? ` They are ${refs.length} lists of failure shapes for ONE hunt: make a single pass over the diff
+     looking for anything in any of them, rather than separate passes. Weight them by what the change
      actually does — a diff with no shared state or threading has little for the concurrency
      patterns, and a diff full of swallowed exceptions has a lot for the silent-failure ones.`
        : ''}
-     Your categories: ${h.focus}.
+     Your categories: ${h.focus}.${h.note ? `\n     ${h.note}` : ''}
      ${common}`
 }
 // Fan the hunters out, then merge. WHICH hunters is a tier decision (see HUNTER_SET below), so
@@ -555,9 +529,9 @@ async function hunterFanOut(scope, hunters, trackName) {
   const hunts = await parallel(hunters.map((h) => () =>
     reliable(`find-bugs:${h.label}`, 'Review', () => agent(
       hunterPrompt(h, scope),
-      // h.effort is per-hunter (see HUNTERS): the pattern hunters run at `high` and docs at
-      // `medium`, while security keeps the inherited top tier. Spread conditionally so a hunter
-      // with no effort of its own still inherits rather than being pinned to undefined.
+      // h.effort is per-hunter (see HUNTERS): the three pattern hunters run at `high` and docs at
+      // `medium`, so nothing here inherits the frontmatter's xhigh. Spread conditionally so a
+      // hunter with no effort of its own still inherits rather than being pinned to undefined.
       { label: `find-bugs:${h.label}`, phase: 'Review', schema: FINDINGS, agentType: h.agentType,
         ...(h.effort ? { effort: h.effort } : {}) }))))
   const missing = hunters.filter((h, i) => blocked(hunts[i])).map((h) => h.label)
@@ -565,12 +539,14 @@ async function hunterFanOut(scope, hunters, trackName) {
     log(`${trackName}: hunter(s) BLOCKED — ${missing.join(', ')}. The scan is INCOMPLETE; ` +
         `the other hunters' findings are still carried into triage, but this track is not a clean bill.`)
   }
-  // A hunter can come back ALIVE and having read the wrong thing. /security-review resolves its
-  // own diff scope and ignores the one it is handed on about one dispatch in seven, so the report
-  // is real, complete, and about a changeset this review is not certifying. Same conclusion as a
-  // blocked hunter — the scan did not cover this diff, so `ran` must not claim it did — but its
-  // OWN log line, because the two need opposite fixes: a blocked tool has to be made to run, a
-  // drifted one has to be made to read the right thing.
+  // A hunter can come back ALIVE and having read the wrong thing. Every hunter is pointed at one
+  // shared diff capture and told to derive the change itself only if that file is missing or
+  // empty — and that fallback can land on a different changeset (a hunter's own `git diff` on a
+  // branch resolves differently from the capture). The report is then real, complete, and about
+  // code this review is not certifying. Same conclusion as a blocked hunter — the scan did not
+  // cover this diff, so `ran` must not claim it did — but its OWN log line, because the two need
+  // opposite fixes: a blocked tool has to be made to run, a drifted one has to be made to read
+  // the right thing, and re-running a drifted hunter unchanged reproduces the same wrong answer.
   const drifted = hunters
     .filter((h, i) => !blocked(hunts[i]) && hunts[i] && hunts[i].scopeMatched === false)
     .map((h) => h.label)
@@ -607,8 +583,8 @@ async function hunterFanOut(scope, hunters, trackName) {
   const securityNote = secIdx < 0
     ? 'security hunter NOT DISPATCHED — no security surface in this diff. Nothing was ' +
       'security-reviewed. This is a skip, not a clean bill.'
-    : (secDrift ? 'security hunter SCOPE MISMATCH — /security-review reviewed a different ' +
-                  'changeset than this diff; nothing security-reviewed THIS change. ' : '') +
+    : (secDrift ? 'security hunter SCOPE MISMATCH — it judged a different changeset than this ' +
+                  'diff; nothing security-reviewed THIS change. ' : '') +
       (secCov ||
        (missing.includes('security') ? 'security hunter BLOCKED — nothing was security-reviewed' : ''))
   // Every hunter's coverage note survives the merge, not just the security one. The hunt is
@@ -625,17 +601,17 @@ async function hunterFanOut(scope, hunters, trackName) {
     // collapses them — every caller that must not treat this as a clean bill reads it and needs
     // no more — but the RECORD must not, because the two need opposite fixes: a blocked tool has
     // to be made to run, a drifted one has to be made to read the right thing. Collapsed into one
-    // `tracksBlocked: ['find-bugs']`, a drifted security hunter reads as "the bug scan failed"
-    // and sends someone looking for a broken tool that isn't broken — while the three hunters
-    // that did complete, and the findings they produced, are invisible.
+    // `tracksBlocked: ['find-bugs']`, a drifted hunter reads as "the bug scan failed" and sends
+    // someone looking for a broken tool that isn't broken — while the hunters that did complete,
+    // and the findings they produced, are invisible.
     blockedHunters: missing,
     driftedHunters: drifted,
     findings,
     coverage: [securityNote, ...notes].filter(Boolean).join(' | '),
     // The security half's own outcome, carried out separately because the merged `ran` and
-    // `coverage` cannot separate the four states that all leave findings:[] behind — and until
-    // they are separable, the 47 recorded dispatches that each returned nothing cannot say
-    // whether the diffs were clean or the track never reports anything at all.
+    // `coverage` cannot separate the four states that all leave findings:[] behind. Without it a
+    // run of empty security results cannot say whether the diffs were clean or the track never
+    // reports anything — the question 49 recorded dispatches of the previous tool could not answer.
     security: secIdx < 0 ? 'not-dispatched'
       : missing.includes('security') ? 'blocked'
       : drifted.includes('security') ? 'scope-mismatch' : 'clean',
@@ -647,11 +623,11 @@ async function hunterFanOut(scope, hunters, trackName) {
 // JUDGEMENT is, and the test is not "does this step matter" (they all do) but "does THIS AGENT
 // decide anything?". A wrapper around a tool that decides for it does not; nor does a fixer whose
 // finding was already judged real by someone else. What still inherits the top tier is the set
-// that forms an opinion nothing downstream re-forms: the security hunter, code-quality, fix-triage
-// (which decides what is a false positive), /r:code-scan's own triage of its findings, and the
-// readability refactor. The pattern hunters and the docs hunter are pinned below it — see the
-// PATTERN_HUNT / DOC_HUNT note above HUNTERS for why a bounded pattern match is a different job
-// from an adjudication.
+// that forms an opinion nothing downstream re-forms: code-quality, fix-triage (which decides what
+// is a false positive), /r:code-scan's own triage of its findings, and the readability refactor.
+// No hunter is in that set — all three pattern hunters and the docs hunter are pinned below it,
+// see the PATTERN_HUNT / DOC_HUNT note above HUNTERS for why a bounded pattern match is a
+// different job from an adjudication.
 //
 // A second reason to pin rather than inherit: the frontmatter only applies when this skill is
 // entered through the Skill tool. Called by scriptPath — which /r:issues-fix does for every group
@@ -790,9 +766,9 @@ const triage = await reliable('triage', 'Triage', () => agent(
   `You are Step 0+1 of /r:task-review. From the repo root:
    1. Run git diff to get changed files for ${scope}.
    1b. Make UNTRACKED source files visible to the diff: run \`git add -N\` (intent-to-add)
-       on any untracked changed source files. Otherwise the diff-scoped tracks — especially
-       /security-review, which keys strictly off \`git diff\` — silently see NOTHING for a
-       brand-new file. Intent-to-add stages no content and is reversible (\`git reset\`).
+       on any untracked changed source files. Otherwise every diff-scoped track — the hunters,
+       codex, /r:code-scan — silently sees NOTHING for a brand-new file, which is exactly where a
+       new endpoint lands. Intent-to-add stages no content and is reversible (\`git reset\`).
    2. Decide reviewNeeded: false ONLY if every changed file is doc/config-only
       (*.md,*.txt,docs/**,LICENSE,.gitignore,images). Any source/build/runtime-config
       file => true. A comment/format-only edit inside source still => true.
@@ -849,8 +825,8 @@ const triage = await reliable('triage', 'Triage', () => agent(
       seams is 'full'. Scary wording alone doesn't force 'full' (a copyright-year bump in a
       template is light); "small" wording alone doesn't earn 'light' (a one-line auth-role change
       is full). When you are unsure, answer 'standard': it keeps a real Codex read of the diff
-      (--mode review), the security hunter running the real /security-review, the docs hunter,
-      static analysis and build+tests, and only gives up the /r:code-bugs pattern hunters plus
+      (--mode review), the security hunter, the docs hunter,
+      static analysis and build+tests, and only gives up the other pattern hunters plus
       the up-front adversarial + readability passes. A caller-provided profile OVERRIDES your call
       — echo it if given. Caller-provided profile: ${TIERS.includes(opts.profile) ? opts.profile : '(none — classify it)'}
       Then set profileReason: ONE line naming what actually decided it — the file, seam or
@@ -865,17 +841,17 @@ const triage = await reliable('triage', 'Triage', () => agent(
       a false 'true' boots the whole stack and drives a browser for nothing, a false 'false'
       ships a rendered change that nothing looked at.
       Caller-provided uiTouched: ${typeof opts.uiTouched === 'boolean' ? opts.uiTouched : '(none — determine it)'}
-   8. securitySurface — does this diff touch anything a security review could have an opinion
-      about? true if ANY of: auth / permissions / session / CSRF, a new or changed HTTP endpoint
+   8. securitySurface — does this diff touch anything the security patterns could match?
+      true if ANY of: auth / permissions / session / CSRF, a new or changed HTTP endpoint
       or controller mapping, upload or file/path IO, SQL/JPQL/native queries or a migration,
       crypto / secrets / tokens / credentials, deserialization or parsing of untrusted input,
       raw/unescaped template output (th:utext, innerHTML, eval), outbound network calls, or
       security/framework configuration. false only when the change is plainly none of those —
       copy and CSS, a log message, a rename, a badge count, a test-only edit.
-      This gate exists because /security-review is expensive and structurally narrow: measured
-      over 19 dispatches it returned zero findings while costing ~232k cache-write tokens each,
-      and most of those diffs were text wrapping and notification counts it could say nothing
-      about. Answer conservatively — when in doubt say true. A skipped security review is a
+      This gate exists because the security hunt is a full parallel subagent — 1.53M cache
+      tokens and about 200s — and on a diff of text wrapping and notification counts there is
+      nothing in its pattern file to match. Answer conservatively — when in doubt say true.
+      Every hunk it never reads is a hunk nothing looked at. A skipped security review is a
       coverage hole, so it must be earned by a diff that genuinely has no security surface, not
       by a guess. If you cannot tell, omit the field: an unanswered gate runs the hunter.
    Return the structured result.`,
@@ -992,16 +968,6 @@ if (Array.isArray(triage.docFiles) && triage.docFiles.length) {
     `If a doc you clearly need is missing from that list, Glob for that one file.`
 }
 
-// The security hunter's argument (see securityTarget above): triage already listed the changed
-// files, and that list is the only argument shape /security-review will accept that names THIS
-// diff. Space-separated so it reads as a path list whichever way the skill parses it. Left null
-// for scope 'all', where there is no diff to name and the whole project genuinely is the target,
-// and for a triage that returned no files — in both cases the prose scope is the honest argument
-// even though the skill will resolve its own, and scopeMatched still reports what happened.
-if (opts.scope !== 'all' && Array.isArray(triage.changedFiles) && triage.changedFiles.length) {
-  securityTarget = triage.changedFiles.join(' ')
-}
-
 const DOCS_HUNTER = HUNTERS.find((h) => h.label === 'docs')
 const docsP = profile === 'light' ? null
   : reliable('find-bugs:docs', 'Review', () => agent(
@@ -1028,10 +994,14 @@ const noFullBuild = triage.buildTool === 'none' ? ''
 // Light: skip the fan-out entirely — the change cannot alter behavior, and a single Codex
 // --mode review pass over the final diff (Phase 6) is the review.
 // Standard: a real Codex read of the PRE-FIX diff (the lighter built-in reviewer, --mode review)
-// plus the one hunter a diff review cannot stand in for — the security hunter, which invokes the
-// real /security-review. What standard trades away are the PATTERN hunters (logic, and
-// runtime-and-failures = concurrency/performance + silent failures) and the code-quality pass, a
-// polish concern rather than a correctness one. The trade is an independent tool over the
+// plus the security hunter. Security stays at this tier while its sibling pattern hunters do not,
+// and the reason is the shape of a miss rather than the yield: a missed N+1 degrades a page, a
+// missed injection or missing authorization check is exploitable in production and is the one
+// class of defect nothing later in the pipeline re-derives. The track is also self-limiting —
+// `securitySurface` closes it on any diff whose hunks have no security surface — so it is not a
+// blanket extra hunter on every standard run. What standard trades away are the other PATTERN
+// hunters (logic, and runtime-and-failures = concurrency/performance + silent failures) and the
+// code-quality pass, a polish concern rather than a correctness one. The trade is an independent tool over the
 // LLM pattern-matchers; the coverage it costs is the performance-at-scale lens (N+1, unbounded
 // fetches, pool exhaustion), which /r:code-scan partly picks up and which a diff-scoped reviewer
 // is least likely to flag — worth knowing when reading a clean standard run.
@@ -1069,10 +1039,10 @@ const wantQuality = profile === 'full'
 // a tier that never ran find-bugs is being told a tool failed when nothing did.
 //
 // The security hunter has a SECOND gate on top of the tier: the diff has to have security surface
-// at all. /security-review only reports HIGH/MEDIUM issues it is >80% sure are exploitable, only
-// for what the change NEWLY introduces, and it excludes DoS, resource exhaustion, rate limiting
-// and secrets-on-disk outright — so on a CSS or copy change there is nothing it can say. Measured:
-// 19 dispatches, 0 findings, ~232k cache-write tokens each. `!== false` is the fail-open: only an
+// at all. The hunt is a pattern match against security.md — injection sinks, authorization checks,
+// credential handling, data exposure — so on a CSS or copy change there is no hunk any of those
+// patterns can apply to, and a full subagent (1.53M cache tokens, ~200s) buys nothing. `!== false`
+// is the fail-open, and it matters MORE now that this track can actually return findings: only an
 // explicit "no security surface" from triage skips it, never a missing field.
 const securitySurface = triage.securitySurface !== false
 // The DOCS hunter is dispatched separately, below, and is deliberately not a member of this set.
@@ -1164,8 +1134,8 @@ for (const [name, r, ran] of [['codex', codex, wantCodexUpfront],
 }
 if (profile === 'standard') {
   log('post-task-review: standard tier — a Codex --mode review pass read the diff, alongside the ' +
-      'security hunter (the real /security-review). The docs hunter ran too, off the barrier. Skipped at this tier: the ' +
-      '/r:code-bugs pattern hunters (logic; runtime-and-failures = concurrency/performance + silent failures), the ' +
+      'security hunter. The docs hunter ran too, off the barrier. Skipped at this tier: the ' +
+      'other /r:code-bugs pattern hunters (logic; runtime-and-failures = concurrency/performance + silent failures), the ' +
       'up-front codex ADVERSARIAL pass and /r:code-quality. A second Codex --mode review over the ' +
       'FINAL diff always runs below, and build/tests + local-scan are unchanged.')
 }

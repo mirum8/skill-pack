@@ -352,6 +352,50 @@ ok "the unlabelled total is still reported" "$(grep -c '4 item(s) carry no step 
 ok "the ones in a pipeline run are singled out" "$(grep -c '1 of them sit in a workflow run' <<<"$rep")" 1
 ok "the foreign ones are counted apart"     "$(grep -c '3 come from workflow runs with no pipeline step' <<<"$rep")" 1
 
+# --- implement depth ---------------------------------------------------------
+# The depth table is the instrument behind the implementers' pinned effort: it buckets each
+# implement run by the effort mined off its items and prints what the review found afterwards. It
+# has three ways to lie and each is fixed here — bucketing a build-fix as a sample of the depth
+# rather than an outcome of it, pairing a review that reviewed a different run, and pairing a
+# DIRECT review, which is a re-review of an already-fixed diff and would credit the run with a
+# second pass's findings.
+P="$TMP/depth.db"
+mk() { python3 "$SINK" --db "$P" >/dev/null 2>&1; }
+echo '{"kind":"implement","run_id":"imp-med","ts":"2026-08-01T10:00:00+00:00","repo":"acme","profile":"full"}' | mk
+echo '{"kind":"review","run_id":"rev-med","ts":"2026-08-01T11:00:00+00:00","repo":"acme","invokedBy":"run-task",
+       "fixedCorrectness":3,"fixedReadability":1,"endVerify":"passed"}' | mk
+echo '{"kind":"implement","run_id":"imp-high","ts":"2026-08-02T10:00:00+00:00","repo":"acme","profile":"standard"}' | mk
+echo '{"kind":"review","run_id":"rev-direct","ts":"2026-08-02T11:00:00+00:00","repo":"acme","invokedBy":"direct",
+       "fixedCorrectness":9,"endVerify":"passed"}' | mk
+sqlite3 "$P" "INSERT INTO items(wf_run_id,agent_id,label,effort,run_id,tokens_in,tokens_out,duration_ms) VALUES
+  ('wf_m','m1','implement','medium','imp-med',1000,1000,60000),
+  ('wf_m','m2','build-fix','medium','imp-med',10,10,1000),
+  ('wf_h','h1','implement','high','imp-high',1000,1000,60000),
+  ('wf_x','x1','implement','high',NULL,1,1,1000),
+  ('wf_x','x2','implement','medium',NULL,1,1,1000);"
+rep=$(python3 "$REPORT" --db "$P" --review 2>&1)
+ok "the depth table is printed"            "$(grep -c 'implement depth' <<<"$rep")" 1
+ok "one run per workflow, one agent in it" "$(grep -cE '^  medium +1 +1 ' <<<"$rep")" 1
+ok "a build-fix counts as an outcome"      "$(grep -cE '^  medium +1 +1 +[0-9.]+ +[0-9]+ +1\.00 ' <<<"$rep")" 1
+ok "two efforts in one run read as mixed"  "$(grep -cE '^  mixed +1 +2 ' <<<"$rep")" 1
+ok "the tier is carried across"            "$(grep -cE '^  medium +1 +1 .*full 1$' <<<"$rep")" 1
+ok "the review that followed is paired"    "$(grep -cE '^  medium +1 +3\.00 +1\.00 +1/1' <<<"$rep")" 1
+# The direct review sits one hour after imp-high and matches on repo and window — only invokedBy
+# keeps it out, which is the whole reason the field is read.
+ok "a direct review is never paired"       "$(grep -cE '^  high +0 ' <<<"$rep")" 1
+ok "unpaired runs are counted out loud"    "$(grep -c '2 of 3 implement run(s) have no review' <<<"$rep")" 1
+ok "a thin sample says so"                 "$(grep -c 'Thin sample' <<<"$rep")" 1
+
+# A review beyond the window belongs to some later run, and pairing it would attribute its
+# findings to code it never read.
+echo '{"kind":"implement","run_id":"imp-old","ts":"2026-07-01T10:00:00+00:00","repo":"acme","profile":"full"}' | mk
+echo '{"kind":"review","run_id":"rev-late","ts":"2026-07-03T10:00:00+00:00","repo":"acme","invokedBy":"run-task",
+       "fixedCorrectness":7,"endVerify":"passed"}' | mk
+sqlite3 "$P" "INSERT INTO items(wf_run_id,agent_id,label,effort,run_id,tokens_in,tokens_out,duration_ms)
+  VALUES ('wf_o','o1','implement','high','imp-old',1,1,1000);"
+rep=$(python3 "$REPORT" --db "$P" --review 2>&1)
+ok "a review outside the window is not paired" "$(grep -cE '^  high +0 ' <<<"$rep")" 1
+
 # --- importing the pre-SQLite archive ---------------------------------------
 A="$TMP/archive.jsonl"; I="$TMP/imported.db"
 printf '%s\n' \
