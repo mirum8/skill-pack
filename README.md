@@ -53,12 +53,13 @@ skills-directory case. Whether plugin discovery follows a *symlinked* entry is
 documented neither way, and it fails identically to a malformed manifest, so the
 pack does not rely on it.
 
-## The nineteen skills
+## The twenty skills
 
 | command | does |
 |---|---|
 | `/r:task-run` | one unit of work end to end — plan, implement test-first, review, PR |
 | `/r:task-review` | the review pipeline over the current diff; never fires on its own |
+| `/r:task-quick` | a small change in one thread — implement, real Codex review, verify each finding, fix what holds |
 | `/r:issues-draft` | a free-text message → a verified `issues-<slug>.md` backlog + a reply |
 | `/r:issues-fix` | triage, group and fix a backlog — GitHub issues or a markdown list |
 | `/r:code-bugs` | hunt real defects, plus drift between the changes and the docs |
@@ -82,12 +83,12 @@ alphabetically sorted `/` menu groups the families: `claudemd-*`, `code-*`,
 `issues-*`, `spec-*`, `task-*`. `hexagonal-architecture` is the one exception — it is a
 rulebook rather than an action, and "hexagonal" is the word someone reaches for.
 
-`task-run`, `issues-fix`, `plan-run` and `spec-design` carry
+`task-run`, `task-quick`, `issues-fix`, `plan-run` and `spec-design` carry
 `disable-model-invocation: true` — each says in its own text that it must never
 fire on its own, and the frontmatter enforces that rather than trusting the
 prose. Each mutates the repo or a plan on a scale nobody wants arrived at by
 inference. They stay invocable by name; they just will not auto-load, and their
-descriptions are not in context at all, which is why none of the four counts
+descriptions are not in context at all, which is why none of the five counts
 against the 16,000-character listing budget below.
 
 `task-review` says the same thing but carries no flag, on purpose. The flag is

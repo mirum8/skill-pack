@@ -4,9 +4,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repository is
 
-The source of `r`, a **skills-directory plugin** for Claude Code: 19 skills (`/r:<name>`) and the
+The source of `r`, a **skills-directory plugin** for Claude Code: 20 skills (`/r:<name>`) and the
 8 agents they dispatch. There is no application here — the "product" is prose (`SKILL.md`),
 workflow scripts, agent definitions and a hook, all loaded by Claude Code itself.
+
+**Load the `skill-creator` skill before you touch anything here.** Every file in this repo is a
+skill, an agent or the machinery that loads them, so `skill-creator` is the reference for the
+format the loader actually reads — frontmatter fields and their effects, description and trigger
+wording, directory layout, evals. Load it at the start of any session that edits this pack, not
+just when creating a skill from scratch: an edit to a `description`, a new `SKILL.md`, a
+frontmatter flag or an `evals.json` is exactly the work it covers, and getting those wrong fails
+silently — a skill that never routes, or a flag that quietly removes it from the router's context.
+The pack's own rules below win where the two disagree; `skill-creator` is the format, this file is
+the policy.
 
 **The repo and the installed pack are two separate copies.** `install.sh` copies, it does not
 symlink. Edit here → run `./install.sh` to publish into `~/.claude/skills/r`. A `SKILL.md` edit is
@@ -93,6 +103,20 @@ this at the top; keep it true.
 `task-run-implement.workflow.js` is the **single encoding** of Steps 0–4 — `SKILL.md` delegates to
 it and must not restate the graph. `task-review` deliberately carries two engines (the script plus
 `references/prose-pipeline.md`) and pays a lockstep tax; changing one means changing the other.
+
+`task-quick` is the third pipeline and is deliberately **not** code: implement → review → verify →
+fix, run inline in the main thread with no `Workflow` and no subagents. There is no fan-out to lose,
+so orchestration would buy nothing and cost a round trip and a context re-read per step; the trade
+is that everything it reads stays in the caller's context, which is why the skill keeps telling the
+reader to target its reading. It earns its place by what it leaves out — no planning phase, no
+explorers, no hunters, no `/r:code-scan`, no UI pass, no branch, no PR, no commit, no plan file —
+against a `task-run` whose `implement` step alone measures 88 runs / 1.69B tokens / 963s per agent
+before the review that follows adds another 258 hunter dispatches. Two things carry its weight and
+must not be softened: the review is the REAL Codex reviewer (a run that could not reach it reports
+an unreviewed change, never a clean one), and every finding is VERIFIED against the code before
+anything is fixed — confirmed or dismissed, each with a reason, and only the confirmed ones fixed.
+Its findings are recorded under their own `quick-codex` track: same tool as `task-review`'s `codex`,
+different mode and a much smaller change under it, so merging them would make neither readable.
 
 **Every workflow edit needs its control-flow test.** `tests/control-flow.test.mjs` executes the
 script with `agent()`/`parallel()`/`phase()`/`log()` stubbed and asserts the branches — what stops

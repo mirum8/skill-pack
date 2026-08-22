@@ -1,0 +1,58 @@
+{
+  "skill_name": "task-quick",
+  "evals": [
+    {
+      "id": 0,
+      "name": "routing-triggers",
+      "kind": "trigger",
+      "prompt": "/r:task-quick the export button posts twice when you double-click it",
+      "expected_output": "task-quick loads and runs in this one thread: a scope check first (hand it to task-run if it needs a design decision, a risk surface, a migration or more than about five files), then test-first implementation with the build green, then the real Codex reviewer over the finished diff, then each finding verified against the code as confirmed or dismissed with a reason, and only the confirmed ones fixed. It ends with the diff uncommitted on the current branch — no plan file, no branch, no PR, no commit.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 1,
+      "name": "routing-excludes-task-run",
+      "kind": "neighbour-exclusion",
+      "neighbour": "task-run",
+      "prompt": "implement issue #42 end to end and open a PR for it",
+      "expected_output": "task-run's job: a task shipped behind a PR wants the feature branch, the explored and Codex-reviewed plan, and the whole /r:task-review pipeline. task-quick must not load — it has no planning phase, never branches, never commits and never opens a PR, and its single Codex pass is not the review a shipped change is owed.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 2,
+      "name": "routing-excludes-task-review",
+      "kind": "neighbour-exclusion",
+      "neighbour": "task-review",
+      "prompt": "review the diff I already have and fix what it finds",
+      "expected_output": "task-review's job: the code already exists, so there is nothing to implement. task-quick must not load — its first step would have nothing to do, and its single Codex pass plus verification is a thinner review than a finished diff deserves.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 3,
+      "name": "routing-excludes-issues-fix",
+      "kind": "neighbour-exclusion",
+      "neighbour": "issues-fix",
+      "prompt": "work through issues.md and fix everything on the list",
+      "expected_output": "A whole backlog is issues-fix's job — it verifies each item against the code, groups what one change can fix together, and keeps going when a group fails. task-quick must not load: it takes exactly one small change and has no loop, no grouping and no per-item bookkeeping.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 4,
+      "name": "routing-triggers-quick-phrasing",
+      "kind": "trigger",
+      "prompt": "small change, don't run the whole pipeline: rename the userId param on OrderController.confirm to buyerId",
+      "expected_output": "task-quick loads: this is the shape it exists for — one or two files, no design decision, no risk surface. It implements test-first, builds, gets a real Codex read of the diff, verifies each finding and fixes only the ones that hold, rather than paying for task-run's explorers, plan review and full post-task review.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    }
+  ]
+}
