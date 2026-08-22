@@ -53,6 +53,36 @@
       "files": [],
       "fixture": null,
       "assertions": []
+    },
+    {
+      "id": 5,
+      "kind": "behaviour",
+      "name": "phase-failure-halts-rather-than-building-on-top",
+      "prompt": "/r:plan-run docs/billing/todo.md",
+      "expected_output": "The first phase that fails — implement stopped, review blocked, build red, or its own Done when: check failing — halts the run. Later phases are not attempted on top of it, the branch is left in place unmerged, and the report names the halt reason and the resume command.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 6,
+      "kind": "behaviour",
+      "name": "no-merge-refuses-from-the-primary-tree",
+      "prompt": "/r:plan-run docs/billing/todo.md --phases 5 --no-merge",
+      "expected_output": "Run from the primary working tree, --no-merge stops and prints the git worktree add --detach command instead of running. A --no-merge run there would strand the user's own checkout on a phase branch with a finished commit and no merge. The slice is also checked against the graph first, and a missing checker is a halt, not a named skip.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 7,
+      "kind": "behaviour",
+      "name": "phases-run-in-the-plan-order-never-regrouped",
+      "prompt": "/r:plan-run docs/billing/todo.md --from 3",
+      "expected_output": "Every unticked phase runs in its written order, one at a time. Phases are never reordered, folded together or re-derived — the plan already carries each phase's Files:, Risk: and runnable Done when:, and each is re-checked against the current code just before it runs.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
     }
   ]
 }

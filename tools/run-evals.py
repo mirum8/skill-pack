@@ -112,7 +112,14 @@ def load_cases(only=None):
             name = case.get("name", f"id-{case.get('id')}")
             kind = case.get("kind")
             if kind not in ROUTING_KINDS:
-                skipped.append((skill, name, "behaviour case — needs its fixture and a judge"))
+                # An unknown kind is named as unknown, never folded into the behaviour bucket. Both
+                # end up skipped, but they need opposite fixes: a behaviour case is waiting on a
+                # fixture and a judge, while a typo'd kind is a routing case that has silently left
+                # the sweep. Reported as "behaviour", the second one reads as work already scoped.
+                why = ("behaviour case — needs its fixture and a judge" if kind == "behaviour"
+                       else f"unknown kind {kind!r} — not run; fix it to one of "
+                            f"{sorted(ROUTING_KINDS | {'behaviour'})}")
+                skipped.append((skill, name, why))
                 continue
             if no_route:
                 # BOTH kinds go, not just the trigger. The description of a flagged skill is not in

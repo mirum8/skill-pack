@@ -369,8 +369,12 @@ For each phase:
 ## Running phases concurrently
 
 Leaves in the same wave have no dependency between them and share no file, so they can be built at
-the same time — one `/r:plan-run` session each. What makes that safe is entirely mechanical, and it
-is worth knowing why before using it.
+the same time — one `/r:plan-run` session each. What makes that safe is entirely mechanical.
+
+[references/concurrent-sessions.md](references/concurrent-sessions.md) is the mechanics: the exact
+`git worktree` commands, the tree-detection test, the checker's three refusals and the loop `--land`
+uses to read a branch's marker. **Read it before running either `--no-merge` or `--land`** — what
+follows here is why each rule exists, not what to type.
 
 **The git constraint that decides the shape.** A linked worktree cannot check out `<base>` by name
 while the primary tree holds it — git refuses with *"'main' is already used by worktree at …"*. So
@@ -387,29 +391,18 @@ It is also the first thing anyone will try, so it is a preflight refusal rather 
 
 ### Preflight — whenever `--no-merge` is passed
 
-1. **Refuse from the primary working tree.** Detect it:
+1. **Refuse from the primary working tree.** A `--no-merge` run there would leave the user's own
+   checkout sitting on a phase branch with a finished commit and no merge — recoverable, but exactly
+   the confusion this mode exists to avoid. Stop and print the `git worktree add --detach` command
+   instead of running.
 
-   ```sh
-   [ "$(git rev-parse --git-dir)" != "$(git rev-parse --git-common-dir)" ]   # true => linked worktree
-   ```
-
-   In the primary tree, **stop** and print the `git worktree add --detach` command instead of
-   running. A `--no-merge` run there would leave the user's own checkout sitting on a phase branch
-   with a finished commit and no merge — recoverable, but exactly the confusion this mode exists to
-   avoid.
-
-2. **Verify the slice against the graph**, using the same checker:
-
-   ```sh
-   python3 "${CLAUDE_PLUGIN_ROOT}/skills/spec-design/scripts/check_todo.py" <plan> --slice <n,n>
-   ```
-
-   It answers only the concurrency question — a dependency not built yet, a dependency inside the
-   same slice, a shared file — and stays quiet about plan quality, because refusing to start over a
-   missing `Implements:` line would be noise at the worst moment. A non-zero exit is a **stop**: a
-   slice that ignores the graph is precisely the failure this whole mode exists to prevent. If the
-   checker is missing, say so and **stop anyway** — this is the one place a named skip is not good
-   enough, because nothing else checks it.
+2. **Verify the slice against the graph** with `check_todo.py --slice <n,n>`. It answers only the
+   concurrency question — a dependency not built yet, a dependency inside the same slice, a shared
+   file — and stays quiet about plan quality, because refusing to start over a missing `Implements:`
+   line would be noise at the worst moment. A non-zero exit is a **stop**: a slice that ignores the
+   graph is precisely the failure this whole mode exists to prevent. If the checker is missing, say
+   so and **stop anyway** — this is the one place a named skip is not good enough, because nothing
+   else checks it.
 
 ### What changes inside the loop
 
@@ -422,45 +415,28 @@ Only two steps, and only under `--no-merge`:
 Everything between them — the re-check, both Workflows, the `Done when:` check, the tick, the
 single commit — is unchanged. A concurrent session is not a lesser run.
 
-### The commands, which `--dry-run` prints
+### What `--dry-run` prints
 
-```
-Wave 3 — 3 leaves, none sharing a file. Run concurrently, one session each:
-
-  git worktree add --detach ../billing-p5 main
-  cd ../billing-p5 && /r:plan-run docs/billing/todo.md --phases 5 --no-merge
-
-  git worktree add --detach ../billing-p6 main
-  cd ../billing-p6 && /r:plan-run docs/billing/todo.md --phases 6 --no-merge
-
-  git worktree add --detach ../billing-p9 main
-  cd ../billing-p9 && /r:plan-run docs/billing/todo.md --phases 9 --no-merge
-
-Then, from the primary tree:
-  /r:plan-run docs/billing/todo.md --land
-```
-
-Print these only for a wave with **more than one unbuilt leaf**. A wave of one is the common case
-and the honest answer there is that there is nothing to parallelise; a table of hopeful commands
-over single-leaf waves buries the waves where it actually pays.
+The worktree/`--no-merge`/`--land` command block from the reference, filled in for the wave — but
+only for a wave with **more than one unbuilt leaf**. A wave of one is the common case and the honest
+answer there is that there is nothing to parallelise; a table of hopeful commands over single-leaf
+waves buries the waves where it actually pays.
 
 ## `--land` — merging what the concurrent sessions built
 
 Runs **from the primary working tree only** (the same detection, inverted: refuse from a linked
 worktree, since base cannot be checked out there). It builds nothing.
 
-1. **Find the finished branches.** `git branch --list 'phase-*'`, keeping those where
-   `git merge-base --is-ancestor <branch> <base>` is false.
-2. **Map each branch to its phase.** Branches are named `phase-<slug>`, not `phase-<n>`, so read
-   the marker the run already wrote (Step 3.6): `git show <branch>:<plan>` and find the heading
-   carrying `<!-- built: <branch> -->`. Its number is the phase.
+1. **Find the finished branches** — `phase-*` branches not yet ancestors of base.
+2. **Map each branch to its phase** by the marker the run wrote on the heading when it ticked the
+   phase (Step 3.6), read off the branch without checking anything out. Branches are named
+   `phase-<slug>`, not `phase-<n>`, so the slug alone cannot say which phase a branch built.
 
    **A branch with no marker is not a finished phase — skip it and say so.** It is a run that
    halted, or someone else's branch that happens to match the glob. Guessing which phase it was
    would merge unreviewed work.
-3. **Merge in ascending phase order**, one at a time: `git merge --no-ff <branch>`, then delete the
-   branch. Ascending order is a valid dependency order, because the plan's numbering is a
-   topological sort of the graph.
+3. **Merge in ascending phase order**, one at a time, then delete the branch. Ascending order is a
+   valid dependency order, because the plan's numbering is a topological sort of the graph.
 4. **On a conflict, stop and surface it — never force it.** Report which branch, leave it in place
    and unmerged, and name the ones already landed so a re-run continues rather than repeats. The
    merge is idempotent (step 1 skips anything already an ancestor), so re-running after a manual
@@ -521,28 +497,12 @@ merge — and that is indistinguishable from a run whose merge failed. Same trap
 scores zero because its tier never dispatched it: absence of an action is not a failed action, and
 only the row itself can say which this was.
 
-**Count what this run actually did, and leave the rest at zero.** A `no-merge` session sets
-`phasesInRun` and `merged: 0`; a `land` pass sets `landed` and leaves `phasesInRun: 0`, because it
-builds nothing. A `dry-run` sets `phasesInPlan` and nothing else.
-
-**So read the concurrent flow across rows, never within one.** A wave built in three sessions and
-landed from the primary tree is *four* rows — three `no-merge` and one `land` — and no single one of
-them holds both halves. The question "how far does a plan survive contact with the code" is
-`phasesInRun` against `merged + landed` **summed over a plan's rows**; asked of one row it reads as
-a string of failures. This is the one metric here that a naive per-row average gets backwards.
-
-**`haltReason` is why, where `haltedAt` is only which phase.** A closed vocabulary, so it can be
-counted: `implement-stopped` | `review-blocked` | `tracks-blocked` | `build-red` | `done-when-failed`
-| `merge-conflict` | `dirty-base` | `recheck-blocked` | `slice-refused` | `workflow-unavailable`.
-The one worth separating from all the others is `review-blocked` — a review that ran and left part of
-the diff unread is a different failure from a build that went red, and it is the one that would
-otherwise have merged.
-
-**`doneCheckFailed` is the point of having a `Done when:` at all.** `doneCheckRan` says the command
-executed; only `doneCheckFailed` records the case the step exists for — a phase whose review passed
-and whose own check did not. If that number stays zero across many runs, the check is costing a
-command per phase and catching nothing; if it does not, it is catching what no reviewer could.
-`alreadyDone` justifies the per-phase re-check the same way.
+**What every remaining field is for** — which counts a `no-merge`, `land` or `dry-run` row
+leaves at zero, why the concurrent flow only reads across rows, `haltReason`'s closed
+vocabulary and `doneCheckFailed` — is in
+[references/stats-fields.md](references/stats-fields.md). Read it while filling the line in:
+a field written without knowing what question it answers gets a plausible number instead of a
+true one.
 
 The script always exits `0` — a lost row is a lost row, never a failed run, and it must never change
 what was merged, landed or ticked. Never retry it.

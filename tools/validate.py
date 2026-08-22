@@ -274,10 +274,16 @@ def check_agents():
     shipped = sorted(f[:-3] for f in os.listdir(adir) if f.endswith(".md"))
     if shipped != sorted(R.AGENTS):
         fail("FR-5", f"agents/ holds {shipped}, expected {sorted(R.AGENTS)}")
+    # SKILL text only, and the `r:`-prefixed name only. `pack_text_files()` walks agents/ too, so a
+    # corpus built from it contains every agent's own `name:` line and the check passes for all of
+    # them however orphaned they are. The prefix is the other half: a bare `bug-hunter` matches the
+    # agent's own filename and its neighbours' prose, while `r:bug-hunter` is the form a dispatch
+    # actually uses — BR-5 above requires it of every agentType and subagent_type in the pack.
     corpus = "\n".join(open(p, encoding="utf-8", errors="ignore").read()
-                       for p in pack_text_files())
+                       for p in pack_text_files()
+                       if os.path.relpath(p, REPO).startswith("skills" + os.sep))
     for a in shipped:
-        if a not in corpus:
+        if f"r:{a}" not in corpus:
             fail("ADR-6", f"agent {a} is dispatched by no packed skill — it is orphaned "
                           "and should be dropped rather than shipped")
         # An agent's frontmatter has to parse for the same reason a skill's does,
@@ -346,6 +352,23 @@ def check_retired_agents():
                                   f"agent {name!r} — it dispatches to a stale copy or to nothing")
 
 
+EVAL_KINDS = {"trigger", "neighbour-exclusion", "behaviour"}
+
+
+# A suite proves the skill still works in exactly two ways, and which one applies is decided by
+# `disable-model-invocation`, not by preference. For a routable skill the risk is the router: its
+# description competes for a listing budget and drifts against its neighbours, so it needs a
+# `trigger` and a `neighbour-exclusion` case. A flagged skill has no description in the router's
+# context at all and NO prompt can reach it — so those same two kinds can only return one answer,
+# and `run-evals.py` skips both and says why. Demanding them there produced four suites
+# (`issues-fix`, `plan-run`, `task-quick`, `task-run`) where every case was skipped: green gate,
+# nothing measured. So the requirement inverts with the flag, and a flagged skill owes a
+# `behaviour` case instead — the only kind that can say anything about a skill nothing can route to.
+#
+# `kind` is also checked against the vocabulary, because it is not optional in effect: `run-evals.py`
+# buckets any unrecognised value as "behaviour case — needs its fixture and a judge" and skips it.
+# A typo'd `"triger"` therefore disappears from the routing sweep silently, and a suite that still
+# holds one correctly-spelled trigger case passes this check while measuring half of what it claims.
 def check_evals():
     for d in skill_dirs():
         path = os.path.join(SKILLS, d, "evals", "evals.json")
@@ -357,14 +380,33 @@ def check_evals():
         except json.JSONDecodeError as e:
             fail("FR-11", f"{d}/evals/evals.json does not parse: {e}")
             continue
-        kinds = {e.get("kind") for e in suite.get("evals", [])}
-        if "trigger" not in kinds:
-            fail("FR-11", f"{d} has no trigger case — nothing checks it still fires on its "
-                          "own phrasing")
-        if "neighbour-exclusion" not in kinds:
-            fail("FR-11", f"{d} has no neighbour-exclusion case — nothing catches it "
-                          "mis-routing against its nearest neighbour")
-
+        cases = suite.get("evals", [])
+        for e in cases:
+            kind = e.get("kind")
+            if kind not in EVAL_KINDS:
+                name = e.get("name", f"id-{e.get('id')}")
+                fail("FR-11", f"{d}/{name} has kind {kind!r}, which is not one of "
+                              f"{sorted(EVAL_KINDS)}. run-evals.py treats anything it does not "
+                              "recognise as a behaviour case and skips it, so a typo here removes "
+                              "the case from the sweep without failing anything")
+        kinds = {e.get("kind") for e in cases}
+        fm, _ = frontmatter(os.path.join(SKILLS, d, "SKILL.md"))
+        try:
+            data = (yaml.safe_load(fm) or {}) if fm else {}
+        except yaml.YAMLError:
+            data = {}
+        routable = invocable_by_model(data)
+        if routable:
+            if "trigger" not in kinds:
+                fail("FR-11", f"{d} has no trigger case — nothing checks it still fires on its "
+                              "own phrasing")
+            if "neighbour-exclusion" not in kinds:
+                fail("FR-11", f"{d} has no neighbour-exclusion case — nothing catches it "
+                              "mis-routing against its nearest neighbour")
+        elif "behaviour" not in kinds:
+            fail("FR-11", f"{d} sets disable-model-invocation, so no prompt can route to it and "
+                          "run-evals.py skips every trigger and neighbour-exclusion case it has. "
+                          "It needs at least one behaviour case, or its suite measures nothing")
 
 # --- FR-13 ------------------------------------------------------------------
 def check_artifacts():
@@ -443,6 +485,56 @@ def check_paths():
                           "cannot locate run.sh, the deploy helper or its reference files must "
                           "stop rather than certify a review it never performed.")
 
+
+
+# --- FR-19 ------------------------------------------------------------------
+# The mirror of the absolute-path rule above, and the half that actually bit. Forbidding
+# `/Users/<name>/…` still lets a skill invoke its own bundled script by a BARE relative path, and
+# that reads as correct in the repo, where `skills/code-scan/scripts/local-scan.py` really does sit
+# under `scripts/`. At run time the cwd is the USER'S project — code-scan's own Prerequisites say
+# so — and the path resolves against a tree that has no `scripts/` at all. Nothing errors visibly:
+# the model locates the file some other way and the run still reports a scan, which is why 16
+# recorded code-scan runs never surfaced it. A human placeholder nothing substitutes
+# (`python3 <this skill>/scripts/check_spec.py`) fails the same way.
+# Only INVOCATIONS are checked, never mentions: "`scripts/check_spec.py` reads it" is prose naming
+# the checker, and demanding a placeholder there would push editors to write paths into sentences.
+# `*.workflow.js` is exempt because no placeholder is substituted inside a workflow script — those
+# resolve `${PACK}` from args.packRoot, which the rule above covers.
+INVOKE = r'(?:python3|bash|sh|Run|\./)\s*'
+QUOTE = r'["\'`]*(?:[A-Z_]+=)?'
+
+
+def check_script_refs():
+    for skill in skill_dirs():
+        sdir = os.path.join(SKILLS, skill, "scripts")
+        if not os.path.isdir(sdir):
+            continue
+        surfaces = []
+        for root, dirs, files in os.walk(os.path.join(SKILLS, skill)):
+            dirs[:] = [d for d in dirs if d not in ("tests", "evals")]
+            surfaces += [os.path.join(root, f) for f in sorted(files) if f.endswith(".md")]
+        for script in sorted(os.listdir(sdir)):
+            esc = re.escape(script)
+            cmd = re.compile(INVOKE + QUOTE + r'(?P<path>[^\s"\'`]*scripts/' + esc + ')')
+            angle = re.compile(INVOKE + QUOTE + r'(?P<path>[^\n`"]*<[^>\n]*>/scripts/' + esc + ')')
+            for path in surfaces:
+                rel = os.path.relpath(path, REPO)
+                text = open(path, encoding="utf-8", errors="ignore").read()
+                for m in angle.finditer(text):
+                    fail("FR-19", f"{rel} invokes {script} through an unsubstituted placeholder "
+                                  f"({m.group('path')}); only ${{CLAUDE_SKILL_DIR}} and "
+                                  f"${{CLAUDE_PLUGIN_ROOT}} are substituted")
+                for m in cmd.finditer(text):
+                    got = m.group("path")
+                    if got.startswith("${CLAUDE_SKILL_DIR}/scripts/"):
+                        continue
+                    if re.fullmatch(r"\$\{CLAUDE_PLUGIN_ROOT\}/skills/[a-z0-9-]+/scripts/" + esc, got):
+                        continue
+                    fail("FR-19", f"{rel} invokes `{got}`, which resolves against the user's "
+                                  f"project rather than the skill. Use "
+                                  f"${{CLAUDE_SKILL_DIR}}/scripts/{script} (or "
+                                  f"${{CLAUDE_PLUGIN_ROOT}}/skills/<name>/scripts/{script} from "
+                                  f"another skill)")
 
 # --- FR-2 -------------------------------------------------------------------
 # Every `skills/*/scripts/*.sh` is invoked as a bare quoted path — the pipelines dispatch
@@ -636,6 +728,7 @@ def main():
     check_evals()
     check_artifacts()
     check_paths()
+    check_script_refs()
     check_home_paths()
     check_script_modes()
     check_vendored()

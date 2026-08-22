@@ -30,7 +30,7 @@ Each tool is independent: if one isn't installed (or SpotBugs has no bytecode to
 
 ## Prerequisites
 
-- `pmd`, `spotbugs`, and `semgrep` should be on `PATH`. Run `scripts/check-tools.sh` first — it reports what's present and prints the one-line install command for anything missing (on macOS: `brew install pmd spotbugs semgrep`). The skill still runs with a subset, but tell the user which tools were skipped so they understand the coverage gap.
+- `pmd`, `spotbugs`, and `semgrep` should be on `PATH`. Run `"${CLAUDE_SKILL_DIR}/scripts/check-tools.sh"` first — it reports what's present and prints the one-line install command for anything missing (on macOS: `brew install pmd spotbugs semgrep`). The skill still runs with a subset, but tell the user which tools were skipped so they understand the coverage gap.
 - The cwd must be a project root with `pom.xml`, `build.gradle*`, or `mvnw`/`gradlew`. SpotBugs needs compiled classes, so the orchestrator runs an incremental compile each run (cheap, and it keeps SpotBugs reading the *current* bytecode rather than stale `.class` files from before your fixes). If the build is broken, **stop and fix the build first** — bug findings on code that doesn't compile are noise.
 - `python3` is used to run the orchestrator. No tokens, no env vars, no network except a one-time download of the find-sec-bugs plugin jar (cached under `~/.cache/local-scan/`) and Semgrep's first registry-rule fetch (also cached).
 
@@ -38,7 +38,7 @@ Each tool is independent: if one isn't installed (or SpotBugs has no bytecode to
 
 ### Step 1: Run the scan
 
-Run `scripts/local-scan.py` with the flag matching the user's invocation (see "Invocation arguments"). It scopes the source set, runs each available analyzer, normalizes the three output formats, filters to the in-scope files, and writes `findings.json` plus a printed table:
+Run `python3 "${CLAUDE_SKILL_DIR}/scripts/local-scan.py"` with the flag matching the user's invocation (see "Invocation arguments"). It scopes the source set, runs each available analyzer, normalizes the three output formats, filters to the in-scope files, and writes `findings.json` plus a printed table:
 
 ```
 SEVERITY  TOOL      CATEGORY  FILE:LINE                       RULE                MESSAGE

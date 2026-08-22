@@ -3,6 +3,7 @@
   "evals": [
     {
       "id": 1,
+      "kind": "behaviour",
       "name": "ddd-marker-interfaces",
       "prompt": "im modeling orders in core. an order has line items and a money total. i keep reading that Order should be an 'aggregate root' and Money should be a 'value object' — do i need to create AggregateRoot and ValueObject marker interfaces in core, or is there a simpler way that still respects hexagonal?",
       "expected_output": "Answer rejects DDD tactical markers (AggregateRoot, ValueObject, DomainEvent). Recommends plain Java records for Order / OrderLine / Money. States that hexagonal's module discipline does not require DDD tactical patterns.",
@@ -15,6 +16,7 @@
     },
     {
       "id": 2,
+      "kind": "behaviour",
       "name": "cqrs-handler-split",
       "prompt": "adding a reports feature — users can both CREATE report jobs and QUERY report results. another dev on the team wants to split it into CreateReportCommandHandler + GetReportQueryHandler with separate command/query DTOs and a mediator. feels overkill to me in a spring boot monolith. what's the right call under hexagonal lite?",
       "expected_output": "Answer pushes back on CQRS handler split. Recommends either one ReportUseCase with multiple methods, or two focused *UseCase interfaces if the callers are genuinely different — but no CommandHandler/QueryHandler hierarchy and no mediator.",
@@ -27,6 +29,7 @@
     },
     {
       "id": 3,
+      "kind": "behaviour",
       "name": "boundary-cleanup-and-adapter-internals",
       "prompt": "im refactoring. right now core has a dependency on org.springframework.web because one of the services builds a ResponseEntity and a controller in web-adapter calls into it. also the core Order class has @Entity on it and jpa-adapter uses it directly as its row. and separately — inside jpa-adapter i have OrderEntityMapper as an interface + OrderEntityMapperImpl for no reason other than habit. i want to clean all of this up.",
       "expected_output": "Three-part answer: (a) ResponseEntity must not be in core — move construction to the controller in web-adapter, return a plain domain type from the service. (b) @Entity must not be in core — introduce OrderEntity in jpa-adapter, define OrderRepository port in core.port.out, implement in jpa-adapter with a mapper between OrderEntity and the plain Order record. (c) OrderEntityMapper should be a concrete class, not an interface + impl, because adapter-internal code has no seam to justify an interface.",
@@ -40,6 +43,7 @@
     },
     {
       "id": 4,
+      "kind": "behaviour",
       "name": "inbound-usecase-interface-visibility",
       "prompt": "ive got a CreateOrderUseCase interface in core.port.in and a CreateOrderService implementing it in core.service, and it's only ever called from one OrderController. a teammate says the interface is pointless ceremony — one impl, one caller — and i should just delete it and have the controller call the service directly. is he right? should i drop the UseCase interface?",
       "expected_output": "Answer should NOT give a blanket 'always keep it' or 'always delete it'. It should distinguish the inbound *UseCase interface (which inverts no dependency, since controller and service both live on the inward side) from outbound ports (which genuinely invert a dependency and should always stay). The keep/drop decision should hinge on the implementing @Service's visibility: keep the interface if the service is package-private (so the public interface is the core's published API / a compiler-enforced seam across the module boundary); drop it and call the @Service directly if the service is public anyway.",
@@ -52,6 +56,7 @@
     },
     {
       "id": 5,
+      "kind": "behaviour",
       "name": "transaction-boundary-placement",
       "prompt": "where does @Transactional go in this hexagonal-lite setup? my CreateOrderService lives in core and calls OrderRepository.save and then InventoryPort.reserve — both are outbound ports implemented over in the jpa-adapter. should @Transactional sit on the jpa repository adapter, or on the core service? and is it even ok for core to use @Transactional if core is supposed to stay framework-free?",
       "expected_output": "Answer puts @Transactional on the core use-case service (CreateOrderService), NOT on the persistence adapter — because the use case is the unit of work and the core service is the only place that sees all the ports a single transaction must wrap; a transaction inside one repository call in the adapter can't span save + reserve. It also confirms @Transactional IS allowed in core: it's a declarative annotation (spring-tx), not I/O, the same category as @Service and jakarta.validation, so it doesn't violate the framework-free rule.",
@@ -64,6 +69,7 @@
     },
     {
       "id": 6,
+      "kind": "behaviour",
       "name": "testing-strategy-and-port-payoff",
       "prompt": "how should i actually test this hexagonal-lite project? i've got a core OrderService that depends on an OrderRepository outbound port, a jpa-adapter implementing that port, and an OrderController on the web side. and honestly someone keeps telling me ports are only worth it 'for testing' — is that true, and how does testing actually make use of them?",
       "expected_output": "Answer lays out a per-layer test strategy: core service = plain unit test substituting fake/mock outbound ports so it runs with no DB/network; outbound JPA adapter = integration test against the real DB (Testcontainers); web adapter = @WebMvcTest with the UseCase/service mocked; ArchUnit test in the app module. It frames the payoff: being able to fake the outbound port in a core unit test IS the concrete thing that justifies the outbound port interface, and gives the heuristic — will I fake it in a core unit test, or is there a genuine second implementation? If neither, don't add the interface.",

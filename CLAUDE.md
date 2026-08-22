@@ -39,6 +39,12 @@ Individual pieces of `validate.sh`, for iterating:
 python3 tools/validate.py                                  # static checks only
 node --test skills/task-run/tests/control-flow.test.mjs    # one workflow's branches
 node --test skills/task-review/tests/control-flow.test.mjs
+bash skills/spec-design/tests/check_todo.test.sh            # the plan graph
+bash skills/spec-brainstorm/tests/check_spec.test.sh        # the spec gate
+bash skills/reuse-index/tests/reuse-index.test.sh           # corpus → candidates → diff
+bash skills/code-scan/tests/local-scan.test.sh              # scoping + the fail-closed contract
+bash skills/code-adversarial/tests/run.test.sh              # the Codex wrapper's exit codes
+bash skills/task-review/tests/worktree-deploy.test.sh       # main-vs-worktree + compose isolation
 bash hooks/tests/guard.test.sh                             # workflow-guard behaviour
 bash lib/tests/stats.test.sh                               # stats sink + hook + reporter
 bash tests/install.test.sh                                 # installer behaviour
@@ -118,6 +124,14 @@ anything is fixed — confirmed or dismissed, each with a reason, and only the c
 Its findings are recorded under their own `quick-codex` track: same tool as `task-review`'s `codex`,
 different mode and a much smaller change under it, so merging them would make neither readable.
 
+**Every bundled executable has a test, and it is the only one it gets.** The two workflows have
+their control-flow tests below; all seven scripts under `skills/*/scripts/` have suites beside them.
+They all guard the same failure shape, which is why none of them is optional: each script either
+*decides a scope* or *decides whether a tool ran*, and both fail by returning a confident wrong
+answer. A scan that resolved to the wrong files, a review wrapper that banked a missing plugin as
+clean, a worktree stack that reused the main one's ports and container names — every one of those
+leaves a green pipeline behind it, so a passing run is not evidence and the suite is.
+
 **Every workflow edit needs its control-flow test.** `tests/control-flow.test.mjs` executes the
 script with `agent()`/`parallel()`/`phase()`/`log()` stubbed and asserts the branches — what stops
 the run, what is retried, what reaches the handoff. It models both agent death shapes: `agent()`
@@ -135,6 +149,15 @@ alone. It fails open on any parse/IO trouble.
 not in a skill's `scripts/`, because every skill writes to it — a shared store owned by one skill
 stays that skill's store. Rules that are load-bearing:
 
+- **A skill records an outcome when it owns a run, and only then.** Thirteen skills write a
+  `result` row; `r:tests-write` and `r:hexagonal-architecture` write none, and that is correct
+  rather than a gap to close. Both are consulted *inside* someone else's task — `tests-write` shapes
+  tests another skill is writing, `hexagonal-architecture` answers where a class goes — so neither
+  has a boundary to report an outcome at, and whatever they influenced belongs to the run that
+  loaded them. The hook still counts their invocations, which is the honest measure available:
+  `r:tests-write` is the most-invoked skill in the pack at 41 runs. Giving them a fabricated
+  outcome row would put a number in the store that no question can be asked of, which is worse
+  than the gap.
 - **Runs come from `invoke` rows only.** One run produces both an `invoke` row (hook) and a
   `result` row (the skill), so counting both doubles every number. `session_id` joins them.
 - **`findings.verdict` is the point.** A track whose findings triage rejects scores the same zero
@@ -199,14 +222,20 @@ stays that skill's store. Rules that are load-bearing:
 - `~/.claude/skill-stats.jsonl` is the pre-SQLite archive: read by `--import-jsonl` once, never
   written.
 
-**Skills that must never self-trigger** (`task-run`, `issues-fix`, `plan-run`, `spec-design`) carry
-`disable-model-invocation: true` in frontmatter — the enforcement, not just a sentence in the body.
-Each of the four mutates the repo or a plan on a scale nobody wants arrived at by inference, so
-they are invoked deliberately or not at all. Two consequences follow and are easy to forget: their
-descriptions leave the listing budget entirely (they are not in the router's context), and **no
-prompt can route to them**, so their own `trigger` eval cases are untestable by design and their
-`neighbour-exclusion` cases pass without measuring anything — `tools/run-evals.py` skips both kinds
-and says why rather than counting them as passes.
+**Skills that must never self-trigger** (`task-run`, `task-quick`, `issues-fix`, `plan-run`,
+`spec-design`) carry `disable-model-invocation: true` in frontmatter — the enforcement, not just a
+sentence in the body. Each of the five mutates the repo or a plan on a scale nobody wants arrived at
+by inference, so they are invoked deliberately or not at all. Two consequences follow and are easy
+to forget: their descriptions leave the listing budget entirely (they are not in the router's
+context), and **no prompt can route to them**, so their own `trigger` eval cases are untestable by
+design and their `neighbour-exclusion` cases pass without measuring anything — `tools/run-evals.py`
+skips both kinds and says why rather than counting them as passes.
+
+Which is why **FR-11 inverts with the flag**: a flagged skill owes a `behaviour` case, and
+`validate.py` fails it for carrying only the two routing kinds. Give one those instead and its whole
+suite is skipped — a green gate over nothing measured, which from the outside is indistinguishable
+from a suite that passes. So read the case count `run-evals.py` prints, never the one in
+`evals.json`.
 
 `task-review` must not self-trigger either, but carries **no** flag: the flag blocks the Skill tool
 outright and cannot tell an auto-load from a deliberate call, so it also blocked `task-run`'s
@@ -251,8 +280,13 @@ captured diff as every other hunter. Reinstating the skill would re-open the hol
 - **Structure.** The skill directories are exactly the set `tools/rename_rules.py` names, two
   levels deep — the map is the rule, not a count, and a stale count here reads as an instruction
   to delete a skill. Every bundled agent must be dispatched by some skill. Every skill needs
-  `evals/evals.json` with at least one `trigger` case and one `neighbour-exclusion` case. No
-  build artefacts tracked.
+  `evals/evals.json` with at least one `trigger` case and one `neighbour-exclusion` case —
+  unless it sets `disable-model-invocation`, which no prompt can route to, and which owes a
+  `behaviour` case instead. A `kind` outside `trigger`/`neighbour-exclusion`/`behaviour` fails:
+  `run-evals.py` skips what it cannot recognise, so a typo silently removes the case from the
+  sweep. A bundled script is invoked through `${CLAUDE_SKILL_DIR}` or
+  `${CLAUDE_PLUGIN_ROOT}/skills/<name>` — a bare `scripts/x.py` resolves against the user's
+  project. No build artefacts tracked.
 
 ## Conventions
 

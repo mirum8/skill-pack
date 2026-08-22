@@ -300,6 +300,38 @@ already there. If the project is missing — or has a clearly stale version of �
 those blocks (Test-Writing Policy, Post-Task Completion Checklist, Code
 Conventions), suggest running `/r:claudemd-patch`. Don't write them yourself.
 
+## Record the run
+
+One line into the pack-wide store — counts and byte sizes only, never a rule's text, a file path
+outside the project root, or anything quoted from the CLAUDE.md itself.
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
+{"skill":"r:claudemd-compact","mode":"interactive","filesRead":0,
+ "bytesBefore":0,"bytesAfter":0,"rulesKept":0,"rulesRewritten":0,"rulesMovedToReference":0,
+ "rulesMovedToSkill":0,"rulesDropped":0,"conflictsResolved":0,"staleFound":0,
+ "wrote":false,"blockedReason":null}
+STATS_JSON
+```
+
+`mode` is `interactive` | `auto`, because `--auto` decides without a gate and its `rulesDropped`
+therefore means something different from a number a human approved.
+
+**`bytesBefore` against `bytesAfter` is the only number that says whether this skill did its job** —
+the always-on context cost is what it exists to reduce. Read it beside `rulesDropped`: a large
+reduction that came entirely from dropping rules is a different outcome from one that came from
+moving them behind references, and only the pair distinguishes compaction from deletion.
+
+**`staleFound` justifies the de-staling half.** If it stays zero across many runs, the pass is
+costing a read of every rule and catching nothing, and the skill is really just a reorganizer.
+
+**`wrote: false` with no `blockedReason` is a decline; with one it is a blockage** — a CLAUDE.md
+that could not be read or written is an absence of judgement, not a judgement that nothing needed
+compacting.
+
+The script always exits `0` — a lost row is a lost row, never a failed run, and it must never change
+what was written. Never retry it.
+
 ## References
 
 - `references/patterns.md` — the destination rubric, staleness heuristics,

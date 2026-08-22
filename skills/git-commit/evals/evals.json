@@ -3,6 +3,7 @@
   "evals": [
     {
       "id": 0,
+      "kind": "behaviour",
       "name": "mixed-changes-grouped",
       "prompt": "I'm done for now, commit my changes please",
       "expected_output": "Three separate Conventional Commits: a feat for the new PayPal provider (src/paypal.js), a fix for the Stripe rounding bug (src/payment.js), and a docs change for the README. Correct conventional types, lowercase imperative descriptions.",
@@ -12,6 +13,7 @@
     },
     {
       "id": 1,
+      "kind": "behaviour",
       "name": "breaking-api-change",
       "prompt": "commit this",
       "expected_output": "A single Conventional Commit for the breaking getUser API change, marked breaking with a '!' before the colon and/or a 'BREAKING CHANGE:' footer.",
@@ -21,6 +23,7 @@
     },
     {
       "id": 2,
+      "kind": "behaviour",
       "name": "refactor-and-tests",
       "prompt": "wrap up these changes into commits",
       "expected_output": "Conventional Commits using the expanded vocabulary: a refactor commit for the cart.js helper extraction and a test commit (or grouped) for the added discount test. Should NOT use add/update/remove.",

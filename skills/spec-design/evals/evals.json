@@ -4,6 +4,7 @@
   "evals": [
     {
       "id": 0,
+      "kind": "behaviour",
       "name": "enterprise-spec-to-plan",
       "prompt": "/r:spec-design docs/fraud-detection-platform/spec.html",
       "fixture": "../../brainstorm-workspace/iteration-1/enterprise-antifraud/with_skill/outputs/docs/fraud-detection-platform",
@@ -93,6 +94,7 @@
     },
     {
       "id": 1,
+      "kind": "behaviour",
       "name": "small-spec-to-plan",
       "prompt": "/r:spec-design docs/plant-watering-tracker/spec.html",
       "fixture": "../../brainstorm-workspace/iteration-1/small-plant-tracker/with_skill/outputs/docs/plant-watering-tracker",
@@ -129,6 +131,7 @@
     },
     {
       "id": 2,
+      "kind": "behaviour",
       "name": "existing-codebase-plan",
       "prompt": "/r:spec-design docs/returns-refunds/spec.html",
       "fixture": "../../brainstorm-workspace/iteration-1/feature-returns-refunds/with_skill/outputs/wholesale-orders",
@@ -190,6 +193,7 @@
     },
     {
       "id": 3,
+      "kind": "behaviour",
       "name": "no-spec-present",
       "prompt": "make a todo for the payments rewrite",
       "fixture": null,
@@ -232,6 +236,7 @@
     },
     {
       "id": 6,
+      "kind": "behaviour",
       "name": "shallow-skips-the-design-pass",
       "prompt": "/r:spec-design docs/plant-watering-tracker/spec.html --shallow",
       "fixture": "../../brainstorm-workspace/iteration-1/small-plant-tracker/with_skill/outputs/docs/plant-watering-tracker",
@@ -254,6 +259,7 @@
     },
     {
       "id": 7,
+      "kind": "behaviour",
       "name": "several-documents-that-disagree",
       "prompt": "/r:spec-design docs/billing/spec.html docs/billing/pricing-prd.md",
       "fixture": null,
@@ -296,6 +302,7 @@
     },
     {
       "id": 10,
+      "kind": "behaviour",
       "name": "requirements-steer-order-not-scope",
       "prompt": "/r:spec-design docs/billing/spec.html \"payouts first, we demo in two weeks; the admin UI can wait, and add SSO login\"",
       "fixture": null,
@@ -318,6 +325,7 @@
     },
     {
       "id": 11,
+      "kind": "behaviour",
       "name": "requirements-contradicting-the-spec",
       "prompt": "/r:spec-design docs/billing/spec.html \"skip the refund flow entirely\"",
       "fixture": null,
@@ -335,6 +343,7 @@
     },
     {
       "id": 12,
+      "kind": "behaviour",
       "name": "open-design-choice-is-asked-not-guessed",
       "prompt": "/r:spec-design docs/billing/spec.html",
       "fixture": null,
@@ -360,6 +369,7 @@
     },
     {
       "id": 13,
+      "kind": "behaviour",
       "name": "codex-plan-review-runs-and-is-triaged",
       "prompt": "/r:spec-design docs/billing/spec.html",
       "fixture": null,
@@ -389,6 +399,7 @@
     },
     {
       "id": 14,
+      "kind": "behaviour",
       "name": "codex-absent-is-a-named-skip",
       "prompt": "/r:spec-design docs/billing/spec.html",
       "fixture": null,
@@ -410,6 +421,7 @@
     },
     {
       "id": 15,
+      "kind": "behaviour",
       "name": "existing-plan-is-rewritten-not-overwritten",
       "prompt": "/r:spec-design docs/billing/spec.html",
       "fixture": null,
@@ -450,6 +462,7 @@
     },
     {
       "id": 16,
+      "kind": "behaviour",
       "name": "hand-written-backlog-is-labelled-not-laundered",
       "prompt": "/r:spec-design docs/billing/spec.html todo.md",
       "fixture": null,

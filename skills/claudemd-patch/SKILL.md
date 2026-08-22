@@ -183,6 +183,29 @@ The skill detects `r:code-bugs` + a security review in a checklist-style section
 
 If the blocks already match the canonical text verbatim (e.g., re-running `/r:claudemd-patch` on a freshly-patched file), the skill reports "no changes needed" for those blocks and exits.
 
+## Record the run
+
+One line into the pack-wide store — counts only, never a rule's text or the project's own content.
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
+{"skill":"r:claudemd-patch","blocksInserted":0,"blocksReplaced":0,"blocksAlreadyCurrent":0,
+ "autoRunBlocksRemoved":0,"createdFile":false,"wrote":false,"blockedReason":null}
+STATS_JSON
+```
+
+**`blocksAlreadyCurrent` is the field that says whether this skill is still needed on a given
+project.** A run that replaces nothing and inserts nothing did no work, and a project where that is
+the normal outcome does not need patching again — where a run that keeps replacing the same block
+means something else keeps reverting it.
+
+**`autoRunBlocksRemoved` is the one that must not quietly go to zero.** Removing a post-task
+auto-run block is a correctness fix, not tidying: `/r:task-review` is not wired to run
+automatically, and a block that says it is makes every session pay for a review nobody asked for.
+
+The script always exits `0` — a lost row is a lost row, never a failed run, and it must never change
+what was written. Never retry it.
+
 ## Notes
 
 - This skill **never** runs git commands beyond the read-only `git rev-parse --show-toplevel`. Reviewing and committing is the user's call.

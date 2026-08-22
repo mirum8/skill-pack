@@ -183,7 +183,7 @@ back to anything.
 Mechanical checks are a script's job, not a checklist you run in your head:
 
 ```
-python3 <this skill>/scripts/check_spec.py docs/<topic>/
+python3 "${CLAUDE_SKILL_DIR}/scripts/check_spec.py" docs/<topic>/
 ```
 
 Fix everything it reports, then re-run until clean. It catches unversioned technology, placeholder
@@ -293,6 +293,42 @@ Summarize the folder, the mode used, the sections and diagrams included, every r
 
 which turns the document into a phased plan beside it. Offer to refine any section or diagram first
 — it's cheaper to fix now than after the plan has been built on top of it.
+
+## Step 6 — record the run
+
+One line into the pack-wide store — counts only, never a topic, a section title or a question the
+user answered. **Record even when the user says no at the gate**, with `wrote: false`: a document
+that was proposed and declined is the most informative row this skill can write, and dropping it
+leaves a store in which every spec was one somebody wanted.
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
+{"skill":"r:spec-brainstorm","mode":"full","rounds":0,"questionsAsked":0,
+ "rowsAsked":0,"rowsAssumed":0,"openQuestions":0,"sections":0,"diagrams":0,
+ "researchRan":"skipped","checkerProblems":0,"wrote":false,"blockedReason":null}
+STATS_JSON
+```
+
+`mode` is `full` | `explain` | `feature` | `continue`, and it is what keeps the other numbers
+comparable: an `--explain` run researches and a `--feature` run reads an existing codebase, so their
+question counts answer different questions and averaging them reports neither.
+
+**`rowsAsked` against `rowsAssumed` is the bar this skill is tuned on.** Interviewing first and
+deciding the rest by default is the whole design, and only that ratio says where the line actually
+fell. All-asked means the interview is offloading decisions the skill is supposed to make;
+all-assumed means it is guessing at things a single question would have settled, and the guesses
+reach the plan and then the code.
+
+**`checkerProblems` is what `check_spec.py` reported on the first run**, before fixing. Consistently
+zero means Step 4 is not earning its place; consistently high means this skill writes documents it
+already knows how to reject.
+
+**`wrote: false` with no `blockedReason` is a decline; with one it is a blockage.** They need
+opposite fixes — a declined document means the proposal was wrong, a blocked one means the skill
+could not run — and a row that conflates them reads as the first while being the second.
+
+The script always exits `0` — a lost row is a lost row, never a failed run, and it must never change
+what was written. Never retry it.
 
 ## Never do this
 

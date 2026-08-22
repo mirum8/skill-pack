@@ -4,6 +4,7 @@
   "evals": [
     {
       "id": 0,
+      "kind": "behaviour",
       "name": "default-demurrage-billing",
       "prompt": "I need to build something that works out demurrage and detention charges for our container shipments and bills the customer.",
       "persona": "CTO at a 30-person freight forwarder in Rotterdam. Two backend engineers plus themselves. ~1,200 containers a month across 14 shipping lines. Today: an analyst rebuilds it in Excel every week from carrier PDFs and gets it wrong often enough that they write off about €40k a year in charges they can't defend. Stack: Python, PostgreSQL, one VM at Hetzner. Knows the domain cold and will explain it if asked, but is impatient with anything that sounds like paperwork. Free days per carrier contract, the clock starts on discharge for demurrage and on gate-out for detention, weekends count for some carriers and not others, and a dispute can freeze the clock retroactively. No regulator, no external system to integrate with beyond emailed carrier PDFs. Wants it in three months. To anything oversized: 'we're three people'.",
@@ -76,6 +77,7 @@
     },
     {
       "id": 1,
+      "kind": "behaviour",
       "name": "explain-demurrage-billing",
       "prompt": "/r:spec-brainstorm --explain I need to build something that works out demurrage and detention charges for our container shipments and bills the customer.",
       "persona": "Same freight-forwarder CTO as eval 0, with one difference: the engineer who will build this has never worked in shipping and the CTO says so early. Will still answer everything asked. Uses the trade's vocabulary without explaining it — 'demurrage', 'detention', 'free days', 'gate-out', 'discharge', 'per diem' — and if asked which word means something different from everyday English, says that 'detention' here is a charge for holding the carrier's equipment outside the terminal, nothing to do with holding cargo, and that some carriers call the combined charge 'per diem'.",
@@ -128,6 +130,7 @@
     },
     {
       "id": 2,
+      "kind": "behaviour",
       "name": "feature-returns-refunds",
       "prompt": "/r:spec-brainstorm --feature add returns and refunds to the orders service",
       "fixture": "../../brainstorm-workspace/fixtures/wholesale-orders",
@@ -182,6 +185,7 @@
     },
     {
       "id": 3,
+      "kind": "behaviour",
       "name": "continue-underinterviewed",
       "prompt": "/r:spec-brainstorm --continue",
       "fixture": "../../brainstorm-workspace/fixtures/oncall-handover",

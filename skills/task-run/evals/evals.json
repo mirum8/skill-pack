@@ -21,6 +21,36 @@
       "files": [],
       "fixture": null,
       "assertions": []
+    },
+    {
+      "id": 2,
+      "kind": "behaviour",
+      "name": "nested-subagent-stops-rather-than-faking-the-fanout",
+      "prompt": "/r:task-run #42",
+      "expected_output": "Reaching neither Workflow nor Agent means the run is nested inside a subagent, where the fan-out would silently collapse to a single context. It stops and tells the user to re-run from a top-level session. It never re-does the task inline and reports a plan review and a fan-out it never had.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 3,
+      "kind": "behaviour",
+      "name": "stop-after-implement-is-never-self-passed",
+      "prompt": "/r:task-run add a dark-mode toggle to the settings page",
+      "expected_output": "A standalone run goes end-to-end: Steps 0-4, then the mandatory /r:task-review at Step 5, then the finish. --stop-after-implement is opt-in and a standalone run never passes it to itself, so an uncommitted implement half is never handed back as a finished task.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 4,
+      "kind": "behaviour",
+      "name": "contentless-input-asks-rather-than-guessing",
+      "prompt": "/r:task-run run the next thing",
+      "expected_output": "No file, no issue ref and no described work means there is no task to run. This is the one case the run stops for input, before doing anything. It does not fall back to free-text and invent work from the phrasing.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
     }
   ]
 }

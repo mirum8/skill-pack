@@ -27,8 +27,10 @@ run.sh — run the REAL Codex reviewer over the current diff and print its findi
   -h, --help                 print this and exit 0 without starting Codex.
 
 Exit codes: 0 = the review ran (findings on stdout, followed by a provenance block saying what it
-examined) · 3 = the Codex plugin is not installed · 4 = Codex could not inspect the diff after 3
-attempts (NOT a clean review) · anything else = the wrapper itself failed; stdout is not findings.
+examined) · 0 with "CODEX SKIPPED:" as the FIRST stdout line = the Codex plugin is not installed,
+which is a skip, not a failure — read that marker, never an exit code, to detect it · 4 = Codex
+could not inspect the diff after 3 attempts (NOT a clean review) · anything else = the wrapper
+itself failed; stdout is not findings.
 
 Env: ADVERSARIAL_REVIEW_TIMEOUT (per-attempt seconds, default 600).
 EOF

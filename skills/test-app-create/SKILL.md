@@ -105,6 +105,31 @@ List the files you created, summarize the tailoring in a sentence or two, and sh
 
 Suggest a first run.
 
+## Record the run
+
+One line into the pack-wide store — counts and detection outcomes only, never a credential, a base
+URL, a hostname, or anything read out of the project's config.
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
+{"skill":"r:test-app-create","buildTool":"maven","surface":"ui","authModel":"form",
+ "detectedFromCode":0,"askedTheUser":0,"httpHelpersFound":0,"credentialsFound":false,
+ "filesWritten":0,"overwroteExisting":false,"blockedReason":null}
+STATS_JSON
+```
+
+**`detectedFromCode` against `askedTheUser` is what this skill is tuned on.** Detection is the whole
+point — a scaffolder that asks the user for the base URL, the build command and the login route has
+only rephrased the questions. Read it per `buildTool` and `surface`: a stack that always falls back
+to asking is a detection gap with a name, not a general one.
+
+**`credentialsFound: false` is a normal outcome, never a blockage.** The generated skill works
+without test credentials; it just cannot log in. Recording it as a block would put a scaffold that
+succeeded into the same bucket as one that never ran.
+
+The script always exits `0` — a lost row is a lost row, never a failed run, and it must never change
+what was written. Never retry it.
+
 ## Edge cases
 
 - **No docker** — drop the rebuild/compose-logs material; `{{LOGS_CMD}}` becomes the app's logfile or stdout, `{{HEALTH_CHECK_CMD}}` a health curl or process check.

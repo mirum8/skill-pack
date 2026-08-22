@@ -53,6 +53,36 @@
       "files": [],
       "fixture": null,
       "assertions": []
+    },
+    {
+      "id": 5,
+      "kind": "behaviour",
+      "name": "codex-absent-is-a-named-skip",
+      "prompt": "/r:task-quick add a maxLength check to the coupon-code field",
+      "expected_output": "With the Codex CLI unavailable, the run reports the change as UNREVIEWED and names the skip. It never substitutes its own read of the diff, an LLM imitation, or a summary of what a reviewer would say — the review is the real Codex or it is nothing, and a run that could not reach it must not read as clean.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 6,
+      "kind": "behaviour",
+      "name": "findings-are-verified-before-any-fix",
+      "prompt": "/r:task-quick fix the off-by-one in the pagination offset",
+      "expected_output": "Every Codex finding is checked against the code first and recorded confirmed or dismissed with a reason; only the confirmed ones are fixed. Fixing everything Codex said and fixing nothing are both failures, and the recorded verdicts are what tell them apart.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 7,
+      "kind": "behaviour",
+      "name": "scope-holds-no-hunters-no-scan-no-commit",
+      "prompt": "/r:task-quick rename the internal helper and update its two callers",
+      "expected_output": "No hunters, no /r:code-scan, no UI pass, no branch, no commit, no plan file, and no refactor beyond the findings. If the change looked like it needed those, the answer is that it needed /r:task-run — the run does not quietly grow into the long pipeline.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
     }
   ]
 }

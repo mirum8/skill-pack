@@ -97,8 +97,9 @@ Leave everything **uncommitted**. This pipeline never commits.
 
 That is Codex's built-in reviewer over the working tree. It takes no focus text. It runs for
 minutes — wait for it; do not background it or give up early. Exit codes: `0` with a first line of
-`CODEX SKIPPED:` (or exit `3`) means the Codex plugin is not installed; `4` means Codex could not
-inspect the diff after three attempts, which is **not** a clean review.
+`CODEX SKIPPED:` means the Codex plugin is not installed — read the marker, never the exit code,
+because a skip exits `0` exactly like a clean review does; `4` means Codex could not inspect the
+diff after three attempts, which is **not** a clean review either.
 
 **A review that did not run is reported as a gap, never as a clean review**, and your own reading of
 the diff is not a substitute for it — you wrote the code, so you are the one reader whose opinion of

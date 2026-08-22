@@ -31,6 +31,36 @@
       "files": [],
       "fixture": null,
       "assertions": []
+    },
+    {
+      "id": 3,
+      "kind": "behaviour",
+      "name": "groups-run-one-at-a-time",
+      "prompt": "/r:issues-fix issues.md",
+      "expected_output": "Approved groups are fixed strictly serially, each on its own feature branch merged into the base before the next starts. Two fixes on one repo collide on that base ref — git worktrees share it too — so parallelising the fix phase is not an optimisation available here, however independent the groups look.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 4,
+      "kind": "behaviour",
+      "name": "verification-rejects-items-already-done",
+      "prompt": "/r:issues-fix #12 #13 #14",
+      "expected_output": "Each candidate is read against the actual code by a read-only verifier before anything is fixed, and an item already implemented, no longer applicable, or resting on a false premise is dropped and named with its reason in the report — not handed to a fixer that will produce an empty diff.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 5,
+      "kind": "behaviour",
+      "name": "both-halves-are-workflows-in-the-main-thread",
+      "prompt": "/r:issues-fix backlog.md --limit 3",
+      "expected_output": "Each approved group is the real run-task-implement Workflow followed by the real /r:task-review Workflow, both driven from the caller's own main thread by scriptPath. Neither half is imitated in prose, and neither is nested inside a subagent where its fan-out would collapse.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
     }
   ]
 }
