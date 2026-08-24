@@ -637,8 +637,8 @@ async function hunterFanOut(scope, hunters, trackName) {
 // pinned effort but not MODEL, so a step marked "nothing to decide" was still running whatever the
 // session was on; through a /r:task-run chain that is Opus, to run `worktree-deploy.sh teardown`.
 const ECHO = { model: 'haiku', effort: 'low' }
-// Cheap, but not the echo tier: it composes prose (a GitHub issue body) or has a fallback path to
-// choose between.
+// Cheap, but not the echo tier: it composes prose (a markdown issue body) and merges it into a
+// file that may already have items in it.
 const MECHANICAL = { model: 'sonnet', effort: 'low' }
 // The build runner AGENTS (r:maven-build-runner, r:gradle-build-runner) are `haiku`, which is right
 // for what they do on almost every dispatch: run one command and report "BUILD SUCCESSFUL". This
@@ -1914,15 +1914,42 @@ try {
   if (minor.length) minorFixer = await agent(`Fix these minor UI/runtime defects (surgical), ${rebuildClause}
     Then redeploy and re-verify once:\n${minor.map(f => `${f.where}: ${f.title} — ${f.suggestedFix}`).join('\n')}${intentBlock}`,
     { label: 'ui-fix-minor', phase: 'UI', agentType: triage.hasFrontend ? 'r:htmx-thymeleaf-dev' : 'r:java-backend-developer', ...FIX_RUN })
-  if (major.length) await agent(`File one GitHub issue per major UI finding via \`gh issue create\`
-    (preflight gh auth + a github remote; best-effort --label bug, retry without on failure). If gh
-    is unusable, write a grouped HTML report under .claude/skills/test-app/bugs/ instead. Findings:
+  // Same rule as the fixer above, for the same reason: whether the FILER came back, not whether
+  // findings were TAGGED major. A filer that died wrote nothing, and a summary still reporting
+  // them filed sends the reader to a backlog entry that does not exist.
+  let majorFiler = null
+  if (major.length) majorFiler = await agent(`Record every major UI finding as an item in this
+    project's issue backlog. Local files only — no \`gh\`, no tracker, nothing outside the repo.
+
+    Write \`issues/ui-review-<YYYY-MM-DD>.md\` (\`mkdir -p issues\` first; take the date and the
+    time from \`date +%F\` / \`date +%H:%M\` in your own shell). APPEND, never overwrite: when the
+    file already exists, add this run's items under a new \`## <HH:MM> — post-task-review\`
+    heading, so a second review the same day does not erase the first one's backlog.
+
+    One UNTICKED \`- [ ]\` item per finding — the title on the item line, the body indented
+    beneath it: where (route / \`file:line\`), what it does vs. what it should do, the evidence
+    (HTTP status, log line), the suggested fix, and the viewport for a responsive finding. That
+    shape is what \`/r:issues-fix\`'s file adapter parses (one item per \`- [ ]\` line, indented
+    lines as its body), and the empty box is the write-back it ticks when the item is done.
+
+    Screenshots: copy each durable path named in the findings into \`issues/assets/<slug>/\` and
+    link it relatively (\`![](assets/<slug>/step-3.png)\`), so the file still reads after an
+    ephemeral worktree is gone.
+
+    Return the path you wrote and how many items you appended. Findings:
     ${JSON.stringify(major)}`, { label: 'ui-file-major', phase: 'UI', ...GP, ...MECHANICAL })
+  if (major.length && !majorFiler) {
+    log(`post-task-review: the issue filer did NOT come back — ${major.length} major UI ` +
+        `finding(s) are NOT in issues/ and exist only in this transcript. File them by hand.`)
+  }
   minorFixed = minor.length > 0 && !!minorFixer
   if (uiWanted && triage.hasTestApp) {
     uiSummary = {
       ran: ui && ui.ran, minorFixed: minorFixed ? minor.length : 0,
-      majorFiled: major.length, blocked: blocked(ui),
+      majorFiled: majorFiler ? major.length : 0, blocked: blocked(ui),
+      // A filer that never returned is a GAP, not a filing. Present only in that case, so a reader
+      // (and the stats row) can tell "nothing was major" from "the backlog write never happened".
+      ...(major.length && !majorFiler ? { majorUnfiled: major.length } : {}),
       // An absent /test-app, in the deploy step's own words. Set only when the file really was
       // not on disk, so it also records that the early gate and the real check disagreed.
       ...(uiMissing ? { missing: uiMissing } : {}),

@@ -505,6 +505,37 @@ test('findings are stamped with the half that found them', async () => {
   assert.equal(out.ui.minorFixed, 1)
 })
 
+test('a major finding is written to the issues/ backlog, never to a tracker', async () => {
+  const { out, counts, prompts } = await run({
+    triage: baseTriage({ hasTestApp: true, uiTouched: true }),
+    overrides: {
+      'ui-functional': { ran: true, findings: [{ title: 'checkout flow needs a redesign', where: '/checkout', fixSize: 'major' }] },
+    },
+  })
+  assert.equal(counts['ui-file-major'], 1)
+  assert.equal(counts['ui-fix-minor'], undefined) // nothing minor to fix
+  assert.equal(out.ui.majorFiled, 1)
+  assert.equal(out.ui.majorUnfiled, undefined)
+  assert.match(prompts['ui-file-major'], /issues\/ui-review-<YYYY-MM-DD>\.md/)
+  assert.doesNotMatch(prompts['ui-file-major'], /gh issue create/) // a local write, never a tracker
+})
+
+test('a filer that never returns is an UNFILED gap, not a filing', async () => {
+  // The shape this step actually fails in: the agent dies before its first tool call, so nothing
+  // reaches issues/. Derived from the `major` TAG alone, the summary would report it filed and
+  // send the reader to a backlog entry that does not exist.
+  const { out, logText } = await run({
+    triage: baseTriage({ hasTestApp: true, uiTouched: true }),
+    overrides: {
+      'ui-functional': { ran: true, findings: [{ title: 'checkout flow needs a redesign', where: '/checkout', fixSize: 'major' }] },
+      'ui-file-major': null,
+    },
+  })
+  assert.equal(out.ui.majorFiled, 0)
+  assert.equal(out.ui.majorUnfiled, 1)
+  assert.match(logText, /issue filer did NOT come back/)
+})
+
 // ------------------------------------------------------------- UI: pre-warm ---
 
 test('the image pre-warm is launched with the end-verify, not after it', async () => {

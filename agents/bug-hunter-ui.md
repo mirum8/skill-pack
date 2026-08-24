@@ -87,7 +87,7 @@ This line is how the orchestrator and a human triager trust — without reading 
 
 ## Constraints
 
-- Report-only: no fixes, no reproducing tests, no plan mode. The orchestrator (`/r:task-review` Step 8) owns triage and deciding what to do with the findings — fixing minor ones inline and filing GitHub issues for ones that need a bigger change.
+- Report-only: no fixes, no reproducing tests, no plan mode. The orchestrator (`/r:task-review` Step 8) owns triage and deciding what to do with the findings — fixing minor ones inline and filing ones that need a bigger change into the project's `issues/` backlog.
 - Diff-scoped: verify the changed functionality, not the whole app.
 - One half only: do your half, not both. The other one is running right now.
 - Never deploy, redeploy, restart, or tear down. The orchestrator owns the stack's whole lifecycle; a second stack collides with your sibling half, and an early teardown deletes it mid-run.
