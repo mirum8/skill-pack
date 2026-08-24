@@ -45,6 +45,12 @@ report python3       python3       "brew install python"              mandatory
 report node          node          "brew install node"                mandatory
 report agent-browser agent-browser "npm i -g agent-browser && agent-browser install" mandatory
 
+# tmux is optional because a terminal app is a minority of projects and its absence costs exactly
+# one track, named. The CLI half of that track does not need it either: argv, exit codes,
+# stdout/stderr separation, piping and signals are plain shell and deterministic without a
+# terminal. Only two checks go with it — --help wrapping, and any isatty-dependent branch.
+report tmux          tmux          "brew install tmux"                optional
+
 # gh is optional because GitHub is one source among several, not the floor: task-run also
 # runs from a todo phase, a list item or free text and finishes with a local `--skip-pr`
 # merge, and issues-fix falls back to the list file at the repo root whenever there is no
@@ -94,6 +100,12 @@ fi
 if (( missing_optional )); then
   echo "All mandatory prerequisites present. $missing_optional optional one(s) absent — the"
   echo "affected step is recorded as SKIPPED and the run continues (FR-22). It is never faked."
+  if ! command -v tmux >/dev/null 2>&1; then
+    echo
+    echo "Without tmux, a project whose /test-app declares a terminal UI cannot be verified: the"
+    echo "TUI checks are recorded as NOT RUN and named, and task-review reports that track blocked"
+    echo "rather than clean. Web and command-line projects are unaffected."
+  fi
   if (( ! gh_ready )); then
     echo
     echo "Without a usable gh, GitHub is simply not one of the sources. task-run runs from a todo"

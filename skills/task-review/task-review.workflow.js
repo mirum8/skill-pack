@@ -129,6 +129,13 @@ const TRIAGE = {
     hasBackend: { type: 'boolean' },
     hasFrontend: { type: 'boolean' },
     hasTestApp: { type: 'boolean' },        // /test-app present ON DISK — the Phase 7 gate, folded in here to save a hop
+    // WHAT KIND of app /test-app drives, READ off that skill's own marker line — never inferred
+    // from this repo's file extensions. It selects the DEFINITION of uiTouched below and the
+    // mechanism 7a deploys through; it is not a second gate, and it is not caller-forceable,
+    // because a caller cannot know better than the file on disk and a forced surface is a way to
+    // start the wrong thing. Deliberately NOT required, like `securitySurface`: the authoritative
+    // read happens again in 7a, where the step that needs the answer looks for it itself.
+    testAppSurface: { type: 'string', enum: ['web', 'tui', 'cli', 'unknown'] },
     // The project's written-intent docs, listed ONCE here instead of re-discovered by the docs
     // hunter on every run. Optional: an empty or missing list just means the hunter globs for
     // them itself, which is what it did before.
@@ -250,6 +257,14 @@ const DEPLOY = {
     // halves report the file gone. This is the check that cannot be answered from impression: the
     // step that needs the file looks for the file.
     missing: { type: 'boolean' },
+    // WHICH surface this deploy actually brought up, re-read from the skill's own marker at step 0b
+    // below rather than taken from triage, which answered from a model's read of the same file.
+    // Absent or 'web' => every branch below behaves exactly as it did before this field existed.
+    surface: { type: 'string', enum: ['web', 'tui', 'cli'] },
+    // The handle for a non-web surface: a tmux session name, or the absolute path of the built
+    // binary. Deliberately NOT reported in `url` — a session name in a field called url becomes
+    // `export TEST_APP_BASE_URL=ta-a1b2c3` and a verifier that then curls it.
+    handle: { type: 'string' },
   },
 }
 // The shared diff every hunter reads (Phase 0b). Deliberately a PATH and a couple of counts, never
@@ -796,6 +811,14 @@ const triage = await reliable('triage', 'Triage', () => agent(
        gitignored test-app counts). A stale worktree where it was never checked out naturally
        reports no, so no git/branch reasoning is needed. This is the Phase 7 gate, answered here
        so the pipeline doesn't spend a whole subagent round-trip on one \`test -f\` later.
+   4d. testAppSurface — WHAT KIND of app that /test-app drives. Do NOT judge this from the repo.
+       READ it, with one command over the file you just tested for:
+         grep -m1 -oE 'test-app-surface: (web|tui|cli)' \
+           "$(git rev-parse --show-toplevel)/.claude/skills/test-app/SKILL.md" | cut -d' ' -f2
+       Answer whatever it prints. If it prints NOTHING the skill predates the marker: answer 'web'
+       when the file names a base URL (\`grep -q BASE_URL\` on the same file), and 'unknown'
+       otherwise. Omit the field entirely when hasTestApp is false. This is a read, not a
+       judgement — do not reason about the project, and do not run the app to find out.
    4c. docFiles — the project's written-intent docs, as repo-relative paths: spec.md/spec.html,
        todo.md, docs/**, DESIGN.md/ui-design.md, README.md/ARCHITECTURE.md/CONTRIBUTING.md, and
        EVERY **/CLAUDE.md (root and nested module ones). Glob the FILESYSTEM, not git — these are
@@ -843,8 +866,17 @@ const triage = await reliable('triage', 'Triage', () => agent(
       "read-modify-write on DealRepo with no lock" is. It is recorded and read back later to check
       whether this classification holds up, so give the evidence rather than the verdict. Echoing
       a caller-provided profile is itself a reason — say so.
-   7. uiTouched — true iff any changed file is frontend: *.html/templates, *.css/*.scss,
-      *.js/frontend *.ts, or under templates/, static/, resources/templates/, webapp/.
+   7. uiTouched — does this diff change WHAT THE APP RENDERS? Which files those are depends on
+      the surface you READ in 4d, and on nothing else:
+        * 'web', 'unknown', or unanswered — true iff any changed file is frontend: *.html/templates,
+          *.css/*.scss, *.js/frontend *.ts, or under templates/, static/, resources/templates/,
+          webapp/.
+        * 'tui' or 'cli' — true iff a changed file DRAWS or DRIVES the terminal interface: the
+          view / render / widget / screen layer, the key bindings and the event loop, the printed
+          output and its formatting, the flag parsing and the help text. A change under the data,
+          storage, network or parsing layers is NOT that, even in a single-binary repo where all
+          of it lives in one tree. Do not fall back to "it is a terminal app, so everything
+          renders" — that turns the most expensive gate in the pipeline permanently on.
       Answer this carefully: it is the SOLE gate on the UI/runtime step in EVERY tier (the tier
       does not force it), and that step is the single most expensive thing in the pipeline —
       a false 'true' boots the whole stack and drives a browser for nothing, a false 'false'
@@ -917,7 +949,11 @@ log(`post-task-review: tier=${profile}, uiTouched=${uiTouched} (${TIERS.includes
 //    fix, never an input to the build. Keeping it inside the Review barrier meant the fix phase
 //    waited on a track whose output it does not consume.
 const uiWanted = uiTouched
-const prewarmP = (uiWanted && triage.hasTestApp)
+// A terminal app has no image to warm, and worktree-deploy.sh require_bin's docker BEFORE it reads
+// its subcommand — so `prewarm` there exits 127 rather than no-opping. Written as a negative on
+// purpose: a web project whose triage omitted the new field must be indistinguishable from today.
+const terminalSurface = (x) => x === 'tui' || x === 'cli'
+const prewarmP = (uiWanted && triage.hasTestApp && !terminalSurface(triage.testAppSurface))
   ? agent(
       `Run \`"${PACK}/skills/task-review/scripts/worktree-deploy.sh" prewarm\` from the
        repo root and report its stderr line verbatim. It builds the app image WITHOUT starting
@@ -1558,10 +1594,23 @@ if (!endVerifyWanted) log('post-task-review: end-verify skipped — no substanti
 // the UI verification, which ran against an image built before those fixes landed, has to look
 // again. Derived from the findings the fixer was handed, so it costs no extra agent.
 const FRONTEND_FILE = /\.(html|htm|css|scss|sass|less|js|mjs|ts|tsx|jsx|vue|svelte)$|(^|\/)(templates|static|webapp|resources\/templates)\//i
+// Where a domain fix goes. The two bundled fixers are Spring/JPA-shaped and Thymeleaf-shaped; on a
+// project with no JVM build there is no honest third one, so the fix goes to a general-purpose
+// agent that reads the project's own conventions instead of importing somebody else's. A terminal
+// /test-app is the first thing that reaches this code path with buildTool 'none' — before it, all
+// 42 stored end-verify-fix runs were in one Spring repo, so this branch has never been exercised.
+const domainFixer = triage.hasFrontend ? { agentType: 'r:htmx-thymeleaf-dev' }
+  : triage.buildTool === 'none' ? { ...GP }
+  : { agentType: 'r:java-backend-developer' }
 let endVerifyTouchedFrontend = false
 const endVerifyTrack = async () => {
   if (!endVerifyWanted) return
-  const fixAgent = triage.hasFrontend && !triage.hasBackend ? 'r:htmx-thymeleaf-dev' : 'r:java-backend-developer'
+  // Same problem as the UI fixer's: on a project with no JVM build, 'r:java-backend-developer' is
+  // a Spring/JPA persona pointed at Rust or Go. Narrower than domainFixer on purpose — this one
+  // only reaches for the Thymeleaf agent when the change is frontend-ONLY.
+  const fixAgent = triage.buildTool === 'none' ? null
+    : (triage.hasFrontend && !triage.hasBackend ? 'r:htmx-thymeleaf-dev' : 'r:java-backend-developer')
+  const fixAgentOpts = fixAgent ? { agentType: fixAgent } : { ...GP }
   // What pass 1 raised and what happened to it. Each pass shells out to `run.sh --mode review`,
   // which starts a FRESH Codex thread (lib/codex.mjs runAppServerReview: startThread, ephemeral) —
   // there is no session to resume, so pass 2 has literally no memory of pass 1 and, until this,
@@ -1653,7 +1702,7 @@ ${priorPass.findings.map(f => `         - ${f.file}:${f.line} [${f.category}] ${
       Fix ONLY these items; do NOT touch any pre-existing / out-of-scope test or class to
       force a pass (the green bar is never relaxed):
       ${real.map(f => `${f.file}:${f.line} ${f.what}`).join('\n')}${intentBlock}`,
-      { label: `end-verify-fix#${pass}`, phase: 'End-verify', agentType: fixAgent, ...FIX_RUN })
+      { label: `end-verify-fix#${pass}`, phase: 'End-verify', ...fixAgentOpts, ...FIX_RUN })
     // Only count what a live fixer took. A dead fixer must not inflate `fixed.correctness` — the
     // whole point of that number is that a caller can trust it. The findings stay in
     // endVerifyUnresolved either way, so a lost fix still shows up in the verdict.
@@ -1667,7 +1716,12 @@ ${priorPass.findings.map(f => `         - ${f.file}:${f.line} [${f.category}] ${
       // The UI track is running alongside this one, against an image built BEFORE these edits.
       // If a fix landed in a frontend file, what it verified is now stale — see the re-verify
       // guard after the barrier.
-      if (real.some((f) => FRONTEND_FILE.test(String(f.file || '')))) endVerifyTouchedFrontend = true
+      // On a terminal surface FRONTEND_FILE can never match — the app's views are .go/.rs/.py like
+      // everything else — so this flag would be permanently false and a re-verify would never fire.
+      // Treat any end-verify fix there as render-affecting: the cost calculus that made this guard
+      // narrow on the web (an 86s docker deploy) does not exist when a restart is seconds.
+      if (terminalSurface(uiSurfaceResolved)) endVerifyTouchedFrontend = true
+      else if (real.some((f) => FRONTEND_FILE.test(String(f.file || '')))) endVerifyTouchedFrontend = true
     }
     // The next pass's only link to this one. Recorded AFTER the fixer so it carries whether the
     // edits actually happened — a dead fixer changes what re-finding these items means, and pass 2
@@ -1702,6 +1756,14 @@ let ui = null
 let uiDead = []
 let uiReasons = []
 let uiMissing = ''
+// What 7a actually brought up, and the sessions it started. Hoisted for the same reason `ui` is:
+// the teardown runs in a `finally` OUTSIDE the barrier, and a variable scoped inside uiTrack() is
+// gone exactly when the teardown needs it most. The defaults come from TRIAGE rather than null
+// because a deploy that DIED before returning still has to be torn down with the right instrument:
+// `tui-session.sh stop` on a session that was never started is a no-op by contract, while
+// `worktree-deploy.sh teardown` on a machine without docker is an exit 127 and three retries.
+let uiSurfaceResolved = terminalSurface(triage.testAppSurface) ? triage.testAppSurface : 'web'
+let uiSessions = []
 // Hoisted for the same reason as `ui` above: the stats row is assembled outside this block, and
 // the UI fixer's outcome is part of what that row claims.
 let minorFixed = false
@@ -1742,6 +1804,17 @@ const uiTrack = async () => {
           You are the step that needs the file, so you are the one that has to look for it — and
           look for SKILL.md specifically, never for the directory. A gitignored, locally-scaffolded
           SKILL.md counts: this is a disk check, and git has no opinion here.
+       0b. Read WHICH SURFACE that skill drives, from its own marker line — one command, not a
+          judgement:
+            grep -m1 -oE 'test-app-surface: (web|tui|cli)' .claude/skills/test-app/SKILL.md | cut -d' ' -f2
+          Prints web/tui/cli -> use it, and report it in \`surface\`. Prints nothing -> the skill
+          predates the marker: if it names a base URL (\`grep -q BASE_URL\`) treat it as 'web' and
+          say in \`reason\` that you INFERRED it; if it names none, you cannot tell what to start,
+          so return ok=false with missing=true and the reason "the /test-app skill declares no
+          surface and names no base URL — re-run /r:test-app-create", and do nothing else. Never
+          assume, and never start anything to find out. Your answer OVERRIDES whatever the triage
+          step guessed; if they disagree, say so in \`reason\`.
+       ===== WEB surface — steps 1-3. =====
        1. Read \`.claude/skills/test-app/SKILL.md\` and its \`references/subagent-prompt.md\` for
           the redeploy command (the REBUILD_NOTE), the HEALTH_CHECK_CMD, and the default BASE_URL.
        2. Deploy ONLY through the helper — never the raw redeploy command. The helper is what keeps
@@ -1759,6 +1832,21 @@ const uiTrack = async () => {
        collide with the main stack, which is the whole failure this helper exists to prevent.`,
       { label: 'ui-deploy', phase: 'UI', schema: DEPLOY, ...GP, ...DEPLOY_RUN }))
 
+    // The deploy's OWN read wins over triage's, for the same reason `missing` exists: triage is a
+    // model answering a one-line command, and this is the step that needs the answer. Anything
+    // that is not explicitly terminal is web, so an absent field is today's behaviour exactly.
+    const depSurface = terminalSurface(dep && dep.surface) ? dep.surface : 'web'
+    // Only overwrite the hoisted default when the deploy actually ANSWERED. A dead agent returns
+    // null, and reading 'web' out of that would throw away triage's answer and send the teardown
+    // after a docker stack that was never built — on a terminal project, three retries of an
+    // exit 127. An answering deploy always wins; a silent one changes nothing.
+    if (dep && (dep.surface || dep.ok)) uiSurfaceResolved = depSurface
+    // One handle per surface. On the web path this IS dep.url, so the guard below reduces to the
+    // expression it replaced. On 'tui' the deploy returns both session handles, space-separated.
+    const depHandle = depSurface === 'web' ? (dep && dep.url) : (dep && dep.handle)
+    const tuiSessions = depSurface === 'tui' ? String(depHandle || '').trim().split(/\s+/).filter(Boolean) : []
+    if (depSurface === 'tui') uiSessions = tuiSessions
+
     if (dep && dep.missing) {
       // An absent prerequisite is a SKIP, not a failure — the same distinction tracksSkipped and
       // tracksBlocked draw everywhere else in this payload. Nothing broke; there is simply no
@@ -1771,20 +1859,66 @@ const uiTrack = async () => {
       log(`post-task-review: UI verification SKIPPED — ${uiMissing}. Nothing was verified in a ` +
           `browser; this is a skip, not a clean bill.`)
       ui = { ran: false, findings: [], coverage: `SKIPPED — ${uiMissing}` }
-    } else if (!dep || !dep.ok || !dep.url) {
+    } else if (!dep || !dep.ok || !depHandle) {
       // A failed deploy is a blocked TRACK, not a clean UI pass. ran=false makes blocked() true,
       // so tracksBlocked names it and nothing downstream reads this as "the UI was verified".
-      log(`post-task-review: UI verification NOT run — deploy failed (${(dep && dep.reason) || 'no usable result'}).`)
+      const why = (dep && dep.reason) || 'no usable result'
+      log(`post-task-review: UI verification NOT run — deploy failed (${why}).`)
       ui = { ran: false, findings: [] }
+      // The reason has to go somewhere a reader can find without the transcript. blockedReasons is
+      // fed only by the HALVES, so before this a failed deploy stored blocked:true against an empty
+      // reason list — the same "a blockage has nowhere to go" shape UIRES.blockedReason exists to
+      // prevent. It matters more on a terminal surface, where two new failures (tmux absent, the
+      // session died at startup) are otherwise indistinguishable in the store.
+      uiReasons = [`ui-deploy: ${why}`]
     } else {
-      // Both halves share this: the stack is already up and someone else owns its lifecycle.
-      const stackUp =
+      // Both halves share this: the app is already up and someone else owns its lifecycle. The web
+      // branch is unchanged text — a web run must be indistinguishable from before this existed.
+      // The terminal branch carries the SAME two load-bearing phrases ("ALREADY deployed", "Do NOT
+      // deploy, redeploy, restart or tear down") so both can be asserted the same way.
+      const handoff = depSurface !== 'web' ? (depSurface === 'tui' ?
+        `The app is ALREADY deployed and running in a tmux session of its own — yours alone. Do NOT
+       deploy, redeploy, restart or tear down anything; this run's orchestrator owns every session
+       it started, and a second instance of a program that owns a config file or a lock is a
+       collision, not a spare. There is NO URL here: do not look for one, and do not export
+       TEST_APP_BASE_URL. Export your handle before you start:
+         export TEST_APP_SESSION="${'${SESSION}'}"
+         export TEST_APP_SURFACE=tui
+       That tells /test-app the caller already started the app, so it attaches to that session
+       instead of launching a competing one.
+       Drive it ONLY through the driver — never bare tmux, never a second process:
+         TUI="${PACK}/skills/test-app-create/scripts/tui-session.sh"
+         "$TUI" capture  "$TEST_APP_SESSION"                     # the screen, as a file
+         "$TUI" send     "$TEST_APP_SESSION" Down Enter          # keys ( -l for literal text )
+         "$TUI" wait-for "$TEST_APP_SESSION" '<regex>' --timeout 15
+         "$TUI" resize   "$TEST_APP_SESSION" 80x24
+       Its exit codes are the contract, and each names something you were unable to observe: 3 the
+       app has already exited (it is NOT ignoring your keys), 4 no such session, 5 the capture is
+       EMPTY (a pane that painted nothing is not a clean screen), 6 a wait hit its deadline, 7 a
+       resize was not applied, 127 tmux is missing. Never read a non-zero code as "passed anyway".
+       Do NOT start a session and do NOT stop one — yours was started for you, and your sibling
+       half has its own.` :
+        `The app is ALREADY deployed — built and ready at ${'${BINPATH}'}. Do NOT deploy, redeploy,
+       restart or tear down anything, and do NOT rebuild: this run's orchestrator owns the binary,
+       and a rebuild mid-run would swap the thing your sibling half is testing. There is NO URL
+       here: do not look for one, and do not export TEST_APP_BASE_URL. Export the binary first:
+         export TEST_APP_BIN="${'${BINPATH}'}"
+         export TEST_APP_SURFACE=cli
+       That tells /test-app the caller already built it, so it tests that binary instead of
+       building a competing one. Invoke "$TEST_APP_BIN" directly for every check — never a source
+       runner like cargo run or go run, which writes its own lines to stderr and returns its own
+       exit code, silently invalidating every assertion you are about to make.`) :
         `The app is ALREADY deployed and healthy at ${dep.url}. Do NOT deploy, redeploy, restart
        or tear down anything — this run's orchestrator owns the stack, and a second stack would
        collide with it. Export the URL before you start:
          export TEST_APP_BASE_URL="${dep.url}"
        That also tells a worktree-aware /test-app the stack is already up, so it tests that URL
        instead of starting a competing one.`
+      // ${SESSION} / ${BINPATH} above are placeholders the per-half strings fill in below: the two
+      // tui halves each get their OWN session, so the handoff cannot bake one in.
+      const fillHandoff = (session) => handoff
+        .replace('${SESSION}', session || '')
+        .replace(/\$\{BINPATH\}/g, String(depHandle || ''))
       const reportRules =
         `Report-only: no fixes, no tests, no plan mode. Stay diff-scoped — verify the CHANGED
        functionality, not the whole app. Report only defects you have HIGH confidence are real;
@@ -1803,11 +1937,16 @@ const uiTrack = async () => {
        already records a blocked half from your ran flag; blockedReason is what tells it why.
        Findings you genuinely observed still belong in \`findings\` even when ran=false — a half
        that fell back to another route and saw something real should report it.${uiIntent}`
-      const halves = [
+      // Which halves run, by surface. 'cli' collapses to ONE: there is no visual pass on a surface
+      // with no rendering, and dispatching an empty second half spends a whole agent to produce
+      // "nothing to check". 'tui' keeps both, because a rendered frame is exactly what a visual
+      // half is for — and each gets its OWN session, since two agents driving one pane interleave
+      // their keystrokes and both then report nonsense.
+      const webHalves = [
         { label: 'ui-functional', session: 'ptr-func', prompt:
       `You are the FUNCTIONAL half of the UI verification. A visual half runs in PARALLEL with you
        and owns screenshots, layout and design — do not do its job, and do not wait for it.
-       ${stackUp}
+       ${handoff}
        Use an isolated browser session so the two halves never share a page or a viewport:
          export AGENT_BROWSER_SESSION=ptr-func
        Invoke the REAL /test-app skill (Skill tool) over the changed functionality, scoped to
@@ -1821,7 +1960,7 @@ const uiTrack = async () => {
         { label: 'ui-visual', session: 'ptr-visual', prompt:
       `You are the VISUAL half of the UI verification. A functional half runs in PARALLEL with you
        and owns API, flow and log checks — do not repeat them, and do not wait for it.
-       ${stackUp}
+       ${handoff}
        Use an isolated browser session so the two halves never share a page or a viewport:
          export AGENT_BROWSER_SESSION=ptr-visual
        Invoke the REAL /test-app skill (Skill tool) scoped to the VISUAL pass only — screenshot
@@ -1851,6 +1990,79 @@ const uiTrack = async () => {
        in the findings, so the orchestrator can embed them in a report after the stack is gone.
        ${reportRules}` },
       ]
+      const tuiHalves = [
+        { label: 'tui-functional', session: tuiSessions[0] || '', prompt:
+      `You are the FUNCTIONAL half of the terminal verification. A visual half runs in PARALLEL
+       with you and owns rendering, geometry and frame captures — do not do its job, and do not
+       wait for it.
+       ${fillHandoff(tuiSessions[0] || '')}
+       Invoke the REAL /test-app skill (Skill tool) over the changed functionality, scoped to
+       BEHAVIOUR: drive the real keys through the flows the change touched, assert on what the app
+       drew, exercise the failure paths, and read the app logs (new ERROR entries during your
+       window — on this surface stdout IS the UI, so the log is a file or a debug channel, never
+       stdout). Say the scope in the argument you pass it, e.g.
+         test-app <the change> — functional checks only (keys, flows, logs), no rendering pass;
+         the app is already running in $TEST_APP_SESSION, attach to that.
+       Never hand-roll your own tmux or expect wrapper in place of the skill and the driver — an
+       ad-hoc wrapper fails open everywhere the driver fails closed, which is the whole reason the
+       driver exists. /test-app is the real tool here.
+       ${reportRules}` },
+        { label: 'tui-visual', session: tuiSessions[1] || '', prompt:
+      `You are the VISUAL half of the terminal verification. A functional half runs in PARALLEL
+       with you and owns keys, flows and log checks — do not repeat them, and do not wait for it.
+       ${fillHandoff(tuiSessions[1] || '')}
+       Invoke the REAL /test-app skill (Skill tool) scoped to the RENDERING pass only — capture the
+       changed screens and check how they draw. Say that in the argument you pass it.
+       GEOMETRY SWEEP — capture each changed screen at three sizes, via \`resize\`, re-render, then
+       \`capture\`: wide (160x50), the app's own default, and 80x24. That last one is the one that
+       finds things: it is the size every terminal guarantees, and it is where a layout that
+       quietly assumes width falls apart — the same role the mobile viewport plays on a web page.
+       Reset to the wide size before you return, so a later capture is not skewed.
+       CAPTURE BUDGET — at most 6, and the reason is NOT the reason the web half has one: a capture
+       is TEXT, so it costs nothing to read. The cap here is scope discipline — the two screens
+       this diff changed most, each at three sizes. Do not paste a capture of a screen the diff
+       never touched.
+       Judge each frame against this rubric, and report only genuine, high-confidence defects —
+       never style preference:
+         1. It fits the box — nothing truncated at the right edge or scrolled off the bottom at
+            80x24; no wrapped line that breaks a table row or a border.
+         2. Columns and borders line up — headers over their data, boxes closed, padding even.
+            Wide characters and emoji are the usual culprit.
+         3. Colour is never the only signal — a state distinguished only by colour is invisible on
+            a monochrome terminal; there must be a glyph or a word too. And no raw escape
+            sequences showing as literal text.
+         4. Focus and affordance — the focused element is visibly focused, and the keys that work
+            HERE are shown or one keypress away.
+         5. Empty and error states read as intended — an empty list says it is empty rather than
+            showing a blank pane; an error is a legible message, not a raw panic in the frame.
+         6. Redraw is clean — after a resize the frame redraws whole: no leftovers from the
+            previous geometry, no doubled borders, no stale half-row.
+       Do NOT load the \`frontend-design\` skill here. It judges typography, colour cohesion,
+       spatial composition, motion and atmosphere; asked to grade an 80x24 text frame it produces
+       findings that are not about anything, and this track's precision is what they would land in.
+       The rubric above is its replacement on this surface.
+       Save every capture to a DURABLE path (not an ephemeral temp dir) and return those paths in
+       the findings. A capture is text, which is the advantage: quote the three broken lines rather
+       than attaching an image nobody can search, and two geometries can be diffed directly.
+       ${reportRules}` },
+      ]
+      const cliHalves = [
+        { label: 'cli-functional', session: '', prompt:
+      `You are the sole verifier for this change. There is no visual half: this app renders
+       nothing, so there is no frame to judge and nobody else is running.
+       ${fillHandoff('')}
+       Invoke the REAL /test-app skill (Skill tool) over the changed functionality. Scope it to the
+       argv contract and the failure paths, and assert the WHOLE result on every check — the exit
+       code, stdout AND stderr — never just the exit code. The defects that actually ship here are
+       an error path that prints a message and then returns success, and a diagnostic that leaks
+       onto stdout and corrupts whatever the caller was piping it into. Say the scope in the
+       argument you pass it, e.g.
+         test-app <the change> — argv, exit codes and stream separation; the binary is already
+         built at $TEST_APP_BIN, test that one.
+       Never hand-roll invocations in place of the skill — /test-app is the real tool here.
+       ${reportRules}` },
+      ]
+      const halves = depSurface === 'tui' ? tuiHalves : depSurface === 'cli' ? cliHalves : webHalves
       const parts = await parallel(halves.map((h) => () =>
         reliable(h.label, 'UI', () => agent(h.prompt,
           { label: h.label, phase: 'UI', schema: UIRES, agentType: 'r:bug-hunter-ui', ...VERIFY }))))
@@ -1868,7 +2080,9 @@ const uiTrack = async () => {
       ui = {
         ran: uiDead.length === 0,
         findings: parts.flatMap((p, i) =>
-          ((p && p.findings) || []).map((f) => ({ ...f, lens: halves[i].label.replace('ui-', '') }))),
+          // The lens is the label's LAST segment, not the label minus 'ui-': a naive replace turns
+          // 'tui-functional' into 'tfunctional', because the first 'ui-' it finds is inside 'tui'.
+          ((p && p.findings) || []).map((f) => ({ ...f, lens: halves[i].label.split('-').pop() }))),
       }
     }
   }
@@ -1913,7 +2127,7 @@ try {
   let minorFixer = null
   if (minor.length) minorFixer = await agent(`Fix these minor UI/runtime defects (surgical), ${rebuildClause}
     Then redeploy and re-verify once:\n${minor.map(f => `${f.where}: ${f.title} — ${f.suggestedFix}`).join('\n')}${intentBlock}`,
-    { label: 'ui-fix-minor', phase: 'UI', agentType: triage.hasFrontend ? 'r:htmx-thymeleaf-dev' : 'r:java-backend-developer', ...FIX_RUN })
+    { label: 'ui-fix-minor', phase: 'UI', ...domainFixer, ...FIX_RUN })
   // Same rule as the fixer above, for the same reason: whether the FILER came back, not whether
   // findings were TAGGED major. A filer that died wrote nothing, and a summary still reporting
   // them filed sends the reader to a backlog entry that does not exist.
@@ -1945,6 +2159,9 @@ try {
   minorFixed = minor.length > 0 && !!minorFixer
   if (uiWanted && triage.hasTestApp) {
     uiSummary = {
+      // Which surface this run actually verified. Free to carry: record-run.py JSON-dumps the whole
+      // record into `payload` with no field whitelist, and skill-stats.py merges it back.
+      surface: uiSurfaceResolved,
       ran: ui && ui.ran, minorFixed: minorFixed ? minor.length : 0,
       majorFiled: majorFiler ? major.length : 0, blocked: blocked(ui),
       // A filer that never returned is a GAP, not a filing. Present only in that case, so a reader
@@ -1969,11 +2186,23 @@ try {
   // Retried, because a teardown that dies leaks the worktree's containers and volumes, and the next
   // run in that worktree then collides with the stack this one left behind.
   if (uiWanted && triage.hasTestApp) {
-    const td = await reliable('ui-teardown', 'UI', () => agent(
-      `Run \`"${PACK}/skills/task-review/scripts/worktree-deploy.sh" teardown\`
+    // 'cli' started nothing, so there is nothing to tear down and no agent worth spending on it.
+    const tuiTeardown = uiSurfaceResolved === 'tui'
+    const td = uiSurfaceResolved === 'cli' ? true : await reliable('ui-teardown', 'UI', () => agent(
+      tuiTeardown
+        ? `Stop every tmux session this run started, unconditionally, and report what you did:
+             TUI="${PACK}/skills/test-app-create/scripts/tui-session.sh"
+           ${(uiSessions.length ? uiSessions : ['<none recorded>']).map((h) => `  "$TUI" stop '${h}'`).join('\n           ')}
+           \`stop\` is a no-op on a session that is already gone, so run it even if you believe the
+           run never got that far. Exit 127 means tmux is not installed — say so and return; nothing
+           was started, so nothing is leaking. Do NOT run worktree-deploy.sh: it requires docker and
+           has nothing to do with a terminal app.`
+        : `Run \`"${PACK}/skills/task-review/scripts/worktree-deploy.sh" teardown\`
       unconditionally (no-op in the main tree; tears down the ephemeral stack in a worktree).`,
       { label: 'ui-teardown', phase: 'UI', ...GP, ...ECHO }))
-    if (blocked(td)) log('post-task-review: UI teardown NOT confirmed — an ephemeral worktree stack may still be running; tear it down by hand with `worktree-deploy.sh teardown`.')
+    if (blocked(td)) log(tuiTeardown
+      ? 'post-task-review: UI teardown NOT confirmed — a tmux session may still be running. It is invisible to `docker ps`, so list them with `tmux ls` and stop them by hand; the driver\'s TTL will otherwise reap it within the hour.'
+      : 'post-task-review: UI teardown NOT confirmed — an ephemeral worktree stack may still be running; tear it down by hand with `worktree-deploy.sh teardown`.')
   }
 }
 
@@ -2142,7 +2371,15 @@ const statsRow = {
     // fixed" records a repair on every run where the fixer died. A major finding is filed as an
     // issue, not fixed, so it is false by construction here.
     ...((ui && Array.isArray(ui.findings)) ? ui.findings : []).map((f) => ({
-      track: `ui-${f.lens || 'functional'}`, severity: f.fixSize,
+      // Terminal findings get their OWN track names and do not merge into the browser ones. Same
+      // call the pack already made for `quick-codex` against `codex`: same job, different mode, and
+      // merging them makes neither readable. Here it is not even the same tool — a captured frame
+      // against agent-browser, a written rubric against `frontend-design`. ui-visual's 11-confirmed
+      // /0-dismissed and ui-functional's 6/0 are BROWSER numbers; a terminal run must not be able to
+      // borrow them, and nobody must be able to argue them about a TUI. These start at zero, which
+      // is the honest place to start. Do not merge them back.
+      track: `${uiSurfaceResolved === 'web' ? 'ui' : uiSurfaceResolved}-${f.lens || 'functional'}`,
+      severity: f.fixSize,
       verdict: 'confirmed', fixed: f.fixSize === 'minor' && minorFixed,
       description: short(`${f.title || ''} — ${f.where || ''}`),
     })),

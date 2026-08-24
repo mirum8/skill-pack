@@ -1740,3 +1740,204 @@ test('the literal placeholder is treated as absent, not as a path', async () => 
   const { out } = await run({ args: JSON.stringify({ packRoot: '${CLAUDE_PLUGIN_ROOT}' }) })
   assert.equal(out.stopped, 'no-pack-root')
 })
+
+// ------------------------------------------------- UI: the terminal surfaces ---
+// Phase 7 verifies whatever the generated /test-app declares it drives. The surface is READ off
+// that skill's marker line, never guessed from this repo's file extensions: `.go` under a view
+// package is a rendered result and `.go` under a store package is not, and no extension test
+// separates them. These lock the three things that go wrong — the gate firing for the wrong
+// diffs, the deploy handing a verifier a handle it cannot use, and a web run drifting.
+
+const tuiTriage = (over = {}) => baseTriage({
+  hasTestApp: true, uiTouched: true, testAppSurface: 'tui',
+  buildTool: 'none', changedFiles: ['internal/ui/table.go'],
+  hasBackend: false, hasFrontend: false, ...over,
+})
+const TUI_DEPLOY = { ok: true, surface: 'tui', handle: 'ta-a1b2-func ta-a1b2-visual' }
+const TUI_HALVES = { 'tui-functional': CLEAN, 'tui-visual': CLEAN, 'cli-functional': CLEAN }
+
+test('a terminal /test-app fires the UI gate on a Go-only diff, and never pre-warms', async () => {
+  const { counts } = await run({
+    triage: tuiTriage(), overrides: { 'ui-deploy': TUI_DEPLOY, ...TUI_HALVES } })
+  assert.equal(counts['ui-deploy'], 1)
+  assert.equal(counts['tui-functional'], 1)
+  assert.equal(counts['tui-visual'], 1)
+  // Nothing to warm, and worktree-deploy.sh require_bin's docker before it reads its subcommand,
+  // so a pre-warm here is not a slow no-op — it is an exit 127.
+  assert.equal(counts['ui-prewarm'], undefined)
+  assert.equal(counts['ui-functional'], undefined) // the browser halves never ran
+})
+
+test('a backend-only terminal diff still does NOT fire — the surface is not a second door in', async () => {
+  const { counts, logText } = await run({
+    triage: tuiTriage({ uiTouched: false, changedFiles: ['internal/store/db.go'] }) })
+  assert.equal(counts['ui-deploy'], undefined)
+  assert.match(logText, /no frontend change in this diff/)
+})
+
+test('the DEPLOY step, not triage, decides the surface — in both directions', async () => {
+  // Triage said terminal; the deploy came back with a URL and no surface. The URL wins.
+  const a = await run({ triage: tuiTriage(), overrides: {
+    'ui-deploy': { ok: true, url: 'http://localhost:18080' }, ...TUI_HALVES } })
+  assert.equal(a.counts['ui-functional'], 1)
+  assert.equal(a.counts['tui-functional'], undefined)
+  assert.match(a.prompts['ui-functional'], /TEST_APP_BASE_URL/)
+
+  // Triage said nothing; the deploy came back terminal. The deploy wins.
+  const b = await run({ triage: baseTriage({ hasTestApp: true, uiTouched: true }), overrides: {
+    'ui-deploy': TUI_DEPLOY, ...TUI_HALVES } })
+  assert.equal(b.counts['tui-functional'], 1)
+  assert.equal(b.counts['ui-functional'], undefined)
+})
+
+test('a terminal deploy hands each half its OWN session, and never a URL', async () => {
+  const { prompts } = await run({
+    triage: tuiTriage(), overrides: { 'ui-deploy': TUI_DEPLOY, ...TUI_HALVES } })
+  assert.match(prompts['tui-functional'], /TEST_APP_SESSION="ta-a1b2-func"/)
+  assert.match(prompts['tui-visual'], /TEST_APP_SESSION="ta-a1b2-visual"/)
+  for (const l of ['tui-functional', 'tui-visual']) {
+    assert.doesNotMatch(prompts[l], /export TEST_APP_BASE_URL="/, `${l} must not be handed a URL`)
+    // The property most at risk when a branch is added: both halves still call the real tool.
+    assert.match(prompts[l], /REAL \/test-app skill \(Skill tool\)/)
+    assert.match(prompts[l], /Do NOT\s+deploy, redeploy, restart or tear down/)
+  }
+})
+
+test('the terminal visual half carries the geometry sweep and NOT frontend-design', async () => {
+  const t = await run({ triage: tuiTriage(), overrides: { 'ui-deploy': TUI_DEPLOY, ...TUI_HALVES } })
+  assert.match(t.prompts['tui-visual'], /80x24/)
+  assert.match(t.prompts['tui-visual'], /at most 6/)
+  // frontend-design grades typography, colour cohesion and motion; over an 80x24 text frame it
+  // produces findings that are not about anything, in a track whose precision they would land in.
+  assert.match(t.prompts['tui-visual'], /Do NOT load the .?frontend-design/)
+  assert.doesNotMatch(t.prompts['tui-visual'], /THEN load the .?frontend-design/)
+
+  // ...and the web half is untouched by that subtraction.
+  const w = await run({ triage: baseTriage({ hasTestApp: true, uiTouched: true }) })
+  assert.match(w.prompts['ui-visual'], /frontend-design/)
+  assert.match(w.prompts['ui-visual'], /SCREENSHOT BUDGET — at most 6/)
+})
+
+test('a cli surface dispatches ONE half — there is no visual pass on nothing rendered', async () => {
+  const { counts, prompts } = await run({
+    triage: tuiTriage({ testAppSurface: 'cli' }),
+    overrides: { 'ui-deploy': { ok: true, surface: 'cli', handle: '/repo/target/release/app' }, ...TUI_HALVES } })
+  assert.equal(counts['cli-functional'], 1)
+  assert.equal(counts['tui-visual'], undefined)
+  assert.equal(counts['ui-visual'], undefined)
+  assert.match(prompts['cli-functional'], /TEST_APP_BIN="\/repo\/target\/release\/app"/)
+  assert.doesNotMatch(prompts['cli-functional'], /export TEST_APP_BASE_URL="/)
+})
+
+test('a terminal deploy that could not start is BLOCKED, and says why', async () => {
+  const { out, logText } = await run({ triage: tuiTriage(), overrides: {
+    'ui-deploy': { ok: false, surface: 'tui', reason: 'tmux not installed (tui-session.sh exited 127)' } } })
+  assert.equal(out.ui.blocked, true)
+  assert.equal(out.ui.missing, undefined)  // a missing TOOL is not a missing prerequisite skill
+  assert.match(logText, /UI verification NOT run — deploy failed/)
+  // The reason has to reach the store. blockedReasons is fed by the halves, which never ran.
+  assert.match(out.ui.blockedReasons.join(' '), /tmux not installed/)
+})
+
+test('an absent /test-app is still a SKIP on the terminal path, never a blockage', async () => {
+  const { out, counts, logText } = await run({ triage: tuiTriage(), overrides: {
+    'ui-deploy': { ok: false, missing: true, reason: '.claude/skills/test-app/SKILL.md is not on disk' } } })
+  assert.equal(counts['tui-functional'], undefined)
+  assert.equal(out.ui.blocked, false)
+  assert.match(out.ui.missing, /not on disk/)
+  assert.match(logText, /UI verification SKIPPED/)
+  assert.doesNotMatch(logText, /deploy failed/)
+})
+
+test('an unresolvable surface is a named skip, and the deploy brief still says so', async () => {
+  const { out, prompts } = await run({ triage: baseTriage({ hasTestApp: true, uiTouched: true }), overrides: {
+    'ui-deploy': { ok: false, missing: true,
+      reason: 'the /test-app skill declares no surface and names no base URL — re-run /r:test-app-create' } } })
+  assert.match(out.ui.missing, /declares no surface/)
+  // Lock the INSTRUCTION, not only the routing: without it the step could quietly start guessing.
+  assert.match(prompts['ui-deploy'], /declares no\s+surface and names no base URL/)
+  assert.match(prompts['ui-deploy'], /test-app-surface: \(web\|tui\|cli\)/)
+})
+
+test('terminal teardown stops the sessions and never calls worktree-deploy', async () => {
+  const { counts, prompts } = await run({
+    triage: tuiTriage(), overrides: { 'ui-deploy': TUI_DEPLOY, ...TUI_HALVES } })
+  assert.equal(counts['ui-teardown'], 1)
+  assert.match(prompts['ui-teardown'], /tui-session\.sh/)
+  assert.match(prompts['ui-teardown'], /stop 'ta-a1b2-func'/)
+  assert.match(prompts['ui-teardown'], /stop 'ta-a1b2-visual'/)
+  assert.doesNotMatch(prompts['ui-teardown'], /worktree-deploy\.sh" teardown/)
+})
+
+test('a terminal half that dies inside the barrier still reaches the TERMINAL teardown', async () => {
+  // Proves the hoisted surface survives a throw out of parallel() — a variable scoped inside
+  // uiTrack() would be gone exactly when the teardown needs it.
+  const { counts, prompts } = await run({ triage: tuiTriage(), overrides: {
+    'ui-deploy': TUI_DEPLOY, 'tui-functional': CLEAN, 'tui-visual': null } })
+  assert.equal(counts['ui-teardown'], 1)
+  assert.match(prompts['ui-teardown'], /tui-session\.sh/)
+})
+
+test('a DEAD terminal deploy still reaches the terminal teardown, from triage alone', async () => {
+  // The default-from-triage branch, and the reason `stop` on a session nobody started must be a
+  // no-op: this run may have started nothing at all.
+  const { counts, prompts } = await run({ triage: tuiTriage(), overrides: { 'ui-deploy': null } })
+  assert.equal(counts['ui-teardown'], 1)
+  assert.match(prompts['ui-teardown'], /tui-session\.sh/)
+  assert.doesNotMatch(prompts['ui-teardown'], /worktree-deploy\.sh" teardown/)
+})
+
+test('REGRESSION: a web run is bit-for-bit what it was before the surfaces existed', async () => {
+  const { counts, prompts } = await run({ triage: baseTriage({ hasTestApp: true, uiTouched: true }) })
+  assert.equal(counts['ui-prewarm'], 1)
+  assert.match(prompts['ui-deploy'], /WTD="[^"]*worktree-deploy\.sh"/)
+  assert.match(prompts['ui-deploy'], /"\$WTD" deploy/)
+  assert.match(prompts['ui-deploy'], /"\$WTD" base-url/)
+  assert.match(prompts['ui-teardown'], /worktree-deploy\.sh" teardown/)
+  for (const l of ['ui-functional', 'ui-visual']) {
+    assert.match(prompts[l], /TEST_APP_BASE_URL="http:\/\/localhost:18080"/)
+    assert.match(prompts[l], new RegExp(`AGENT_BROWSER_SESSION=ptr-${l === 'ui-functional' ? 'func' : 'visual'}`))
+  }
+  // The negative half is what catches a prompt builder that leaks the terminal block into the
+  // web branch — a positive-only check would pass on a prompt carrying both.
+  for (const l of ['ui-deploy', 'ui-functional', 'ui-visual', 'ui-teardown']) {
+    assert.doesNotMatch(prompts[l], /tui-session/, `${l} leaked the terminal driver`)
+    assert.doesNotMatch(prompts[l], /TEST_APP_SESSION/, `${l} leaked the session handle`)
+  }
+})
+
+test('the run records WHICH surface it verified, and the tracks do not borrow browser numbers', async () => {
+  const t = await run({ triage: tuiTriage(), overrides: {
+    'ui-deploy': TUI_DEPLOY,
+    'tui-functional': { ran: true, findings: [{ title: 'row clipped at 80x24', where: 'table.go', fixSize: 'minor' }] },
+    'tui-visual': CLEAN } })
+  assert.equal(t.out.ui.surface, 'tui')
+  assert.ok(t.out.appliedFindings.some((f) => f.track === 'tui-functional'),
+    'terminal findings must not merge into ui-functional, whose 6/0 precision is a browser number')
+
+  const w = await run({ triage: baseTriage({ hasTestApp: true, uiTouched: true }), overrides: {
+    'ui-functional': { ran: true, findings: [{ title: 'toast never shows', where: '/widgets', fixSize: 'minor' }] } } })
+  assert.equal(w.out.ui.surface, 'web')
+  assert.ok(w.out.appliedFindings.some((f) => f.track === 'ui-functional'))
+})
+
+test('the effort pins hold on the terminal surface too', async () => {
+  const { opts } = await run({
+    triage: tuiTriage(), overrides: { 'ui-deploy': TUI_DEPLOY, ...TUI_HALVES } })
+  assert.equal(opts['tui-functional'].effort, 'high')
+  assert.equal(opts['tui-visual'].effort, 'high')
+  assert.equal(opts['tui-functional'].agentType, 'r:bug-hunter-ui')
+  assert.equal(opts['ui-teardown'].model, 'haiku')
+})
+
+test('a non-JVM UI fix does not go to the Java agent', async () => {
+  const t = await run({ triage: tuiTriage(), overrides: {
+    'ui-deploy': TUI_DEPLOY,
+    'tui-functional': { ran: true, findings: [{ title: 'x', where: 'table.go', fixSize: 'minor' }] },
+    'tui-visual': CLEAN } })
+  assert.equal(t.opts['ui-fix-minor'].agentType, 'general-purpose')
+
+  const w = await run({ triage: baseTriage({ hasTestApp: true, uiTouched: true }), overrides: {
+    'ui-functional': { ran: true, findings: [{ title: 'x', where: '/w', fixSize: 'minor' }] } } })
+  assert.equal(w.opts['ui-fix-minor'].agentType, 'r:java-backend-developer')
+})

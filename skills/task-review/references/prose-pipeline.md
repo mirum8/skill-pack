@@ -23,7 +23,7 @@ other silently makes the two engines diverge.
 | 5 | Build with tests |
 | 6 | `/r:code-scan` on the changed classes, then rebuild if it wrote code |
 | 7 | End-verify: one bounded Codex review of the final diff |
-| 8 | UI / runtime verification — only when `uiTouched` and `/test-app` exists |
+| 8 | UI / runtime verification — only when `uiTouched` and `/test-app` exists, in the surface that skill declares (web, tui or cli) |
 | 9 | Record learnings, keep CLAUDE.md lean, log the run |
 | — | **Non-negotiables** (between Steps 8 and 9 — they govern both engines) |
 
@@ -288,7 +288,7 @@ If git can't resolve a base, fall back to the working-tree + staged diff and not
 
 **Run this step and Step 8 TOGETHER, not one after the other.** They are the two longest blocks in the pipeline — Step 8 measured a median of 542s (p90 1150s), and this one is up to two Codex passes each followed by a fixer — and they read different things: this one reads the git diff, Step 8 drives a browser against a deployed image. They share nothing until their fixes land, so launch both and join. Everything that **writes** waits for that join: Step 8's minor fixes, its issue filing, and its teardown all happen after both have returned.
 
-**The honesty cost, and the guard that pays it.** Step 8's halves verify an image built *before* this step's fixers ran. When one of those fixers touches a **frontend** file, what Step 8 looked at is stale — so re-deploy and re-run its two halves **once**, and say so in the log. That case costs about what running the two serially costs every time, which is the point: the worst case here is the serial ordering, and the common case (end-verify fixes are overwhelmingly backend) is the whole saving. A fixer that **died** changed nothing, so it never triggers the re-verify.
+**The honesty cost, and the guard that pays it.** Step 8's halves verify an image built *before* this step's fixers ran. When one of those fixers touches a **frontend** file, what Step 8 looked at is stale — so re-deploy and re-run its two halves **once**, and say so in the log. **On a terminal surface, treat ANY end-verify fix as render-affecting**: the frontend-file test can never match there — the app's views are `.go`/`.rs`/`.py` like everything else — so left as-is the flag would be permanently false and a TUI would never re-verify at all. The cost calculus that keeps this guard narrow on the web (an 86s docker deploy) does not exist when a restart takes seconds. That case costs about what running the two serially costs every time, which is the point: the worst case here is the serial ordering, and the common case (end-verify fixes are overwhelmingly backend) is the whole saving. A fixer that **died** changed nothing, so it never triggers the re-verify.
 
 This is the single safety gate that makes the one-pass design safe. Steps 4–6 *wrote code* — bug fixes, a refactor, the scan's self-fixes — and none of it has been reviewed since it was written. Rather than re-review after each step, re-review once here, over the **final** diff, so the whole batch of machine-and-subagent-written code gets one real independent read. Codex is the right reviewer for this: the risk is "did a fix or refactor quietly change behavior," which is an equivalence-reasoning question Codex is well-suited to. This pass uses Codex's **lighter built-in reviewer** (`--mode review`) in **all three** tiers, not the strict adversarial mode Step 2 uses at full. Only the *framing* changes, by what has already read the change: in **full** it is regression-only (did Steps 4–6 break anything?), in **standard** a Codex read the pre-fix diff and this one reads the final one, and in **light** nothing has read the change at all, so this is the review.
 
@@ -323,15 +323,31 @@ Cap the end-verify at **2 Codex passes total** — a converge loop without a cap
 
 ## Step 8 — UI / runtime verification (only if a `/test-app` skill exists)
 
-The static tracks read the code. This last step **exercises the running app** to catch what only shows up at runtime: a wrong redirect, a 500 on a valid form, a broken/unstyled page, a JS console error, a flow that no longer works end to end, plus genuine UI **design-quality** regressions. It runs dead last so it tests the **final, fixed, built, scan-cleaned, end-verified** code rather than something earlier steps then change.
+The static tracks read the code. This last step **exercises the running app** to catch what only shows up at runtime: a wrong redirect, a 500 on a valid form, a broken/unstyled page, a JS console error, a flow that no longer works end to end, plus genuine **rendering-quality** regressions. On a terminal app the same list reads: a pane that never redraws after a resize, a key binding that does nothing, a panic dumped into the frame, a table that wraps at 80 columns, a terminal left in raw mode after the app quits. It runs dead last so it tests the **final, fixed, built, scan-cleaned, end-verified** code rather than something earlier steps then change.
+
+The **deploy → halves → teardown** shape below is surface-independent — it is a consequence of subagents having no `Agent` tool, not an artifact of driving a browser — so it holds for a terminal app exactly as written. What the surface changes is the *instrument*: what the deploy starts, what handle the halves are given, and what the teardown stops.
 
 **It is three steps, not one: deploy → (functional ‖ visual) → teardown** — and the whole thing runs *alongside* Step 7 rather than after it (see the note at the top of Step 7). The deploy and the two halves are what overlaps; the teardown, the minor fixes and the issue filing all happen after the join, so they can't race Step 7's fixers over the same files. Put the teardown in a `finally` around the **join**, not inside the parallel branch: a branch that throws is swallowed by the fan-out, and a teardown nested in there would be skipped exactly when it is needed most.
 
-**Warm the image at Step 0.** The deploy is 42% of this step's tool time and took over two minutes in 17 of 56 stored runs (worst: 607s). `uiTouched` is known as soon as Triage classifies the diff, so start `worktree-deploy.sh prewarm` there — it builds the image **without starting anything**, so it cannot serve stale code, and it then overlaps the review, the fix phase, the build and the scan instead of just this step. A fixer editing a file below simply invalidates the layers that file touches, which the real deploy rebuilds; the cache is an optimisation, never the artifact under test. The helper always exits 0, and nothing reads its result — a failed pre-warm costs a cold build and nothing else.
+**Warm the image at Step 0 — web surface only.** A terminal app has no image to warm, and `worktree-deploy.sh` runs `require_bin docker` *before* it reads its subcommand, so `prewarm` there does not no-op: it exits 127. Skip the pre-warm entirely when the surface is `tui` or `cli`. The deploy is 42% of this step's tool time and took over two minutes in 17 of 56 stored runs (worst: 607s). `uiTouched` is known as soon as Triage classifies the diff, so start `worktree-deploy.sh prewarm` there — it builds the image **without starting anything**, so it cannot serve stale code, and it then overlaps the review, the fix phase, the build and the scan instead of just this step. A fixer editing a file below simply invalidates the layers that file touches, which the real deploy rebuilds; the cache is an optimisation, never the artifact under test. The helper always exits 0, and nothing reads its result — a failed pre-warm costs a cold build and nothing else.
 
 **It is three steps, not one: deploy → (functional ‖ visual) → teardown.** A single agent doing all four jobs end to end is the slowest thing in the pipeline — measured across 59 stored runs: median 542s, p90 1150s, with **two thirds of it model time** spread over a median of 86 serial turns. The Phase 2 hunters at least overlap each other; this one runs alone at the end. `/test-app` is *designed* to split its work across parallel subagents ("one subagent for one focused area… spawn them in parallel"), and it **cannot** — subagents have no `Agent` tool since 2.1.217, and not one of those 59 runs ever spawned one. So you do the fan-out, exactly as Step 2b already does for the hunters.
 
-**Gate.** Two conditions decide whether UI verification runs: **`uiTouched`** — the change touched a frontend file — and `/test-app` **present on disk**. The first applies in **every tier, `full` included** — the tier itself must never force this step. Forcing it is the most expensive unearned work available: what routes a change to `full` is auth, money, persistence, concurrency or an approach worth challenging, none of which implies a rendered page changed, so a backend-only `full` run boots the whole stack, drives a browser and grades the design of pages the diff never touched, at a median 542s. The evidence for a UI defect is a **new rendered result**, and there is one only when a frontend file changed; when none did, the static tracks (which `full` runs in full) are what read the change. So a backend-only diff **skips Step 8** at any tier with `post-task-review: no frontend change in this diff (<tier> tier) — skipping UI verification`. When `uiTouched`, the remaining question is presence on disk — that is all the `Skill` tool needs to load it. Whether git *tracks* it on the current branch is irrelevant: a `/test-app` scaffolded locally and gitignored (e.g. a `.venv` + `bugs/` setup) is fully usable even though `git` reports it as not on this branch. That's the filesystem check, not git history — and **Step 1 already ran it** and recorded **hasTestApp**, so read that flag here rather than spending another round-trip on the same `test -f`.
+**Gate.** Three things decide this step now: **`uiTouched`**, `/test-app` **present on disk**, and the **surface that skill declares**.
+
+**Read the surface; judge the diff.** The surface is not a matter of opinion and must never be inferred from this repo's file extensions — `.go` under a view package is a rendered result and `.go` under a store package is not, and no extension test separates them. It is written in the generated skill, the one artifact produced by a detector that looked at the whole project:
+
+```bash
+grep -m1 -oE 'test-app-surface: (web|tui|cli)' .claude/skills/test-app/SKILL.md | cut -d' ' -f2
+```
+
+- prints `web` → today's path, unchanged.
+- prints `tui` or `cli` → the terminal path below.
+- prints **nothing** → the skill predates the marker. If the file names a base URL (`grep -q BASE_URL`) treat it as `web` and **say that you inferred it**; this is a statement about the corpus rather than a guess, because every `/test-app` written before the marker came from a template whose base-URL ladder and Notes both carry one. If it names no base URL either, you cannot tell what to start: **skip the track**, name `/r:test-app-create` as the fix, and start nothing. A skip, not a blockage — the deploy never spent anything and there is no failed tool to go looking for.
+
+`uiTouched` keeps its name and its meaning — *does this diff change what the app renders* — and only its **definition** is surface-selected. For `web` (and for an unread surface) it is the frontend-file list, unchanged. For `tui`/`cli` it is true iff a changed file **draws or drives** the terminal interface: the view/render/widget layer, the key bindings and the event loop, the printed output and its formatting, the flag parsing and the help text. A change under the data, storage, network or parsing layers is not that, even in a single-binary repo. Do not fall back to "it is a terminal app, so everything renders" — that turns the pipeline's most expensive gate permanently on. **The surface decides *how*, never *whether*.**
+
+The two original conditions, unchanged: **`uiTouched`** — the change touched a frontend file — and `/test-app` **present on disk**. The first applies in **every tier, `full` included** — the tier itself must never force this step. Forcing it is the most expensive unearned work available: what routes a change to `full` is auth, money, persistence, concurrency or an approach worth challenging, none of which implies a rendered page changed, so a backend-only `full` run boots the whole stack, drives a browser and grades the design of pages the diff never touched, at a median 542s. The evidence for a UI defect is a **new rendered result**, and there is one only when a frontend file changed; when none did, the static tracks (which `full` runs in full) are what read the change. So a backend-only diff **skips Step 8** at any tier with `post-task-review: no frontend change in this diff (<tier> tier) — skipping UI verification`. When `uiTouched`, the remaining question is presence on disk — that is all the `Skill` tool needs to load it. Whether git *tracks* it on the current branch is irrelevant: a `/test-app` scaffolded locally and gitignored (e.g. a `.venv` + `bugs/` setup) is fully usable even though `git` reports it as not on this branch. That's the filesystem check, not git history — and **Step 1 already ran it** and recorded **hasTestApp**, so read that flag here rather than spending another round-trip on the same `test -f`.
 
 **The deploy re-checks the file before it spends anything, and that check is the authoritative one.** `hasTestApp` is a model's answer to a one-line command, and the `.claude/skills/test-app/` directory outlives its `SKILL.md` — an answer from impression says "present" over a tree with no skill in it. So make step 0 of the deploy `test -f …/test-app/SKILL.md`, and on absence return **ok=false with missing=true** and do nothing else: no pre-warm, no deploy, no containers. Then record the track as **SKIPPED** — an absent optional prerequisite is nobody's failure, the same distinction `tracksSkipped` and `tracksBlocked` draw everywhere else. Never as blocked: that sends a reader after a deploy that never failed. A deploy that genuinely could not bring the app up stays **blocked**, because that one *is* a failure.
 
@@ -342,10 +358,10 @@ The static tracks read the code. This last step **exercises the running app** to
 
 A missing `/test-app` is a skip, not a blocking missing-prerequisite (unlike `/r:code-scan`'s analyzers or Codex's CLI) — the static review still happened.
 
-**Worktree prerequisite.** When the skill *is* present **and you're in a linked git worktree**, this step needs working isolation — otherwise it would redeploy on the project's default port and clash with the main stack or another worktree. Require **both** before proceeding:
+**Worktree prerequisite — web surface only.** A terminal app opens no port, so two worktrees running one cannot collide over one; what they *can* corrupt is the app's shared state directory, and the TUI driver already derives that from the checkout root. There is nothing to require here and nothing to refuse. When the surface is `tui`/`cli`, skip straight to 8a. Otherwise: when the skill *is* present **and you're in a linked git worktree**, this step needs working isolation — otherwise it would redeploy on the project's default port and clash with the main stack or another worktree. Require **both** before proceeding:
 
 ```bash
-WTD=${CLAUDE_SKILL_DIR}/scripts/worktree-deploy.sh"
+WTD="${CLAUDE_SKILL_DIR}/scripts/worktree-deploy.sh"
 IN_WORKTREE=$([ "$(git rev-parse --git-dir)" != "$(git rev-parse --git-common-dir)" ] && echo yes || echo no)
 HELPER_OK=$([ -x "$WTD" ] && echo yes || echo no)
 SKILL_AWARE=$(grep -q "worktree-deploy.sh" .claude/skills/test-app/SKILL.md && echo yes || echo no)
@@ -356,33 +372,63 @@ If `IN_WORKTREE=yes` and either `HELPER_OK=no` or `SKILL_AWARE=no`, **skip this 
 **The pre-warm command**, dispatched back at Step 0 as described above — a cheap `general-purpose` subagent running:
 
 ```bash
-${CLAUDE_SKILL_DIR}/scripts/worktree-deploy.sh" prewarm
+"${CLAUDE_SKILL_DIR}/scripts/worktree-deploy.sh" prewarm
 ```
 
 Collect it before deploying, so the build it started can't still be running against the same docker daemon when the deploy asks for the same layers. Never let it halt or block the run.
 
-**8a — Deploy, once, in its own subagent.** A `general-purpose` subagent brings the app up and returns the live `BASE_URL`. It tests nothing. Reading a command out of a skill file and running a script does not get better with more thinking, and doing it inside the verifier put a whole docker build log into an expensive context. Brief it to read `.claude/skills/test-app/SKILL.md` (+ `references/subagent-prompt.md`) for the redeploy command, health check and default URL, then deploy **only** through the shared helper at the **absolute** path — never the raw redeploy command:
+**8a — Deploy, once, in its own subagent.** A `general-purpose` subagent brings the app up and returns its **handle** — a live `BASE_URL` on the web, a tmux session on a TUI, the built binary path for a command-line app. It tests nothing. Reading a command out of a skill file and running a script does not get better with more thinking, and doing it inside the verifier put a whole docker build log into an expensive context. Brief it to read `.claude/skills/test-app/SKILL.md` (+ `references/subagent-prompt.md`) for the redeploy command, health check and default URL, then deploy **only** through the shared helper at the **absolute** path — never the raw redeploy command:
 
 ```bash
-WTD=${CLAUDE_SKILL_DIR}/scripts/worktree-deploy.sh"
+WTD="${CLAUDE_SKILL_DIR}/scripts/worktree-deploy.sh"
 "$WTD" deploy '<the REBUILD_NOTE redeploy command>'
 "$WTD" base-url '<the default BASE_URL>'
 ```
 
 (Always use that absolute path; a bare `scripts/…` resolves against the project cwd and looks missing. If it isn't there, locate it with `find ~/.claude -name worktree-deploy.sh`.) The helper makes this step **safe to run in parallel across worktrees**, which is the normal case when several tasks are in flight. It branches purely on location: in the **main working tree** it redeploys exactly as before (default port + config) and leaves the stack up; in a **linked git worktree** it brings up a fully isolated ephemeral stack (unique compose project, a free host port, unique container names, throwaway per-worktree volumes → an ephemeral DB). So a verifier in one worktree can never bind the same port, clobber the same containers, or share a DB with the main tree or another worktree.
 
-**A deploy that didn't come up is a blocked track, not a clean UI pass.** If the health check fails, do **not** dispatch the halves — testing whatever happens to be running on that port is worse than not testing. Report the UI track blocked, and still run the teardown in 8c.
+**Terminal surface — 8a instead does this.** There is no compose file, no port and no URL, and `worktree-deploy.sh` is not involved at all. Read the skill for the build command, the launch command, the built binary path, and (for `tui`) a ready marker the first frame prints. **Build first**, and report `ok=false` with the build output if it fails — an unbuilt binary is silently the previous commit, and every check downstream would then pass against code this review never saw. Then:
+
+- **`cli`** — that is all. Return `ok=true`, `surface=cli`, `handle=<absolute path of the built binary>`. Nothing is running.
+- **`tui`** — start **two** sessions through the driver, one per half, and confirm **both** are drawing before returning:
+
+  ```bash
+  TUI="${CLAUDE_PLUGIN_ROOT}/skills/test-app-create/scripts/tui-session.sh"
+  F=$(TUI_SESSION_SUFFIX=func   "$TUI" start --ttl 3600 -- <the launch command>)
+  V=$(TUI_SESSION_SUFFIX=visual "$TUI" start --ttl 3600 -- <the launch command>)
+  TUI_SESSION_SUFFIX=func   "$TUI" wait-for "$F" '<the ready marker>' --timeout 60
+  TUI_SESSION_SUFFIX=visual "$TUI" wait-for "$V" '<the ready marker>' --timeout 60
+  ```
+
+  Each `start` prints exactly one line: the handle it created. Use those strings verbatim. Return `ok=true`, `surface=tui`, `handle="<F> <V>"`.
+
+**Two sessions, not one.** The web analogue of "one stack, two isolated browser sessions" is *one server, two browsers*. A TUI has no server/client split — the terminal **is** the process — so the honest analogue is two instances. One shared session would put the functional half's keystrokes and the visual half's capture on the same stateful frame. It costs almost nothing here: no image build, no port, no volume.
+
+**Driver exit 127 means tmux is missing, and that is a blocked track, not a skip.** The generated skill *declared* this surface, so a terminal is the instrument this project's verification needs — the same shape as a missing docker on the web path, and it must subtract from `tracksBlocked` so an unattended caller cannot merge on a TUI nobody looked at.
+
+**A deploy that didn't come up is a blocked track, not a clean UI pass.** If the health check fails, or a session never draws a frame, do **not** dispatch the halves — testing whatever happens to be running is worse than not testing. Report the UI track blocked **with the deploy's own reason** (a failed deploy leaves the halves' `blockedReasons` empty, so its reason has to be written there explicitly or the blockage has nowhere to go), and still run the teardown in 8c.
 
 **8b — Verify, in two halves, in parallel.** Dispatch **two** `r:bug-hunter-ui` agents (`subagent_type: "r:bug-hunter-ui"`) in the **same turn**. Both invoke the **real `/test-app`** skill — only the scope each is pointed at differs:
 
-| half | scope | browser session |
-|---|---|---|
-| **functional** | API responses and status codes, form submits and redirects, end-to-end flows, app logs | `AGENT_BROWSER_SESSION=ptr-func` |
-| **visual** | screenshots of the changed pages at three viewports, the responsive checklist, then the **`frontend-design`** rubric | `AGENT_BROWSER_SESSION=ptr-visual` |
+| surface | half | scope | isolation handed to it |
+|---|---|---|---|
+| web | **functional** | API responses and status codes, form submits and redirects, end-to-end flows, app logs | `AGENT_BROWSER_SESSION=ptr-func` |
+| web | **visual** | screenshots of the changed pages at three viewports, the responsive checklist, then the **`frontend-design`** rubric | `AGENT_BROWSER_SESSION=ptr-visual` |
+| tui | **functional** | real keystrokes through the changed flows, asserted on what the app drew; failure paths; the app's log file | `TEST_APP_SESSION=<its own session>` |
+| tui | **visual** | the changed screens captured at three geometries, judged against the terminal-render rubric | `TEST_APP_SESSION=<its own session>` |
+| cli | **functional only** | argv contract, exit codes, stdout/stderr separation, piping, signals | `TEST_APP_BIN=<the built binary>` |
 
-Give both the resolved URL and tell them the stack is **already up and not theirs**: `export TEST_APP_BASE_URL="<url>"`, do not deploy, do not tear down. The isolated `AGENT_BROWSER_SESSION` is not optional — sessions have separate browser instances, so without it the visual half switching to iPhone 14 would silently reshape the page the functional half is clicking.
+**A `cli` surface dispatches ONE half.** There is no visual pass on a surface that renders nothing, and dispatching an empty second half spends a whole agent to produce "nothing to check".
 
-Two budgets belong in the visual half's brief, because both were measured being blown:
+Give each half its handle and tell it the app is **already up and not theirs**: `export TEST_APP_BASE_URL="<url>"` on the web, `export TEST_APP_SESSION="<its own session>"` or `export TEST_APP_BIN="<path>"` on a terminal — do not deploy, do not tear down, and on a terminal surface do not `start` or `stop` a session either. **Never overload `TEST_APP_BASE_URL` with a session name**: a mixed project's `curl "$TEST_APP_BASE_URL"` would then silently address a tmux handle. The isolated `AGENT_BROWSER_SESSION` is not optional — sessions have separate browser instances, so without it the visual half switching to iPhone 14 would silently reshape the page the functional half is clicking.
+
+**The terminal visual half's brief** replaces both of the web budgets below with its own, and one substitution in it is load-bearing:
+
+- **Three geometries, not three viewports** — wide (160×50), the app's own default, and **80×24**. That last one is the one that finds things: it is the size every terminal guarantees, and it is where a layout that quietly assumes width falls apart. It plays exactly the role the mobile viewport plays on the web.
+- **At most 6 captures, for a different reason** — a capture is *text*, so the image-reading cost that justifies the screenshot cap does not apply. The cap here is scope discipline: the two screens the diff changed most, each at three sizes.
+- **`frontend-design` is NOT loaded on this surface.** It judges typography, colour cohesion, spatial composition, motion and atmosphere; asked to grade an 80×24 text frame it produces findings that are not about anything, in a track whose precision they would land in. The six-item terminal-render rubric in `r:bug-hunter-ui` replaces it — fits the box · columns and borders line up · colour is never the only signal · focus and affordance · empty and error states read as intended · redraw is clean after a resize.
+
+Two budgets belong in the **web** visual half's brief, because both were measured being blown:
 
 - **At most 6 screenshots** — the two pages the diff changed most, each at desktop (1280×800), tablet (`set viewport 768 1024`) and mobile (`set device "iPhone 14"`). Past runs took a median of 7 and up to 35; past about six the extra shots re-show what the first ones already showed, and each one is an image the agent must then read. Tell it to batch the switch and the capture into one call — `agent-browser batch 'set viewport 768 1024' 'open <url>' 'screenshot <path>'` — so a run doesn't spend a whole model turn per shot.
 - **`frontend-design` is mandatory, not garnish** — it ran in only **11 of 59** past verifications. `/test-app` catches UI that is *broken*; `frontend-design` judges whether the changed pages are *well-designed*. Different lens, and it is the part that quietly goes missing.
@@ -391,13 +437,25 @@ Both agents are **report-only**: they return findings plus the durable screensho
 
 Per the subagent-flow non-negotiable: a returned report **is** the completion signal — don't poll it or watch for an output file. If a half comes to rest **without a usable report** (died, returned nothing, no confirmation line, or stalled past a short bounded wait), **re-dispatch it**, bounded to **2 re-dispatches**. **A half that stays dead makes the UI track incomplete, not clean** — carry the survivor's findings into triage, but never report the track as a clean bill. Reading one half as a full pass is the same phantom-clean failure Step 2b guards against for the hunters.
 
-**8c — Teardown, and it is now the ONLY teardown.** Once **both** halves have returned — **on success, failure, OR stall**, and before triage — run it yourself:
+**8c — Teardown, and it is now the ONLY teardown.** Once **both** halves have returned — **on success, failure, OR stall**, and before triage — run it yourself. **Which one you run is decided by the surface you resolved, and that has to survive a throw**: resolve it before 8a and keep it outside the parallel branch, or a deploy that died leaves you tearing down with the wrong instrument.
+
+Web:
 
 ```bash
-${CLAUDE_SKILL_DIR}/scripts/worktree-deploy.sh" teardown
+"${CLAUDE_SKILL_DIR}/scripts/worktree-deploy.sh" teardown
 ```
 
-This is safe to call always: in a linked worktree it removes that worktree's ephemeral containers and volumes; in the main tree it is a deliberate no-op by design, so it never touches the main stack. Structure it as a `finally` around 8a–8b so a failed deploy or a dead half still reaches it.
+Safe to call always: in a linked worktree it removes that worktree's ephemeral containers and volumes; in the main tree it is a deliberate no-op, so it never touches the main stack.
+
+`tui` — stop every session this run started, and do **not** run `worktree-deploy.sh`, which requires docker and has nothing to do with a terminal app:
+
+```bash
+"${CLAUDE_PLUGIN_ROOT}/skills/test-app-create/scripts/tui-session.sh" stop '<each handle>'
+```
+
+`stop` exits 0 on a session that is already gone, which is precisely what lets this run unconditionally — including on a path where the deploy started nothing at all. `cli` started nothing, so its teardown is a no-op worth no agent.
+
+Structure it as a `finally` around 8a–8b so a failed deploy or a dead half still reaches it. **One thing no `finally` can cover:** a run killed outright never reaches it, and a leaked tmux session is worse than a leaked container because nothing lists it where you would look. That is why every session is started with a `--ttl`: it is the only backstop for that case, and without it "teardown on every exit path" is not true on this surface.
 
 **Neither half tears down, and that is deliberate.** With two agents sharing one stack, a half that ran teardown when *it* finished would delete the containers out from under its sibling, mid-run. So the orchestrator is the single owner of the stack's lifecycle, and no agent-side backstop is needed. (Worth knowing why one would otherwise matter: across 59 measured runs a hunter left to tear down after itself reached that step in only 21 of them — skipped nearly two thirds of the time.)
 
@@ -410,7 +468,7 @@ Classify each confirmed finding **by the size and risk of its fix, not by the bu
 - **Minor** — surgical, low-risk, clearly scoped (a wrong redirect, a missing/incorrect CSS class, an obvious 500, a clipped element fixable with a small tweak). *Fix it now.* A serious bug with a one-line fix still counts as minor — small fixes are safe to fold in.
 - **Major** — needs its own development or design cycle (a flow redesign, a responsive-layout overhaul, a design-quality rethink, a behavior change with broad blast radius). *File it in the backlog, don't fix it this turn.* Reworking this inline would quietly turn a turn about something else into a UI project.
 
-**Fix the minor ones.** Triage is already done; delegate to the matching domain subagent — UI/template/CSS → **`r:htmx-thymeleaf-dev`**, backend/runtime → **`r:java-backend-developer`** — briefed as surgical fixers (smallest diff, project conventions, no stray refactors). UI/runtime defects are runtime-proven, not unit-testable in the usual way, so the proof is the **re-verify**, not a JUnit test: rebuild (the **incremental** command from Step 1 + runner agent) until green, redeploy through the helper, and re-verify **once** — dispatching only the half that reported the defects, not both, since the other half found nothing to re-check. Bound it to this one loop — do **not** re-run Steps 2–7 (review / fixes / `/r:code-scan` / end-verify) from here. Anything still failing after that single re-verify is **escalated into the backlog file** (treat it as major) rather than looping or asking.
+**Fix the minor ones.** Triage is already done; delegate to the matching domain subagent — UI/template/CSS → **`r:htmx-thymeleaf-dev`**, backend/runtime → **`r:java-backend-developer`**, and on a project with **no JVM build** neither of those but a `general-purpose` agent that reads the project's own conventions instead of importing a Spring/JPA persona into Rust or Go — briefed as surgical fixers (smallest diff, project conventions, no stray refactors). UI/runtime defects are runtime-proven, not unit-testable in the usual way, so the proof is the **re-verify**, not a JUnit test: rebuild (the **incremental** command from Step 1 + runner agent) until green, redeploy through the helper — on a terminal surface that is `stop` then `start` through the driver, never the helper — and re-verify **once** — dispatching only the half that reported the defects, not both, since the other half found nothing to re-check. Bound it to this one loop — do **not** re-run Steps 2–7 (review / fixes / `/r:code-scan` / end-verify) from here. Anything still failing after that single re-verify is **escalated into the backlog file** (treat it as major) rather than looping or asking.
 
 **File the major ones into `issues/`.** This is a local write and nothing else — write the file, never `gh issue create` or any other tracker. That is not a preference: an agent asked to publish tickets under the user's identity is stopped by the safety classifier *before its first tool call*, so the finding is lost outright and no fallback is ever reached. A file always writes.
 
@@ -418,7 +476,7 @@ Classify each confirmed finding **by the size and risk of its fix, not by the bu
 
 - **Append, never overwrite.** If the file already exists, add this run's items under a new `## <HH:MM> — post-task-review` heading, so a second review the same day doesn't erase the first one's backlog.
 - **One unticked `- [ ]` item per finding**, the title on the item line (concise, e.g. `[UI] checkout form returns 500 on valid coupon`), the body indented beneath it: where (route / `file:line`), what it does vs. what it should do, the evidence (HTTP status, log line), the suggested fix, and the viewport a responsive finding failed at (mobile/tablet).
-- **Screenshots travel with the file.** Copy each durable path `r:bug-hunter-ui` returned into `issues/assets/<slug>/` and link it relatively (`![](assets/<slug>/step-3.png)`) — the durable path may sit in an ephemeral worktree that is torn down minutes later.
+- **Evidence travels with the file.** Copy each durable path `r:bug-hunter-ui` returned into `issues/assets/<slug>/` and link it relatively (`![](assets/<slug>/step-3.png)`) — the durable path may sit in an ephemeral worktree that is torn down minutes later. A **terminal capture is text, not an image**: copy it to `issues/assets/<slug>/<step>.txt` and embed the relevant lines as a fenced block. Writing `![](…)` around a `.txt` produces a broken image in a backlog `/r:issues-fix` then reads.
 
 That item shape is not decoration: it is exactly what `/r:issues-fix`'s file adapter parses (one item per `- [ ]` line, indented lines as its body), so the file is a backlog someone can work through with `/r:issues-fix issues/ui-review-<date>.md`, and the empty box is the write-back it ticks. Name the path in the final summary. Writing long item bodies can be delegated to a general subagent to keep your context lean.
 

@@ -2,6 +2,124 @@
 
 Read-only probes for filling the placeholder map. Run from the project root. Record what you find; where a signal is missing or ambiguous, fall back as noted (and ask the user for the base URL rather than guessing).
 
+## Step 0 — which surface
+
+Run this **first**, before anything below. Its answer picks the template pair, and it decides
+whether the base-URL section is even read. Fill `{{SURFACE}}` with exactly one of `web`, `tui`
+or `cli`.
+
+### Stage A — collect candidates, never answers
+
+Web signals: a compose file, a server framework in the manifest, a `templates/` or `static/`
+directory, a published port, a `deploy` skill.
+
+Terminal signals: an executable entrypoint, plus a framework from the tables in
+`process-surfaces.md`.
+
+```
+ls docker-compose*.yml compose*.yml 2>/dev/null
+grep -nE '"?[0-9]+:[0-9]+"?' docker-compose*.yml 2>/dev/null | head
+grep -nA2 '^\[\[bin\]\]' Cargo.toml 2>/dev/null; ls cmd/*/main.go src/main.rs 2>/dev/null
+grep -n '"bin"' package.json 2>/dev/null
+grep -nA3 '\[project.scripts\]\|console_scripts' pyproject.toml setup.py 2>/dev/null
+```
+
+Record everything. A hit here is a candidate.
+
+### Stage B — the discriminator, and it is the load-bearing probe
+
+**A dependency is not a surface.** `ratatui` can sit in `[dev-dependencies]`; `rich` prints
+coloured tables from a program that is unambiguously a CLI; `bubbles` gets vendored for one
+spinner; `prompt_toolkit` in its default `PromptSession` mode is a readline replacement, not a
+TUI. What decides is whether the program **takes over the terminal**.
+
+Getting this wrong is uniquely expensive: it picks the wrong template pair for the user's entire
+generated skill, and every check in it then asks the wrong questions of the right program.
+
+**B1 — static evidence, at the call site rather than the import.** The rawest signal first,
+because it is language- and framework-independent:
+
+```
+grep -rn '?1049h\|?1049l\|smcup\|\[?25l' --include='*' . 2>/dev/null
+```
+
+Then the calls that make a framework full-screen — not the import, the call:
+
+| framework | the line that makes it a TUI |
+| --- | --- |
+| ratatui / crossterm | `EnterAlternateScreen`, `enable_raw_mode()`, `ratatui::init()`, `Terminal::new(CrosstermBackend` |
+| termion | `into_raw_mode()`, `AlternateScreen::from(` |
+| cursive | `Cursive::default()` then `.run()` |
+| bubbletea | `tea.NewProgram(` **with** `tea.WithAltScreen()`; `p.Run()` |
+| tview | `tview.NewApplication()` then `.Run()` |
+| gocui | `gocui.NewGui(` then `g.MainLoop()` |
+| tcell | `tcell.NewScreen()` then `screen.Init()` |
+| textual | `class X(App)` then `.run()` / `.run_async()` |
+| urwid | `urwid.MainLoop(` |
+| curses | `curses.wrapper(`, `initscr()`, `cbreak()`, `noecho()` |
+| prompt_toolkit | `Application(` **with** `full_screen=True` — `prompt()` and `PromptSession` are **not** |
+| ink | `render(<App` from `ink` |
+| blessed (node) | `blessed.screen({` with `smartCSR` |
+| ncurses (C) | `initscr()`, `newterm(`, a `tcsetattr` clearing `ICANON` |
+| lanterna | `createScreen()` then `screen.startScreen()` |
+| jline | `terminal.enterRawMode()` |
+
+CLI evidence is the absence of all of that plus an arg parser at the entrypoint —
+`Parser::parse()`, `rootCmd.Execute()`, `parse_args()`, `program.parse(`,
+`new CommandLine(...).execute(` — with explicit exits and a `--help` string.
+
+**B2 — the runtime probe, which is what actually settles it.** Static evidence gets this wrong in
+both directions. Start the program and ask the terminal what it did:
+
+```
+${CLAUDE_SKILL_DIR}/scripts/tui-session.sh probe --timeout 8 -- <the launch command, no arguments>
+```
+
+It prints one word — `tui`, `cli` or `unknown` — and always tears down its own session.
+
+**Probe the real entrypoint, never `--help`.** No TUI enters the alternate screen to print its
+help, so probing `--help` reports `cli` for every program on earth.
+
+The ladder inside `probe`, first hit wins:
+
+1. tmux reports the pane is on the alternate screen → **`tui`**. Definitive, and the one signal
+   that owes nothing to the language or the framework.
+2. The program exited inside the deadline, with a status recorded → **`cli`**. Definitive the
+   other way: it terminated without being given any input.
+3. Still alive, no alternate screen — one harmless key is sent and the frame re-read. **Changed,
+   with no line appended** → **`tui`**: an inline TUI (bubbletea without `WithAltScreen`, ink's
+   default render) repaints in place.
+4. Still alive, frame unchanged, a prompt on the last line → **`cli`**, a REPL. Say so in the
+   summary; a REPL is a CLI wearing a loop, and the CLI catalog is the right one for it.
+5. Anything else → **`unknown`**, exit 9. It never guesses, and neither should you.
+
+If the driver exits `127`, tmux is absent and the ladder degrades to B1 alone. **When B1 is not
+unanimous, ask the user.** Never fall back to `web`: a repo with a `Cargo.toml`, no compose file
+and no HTTP framework is not a web app with a missing base URL, and generating the web pair for it
+produces a skill whose every placeholder is a guess.
+
+### Stage C — both surfaces present → ASK (don't auto-pick)
+
+When Stage A finds a web signal **and** a terminal entrypoint that Stage B classifies as `tui` or
+`cli`, they are two different products with two different verifications, and nothing in the tree
+says which one the user wants tested. List what you found — surface → entrypoint → framework → how
+it launches → what it looks like it is for — and **ask which one `/test-app` should target**. Take
+the whole placeholder map from the matching column.
+
+The common real shape is a server binary plus an admin CLI in one repo. The answer is usually the
+server, and the user is the only one who knows.
+
+This is the same rule as the multiple-compose-files ask below, for the same reason: several
+plausible targets, no way to rank them from the code, and a wrong pick that is invisible until
+someone reads the generated skill.
+
+Record the outcome: `surfaceDetectedBy` is `static` when B1 was unanimous, `probe` when B2
+decided, `asked` when Stage C or a non-unanimous B1 sent you to the user; `surfaceCandidates` is
+how many surfaces Stage A found.
+
+**Everything below this line is the `web` pair.** For `tui` or `cli`, read
+`process-surfaces.md` instead and skip to "Credentials", which both pairs share.
+
 ## `{{APP_NAME}}`
 
 Dir name of the root, or a real name from `pom.xml` `<name>`, `package.json` `"name"`, `pyproject.toml` `[project] name`. Used only in prose.
@@ -65,7 +183,14 @@ If a **distinct end-to-end helper** exists beyond the REST client — e.g. a cha
 
 Note: these are the **project's own** helpers — the generated skill uses them in place but never modifies the project's `scripts/`. Newly generated e2e scripts go under `{{E2E_DIR}}` (the skill's own `e2e/`), never into the project's `scripts/`.
 
-## `{{UI_IN_SCOPE}}`
+## `{{UI_IN_SCOPE}}` (web pair only)
+
+This is a **web-pair placeholder**. It gates the `/agent-browser` blocks and nothing else — every
+`{{#IF_UI}}` block in both web templates is browser material. The process pair does not have it,
+and a terminal app never sets it: a TUI is a user interface, but not one a browser can open. Use
+`{{SURFACE}}` to choose the pair, and this only to decide whether the *web* pair keeps its browser
+blocks. Unifying the two is tempting and produces a generated skill that tells a subagent to open
+a URL against a program with no HTTP server.
 
 ```
 find . -type d -name templates -path "*resources*" 2>/dev/null     # Thymeleaf/JTE/Freemarker

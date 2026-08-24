@@ -3,8 +3,8 @@ description: >-
   Run the user's post-task review routine over the current git diff — one pipeline that finds
   everything, fixes it once, and verifies the result: parallel Codex + bug/security/docs hunters +
   code-quality, one fix phase, build with tests, mandatory `/r:code-scan` static analysis, a
-  bounded Codex end-verify of the final diff, and UI/runtime verification when the frontend
-  changed. Runs in three auto-classified tiers (light / standard / full) that scale depth only —
+  bounded Codex end-verify of the final diff, and UI/runtime verification when the change touches
+  what the app renders — a web page or a terminal UI. Runs in three auto-classified tiers (light / standard / full) that scale depth only —
   no tier drops build+tests, `/r:code-scan`, or a real Codex read of the final diff. Every step
   invokes the ACTUAL tool, never an LLM imitation. **This routine is NOT automatic.** Invoke it
   only when `/r:task-run` reaches its post-task-review step, or when the user explicitly asks —
@@ -106,6 +106,7 @@ The full text of each lives in `references/prose-pipeline.md` (between Steps 8 a
 - **An empty findings list is a claim, not a safe default.** Every report-only track states whether its tool actually **ran**. `ran=false` counts as **blocked**, exactly like a dead track — never as clean. This is the failure the routine is least able to detect and most damaged by.
 - **Subagent result = its return value.** That return **is** the completion signal — never poll it, never invent a `.done` file or status marker to watch. A subagent that comes to rest without a usable result is re-dispatched, bounded to **2** re-dispatches, then surfaced as blocked.
 - **Tiers scale depth, not integrity.** No tier drops build+tests, `/r:code-scan`, or a real Codex read of the final diff. Routing a risky change to a cheap tier is the failure that matters; routing an ordinary one to `full` is how a tier system stops meaning anything — which is why uncertainty goes to `standard`.
+- **The UI step verifies whatever `/test-app` declares it drives.** Its surface is READ off that skill's own marker line — `web`, `tui` or `cli` — never inferred from this repo's file extensions, and never forced by a caller: a caller cannot know better than the file on disk, and a forced surface is a way to start the wrong thing. The surface decides *how* the step runs, never *whether* — that stays `uiTouched` in every tier.
 - **UI verification auto-resolves without asking.** It classifies findings by **fix size**: minor ones are fixed inline and re-verified once; ones needing their own development cycle are appended to `issues/ui-review-<date>.md` as unticked backlog items, which `/r:issues-fix` reads directly. That filing is a local write, never `gh` — an agent told to publish tickets under the user's identity is stopped by the safety classifier before its first tool call, losing the finding outright.
 - **CLAUDE.md compaction is unattended but evidence-gated.** `/r:claudemd-compact --auto` runs with no confirmation, but only when CLAUDE.md changed this turn **and** its root exceeds ~200 lines, and it may only delete a rule the codebase proves stale.
 
@@ -115,7 +116,8 @@ The full text of each lives in `references/prose-pipeline.md` (between Steps 8 a
 |---|---|---|
 | `task-review.workflow.js` | the canonical pipeline (the `meta.name` inside it keeps the pre-rename spelling — that string is what the guard hook matches) | never by hand — run it via `Workflow` |
 | `references/prose-pipeline.md` | Steps 0–9 in full + the non-negotiables verbatim | only on the fallback path (no `Workflow` tool), or when changing the pipeline |
-| `scripts/worktree-deploy.sh` | port/container isolation for the UI step across worktrees | called by Steps 8a/8c |
+| `scripts/worktree-deploy.sh` | port/container isolation for the UI step across worktrees | called by Steps 8a/8c on a **web** surface |
+| `${CLAUDE_PLUGIN_ROOT}/skills/test-app-create/scripts/tui-session.sh` | the real terminal a TUI's verification is driven through | called by Steps 8a/8c on a **terminal** surface |
 | `${CLAUDE_PLUGIN_ROOT}/lib/record-run.py` · `${CLAUDE_PLUGIN_ROOT}/lib/skill-stats.py` | the per-run stats row, and reading it back — pack-level, shared with every other skill | Step 9c; `skill-stats.py --review` any time you want the measured yield per track |
 | `${CLAUDE_PLUGIN_ROOT}/hooks/guard-workflow.py` | `PreToolUse` hook that blocks forked invocations — pack-level, not this skill's | never directly |
 | `tests/control-flow.test.mjs` | locks the workflow's control flow (`node --test`) | run it after any change to the pipeline |

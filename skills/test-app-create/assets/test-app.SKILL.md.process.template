@@ -1,0 +1,114 @@
+---
+name: test-app
+description: Use this skill to verify {{APP_NAME}} after changes — smoke tests, regression checks, post-build validation, {{#IF_TUI}}rendered-frame and keybinding verification, terminal-restoration checks, {{/IF_TUI}}{{#IF_CLI}}exit-code and stdout/stderr checks, argv and piping behaviour, {{/IF_CLI}}log inspection. Triggers on "test the app", "verify the changes", "check if it works", "smoke test", "did that build work", "/test-app", or any request to validate that recent code or config changes behave correctly end to end.
+---
+
+# Test App
+
+<!-- test-app-surface: {{SURFACE}} -->
+
+Verifies that recent changes to {{APP_NAME}} actually work — by building it with `{{BUILD_CMD}}` and then driving the real program: {{#IF_TUI}}a real terminal through `{{TUI_DRIVER_PATH}}`, {{/IF_TUI}}direct `{{BIN_PATH}}` invocations, persisted e2e scripts, and `{{LOGS_CMD}}`. It checks the happy path, {{#IF_TUI}}what the app actually renders, {{/IF_TUI}}the failure paths, **and** the security rules that apply to a program running on someone's machine, then reports concrete pass/fail.
+
+That marker line above is not decoration: `/r:task-review` reads it to decide what to start and what to hand a verifier. Keep it, and keep it accurate — if this project grows a web surface, re-run `/r:test-app-create` rather than editing the line, because the rest of this file would still describe a terminal app.
+
+This skill owns its artifacts under its own directory — credentials in `{{CREDS_PATH}}`, generated e2e scripts and captured frames in `{{E2E_DIR}}/` — so it never collides with the project's own `scripts/`.
+
+## Where the app runs — build, state, and isolation
+
+There is no server here and no port. What decides whether you are testing *this* change is the **build**, and what stops two runs from corrupting each other is the **state directory**. Resolve both before testing:
+
+    {{#IF_TUI}}TUI="{{TUI_DRIVER_PATH}}"
+    {{/IF_TUI}}BIN="${TEST_APP_BIN:-{{BIN_PATH}}}"
+
+    if [ -n "${TEST_APP_SESSION:-}" ] || [ -n "${TEST_APP_BIN:-}" ]; then
+        :                                    # (1) caller already built and started it — test THAT
+    else
+        {{BUILD_CMD}}                        # (2) build, so the binary under test is this diff
+        {{HEALTH_CHECK_CMD}}                 # (3) confirm it runs at all before asserting anything
+    fi
+
+Four cases, in priority order:
+
+1. **Caller supplied `TEST_APP_SESSION` / `TEST_APP_BIN`** (the post-task-review verifier already built and started the app): use them, and do **not** build, start or stop anything — the caller owns the lifecycle, and a second instance of a program that owns a config file or a lock is a collision, not a spare.
+2. **Anywhere else**: run `{{BUILD_CMD}}` first. {{REBUILD_NOTE}} This matters more here than on a web stack, where a running server at least tells you *something* is up: an unbuilt binary is silently the previous commit, and every check passes against code you did not change.
+3. **A linked git worktree needs nothing extra.** This is the interesting difference from a compose-backed app, so it is worth stating rather than leaving implicit: two worktrees running a terminal program collide only through its **state directory**, never through a port, and {{#IF_TUI}}the driver already derives that directory from the checkout root{{/IF_TUI}}{{#IF_CLI}}the checks below point the app at a throwaway directory{{/IF_CLI}}. There is no "refuse to run from a worktree" case, because there is nothing to refuse.
+{{#IF_TUI}}4. **tmux is missing** (the driver exits `127`): the checks that need a real terminal did **not run**. Record them as such and **name tmux** — never report the app as verified, and never substitute a hand-rolled `expect` wrapper. The surface-independent checks below still run and still count.
+{{/IF_TUI}}{{#IF_CLI}}4. **`{{BIN_PATH}}` is missing after the build**: stop and report the build failure. A `/test-app` run that tests a stale binary is worse than one that does not run.
+{{/IF_CLI}}
+{{#IF_TUI}}Every session must be stopped. Set the teardown up as a trap the moment a start succeeds, so the session goes away on **any** exit path — a failed assertion, an error, an abort — not just the happy one:
+
+    H=$("$TUI" start --geometry {{TERM_GEOMETRY}} -- {{LAUNCH_CMD}}) || exit 1
+    trap '"$TUI" stop "$H"' EXIT
+
+A leaked tmux session is worse than a leaked container in one specific way: nothing lists it where you would look. The driver's own TTL eventually reaps it, but that is a backstop for a killed run, not a substitute for the trap.
+
+{{/IF_TUI}}## When this skill activates
+
+### 1. Decide what to test — two modes
+
+- **Argument given** (e.g. `/test-app the new filter pane`, `/test-app @parser`): test exactly what the argument names. Don't widen scope to the diff unless the argument is too vague to act on (then ask).
+- **No argument**: test the recent change. Look in this order — conversation history (you usually just discussed it), then `git status` + `git diff` for uncommitted work, then `git diff HEAD~1 --stat` if the tree is clean.
+
+Then pick the dimensions that fit (see the catalog). {{#IF_TUI}}A change to the render layer needs the geometry sweep; a change to a key handler needs the binding pass; a change under the data layer often needs neither, only the functional path and the logs.{{/IF_TUI}}{{#IF_CLI}}A new flag needs the argv and `--help` passes; a change to an error path needs the exit-code and stderr passes.{{/IF_CLI}}
+
+### 2. Build the subagent prompt
+
+Read `references/subagent-prompt.md` and substitute `{WHAT_TO_TEST}` with a concrete checklist. Good content names exact {{#IF_TUI}}keys, screens and expected frame text{{/IF_TUI}}{{#IF_CLI}}argv, exit codes and which stream each message belongs on{{/IF_CLI}}. Examples:
+
+{{#IF_TUI}}- *Functional:* "Open the app, press `w` for the widgets pane, `n` for new, type `alpha`, press Enter. Confirm a row `alpha` appears in the list and the status line says `1 widget`. Capture the frame."
+- *Rendering:* "Capture the widgets pane at {{GEOMETRY_SWEEP}}. At 80x24 confirm the id column is not truncated away, the borders still close, and the footer is still on screen."
+- *Restoration:* "Quit with the documented key and confirm the terminal is restored — alternate screen off, non-zero exit only if the app meant it. `stop --expect-exited` is the check."
+{{/IF_TUI}}{{#IF_CLI}}- *Functional:* "`{{BIN_PATH}} widgets add --name alpha` → exit 0, the new id alone on **stdout**, nothing on stderr. Then `widgets list` shows it."
+- *Failure path:* "Omit `--name` → a usage error on **stderr**, exit 2 (not 1, not 0), and stdout completely empty so a caller piping it gets nothing rather than half a record."
+- *Composability:* "`{{BIN_PATH}} widgets list --json | head -1` exits 0 with no traceback, and the full output parses as JSON."
+{{/IF_CLI}}
+### 3. Surface scan → persisted e2e scripts
+
+Read the real contract before testing it, the way the web pair reads controllers: {{#IF_TUI}}the app's **binding table** ({{KEYMAP_BLOCK}} is what was found — check it is still current) and the widget/view code behind the changed screen. Guessing `q` and reporting "unresponsive" when nothing happens is the commonest way this surface produces a false finding.{{/IF_TUI}}{{#IF_CLI}}the **parser definition** — the clap derive, the `AddCommand` calls, the `add_argument` lines. Never read `--help` for this: `--help` is one of the things under test, and taking it as the specification means a wrong help text can never be found.{{/IF_CLI}}
+
+Turn the meaningful flows into reusable scripts under `{{E2E_DIR}}/` and keep them, so the next run extends them instead of rewriting one-off invocations. {{#IF_TUI}}A TUI flow is a sequence of `send` / `wait-for` / `capture` with the expected frame fragments asserted.{{/IF_TUI}}{{#IF_CLI}}A CLI flow asserts the whole triple — exit code, stdout, stderr — never just the exit code.{{/IF_CLI}}{{#IF_NATIVE_HARNESS}} Where the project already has a harness for this ({{NATIVE_HARNESS_BLOCK}}), add the case **there** instead: that is where it will keep running after this review is over.{{/IF_NATIVE_HARNESS}}
+
+### 4. Verification catalog — pick what fits the change
+
+Always on: **functional behaviour**{{#IF_TUI}}, **rendering correctness**, and **terminal restoration**{{/IF_TUI}}{{#IF_CLI}}, **exit codes**, and **stdout/stderr separation**{{/IF_CLI}}. Add the rest when relevant.
+
+{{#IF_TUI}}- **Functional** — the changed behaviour works when driven by real keystrokes, asserted against what the app drew.
+- **Rendering correctness** — the frame shows what it should: the new pane, column or row is present with the right values; nothing truncated with `…` where it would fit; no mojibake where a box-drawing or wide glyph belongs; no widgets overlapping.
+- **Geometry sweep** — re-capture the changed screen at {{GEOMETRY_SWEEP}}. **80x24 is the one that finds things**: it is the size every terminal guarantees, and it is where a layout that quietly assumes width falls apart. Below the app's own minimum size it must *say so* rather than crash.
+- **Keybinding and focus** — every binding the change touches does what the app claims; `Tab` and the arrows move focus **visibly**; `Esc` backs out; the documented quit key quits. And the one that regresses most: an **unbound** key is ignored — not swallowed into a text field, not a crash.
+- **Terminal restoration on exit** — after the quit path, alternate screen off, cursor visible, echo restored. This is the defect users actually report, and no in-process test harness can see it, because there is no real terminal to leave broken.
+- **Crash surface** — reach the nearest error path on purpose. A panic or traceback must not be painted over the frame and left there with the terminal in raw mode; the message has to be readable, not interleaved with layout escapes.
+- **Non-TTY degradation** — `{{LAUNCH_CMD}} < /dev/null | cat`, and `TERM=dumb`. A clear message and an exit, never a hang waiting for input that will never come. A TUI that hangs when piped is the single commonest way this kind of app breaks a CI job.
+{{#IF_COLOR}}- **Colour and `NO_COLOR`** — capture with escapes kept and confirm the styling is there with a terminal attached; then `NO_COLOR=1` and confirm the same content with no colour sequences at all. An app that ignores `NO_COLOR` is a finding, not a skip.
+{{/IF_COLOR}}- **Large data** — if the change touches a list or table, feed it more rows than the viewport: the last item is reachable, the scroll indicator is honest, and paging does not repaint garbage.
+- **State isolation** — the run wrote nothing into the real `{{STATE_DIR}}`, and a fresh state directory starts clean rather than erroring.
+{{#IF_MOUSE}}- **Mouse** — this app enables mouse capture.{{#IF_NATIVE_HARNESS}} Cover it through the project's own harness.{{/IF_NATIVE_HARNESS}} Driving a mouse report into a real pane is not something this skill can do honestly, so wherever a harness does not cover it, record mouse paths as **NOT COVERED** and say so. A check that cannot fail is worse than an admitted gap.
+{{/IF_MOUSE}}{{/IF_TUI}}{{#IF_CLI}}- **argv contract** — each changed subcommand and flag does what it says; long and short forms agree; an unknown flag is **rejected**, not silently ignored.
+- **Exit codes** — 0 on success, and a **distinct** non-zero per failure class{{#IF_EXIT_CODES}} per the app's own table: {{EXIT_CODE_TABLE}}{{/IF_EXIT_CODES}}. The defect this catches most often: an error path that prints a message and then falls through to a successful return, so every caller in a pipeline treats the failure as a result.
+- **stdout/stderr separation** — run as `cmd > out 2> err`. `out` holds exactly the payload (and parses as JSON if it claims to); every diagnostic, warning, prompt and progress bar is in `err`. This is what makes the tool composable at all, and roughly every second change that adds a log line breaks it.
+- **`--help` accuracy** — every flag `--help` lists exists and behaves as described, and every flag the parser accepts is listed. Cheap to check and it fails often, because nobody updates help text.
+{{#IF_STDIN}}- **Piping and EOF** — the stdin form matches the file form; `< /dev/null` makes it exit rather than hang; `| head -1` on long output produces neither a broken-pipe traceback nor a non-zero exit.
+{{/IF_STDIN}}{{#IF_SIGNALS}}- **Signals** — an interrupt during a long operation exits promptly with the documented code, leaves no half-written output file, and prints no traceback.
+{{/IF_SIGNALS}}- **Destructive-flag safety** — `--dry-run` changes nothing; a destructive subcommand refuses without its confirmation flag.
+- **State isolation** — the run wrote nothing into the real `{{STATE_DIR}}`.
+{{/IF_CLI}}- **Security** — see the pass in `references/subagent-prompt.md`; it is short, and the parts that survive from a web app are the parts that get skipped.
+- **Regression of adjacent flows** — re-exercise the neighbours of what changed, so the fix didn't break something next door.
+{{#IF_I18N}}- **Localization** — the changed user-visible strings render in each configured locale with no missing keys.
+{{/IF_I18N}}
+### 5. Credentials on demand
+
+The subagent reads accounts and tokens from `{{CREDS_PATH}}`. {{AUTH_MODEL}}. If a flow needs one that isn't there, **pause and ask the user**, then append it in the existing format so the next run is unattended. Never invent credentials and never paste a real secret into this skill or the subagent prompt — always reference the file.
+
+### 6. Spawn subagent(s)
+
+Spawn via the Agent tool with `subagent_type: general-purpose`, prompt = the filled template. Use one subagent per focused area; if the change touches independent areas, spawn them in parallel in one message.{{#IF_TUI}} **Give each one a distinct `TUI_SESSION_SUFFIX`.** Two subagents driving one pane interleave their keystrokes and both report nonsense — the driver isolates by suffix, but only if they are actually different.{{/IF_TUI}} Run foreground — you need the results to report back.
+
+### 7. Report results
+
+Summarize concisely: `N passed, M failed, K skipped`, with evidence. {{REPORT_EVIDENCE_NOTE}} Don't relay the subagent's text verbatim — surface the action items. **A check that could not run is reported as skipped and named, never folded into the pass count.**
+
+## Notes
+
+- **{{REBUILD_NOTE}}** The binary is the thing under test; if it predates the diff, nothing below means anything.
+{{#IF_EXTRA_SERVICES}}- {{EXTRA_SERVICES}}
+{{/IF_EXTRA_SERVICES}}- Keep stateful tests clean: point the app at a throwaway state directory for anything that mutates, and don't wipe the user's real config unless that is literally what is being tested.

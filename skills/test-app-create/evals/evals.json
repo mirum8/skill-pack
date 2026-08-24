@@ -21,6 +21,47 @@
       "files": [],
       "fixture": null,
       "assertions": []
+    },
+    {
+      "id": 2,
+      "name": "routing-triggers-tui",
+      "kind": "trigger",
+      "prompt": "scaffold /test-app for this ratatui app so i can smoke-test the pane changes",
+      "expected_output": "test-app-create loads, Step 0 resolves the surface to tui, and it writes the PROCESS template pair — the generated skill drives a real terminal and never mentions a base URL or /agent-browser.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 3,
+      "name": "routing-triggers-cli",
+      "kind": "trigger",
+      "prompt": "i've got a cobra cli here, make me a test skill for this repo",
+      "expected_output": "test-app-create loads and resolves the surface to cli — the generated skill asserts exit codes and stdout/stderr separation against the built binary, and there is no visual pass.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 4,
+      "name": "routing-excludes-run",
+      "kind": "neighbour-exclusion",
+      "neighbour": "run",
+      "prompt": "start the TUI so I can see the new filter pane working",
+      "expected_output": "Launching the app to look at it is /run's job. test-app-create must not load: it GENERATES the skill that tests an app, and generating one here would be a large unasked-for write in place of a one-line launch.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 5,
+      "name": "surface-discriminator",
+      "kind": "behaviour",
+      "prompt": "scaffold the test-app skill for this project",
+      "expected_output": "Resolves the surface to cli, NOT tui. The fixture carries ratatui in [dev-dependencies] only, clap in [dependencies], and no alternate-screen call anywhere — so a dependency-name match says tui and the discriminator must overrule it. This is the hardest input Step 0 gets: a wrong answer here picks the wrong template pair for the whole generated skill, and every check in it then asks the wrong questions of the right program.",
+      "files": [],
+      "fixture": "setup_rust_cli_dev_ratatui.sh",
+      "assertions": []
     }
   ]
 }

@@ -110,16 +110,16 @@ better — those checks can say which coverage was lost. This one answers the
 question they cannot answer between them: will the pack work here at all?
 
 **Mandatory** — the pipeline cannot run honestly without them. `task-review`
-calls `code-scan` on every tier and treats it as required, and UI verification
-goes through `agent-browser`.
+calls `code-scan` on every tier and treats it as required, and verification of a
+**web** UI goes through `agent-browser`.
 
 | tool | for | install |
 |---|---|---|
 | `pmd`, `spotbugs`, `semgrep` | `code-scan` | `brew install pmd spotbugs semgrep` |
-| `agent-browser` | UI verification | `npm i -g agent-browser && agent-browser install` |
+| `agent-browser` | web UI verification | `npm i -g agent-browser && agent-browser install` |
 | `node`, `python3` | workflow scripts, analyzers | — |
 
-**Optional** — absent, what is lost is **named** and the run continues. Neither is ever
+**Optional** — absent, what is lost is **named** and the run continues. None of them is ever
 satisfied by a model-written substitute: a skipped step reported as a review is worse than
 no review at all.
 
@@ -127,6 +127,14 @@ no review at all.
 |---|---|---|
 | `gh` (authenticated) | `task-run` issue sources and PRs; `issues-fix` against GitHub | GitHub stops being one of the sources |
 | `codex` plugin | `code-adversarial` | the step is recorded as **skipped** and named |
+| `tmux` | driving a **terminal** app in a real pty — `test-app-create`'s TUI track and `task-review` Step 8 on a `tui` surface | the TUI checks are recorded as **not run** and named, and that track is reported blocked rather than clean; web and command-line projects are unaffected |
+
+`install.sh` provisions only the mandatory tools, so it does **not** install `tmux` — the same
+rule that leaves `gh` and the codex plugin alone. Most projects have no terminal UI, a surprise
+`brew install` for a track that will never run is worse than a named absence, and tmux leaves a
+server process behind, which is a thing a user opts into rather than something an installer
+decides. The CLI half of that track needs no terminal at all: argv, exit codes, stdout/stderr
+separation, piping and signals are plain shell.
 
 The pack runs end to end **without GitHub**. `task-run` takes a todo phase, a list item or
 free text as its source and finishes by merging the feature branch instead of opening a PR;
@@ -147,7 +155,7 @@ which is why this is a README section and a runtime check rather than metadata.
 Known-good versions, read 2026-07-30 — recorded as tested-against, not as minimum
 floors, because no lower bound was tested: `pmd` 7.26.0 · `spotbugs` 4.10.2 ·
 `semgrep` 1.168.0 · `gh` 2.96.0 · `codex-cli` 0.146.0 · `node` v26.4.0 ·
-`agent-browser` 0.26.0 · Claude Code 2.1.220.
+`agent-browser` 0.26.0 · `tmux` 3.7b · Claude Code 2.1.220.
 
 ## Maintaining it
 

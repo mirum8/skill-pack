@@ -45,6 +45,7 @@ bash skills/reuse-index/tests/reuse-index.test.sh           # corpus → candida
 bash skills/code-scan/tests/local-scan.test.sh              # scoping + the fail-closed contract
 bash skills/code-adversarial/tests/run.test.sh              # the Codex wrapper's exit codes
 bash skills/task-review/tests/worktree-deploy.test.sh       # main-vs-worktree + compose isolation
+bash skills/test-app-create/tests/tui-session.test.sh       # the TUI driver's fail-closed contract
 bash hooks/tests/guard.test.sh                             # workflow-guard behaviour
 bash lib/tests/stats.test.sh                               # stats sink + hook + reporter
 bash tests/install.test.sh                                 # installer behaviour
@@ -125,12 +126,14 @@ Its findings are recorded under their own `quick-codex` track: same tool as `tas
 different mode and a much smaller change under it, so merging them would make neither readable.
 
 **Every bundled executable has a test, and it is the only one it gets.** The two workflows have
-their control-flow tests below; all seven scripts under `skills/*/scripts/` have suites beside them.
+their control-flow tests below; all eight scripts under `skills/*/scripts/` have suites beside them.
 They all guard the same failure shape, which is why none of them is optional: each script either
-*decides a scope* or *decides whether a tool ran*, and both fail by returning a confident wrong
-answer. A scan that resolved to the wrong files, a review wrapper that banked a missing plugin as
-clean, a worktree stack that reused the main one's ports and container names — every one of those
-leaves a green pipeline behind it, so a passing run is not evidence and the suite is.
+*decides a scope*, *decides whether a tool ran*, or *decides whether the app is on the screen at
+all*, and every one of those fails by returning a confident wrong answer. A scan that resolved to
+the wrong files, a review wrapper that banked a missing plugin as clean, a worktree stack that
+reused the main one's ports and container names, an empty terminal capture read as a clean screen,
+a CLI misread as a TUI so the wrong template pair is written for a whole generated skill — every
+one of those leaves a green pipeline behind it, so a passing run is not evidence and the suite is.
 
 **Every workflow edit needs its control-flow test.** `tests/control-flow.test.mjs` executes the
 script with `agent()`/`parallel()`/`phase()`/`log()` stubbed and asserts the branches — what stops
@@ -243,8 +246,14 @@ mandatory Step 5 from invoking the review. There the rule lives in the descripti
 non-negotiables — don't "fix" it back.
 
 **Real tools, or a named skip.** The pipelines call `gh`, the real Codex review, real build runners,
-`agent-browser`, `code-scan`. Never substitute a model-written prose imitation. When a tool is
-missing, the step is recorded as **skipped** and named, and the run continues.
+`agent-browser`, `tmux`, `code-scan`. Never substitute a model-written prose imitation — a
+hand-rolled `expect` wrapper in place of the TUI driver is the newest instance of that temptation,
+and it fails open everywhere the driver fails closed. When a tool is missing, the step is recorded
+as **skipped** and named, and the run continues. One exception, and it is principled: `tmux` absent
+on a project whose generated `/test-app` **declared** a terminal surface is a **blockage**, not a
+skip — that declaration is the project opting in, so the terminal is the instrument its verification
+needs, exactly as docker is on the web path. A skip there would let `issues-fix`'s merge gate read
+"nothing was owed" about a TUI nobody looked at.
 
 The test is whether the thing runs a real binary or a different model — and the bundled
 `/security-review` is neither, which is why the security track does NOT call it. It is a markdown

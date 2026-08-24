@@ -5,7 +5,11 @@ description: Use this skill to verify deployed app functionality after changes �
 
 # Test App
 
+<!-- test-app-surface: web -->
+
 Verifies that recent changes to {{APP_NAME}} actually work — by hitting the running app at `{{BASE_URL}}` ({{RUN_MODEL}}) through `{{HTTP_TOOL_NAME}}`, persisted python e2e scripts, the `/agent-browser` skill, and `{{LOGS_CMD}}`. It checks the happy path, the UI, **and** the security/authorization rules, then reports concrete pass/fail.
+
+That marker line is not decoration: `/r:task-review` reads it to decide what to start and what to hand a verifier. Keep it, and keep it accurate — if this project's tested surface changes, re-run `/r:test-app-create` rather than editing the line, because the rest of this file would still describe the old one.
 
 This skill owns its artifacts under its own directory — credentials in `{{CREDS_PATH}}` and generated e2e scripts in `{{E2E_DIR}}/` — so it never collides with the project's own `scripts/`.
 
