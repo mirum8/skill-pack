@@ -14,8 +14,8 @@ description: >-
   ("/r:spec-brainstorm --feature let users export invoices as CSV") - it reads the code first.
   --continue resumes an unfinished or under-interviewed document. NOT for the phased
   implementation plan - that's /r:spec-design.
-model: opus
-effort: xhigh
+model: fable
+effort: high
 ---
 
 # Brainstorm to specification

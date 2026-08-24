@@ -278,7 +278,7 @@ test('the visual half carries a screenshot budget and the frontend-design lens',
   assert.match(prompts['ui-visual'], /frontend-design/)
 })
 
-test('the verifiers run below xhigh, the deploy lower still', async () => {
+test('the verifiers are pinned at high, the deploy lower still', async () => {
   const { opts } = await run({ triage: baseTriage({ hasTestApp: true, uiTouched: true }) })
   assert.equal(opts['ui-functional'].effort, 'high')
   assert.equal(opts['ui-visual'].effort, 'high')
@@ -287,7 +287,7 @@ test('the verifiers run below xhigh, the deploy lower still', async () => {
 })
 
 // The pins below are what makes the review's depth a property of the PIPELINE rather than of how
-// it was invoked: the frontmatter's xhigh only applies via the Skill tool, and /r:gh-issues-fix calls
+// it was invoked: the frontmatter's effort only applies via the Skill tool, and /r:gh-issues-fix calls
 // this script by scriptPath. An unpinned agent there silently runs at the session's effort.
 
 test('the Codex tracks run at wrapper depth — Codex does the reviewing, not the agent', async () => {
@@ -329,8 +329,9 @@ test('every pattern hunter runs below the top tier, security included', async ()
   // matches code against written statements rather than adjudicating anything.
   assert.equal(opts['find-bugs:docs'].effort, 'medium')
   // Asserted as 'high', never as undefined: r:bug-hunter-pattern's own frontmatter already pins
-  // `high`, so an unpinned row would sit at high while the tier tables claimed xhigh and this
-  // assertion stayed green on the lie. The pin is what makes the claim and the run agree.
+  // `high`, so an unpinned row would land at the right depth for the wrong reason and this
+  // assertion would stay green on it. The pin is what makes the claim and the run agree — and what
+  // holds this row still the day the agent's own frontmatter moves.
   assert.equal(opts['find-bugs:security'].effort, 'high')
 })
 

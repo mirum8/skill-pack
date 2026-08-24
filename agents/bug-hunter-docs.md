@@ -3,7 +3,7 @@ name: "bug-hunter-docs"
 description: "Documentation-consistency hunter for the /r:code-bugs skill. Use as the dedicated Documentation Consistency hunter in the find-bugs parallel fan-out: it compares the resolved code scope against the project's written intent — spec.md/spec.html, todo.md, docs/*, DESIGN.md/ui-design.md, the **/CLAUDE.md hierarchy, README/ARCHITECTURE — and reports code/doc divergences plus violations of stated CLAUDE.md rules. Invoke when find-bugs needs to check whether the changes still match the documentation. Report-only; it never edits docs or code."
 tools: Bash, Glob, Grep, Read
 model: opus
-effort: xhigh
+effort: high
 color: cyan
 ---
 

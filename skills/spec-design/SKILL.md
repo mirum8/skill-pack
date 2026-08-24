@@ -17,8 +17,8 @@ description: >-
   ones fixed, all three lists reported. Invoked deliberately as "/r:spec-design" — never routed to.
   Add --shallow for the build order alone. NOT for writing the spec — that's
   /r:spec-brainstorm; NOT for building the plan — that's /r:plan-run or /r:task-run.
-model: opus
-effort: xhigh
+model: fable
+effort: high
 disable-model-invocation: true
 ---
 

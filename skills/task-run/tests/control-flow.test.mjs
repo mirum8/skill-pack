@@ -432,9 +432,12 @@ test('the light-tier planner keeps the model but not the top effort', async () =
     source: baseSource({ profile: 'light', exploreAspects: ['the one seam'] }),
     args: { source: '#81', profile: 'light' },
   })
+  // MODEL is the only thing separating the two planners — they share a tier, and the brief-vs-full
+  // contract lives in the prompt. So assert both halves: a plan-light that drifted onto the full
+  // planner's model would otherwise pass on the effort alone.
   assert.equal(optsBy['plan-light'].model, 'opus')
   assert.equal(optsBy['plan-light'].effort, 'high')
-  assert.equal(optsBy['planner'], undefined)   // the full planner keeps xhigh; it just didn't run
+  assert.equal(optsBy['planner'], undefined)   // the full planner is untouched; it just didn't run
 })
 
 test('plan-write gets the plan verbatim, labelled with its size, in a QUOTED heredoc', async () => {
@@ -595,7 +598,7 @@ test('standard tier: full planner, but no Codex plan review', async () => {
     args: { source: '#81', profile: 'standard' },
   })
   assert.equal(out.profile, 'standard')
-  assert.equal(counts['planner'], 1)          // the full Opus/xhigh planner, not the brief one
+  assert.equal(counts['planner'], 1)          // the full Fable planner, not the brief one
   assert.equal(counts['plan-light'], undefined)
   assert.equal(counts['codex-plan-review#1'], undefined)
   assert.equal(out.planReview.ran, false)
@@ -1637,8 +1640,8 @@ test('the plan scribe stays sonnet/medium — it transcribes a document verbatim
 
 test('every judging track still keeps its own model and depth', async () => {
   const { optsBy } = await run({ review: OK_REVIEW, planfix: OK_FIX, verdict: MIXED })
-  assert.equal(optsBy['planner'].model, 'opus')
-  assert.equal(optsBy['planner'].effort, 'xhigh')
+  assert.equal(optsBy['planner'].model, 'fable')
+  assert.equal(optsBy['planner'].effort, 'high')
   assert.equal(optsBy['implement:backend'].model, 'opus')
   for (const l of ['source', 'judge#1.1:coverage', 'plan-fix#1']) {
     assert.equal(optsBy[l].model, undefined, `${l} classifies — it must not be down-tiered`)

@@ -14,7 +14,7 @@ description: >-
   just one known bug. NOT for: a single specific bug you already understand (hand that straight to
   `/r:task-run`), writing a plan only (`/r:spec-design`), or reviewing an existing diff
   (`/r:task-review`).
-effort: xhigh
+effort: high
 disable-model-invocation: true
 ---
 
@@ -159,7 +159,7 @@ Have each return a **compact structured verdict** so your context stays clean (a
 `category` is what `--bugs-only` filters on, so it has to be recorded honestly even when the verdict
 is `fix` — a run that labels every accepted item `bug` makes that flag do nothing.
 
-Verifiers are **strictly read-only** — they diagnose, they never edit code, touch git, or mark anything done in the list file. The point of this step is to spend an `xhigh` `/r:task-run` only on items that are real and still worth doing.
+Verifiers are **strictly read-only** — they diagnose, they never edit code, touch git, or mark anything done in the list file. The point of this step is to spend a full `/r:task-run` only on items that are real and still worth doing.
 
 ## Step 2.5 — Cluster into fix groups
 

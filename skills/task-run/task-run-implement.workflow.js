@@ -3,7 +3,7 @@
 //
 // This encodes /r:task-run Steps 0 – 4 as a hardcoded subagent graph: resolve the
 // task source, map the code, design the UI when the change touches one, plan it on
-// Opus at xhigh, have Codex challenge the plan, implement it test-first through domain
+// Fable at high, have Codex challenge the plan, implement it test-first through domain
 // subagents, and drive the build green.
 // It STOPS after the build, leaving the uncommitted diff on the feature branch
 // and returning a handoff. Steps 5 (review) and 6 (finish) are the CALLER's.
@@ -76,7 +76,7 @@ export const meta = {
     { title: 'Source',      detail: 'resolve task + criteria + tier + build tool' },
     { title: 'Explore',     detail: 'read-only fan-out over the change surface', model: 'sonnet' },
     { title: 'Design',      detail: 'UI/UX spec via frontend-design, iff the visuals change', model: 'opus' },
-    { title: 'Plan',        detail: 'Opus xhigh planner, written to .task-plans/', model: 'opus' },
+    { title: 'Plan',        detail: 'Fable planner, written to .task-plans/', model: 'fable' },
     { title: 'Plan-review', detail: 'Codex challenge + one bounded re-review' },
     { title: 'Implement',   detail: 'branch + test-first domain subagents' },
     { title: 'Build',       detail: 'build with tests, bounded retry' },
@@ -289,9 +289,9 @@ const REVIEW = {
 }
 // One judge, a BATCH of findings that share a rubric — with one verdict returned per finding.
 //
-// Two rounds of this. Triage began as a single xhigh agent that judged every finding and rewrote
-// the plan: 11 minutes and 122k tokens on a measured run, most of it re-deriving a code map the
-// explorers had already produced. Splitting it one-agent-per-finding fixed that, and then became
+// Two rounds of this. Judge findings in batches, never with ONE agent over all of them: a single
+// agent at the inherited tier that judges every finding and rewrites the plan measures 11 minutes
+// and 122k tokens on a real run, most of it re-deriving a code map the explorers already produced. Splitting it one-agent-per-finding fixed that, and then became
 // the widest fan-out in the pipeline — ~24 cold contexts per run, two waves deep at a cap of 16,
 // each re-reading the plan and reopening the same files to answer one question. Batching by rubric
 // keeps the parallelism and stops paying for the duplicated reading: the findings grouped together
@@ -443,7 +443,7 @@ const BUILD_RUN = { model: 'sonnet', effort: 'medium' }
 // discrimination, and an unsure answer lands on "standard" rather than "full", so a weak
 // classifier's mistakes go BOTH ways: the expensive direction is under-rating, which ships an
 // unchallenged approach rather than merely costing time. Drop the
-// inherited xhigh though — it buys nothing on what is otherwise transcription.
+// inherited depth though — it buys nothing on what is otherwise transcription.
 const SOURCE_RUN = { effort: 'medium' }
 // The Codex agent shells out and collects the run; Codex does the reviewing. Its own reasoning
 // adds nothing to the critique. Not `low`, though: this agent owns the background-collection
@@ -454,30 +454,32 @@ const CODEX_RUN = { effort: 'medium' }
 // the one consequential call an explorer makes is riskFlags, which gates the light->FULL
 // escalation below; medium leaves it enough budget to spot auth/money/migration/concurrency.
 const EXPLORE_RUN = { model: 'sonnet', effort: 'medium' }
-// The plan is the highest-leverage artifact in the run, so the standard/full planner gets the most
-// capable model at maximum reasoning effort — the inverse of the explorers. agent() exposes a real
-// effort lever here (the raw Agent tool does not), so depth is dialed in, not just asked for.
-const PLAN_RUN = { model: 'opus', effort: 'xhigh' }
-// The LIGHT-tier planner writes a brief for a change that, by the tier's own definition, cannot
-// alter behavior. It shared PLAN_RUN because both are "the plan", but maximum reasoning effort on
-// a brief buys nothing — and the tier is not load-bearing on its own: the explorers' risk flags
-// escalate light->FULL the moment they see auth, money, migrations or concurrency, so a
-// misclassified task never actually gets planned here. Same model, one tier down.
+// The plan is the highest-leverage artifact in the run, so the standard/full planner is the one
+// step that names Fable — the inverse of the explorers, which run a cheaper model still. agent()
+// exposes a real effort lever here (the raw Agent tool does not), so depth is pinned rather than
+// inherited from whatever the caller was running.
+const PLAN_RUN = { model: 'fable', effort: 'high' }
+// The LIGHT-tier planner writes a BRIEF for a change that, by the tier's own definition, cannot
+// alter behavior — and that contract, not the depth, is what separates it from PLAN_RUN: the two
+// share a tier and the split lives in the prompt. Its own constant exists so the brief can be
+// costed separately from the full plan. The tier is not load-bearing on its own either: the
+// explorers' risk flags escalate light->FULL the moment they see auth, money, migrations or
+// concurrency, so a misclassified task never actually gets planned here.
 const PLAN_LIGHT_RUN = { model: 'opus', effort: 'high' }
 // The UI/UX design agent. Opus because this is judgement — what the screen should be, which of the
 // app's existing components it is built from, which states it owes the user — and a cheaper model
-// reliably produces the generic layout `frontend-design` exists to rule out. `high` rather than the
-// planner's `xhigh`: the surface is one screen area against a design system that already exists,
-// not the whole change, and this document is reviewed downstream (by Codex at full tier, and by the
+// reliably produces the generic layout `frontend-design` exists to rule out. It is pinned, not
+// inherited: the surface is one screen area against a design system that already exists, not the
+// whole change, and this document is reviewed downstream (by Codex at full tier, and by the
 // review's visual half against the rendered pages) rather than being the last word.
 const DESIGN_RUN = { model: 'opus', effort: 'high' }
 // The implementers' depth is PINNED here rather than inherited from the session — unpinned, the
-// same workflow writes code at xhigh when entered through /r:task-run (whose frontmatter sets it)
+// same workflow writes code at `high` when entered through /r:task-run (whose frontmatter sets it)
 // and at whatever the caller happened to be running when the script is invoked directly, which
 // SKILL.md explicitly invites callers like /r:issues-fix to do. One depth, whatever the entry.
 //
 // `medium` is the pinned depth, and it is a claim UNDER MEASUREMENT rather than a settled default:
-// these agents follow a plan built at opus/xhigh, challenged by Codex and re-read afterwards by
+// these agents follow a plan built at fable/high, challenged by Codex and re-read afterwards by
 // /r:task-review, so the argument is that the judgement left to them is bounded. What the plan
 // cannot do for them is real too — observing red-before-green, deciding a [RED] test that passes
 // is a weak test rather than a formality, and setting blockedOn when the plan is wrong — so the
@@ -490,15 +492,16 @@ const DESIGN_RUN = { model: 'opus', effort: 'high' }
 // declare opus, so this only lifts the `general` fallback to match them rather than letting it
 // inherit the session's model.
 const IMPL_RUN = { model: 'opus', effort: 'medium' }
-// Triage is SPLIT, not one agent, and the two halves want different depths. Collapsed into a
-// single xhigh agent that judges every finding and rewrites the plan, it measures 11 minutes and
-// 122k tokens on a real run, most of it re-deriving a code map the explorers already produced.
+// Triage is SPLIT, not one agent, and the two halves want different depths. Collapsed into one
+// agent at the inherited tier that judges every finding and rewrites the plan, it measures 11
+// minutes and 122k tokens on a real run, most of it re-deriving a code map the explorers already
+// produced.
 //
 // A judge answers ONE narrow question — does this finding hold against the real code — with the
 // briefs already in hand, so `high` is depth where it counts without the context that makes the
 // collapsed step slow. Nor is it the last word: a dismissal is re-read by Codex in pass 2 (the
 // dismissedAll branch below) and the diff is re-read by /r:task-review, which covers what a
-// "no reviewer after it" argument for xhigh would be defending against.
+// "no reviewer after it" argument for a deeper tier would be defending against.
 const JUDGE_RUN = { effort: 'high' }
 // The editor applies fixes that are already written down and flips one header line. There is no
 // judgement left in it except "did this change the approach".
@@ -1255,8 +1258,8 @@ if (!resuming) {
   // REVIEW of the plan (Phase 3), not the thinking that produces it — a medium task still
   // deserves a grounded plan, and a cheap plan would just push the cost into the implementers.
   if (profile !== 'light') {
-    // Opus at xhigh (PLAN_RUN): the plan is the highest-leverage artifact in the run, so it gets
-    // the most capable model at maximum reasoning effort. It is still written and critiqued by
+    // Fable (PLAN_RUN): the plan is the highest-leverage artifact in the run, so it is the one
+    // step that names its own model rather than inheriting. It is still written and critiqued by
     // DIFFERENT models — Codex reviews it in Phase 3 — so a single model never grades its own plan.
     const plan = await reliable('planner', 'Plan', () => agent(
       `Plan this task at MAXIMUM reasoning depth. You are read-only: return the plan, do not write it.
@@ -1317,10 +1320,10 @@ ${uiDesignNote}
     if (blocked(plan) || typeof plan !== 'string' || !plan.trim()) return { stopped: 'planner-blocked' }
     planMarkdown = plan.trim()
   } else {
-    // Light tier: no Codex plan review, and the plan itself stays BRIEF — but it runs on the same
-    // Opus/xhigh planner (PLAN_RUN) and still carries a real coverage contract, so a light plan is
-    // a checkable contract rather than loose prose. The light saving is skipping the review pass,
-    // not cheapening the planner.
+    // Light tier: no Codex plan review, and the plan itself stays BRIEF — but PLAN_LIGHT_RUN sits
+    // at the same depth as the full planner and the brief still carries a real coverage contract,
+    // so a light plan is a checkable contract rather than loose prose. The light saving is skipping
+    // the review pass, not cheapening the planner.
     const lite = await reliable('plan-light', 'Plan', () => agent(
       `Write a BRIEF implementation plan for this low-risk task. Keep it proportionate — this is
        the light tier — but it must still be a contract, not prose.
@@ -1586,7 +1589,7 @@ ${checks.map((c, i) => `     ${i + 1}. ${c}`).join('\n')}
   // the point: this catches a rewrite that opened a fresh hole, it does not loop until the plan
   // is flawless. No approval gate — the run is autonomous, and the human reviews the final PR.
   //
-  // Triage is a FAN-OUT, not one agent. A single xhigh agent handed nothing but the finding
+  // Triage is a FAN-OUT, not one agent. One agent handed nothing but the finding
   // strings has to re-open every file each finding cites to decide whether it holds, re-deriving a
   // code map the explorers built minutes earlier, and works the findings one after another.
   // Measured: 11 minutes and 122k tokens, more than the Codex review it is triaging. Two things

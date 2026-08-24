@@ -385,10 +385,10 @@ const BATCH_CLAUSE = `
 //
 // `security` is a pattern hunter like the other two and takes the same `high`. Pin it EXPLICITLY
 // rather than letting it inherit: r:bug-hunter-pattern's own frontmatter already says `high`, so
-// an unpinned row would sit at `high` while every table here claimed the top tier, and the
-// control-flow test asserting `effort === undefined` would stay green on a lie. After this pin no
-// hunter runs at xhigh — the tracks that keep it are the ones that adjudicate rather than match
-// (fix-triage, code-quality, /r:code-scan's triage, the readability refactor).
+// an unpinned row would RUN at the right depth for the wrong reason — nothing in this script would
+// say so, and the control-flow test asserting `effort === undefined` would stay green on a lie.
+// The pin is what makes the claim and the run agree, and what keeps the row where it is when the
+// agent's own frontmatter moves.
 const PATTERN_HUNT = { effort: 'high' }
 // The docs hunter is the one track whose MODEL is pinned down, not just its effort. Every hunter
 // agent carries `model: opus` in its own frontmatter, so an effort pin alone leaves the top model
@@ -530,7 +530,7 @@ async function hunterFanOut(scope, hunters, trackName) {
     reliable(`find-bugs:${h.label}`, 'Review', () => agent(
       hunterPrompt(h, scope),
       // h.effort is per-hunter (see HUNTERS): the three pattern hunters run at `high` and docs at
-      // `medium`, so nothing here inherits the frontmatter's xhigh. Spread conditionally so a
+      // `medium`, so nothing here inherits its depth from the caller. Spread conditionally so a
       // hunter with no effort of its own still inherits rather than being pinned to undefined.
       { label: `find-bugs:${h.label}`, phase: 'Review', schema: FINDINGS, agentType: h.agentType,
         ...(h.effort ? { effort: h.effort } : {}) }))))
@@ -618,16 +618,15 @@ async function hunterFanOut(scope, hunters, trackName) {
   }
 }
 
-// Effort tiers. The skill's frontmatter sets effort:xhigh, which every subagent would otherwise
+// Effort tiers. The skill's frontmatter sets effort:high, which every subagent would otherwise
 // inherit — including ones whose whole job is running a shell command. Depth belongs where the
 // JUDGEMENT is, and the test is not "does this step matter" (they all do) but "does THIS AGENT
 // decide anything?". A wrapper around a tool that decides for it does not; nor does a fixer whose
-// finding was already judged real by someone else. What still inherits the top tier is the set
-// that forms an opinion nothing downstream re-forms: code-quality, fix-triage (which decides what
-// is a false positive), /r:code-scan's own triage of its findings, and the readability refactor.
-// No hunter is in that set — all three pattern hunters and the docs hunter are pinned below it,
-// see the PATTERN_HUNT / DOC_HUNT note above HUNTERS for why a bounded pattern match is a
-// different job from an adjudication.
+// finding was already judged real by someone else. What still inherits is the set that forms an
+// opinion nothing downstream re-forms: code-quality, fix-triage (which decides what is a false
+// positive), /r:code-scan's own triage of its findings, and the readability refactor. The hunters
+// are pinned at that same depth rather than left to inherit it — see the PATTERN_HUNT / DOC_HUNT
+// note above HUNTERS for why the pin is load-bearing even where the number matches.
 //
 // A second reason to pin rather than inherit: the frontmatter only applies when this skill is
 // entered through the Skill tool. Called by scriptPath — which /r:issues-fix does for every group
@@ -692,12 +691,13 @@ const TRIAGE_RUN = { effort: 'medium' }
 // end-verify, then the next review reports it — so a regression here surfaces in a run or two
 // rather than hiding in the diff.
 const FIX_RUN = { effort: 'medium' }
-// The UI verifiers are the one JUDGING track where xhigh does not pay for itself. Measured over
-// 59 stored r:bug-hunter-ui transcripts: 66% of their wall time was model time, spread over a median
-// of 86 turns (p90 144) at ~4.2s of thinking each — and the large majority of those turns drive a
-// browser or read a page, not adjudicate a defect. `high` keeps the judgement that decides "is this
-// a real problem or an intentional design choice" while cutting the per-turn cost of the mechanical
-// majority. Deliberately NOT MECHANICAL: these agents still have to make that call.
+// The UI verifiers are a JUDGING track that must not be pushed any deeper. Measured over 59 stored
+// r:bug-hunter-ui transcripts: 66% of their wall time was model time, spread over a median of 86
+// turns (p90 144) at ~4.2s of thinking each — and the large majority of those turns drive a browser
+// or read a page, not adjudicate a defect, so every extra second of thinking is paid mostly on the
+// mechanical majority. `high` keeps the judgement that decides "is this a real problem or an
+// intentional design choice". Deliberately NOT MECHANICAL: these agents still have to make that
+// call.
 const VERIFY = { effort: 'high' }
 
 // ================================================================ pipeline ===
@@ -1728,7 +1728,7 @@ const uiTrack = async () => {
     // 7a — deploy. Its own step, at DEPLOY_RUN: reading a command out of a skill file and
     // running a script is not work that improves with more thinking (it only has to tell a real
     // failure from a slow start), and doing it inside the verifier put a whole docker build log
-    // into an xhigh context. reliable() only re-dispatches a DEAD agent, so an honest
+    // into a judging context. reliable() only re-dispatches a DEAD agent, so an honest
     // {ok:false, reason} comes back once — a broken deploy is never retried three times.
     const dep = await reliable('ui-deploy', 'UI', () => agent(
       `Bring the app up for UI verification and return its base URL. You do NOT test anything.

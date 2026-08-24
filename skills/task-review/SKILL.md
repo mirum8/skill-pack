@@ -12,7 +12,7 @@ description: >-
   "/r:task-review" (optionally with `--light` / `--standard` / `--full`). Never trigger it on your
   own after an ordinary code change, and never at the end of a regular coding session.
   Auto-detects Maven vs Gradle; skips itself on doc-only / config-only turns.
-effort: xhigh
+effort: high
 ---
 
 # post-task-review
@@ -86,7 +86,7 @@ The tier scales **depth**, never integrity. Phase 0 picks it from the diff by th
 | Codex end-verify of the **final** diff | ✅ | ✅ | ✅ *(regression-only)* |
 | UI / runtime verification | *iff* `uiTouched` | *iff* `uiTouched` | *iff* `uiTouched` |
 
-**Spend depth where judgement happens.** This skill's frontmatter sets `effort: xhigh`, which every subagent would otherwise inherit — including ones whose whole job is running a shell command. The workflow tiers the fan-out instead. The test is not "does this step matter" (they all do) but **"does this agent decide anything?"** — a wrapper around a tool that decides for it does not, and neither does a fixer whose finding was already judged real by someone else. So the pre-warm, teardown, stats sink and issue-filer run at `low`; the build runners, UI deploy, Phase 0 triage and both Codex tracks at `medium` (Codex does the reviewing, the agent shells out and parses); all three pattern hunters at `high` and the docs hunter at `medium` (a bounded match against a reference file, and doc drift is never auto-fixed); the UI halves and every fixer at `high`. What keeps `xhigh` is the set that forms an opinion nothing downstream re-forms: `r:code-quality`, the fix-triage that decides what is a false positive, `/r:code-scan`'s triage of its own findings, and the readability refactor — no hunter is in it.
+**Spend depth where judgement happens.** This skill's frontmatter sets `effort: high`, which every subagent would otherwise inherit — including ones whose whole job is running a shell command. The workflow tiers the fan-out instead. The test is not "does this step matter" (they all do) but **"does this agent decide anything?"** — a wrapper around a tool that decides for it does not, and neither does a fixer whose finding was already judged real by someone else. So the pre-warm, teardown, stats sink and issue-filer run at `low`; the build runners, UI deploy, Phase 0 triage and both Codex tracks at `medium` (Codex does the reviewing, the agent shells out and parses); the docs hunter at `medium` too (a bounded match against a reference file, and doc drift is never auto-fixed); every fixer at `medium`, never deeper than the implementers whose code it patches. What runs at the inherited depth is the set that forms an opinion nothing downstream re-forms: `r:code-quality`, the fix-triage that decides what is a false positive, `/r:code-scan`'s triage of its own findings, and the readability refactor. The three pattern hunters and the two UI halves sit there too, but **pinned** rather than inherited — see the next paragraph for why the pin is load-bearing even where the number matches.
 
 There's a second reason these are pinned rather than inherited: **the frontmatter only applies when this skill is entered through the Skill tool.** Called by `scriptPath` — which `/r:issues-fix` does for every group — nothing sets it, and an unpinned agent silently takes the *session's* effort. Pinning makes the review's depth a property of the pipeline instead of a property of how it happened to be invoked.
 
