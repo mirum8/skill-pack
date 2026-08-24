@@ -96,11 +96,19 @@ If nothing exists, say so and point at `/r:spec-brainstorm` rather than inventin
 against.
 
 Pull out: **user stories, by name** (in a `/r:spec-brainstorm` spec these are the `<h3>` headings
-inside User stories — carry them verbatim, they are the traceability spine); **the modules and the
-stack**, with versions, which you follow and never re-decide; **the domain model** — every entity
-needs a migration somewhere; **the API** — every endpoint, command or screen needs a leaf that
-builds it; **risks** whose mitigation is "investigate", which go to `## Resolve first`; and **the
-v1 line**.
+inside User stories — carry them verbatim, they are the traceability spine); **the components and
+the stack**, with versions, which you follow and never re-decide; **the domain model** — every
+entity needs a migration somewhere; **the API** — every endpoint, command or screen needs a leaf
+that builds it; **risks** whose mitigation is "investigate", which go to `## Resolve first`; and
+**the v1 line**.
+
+**A `/r:spec-brainstorm` spec also carries its decisions and what they were made for**, and both
+change the plan. Its **Decisions** part holds one ADR per choice that had a live alternative, each
+with the consequences it accepted — a consequence that says "held payouts accumulate and need a
+queue" is a leaf somebody has to build, and re-opening a decision the ADR already settled is the
+most expensive thing a plan can do. Its **Architectural characteristics** part holds at most three
+numbers the whole design is traded against; a leaf that would miss one of them is a leaf that
+needs its own verification step, not a note. Read both before ordering anything.
 
 **In an existing codebase, read the code too** before writing anything: build files for real
 dependency versions, the migration folder for the real schema, the package layout, `CLAUDE.md`, and

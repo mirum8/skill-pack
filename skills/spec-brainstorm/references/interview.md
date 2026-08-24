@@ -37,7 +37,8 @@ This decides the *form* of every question:
 | Altitude | Cost of guessing wrong | Style |
 |---|---|---|
 | Scope, users, the one case | expensive — the whole document is wrong | **Open question.** Genuinely ask. |
-| Domain model, boundaries, unhappy endings | moderate — a section gets rewritten | **Propose, then correct.** State it as fact. |
+| **Driving characteristics** | expensive — every part below Part 3 is optimised for the wrong thing | **Forced trade-off.** Make them choose between two things they want. |
+| Domain model, components, unhappy endings | moderate — a section gets rewritten | **Propose, then correct.** State it as fact. |
 | API conventions, stack, error format | cheap — one line to change later | **Default and veto.** Assert it, invite objection, silence is agreement. |
 
 People correct far better than they compose. *"What are your entities?"* returns a vague
@@ -47,6 +48,20 @@ and which are copies?"* returns a precise correction in ten seconds.
 Getting this backwards is the most common way the interview fails. Open-questioning a cheap
 convention wastes a round trip; asserting a default over the scope produces a confident
 document about the wrong system.
+
+**The fourth style exists because the other three all fail on characteristics.** Ask openly —
+"how available does this need to be?" — and the answer is always "very"; every adjective is free
+when nothing is being spent for it. Assert a default and nobody objects, because a number they
+never had to trade for is a number they have no opinion about. So put two things they want on
+opposite sides of a scale and make them pick:
+
+> "Under a load spike, would you rather it get slow for everyone, or start rejecting some
+> requests and stay fast for the rest?"
+> "The cluster is unreachable for ten seconds. Show stale data with a warning, or an error?"
+> "Pick one to give up: a second of startup time, or offline use."
+
+Each answer is a *ranked* characteristic with a real cost attached, which is what Part 3 needs
+and what an adjective can never become.
 
 ### Rule 3 — two gates before any question is asked
 
@@ -76,7 +91,7 @@ as not listening, because it is.
 Put **3–6 numbered questions in one call**, under ~150 words of question text. Round trips,
 not question counts, are what make people quit.
 
-Ask alone only what reshapes the tree: the scope in round 1, and the v1 cut in round 7.
+Ask alone only what reshapes the tree: the scope in round 1, and the v1 cut in round 8.
 Everything else batches.
 
 Order inside a batch: what you most need first, cheapest last. Mark the optional ones
@@ -86,7 +101,7 @@ Order inside a batch: what you most need first, cheapest last. Mark the optional
 
 ## 3. The funnel
 
-Seven rounds on paper, typically three in practice. **Rounds collapse.** Anything already
+Eight rounds on paper, typically four in practice. **Rounds collapse.** Anything already
 answered by the opening message, the repo or an earlier round is stated as fact and never
 re-asked, and a small project finishes early because the later rounds have nothing left to
 ask — not because a quota ran out.
@@ -97,15 +112,23 @@ ask — not because a quota ran out.
 | 2 | The process | propose→correct | the sequence and its point of no return · unhappy endings · where it waits · what a failure costs |
 | 3 | The model | propose→correct | entities and ownership · states and the irreversible transition · invariants · the ambiguous word · cross-system identity |
 | 4 | Scope edges | default→veto | what it does not do · law vs policy vs habit · external systems · who operates it |
-| 5 | Boundaries & API | default→veto | the module cut · sync vs async · transactional across boundaries · surface shape · idempotency, errors, paging |
-| 6 | Technology | default→veto | named stack with versions · where it runs · team and deadline · non-negotiables |
-| 7 | Stories & v1 | alone | stories grouped by actor, smallest end-to-end slice pre-selected |
+| 5 | **What it is optimised for** | forced trade-off | the two or three characteristics that win an argument · the number under each · what is being spent for them |
+| 6 | Components & API | default→veto | the component cut and what each owns · sync vs async · transactional across boundaries · style and topology · surface shape · idempotency, errors, paging |
+| 7 | Technology | default→veto | named stack with versions · where it runs · team and deadline · non-negotiables |
+| 8 | Stories & v1 | alone | stories grouped by actor, smallest end-to-end slice pre-selected |
 
 **Rounds 2 and 3 are the same subject twice** — the process in the business's own words, then
 the model that has to hold it. That pairing is what makes the model right the first time:
 round 2's unhappy endings *are* round 3's states. Collapse them into one round when the
 opening message already described the process clearly, and say that you are doing it rather
 than silently dropping the correction step.
+
+**Round 5 is where it is because of what it decides.** The characteristics are the forces behind
+the component cut, the style and half the ADRs — Parts 3, 4, 5 and 6 of the document. Asked
+after the boundaries, they can only ratify a cut that was already made; asked before, they are
+what the cut is argued from. This is rule 1 applied to the one place it is easiest to get wrong,
+because characteristics *feel* like technical detail and are in fact the most load-bearing
+business answer in the interview.
 
 **→ Under `--explain`, research fires after round 1.** Read `research.md`. Without the flag it
 does not fire at all.
@@ -189,21 +212,54 @@ the cheapest thing to write down and the most expensive to discover late.
    specific broke. What was it?" Failure stories outperform requirement questions; this one
    produces alerting, audit and error-handling material for free.
 
-### Round 5 — boundaries and API
+### Round 5 — what it is optimised for
 
-1. "I'd cut three modules where ownership changes — **Receiving**, **Matching**,
-   **Settlement** — one deployable, modules inside it. Three engineers don't need a network
-   between their own functions. Object if any part must ship or scale separately."
-2. "Matching runs async off a queue, not in the request path — it can wait 30s, a user
-   staring at a spinner can't."
-3. "Does anything need to be transactional *across* those boundaries, or is eventual
-   consistency fine everywhere?"
-4. "Surface: REST plus webhooks. Say if the real surface is screens or a CLI instead."
-5. "Idempotency key on every mutating endpoint, supplied by the caller; error contract
+The only round asked as forced trade-offs (§1, rule 2). Three or four items, and the answers
+become Part 3 of the document. **Never ask for an adjective, and never offer a default** — both
+produce a number nobody is committed to.
+
+1. **The scale question.** "Under a spike, would you rather it get slow for everyone, or start
+   rejecting some requests and stay fast for the rest?" *(→ elasticity vs availability, and which
+   one is driving)*
+2. **The failure question.** "The bank API is unreachable for ten minutes. Queue and keep taking
+   requests, or refuse the ones you can't complete?" *(→ fault tolerance, consistency, and what
+   the user sees; this often re-uses round 2's answer, in which case state it rather than re-ask)*
+3. **The giving-up question.** "Name one you'd give up to get the others: a second of startup
+   time, running on a machine with no network, or a build that ships twice a day." Whatever they
+   refuse to give up is the driving characteristic.
+4. **Then, and only then, the number.** Turn each answer into one: "so — repaint under 16 ms and
+   cold start under a second, measured on a 500-pod cluster. Correct those numbers if they're
+   wrong; I'll write them as the two things everything else gets traded against."
+
+**At most three come out of this round as driving.** If they want five, ask which two they would
+sacrifice to keep the other three — a list of five is a list of none, and it licenses every later
+decision to point at whichever one suits it.
+
+Everything they *didn't* pick is worth one line too: those are Part 3's "what we are not
+optimising for", and writing them down is what stops the argument being had again in month four.
+
+### Round 6 — components, style and API
+
+1. "I'd cut three components where ownership changes — **Receiving** owns `GoodsReceipt`,
+   **Matching** owns `MatchResult`, **Settlement** owns `Payment`. Object if anything else should
+   own one of those." *(→ ownership is exclusive; two components writing one entity is the defect
+   this question exists to catch)*
+2. "One deployable, modules inside it. Three engineers don't need a network between their own
+   functions. Object if any part must ship or scale separately." *(→ the style and topology, and
+   whichever way this goes it is an ADR)*
+3. "Matching runs async off a queue, not in the request path — it can wait 30s, a user staring at
+   a spinner can't."
+4. "Does anything need to be transactional *across* those boundaries, or is eventual consistency
+   fine everywhere?"
+5. "Surface: REST plus webhooks. Say if the real surface is screens or a CLI instead."
+6. "Idempotency key on every mutating endpoint, supplied by the caller; error contract
    `{code, message, details}` with a stable machine-readable `code`; every list endpoint
    paginated, cursor, default 50. Push back on any of the three."
 
-### Round 6 — technology and constraints
+Every one of these is a proposal with a live alternative, which is exactly the shape of an ADR.
+Log each outcome — corrected or accepted — in `## Decisions` (§10) as it lands.
+
+### Round 7 — technology and constraints
 
 One default per line, each with one clause of why and an escape hatch.
 
@@ -212,7 +268,7 @@ One default per line, each with one clause of why and an escape hatch.
 3. "Team size and deadline?"
 4. "Anything non-negotiable — a platform, a licence, a system you must not touch?"
 
-### Round 7 — stories and the v1 line
+### Round 8 — stories and the v1 line
 
 Asked alone, because it reshapes everything else. Read the stories back grouped by actor with
 the smallest end-to-end slice pre-selected and the rest deferred.
@@ -396,16 +452,32 @@ status: interviewing      # interviewing | generated-partial | generated
 - domain-model: answered (round 3) — Invoice owned, PurchaseOrder is a copy from SAP
 - scale: answered (round 1) — ~4,000 invoices/day, write-heavy
 - anti-scope: answered (round 4) — no credit notes, no multi-currency, no supplier portal
-- boundaries: answered (round 5) — Receiving | Matching | Settlement, one deployable
+- arch-characteristics: answered (round 5) — chose rejecting over slowing; match within 30s
+- boundaries: answered (round 6) — Receiving | Matching | Settlement, ownership exclusive
+- style-and-topology: answered (round 6) — modular monolith, one deployable, async matching
 - api: assumed — REST plus webhooks, never asked
-- stack-and-constraints: answered (round 6) — Java 21 / Spring Boot 3.4.1, on-prem, 4 engineers
+- stack-and-constraints: answered (round 7) — Java 21 / Spring Boot 3.4.1, on-prem, 4 engineers
 - integrations: answered (round 4) — SAP and the bank SFTP drop, neither changeable
 - failure-behaviour: answered (round 2) — unmatched invoices queue for a buyer, no auto-reject
+- decisions: answered (rounds 5–7) — 6 logged below, 2 of them corrections
 - stories-and-v1: open
 - rollout: n/a — nothing exists today
 
 ## Answers
 - **Volume** — ~4,000 invoices/day, write-heavy. *(round 1)*
+
+## Decisions
+<!-- one per decision that had a live alternative: what was proposed, what happened, what else
+     was on the table, and the force that decided it. This becomes Part 6 verbatim. -->
+- **One deployable, modules inside it** — proposed; accepted without objection. Alternative on
+  the table: a service per module, which they'd read about. Decided by team size (4 engineers)
+  and by `match within 30s` not needing independent scaling. *(round 6)*
+- **Matching owns `MatchResult`** — proposed that Settlement own it; **corrected** — Matching
+  writes it, Settlement only reads. Their reason: a re-match must not need Settlement to be up.
+  *(round 6)*
+- **Eventual consistency between Matching and Settlement** — proposed; **overruled**. They
+  require the ledger write and the payment instruction in one transaction. Objection made once
+  and withdrawn; accepted risk recorded in Risks. *(round 6)*
 
 ## Assumptions (not confirmed)
 - REST plus webhooks — no existing API convention was named. Breaks if: … Confirm with: …
@@ -417,6 +489,26 @@ status: interviewing      # interviewing | generated-partial | generated
 
 Open questions use these four fields everywhere they appear — here and in the document, never
 a third shape.
+
+### The Decisions log is written live, and that is the whole point
+
+Append to `## Decisions` **the moment a decision lands**, not at generate time. Three things go
+in it, and each is already happening in the interview:
+
+- a **propose→correct** the user corrected — their correction is the decision, your proposal is
+  the alternative;
+- a **default→veto** they vetoed, or let stand after being told what it costs;
+- an **objection you made and they overruled** (§8) — the decision is theirs, the alternative is
+  yours, and the accepted risk is the consequence.
+
+`sections.md` §8 turns this log into Part 6 of the document. Assembling that part from memory
+afterwards produces ADRs with invented alternatives: what you write down is the option you would
+now reject, not the one that was genuinely live at the time, and no reader can tell the
+difference. A decision recorded five rounds later has already lost the thing that made it worth
+recording.
+
+Log the *force* as well as the outcome — the characteristic, the story or the constraint that
+settled it. An ADR whose context names none of those is one nobody can check later.
 
 ### The ledger records *how* a row was settled
 
@@ -452,6 +544,12 @@ imagination.
 **Settled does not mean asked.** Four of the five ways to settle a row involve no question at
 all, and each has its own ledger verdict.
 
+**`decisions` is settled differently from the rest.** Every other row is settled by knowing
+something; this one is settled by having *written* something — the log exists and covers the
+choices that had alternatives. A run that reaches the write gate with an empty log has not
+skipped a question, it has thrown away the reasoning behind everything it is about to write, and
+Part 6 will be reconstructed from memory. Check it before generating, not after.
+
 `scripts/check_spec.py` reads these keys, so a row covered under an invented name reads to the
 script as a row you skipped. Copy them verbatim.
 
@@ -463,11 +561,14 @@ script as a row you skipped. Copy them verbatim.
 | `domain-model` | the entities, which you own, and the states each moves through |
 | `scale` | the order of magnitude, read-heavy vs write-heavy |
 | `anti-scope` | at least three things it explicitly does not do |
-| `boundaries` | the module or service cut, and what talks to what |
+| `arch-characteristics` | the two or three characteristics that win an argument, each with a number, and what is being spent for them |
+| `boundaries` | the component cut, which entities each one **owns**, and what talks to what |
+| `style-and-topology` | the style by its name in the field, and one deployable or several |
 | `api` | the surface shape, and who calls it |
 | `stack-and-constraints` | language, storage, hosting, team size, deadline |
 | `integrations` | which external systems it talks to, and which cannot be changed |
 | `failure-behaviour` | what the user sees when a dependency is down or a case can't complete |
+| `decisions` | every choice that had a live alternative is in the `## Decisions` log with the option not taken |
 | `stories-and-v1` | the stories, and which ship first |
 
 **Add `rollout`** whenever anything already exists: the migration shape, and how to undo it.
@@ -502,6 +603,9 @@ difference is whether the reader knows.
 | **Scope inflation by question** — "want notifications, an admin panel, an API?" | Did the user mention it, or did you? | Ask about cuts, not additions |
 | Amnesia | Diff against the answer ledger before each batch | Quote their earlier answer when you use it |
 | **Disguised assumption** — a row you decided, recorded as `answered` | Can you write the evidence clause? | Record `assumed` — it is the only thing that lets `--continue` offer the decision back |
+| **Adjective accepted as a characteristic** — "highly available", "fast" | Does the row carry a number and a way to measure it? | Force the trade-off (§1, rule 2), then read the number back |
+| **Everything is driving** — five ranked characteristics | Could any later decision point at one of these to justify itself? | Ask which two they'd sacrifice; three is the ceiling |
+| **Unlogged decision** — a correction or veto that never reached `## Decisions` | Diff the log against the round you just finished | Append it now, with the alternative that was live — an ADR written later invents one |
 | Restating without deciding | Does the checkpoint contain a decision, or a paraphrase? | Every bullet is a decision or a number |
 | Infinite hedging | Count open questions with no default | Every unknown gets a default |
 | Register mismatch | Match vocabulary to the user's own first message | Define a term inline, once, only if you must use it |

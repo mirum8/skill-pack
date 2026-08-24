@@ -1,6 +1,6 @@
 {
   "skill_name": "brainstorm",
-  "notes": "Each eval carries a persona because the runner has no human to answer AskUserQuestion; the runner answers as the persona and logs the Q&A to transcript.md. The deliverable is one spec.html plus interview-notes.md — there is no second HTML file, and todo.md belongs to /r:spec-design. Evals 0 and 1 are the same unfamiliar domain with and without --explain, so the pair isolates exactly what the flag adds: without it there must be no research and no teaching sections. Eval 0 doubles as the sizing test — a two-person project must not grow integrations or operations material. Eval 2 is the repo path, eval 3 the resume path, which starts from a fixture whose ledger claims rows are answered that nothing evidences. Mechanical assertions are checked by scripts/check_spec.py; the rest are judgment.",
+  "notes": "Each eval carries a persona because the runner has no human to answer AskUserQuestion; the runner answers as the persona and logs the Q&A to transcript.md. The deliverable is one spec.html plus interview-notes.md — there is no second HTML file, and todo.md belongs to /r:spec-design. Evals 0 and 1 are the same unfamiliar domain with and without --explain, so the pair isolates exactly what the flag adds: without it there must be no research and no teaching sections. Eval 0 doubles as the sizing test — a two-person project must not grow integrations or operations material, and must still carry all seven parts, because a part is shortened rather than dropped. Eval 2 is the repo path, eval 3 the resume path, which starts from a fixture whose ledger claims rows are answered that nothing evidences. Mechanical assertions are checked by scripts/check_spec.py; the rest are judgment.",
   "evals": [
     {
       "id": 0,
@@ -8,7 +8,7 @@
       "name": "default-demurrage-billing",
       "prompt": "I need to build something that works out demurrage and detention charges for our container shipments and bills the customer.",
       "persona": "CTO at a 30-person freight forwarder in Rotterdam. Two backend engineers plus themselves. ~1,200 containers a month across 14 shipping lines. Today: an analyst rebuilds it in Excel every week from carrier PDFs and gets it wrong often enough that they write off about €40k a year in charges they can't defend. Stack: Python, PostgreSQL, one VM at Hetzner. Knows the domain cold and will explain it if asked, but is impatient with anything that sounds like paperwork. Free days per carrier contract, the clock starts on discharge for demurrage and on gate-out for detention, weekends count for some carriers and not others, and a dispute can freeze the clock retroactively. No regulator, no external system to integrate with beyond emailed carrier PDFs. Wants it in three months. To anything oversized: 'we're three people'.",
-      "expected_output": "Default mode, announced in one line. No depth question is asked at any point and no web research runs. docs/<topic>/spec.html plus interview-notes.md — one HTML file, nothing else. The document carries the domain model with entity lifecycles and the clock invariants, user stories as <h3> names with Given/When/Then, key flows including the dispute path, a module cut, named technology with versions, the API, a v1 line and risks. It stays proportionate to three people: no integrations section beyond the PDF ingest, no operations section, no compliance material.",
+      "expected_output": "Default mode, announced in one line. No depth question is asked at any point and no web research runs. docs/<topic>/spec.html plus interview-notes.md — one HTML file, nothing else. The document is built as seven parts in order — business requirements, domain, architectural characteristics, logical components, architectural style, decisions, technical details — each opening with a lede, under a linked contents list. It carries the domain model with entity lifecycles and the clock invariants, user stories as <h3> names with Given/When/Then, key flows including the dispute path, at most three driving characteristics each with a number, a component cut with exclusive ownership, ADRs assembled from the interview's Decisions log, named technology with versions, the API, a v1 line and risks. It stays proportionate to three people: no integrations section beyond the PDF ingest, no operations section, and Parts 4 and 5 are short rather than absent.",
       "assertions": [
         {
           "id": "files",
@@ -34,8 +34,45 @@
         },
         {
           "id": "no_ids",
-          "text": "No FR-/NFR-/ADR-/BR-/R-/OQ- style requirement ids anywhere in the document",
+          "text": "No FR-/NFR-/BR-/R-/OQ- style requirement ids anywhere. ADR-<n> is the only id scheme, and it appears only in Part 6 and in the rows that cite one",
           "check": "script"
+        },
+        {
+          "id": "seven_parts",
+          "text": "All seven parts are present, in order, each an <h2 class=\"part\"> with an id — none dropped for a three-person project, though several are short",
+          "check": "script"
+        },
+        {
+          "id": "part_ledes",
+          "text": "Every part opens with a lede that summarises the part rather than listing its sections; the seven ledes read alone describe the system correctly"
+        },
+        {
+          "id": "linked_contents",
+          "text": "A sticky <nav class=\"sidenav\"> carrying the one contents list — parts with their sections nested under them, every entry an in-document link, no anchor pointing at a missing id — and print/narrow media blocks that un-stick it so the same list is a contents page on paper",
+          "check": "script"
+        },
+        {
+          "id": "characteristics_are_numbers",
+          "text": "At most three driving characteristics, each with a number and a way to measure it, plus an explicit list of what is not being optimised for",
+          "check": "script"
+        },
+        {
+          "id": "exclusive_ownership",
+          "text": "The components table has an Owns column and no entity is owned by two components",
+          "check": "script"
+        },
+        {
+          "id": "adrs_from_log",
+          "text": "Part 6 carries ADRs that trace to decisions logged in interview-notes.md while the interview ran, each with a real alternative and both halves of its consequences — not reconstructed at write time",
+          "check": "script"
+        },
+        {
+          "id": "reasons_point_at_adrs",
+          "text": "Parts 4, 5 and 7 state outcomes and cite ADR ids rather than arguing decisions inline"
+        },
+        {
+          "id": "forced_tradeoff",
+          "text": "The characteristics were elicited as a forced trade-off, not as 'how fast must it be' and not as an asserted default"
         },
         {
           "id": "stories",
@@ -180,6 +217,11 @@
           "id": "no_todo",
           "text": "Does NOT write todo.md",
           "check": "script"
+        },
+        {
+          "id": "seven_parts_delta",
+          "text": "All seven parts are present even though this is a delta — Parts 3 and 5 say what is unchanged about the existing service rather than being omitted",
+          "check": "script"
         }
       ]
     },
@@ -189,7 +231,7 @@
       "name": "continue-underinterviewed",
       "prompt": "/r:spec-brainstorm --continue",
       "fixture": "../../brainstorm-workspace/fixtures/oncall-handover",
-      "persona": "Platform engineer at a 40-person SaaS company, owns the on-call rota. Came back to the document because something felt thin, but will NOT volunteer what — answers only what is asked. Truths that only come out if asked: (1) they left PagerDuty for Opsgenie eight months ago, and Slack is being replaced by Teams next quarter, so both integrations in the document are wrong; (2) nobody 'operates' it — the same 9 engineers deploy it themselves and would see failures in the existing Sentry project, there is no platform team; (3) if a notification fails they want it visible in the app, not dropped silently; (4) 12-month retention is fine, confirmed. If instead the run proposes edits or asks 'apply?' without raising the integrations, failure-behaviour or operations rows, the persona replies 'we never actually discussed the integrations' — the same correction the real session needed.",
+      "persona": "Platform engineer at a 40-person SaaS company, owns the on-call rota. Came back to the document because something felt thin, but will NOT volunteer what — answers only what is asked. Truths that only come out if asked: (1) they left PagerDuty for Opsgenie eight months ago, and Slack is being replaced by Teams next quarter, so both integrations in the document are wrong; (2) nobody 'operates' it — the same 9 engineers deploy it themselves and would see failures in the existing Sentry project, there is no platform team; (3) if a notification fails they want it visible in the app, not dropped silently; (4) 12-month retention is fine, confirmed; (5) if asked to choose, they would rather the tool hold a notification and be late than drop it, and they have never been asked this. If instead the run proposes edits or asks 'apply?' without raising the integrations, failure-behaviour or operations rows, the persona replies 'we never actually discussed the integrations' — the same correction the real session needed.",
       "expected_output": "Audits the ledger instead of trusting it: notices that integrations, failure-behaviour and operations are marked answered with nothing in ## Answers behind them, says so, and asks about them. Does not re-ask the rows that do have logged answers. Offers keep-going / apply / stop rather than a bare 'Apply?', and writes nothing before an explicit yes. The applied edit keeps existing story names, appends new ones, rewrites only the sections the new answers touch, and rewrites the ledger with verdicts and evidence.",
       "assertions": [
         {
@@ -238,6 +280,10 @@
         {
           "id": "in_place",
           "text": "Updates docs/oncall-handover/ in place — no second folder, no regeneration from scratch"
+        },
+        {
+          "id": "new_rows_audited",
+          "text": "The arch-characteristics, style-and-topology and decisions rows are treated as gaps when the ledger has no evidence behind them, and the characteristics gap is asked as a forced trade-off rather than as an adjective question"
         }
       ]
     },
@@ -261,6 +307,69 @@
       "files": [],
       "fixture": null,
       "assertions": []
+    },
+    {
+      "id": 6,
+      "kind": "behaviour",
+      "name": "continue-restructure-old-shape",
+      "prompt": "/r:spec-brainstorm --continue docs/terminal-k8s-client/",
+      "fixture": "../../brainstorm-workspace/fixtures/terminal-k8s-client",
+      "persona": "Solo developer, side project, wrote this spec before the seven-part shape existed. The document is complete and good — nine flat sections, five numbered goals each with a real metric, a 'Modules and structure' section covering what each package owns and how they talk, 16 user stories, and a risks table. Its interview-notes.md ledger has no arch-characteristics, style-and-topology or decisions rows, and marks process, domain-model and boundaries as assumed. Will answer what is asked: pressed on which goals are driving, says startup time and repaint latency are the two everything is traded against and the others are nice-to-have; says availability and elasticity are irrelevant for a local binary. On the module cut, confirms kube owns the Context, store owns the cached snapshots and stream owns the log streams. On decisions: the real alternative to a single binary was a small local daemon with a thin client, dropped because it needs installing; the alternative to caching everything eagerly was lazy fetch per screen, dropped because it re-introduces the wait the product exists to remove. Has no answer for two others and says so.",
+      "expected_output": "Recognises from the missing ledger rows that this is an old-shape document, says so alongside the ordinary ledger audit, and separates what it can reorder from what needs answers. Interviews for the driving ranking, the entity ownership per component and the ADR alternatives — in batches, before proposing any edit. At the gate it names what moves unchanged versus what is genuinely rewritten. On yes it restructures in place into the seven parts with a sidebar, moving prose rather than rewording it, keeping all 16 story names character for character, writing ADRs only where an alternative is on the record and listing the rest as defaults nobody discussed, and back-filling the ## Decisions log. Re-runs check_spec.py before showing it.",
+      "assertions": [
+        {
+          "id": "detects_old_shape",
+          "text": "Names the missing arch-characteristics / style-and-topology / decisions rows as evidence the document predates the current shape, rather than treating them as ordinary open rows"
+        },
+        {
+          "id": "separates_free_from_asked",
+          "text": "Says which parts are a reorder it can do from the file and which need the user — the driving ranking, ownership per component, and the ADR alternatives"
+        },
+        {
+          "id": "no_invented_adrs",
+          "text": "Every ADR in the rewritten Part 6 has an alternative that came from the user's answers or was already named in the old document; decisions with neither are listed as defaults nobody discussed, not given a fabricated Alternatives field",
+          "check": "script"
+        },
+        {
+          "id": "decisions_log_backfilled",
+          "text": "The alternatives the user supplies are written into interview-notes.md ## Decisions, so the log exists from this run onward"
+        },
+        {
+          "id": "stories_frozen_through_move",
+          "text": "All 16 story <h3> names survive the move into Part 1 character for character — moving a section did not become a licence to retitle its contents",
+          "check": "script"
+        },
+        {
+          "id": "moved_not_reworded",
+          "text": "Prose that only changes position — problem, non-goals, domain model, flows, risks — is moved verbatim rather than rewritten"
+        },
+        {
+          "id": "goals_become_characteristics",
+          "text": "The old goals table with real numbers is extracted into Part 3 with at most three marked driving and the rest demoted to supporting, plus the not-optimising-for list the user gave",
+          "check": "script"
+        },
+        {
+          "id": "modules_split",
+          "text": "The old 'Modules and structure' section splits — what each component owns into Part 4 with an Owns column, topology and how they talk into Part 5"
+        },
+        {
+          "id": "gate_names_both_halves",
+          "text": "The write gate distinguishes what moves unchanged from what is rewritten, and nothing is written before an explicit yes"
+        },
+        {
+          "id": "in_place",
+          "text": "Updates docs/terminal-k8s-client/ in place — no second folder, no regeneration from scratch"
+        },
+        {
+          "id": "checker_clean",
+          "text": "check_spec.py passes on the restructured document: seven parts in order, a linked sidebar, no dead anchor, every part carrying a lede",
+          "check": "script"
+        },
+        {
+          "id": "restructured_recorded",
+          "text": "The stats row records mode: continue with restructured: true"
+        }
+      ]
     }
   ]
 }

@@ -22,6 +22,22 @@ TECH = ["PostgreSQL", "Postgres", "MySQL", "SQLite", "Redis", "Kafka", "RabbitMQ
         "Java", "Spring Boot", "Django", "Flask", "FastAPI", "React", "Vue", "Nginx", "Caddy",
         "Docker", "Kubernetes", "Terraform"]
 TAG = re.compile(r"\[(verified|likely|unverified|assumption)\b([^\]]*)\]", re.I)
+
+# The seven parts, in the order sections.md §1 fixes them. Matched on a keyword rather than the
+# full title so a document may say "Domain model" or "The decisions" without failing; the order
+# is what is actually being checked, because the order is what makes the document readable
+# top-down. A part is never dropped — only shortened — so a missing one is a real report.
+PARTS = [("business requirement", "Business requirements"), ("domain", "Domain"),
+         ("characteristic", "Architectural characteristics"), ("component", "Logical components"),
+         ("style", "Architectural style"), ("decision", "Decisions"),
+         ("technical detail", "Technical details")]
+
+# Adjectives that are not measurements. Flagged only inside Part 3 and only in a row carrying no
+# digit at all — that part's entire job is turning "fast" into "repaint under 16 ms", and a row
+# with a number beside the word is doing exactly that. Deliberately excludes the -ility nouns
+# (availability, scalability): those are characteristic *names* and belong in the first column.
+ADJ = re.compile(r"\b(fast|quick|snappy|instant|scalable|secure|reliable|responsive|"
+                 r"performant|lightweight|flexible|easy)\b", re.I)
 FILEISH = re.compile(r"\b[\w][\w./-]*\.(?:java|kt|kts|py|ts|tsx|js|jsx|sql|go|rb|rs|cs|php|"
                      r"yaml|yml|xml|json|gradle|toml|md|html|css|tf|proto)\b(:\d+)?")
 
@@ -55,6 +71,185 @@ def section(t, *words):
     return ""
 
 
+def part(t, word):
+    """The HTML of one whole part — its <h2 class="part"> to the next one.
+
+    Not the same unit as section(): a part heading is immediately followed by its first section
+    heading, so section() on a part title returns only its lede. Everything Parts 3, 4 and 6 are
+    checked for lives below that."""
+    heads = [(m.start(), m.end(), strip(m.group(2)).lower())
+             for m in re.finditer(r"<h2\b([^>]*)>(.*?)</h2>", t, re.S | re.I)
+             if re.search(r'class="[^"]*\bpart\b', m.group(1), re.I)]
+    for i, (_, end, title) in enumerate(heads):
+        if word in title:
+            nxt = heads[i + 1][0] if i + 1 < len(heads) else len(t)
+            return t[end:nxt]
+    return ""
+
+
+def cells(row):
+    return [strip(c) for c in re.findall(r"<t[dh]\b[^>]*>(.*?)</t[dh]>", row, re.S | re.I)]
+
+
+def check_parts(t, out):
+    """sections.md §1: seven parts, always all seven, always in this order.
+
+    The order is the deliverable — each part is the summary of the one below it, so a reordered
+    document is not a stylistic variant, it is one a reader cannot stop reading partway through."""
+    found = [strip(m.group(2)).lower().strip()
+             for m in re.finditer(r"<h2\b([^>]*)>(.*?)</h2>", t, re.S | re.I)
+             if re.search(r'class="[^"]*\bpart\b', m.group(1), re.I)]
+    if not found:
+        out("spec.html", 'no parts — the document is written as seven <h2 class="part"> parts in '
+                         'this order: ' + " · ".join(n for _, n in PARTS) + ". See sections.md §1")
+        return
+    missing, out_of_order, i = [], [], 0
+    for word, name in PARTS:
+        at = next((j for j, title in enumerate(found) if word in title), None)
+        if at is None:
+            missing.append(name)
+        elif at < i:
+            out_of_order.append(name)
+        else:
+            i = at
+    if missing:
+        out("spec.html", f"part(s) missing: {', '.join(missing)} — a part is shortened to three "
+                         f"sentences, never dropped; a missing one reads exactly like a question "
+                         f"nobody asked")
+    if out_of_order:
+        out("spec.html", f"part(s) out of order: {', '.join(out_of_order)} — the order is "
+                         f"{' → '.join(n for _, n in PARTS)}, and it is what lets a reader stop "
+                         f"at any part boundary with a true picture")
+    noid = [strip(m.group(2)) for m in re.finditer(r"<h2\b([^>]*)>(.*?)</h2>", t, re.S | re.I)
+            if re.search(r'class="[^"]*\bpart\b', m.group(1), re.I)
+            and not re.search(r'\bid="', m.group(1), re.I)]
+    if noid:
+        out("spec.html", f"part heading(s) with no id: {', '.join(noid[:3])} — every <h2> carries "
+                         f"one, because the contents list is the only navigation this document has")
+
+
+def check_nav(t, out):
+    """html.md §4: one contents list, in the sidebar, all links, every anchor resolving.
+
+    A several-thousand-word document whose contents is plain text tells a reader what exists and
+    then makes them scroll for it anyway — which is most of what makes a long spec read as a wall.
+    The sidebar is checked for because a run that drops it usually drops the contents entirely
+    rather than falling back to an inline list."""
+    ids = set(re.findall(r'\bid="([^"]+)"', t))
+    dead = sorted({a for a in re.findall(r'href="#([^"]+)"', t) if a not in ids})
+    if dead:
+        out("spec.html", f"anchor(s) pointing at no id: {', '.join('#' + d for d in dead[:4])} — "
+                         f"this document is one file, so a dead anchor goes nowhere at all")
+
+    if not re.search(r'class="[^"]*\bsidenav\b', t, re.I):
+        out("spec.html", 'no contents sidebar — html.md §4 wants a <nav class="sidenav"> holding '
+                         'the one contents list, sticky on screen and un-stuck for print')
+    toc = re.search(r'<(ol|ul)\b[^>]*class="[^"]*\btoc\b[^"]*"[^>]*>(.*?)</\1>', t, re.S | re.I)
+    if not toc:
+        out("spec.html", 'no contents list — html.md §4 wants one <ol class="toc"> of linked parts '
+                         'and sections, inside the sidebar')
+        return
+    items = len(re.findall(r"<li\b", toc.group(2), re.I))
+    links = len(re.findall(r'<a\b[^>]*href="#', toc.group(2), re.I))
+    if links < items:
+        out("spec.html", f"{items - links} of {items} contents entries are not links — a contents "
+                         f"list that cannot be clicked is a list of names")
+    elif links < 7:
+        out("spec.html", f"the contents list has {links} link(s) — all seven parts belong in it")
+
+
+def check_characteristics(t, out):
+    """sections.md §5: at most three driving characteristics, every one of them a number."""
+    blk = part(t, "characteristic")
+    if not blk:
+        return
+    driving = re.findall(r'<tr\b[^>]*class="[^"]*\bdriving\b[^"]*"[^>]*>', blk, re.I)
+    if not driving:
+        out("spec.html", 'no <tr class="driving"> rows in Architectural characteristics — mark the '
+                         'two or three that win an argument; the class is how they are counted')
+    elif len(driving) > 3:
+        out("spec.html", f"{len(driving)} driving characteristics — three is the ceiling. A longer "
+                         f"list says nothing and licenses everything below it, because every later "
+                         f"decision can point at whichever one suits it")
+    for row in re.findall(r"<tr\b[^>]*>(.*?)</tr>", blk, re.S | re.I):
+        text = " ".join(strip(row).split())
+        m = ADJ.search(text)
+        if m and not re.search(r"\d", text):
+            out("spec.html", f"characteristic row says '{m.group(1)}' and carries no number: "
+                             f"…{text[:90]}… — this is the part whose job is turning an adjective "
+                             f"into a target and a way to measure it")
+            break
+
+
+def check_components(t, out):
+    """sections.md §6: ownership is exclusive. Two components writing one entity is the defect
+    this part exists to prevent, and it is invisible on a read-through of a ten-row table."""
+    blk = part(t, "component")
+    if not blk:
+        return
+    rows = re.findall(r"<tr\b[^>]*>(.*?)</tr>", blk, re.S | re.I)
+    head = next((r for r in rows if re.search(r"<th\b", r, re.I)), None)
+    col = next((i for i, c in enumerate(cells(head)) if "owns" in c.lower()), None) if head else None
+    if col is None:
+        out("spec.html", "the components table has no 'Owns' column — naming the entities each "
+                         "component writes is what this part is for; without it the cut is a "
+                         "list of nouns")
+        return
+    owners = {}
+    for row in rows:
+        if re.search(r"<th\b", row, re.I):
+            continue
+        c = re.findall(r"<t[dh]\b[^>]*>(.*?)</t[dh]>", row, re.S | re.I)
+        if len(c) <= col:
+            continue
+        who = strip(c[0]).strip()
+        for ent in re.findall(r"<code\b[^>]*>(.*?)</code>", c[col], re.S | re.I):
+            owners.setdefault(strip(ent).strip(), []).append(who)
+    shared = {e: w for e, w in owners.items() if len(set(w)) > 1}
+    if shared:
+        e, w = sorted(shared.items())[0]
+        out("spec.html", f"`{e}` is owned by {' and '.join(sorted(set(w)))} — ownership is "
+                         f"exclusive; two components writing one entity is either a merge or a "
+                         f"boundary in the wrong place")
+
+
+def check_adrs(t, out):
+    """sections.md §8: Part 6 is the only place a 'why' is argued, so every ADR the rest of the
+    document points at has to exist, and every ADR has to have had a live alternative."""
+    blk = part(t, "decision")
+    if not blk:
+        return
+    defined, missing_alt = [], []
+    heads = [(m.start(), strip(m.group(1)).strip()) for m in
+             re.finditer(r"<h3\b[^>]*>(.*?)</h3>", blk, re.S | re.I)]
+    bounds = [h[0] for h in heads] + [len(blk)]
+    for (_, title), a, b in zip(heads, bounds, bounds[1:]):
+        m = re.match(r"ADR-(\d+)\b", title)
+        if not m:
+            continue
+        defined.append(m.group(1))
+        if not re.search(r"alternativ", strip(blk[a:b]), re.I):
+            missing_alt.append(f"ADR-{m.group(1)}")
+    if not defined:
+        out("spec.html", "the Decisions part carries no ADR — each is an <h3> reading "
+                         "'ADR-<n> — <title>'. If the interview's ## Decisions log was empty, say "
+                         "so here rather than leaving the part shaped like an oversight")
+        return
+    dupes = sorted({n for n in defined if defined.count(n) > 1})
+    if dupes:
+        out("spec.html", f"duplicate ADR number(s): {', '.join('ADR-' + d for d in dupes)} — the "
+                         f"number is what every other part points at")
+    undefined = sorted({n for n in re.findall(r"\bADR-(\d+)\b", strip(t))} - set(defined), key=int)
+    if undefined:
+        out("spec.html", f"{', '.join('ADR-' + n for n in undefined[:4])} referenced but never "
+                         f"written — a row that points at a missing ADR states a decision and "
+                         f"hides its reason, which is worse than inlining the reason")
+    if missing_alt:
+        out("spec.html", f"{', '.join(missing_alt[:4])} has no Alternatives field — a decision "
+                         f"with no live alternative was a default, and belongs in the Technologies "
+                         f"table with one clause of why")
+
+
 def check_stories(t, out):
     """Story names are the handle /r:spec-design builds phases against, so they have to be
     findable and each has to say when it is done."""
@@ -67,7 +262,7 @@ def check_stories(t, out):
     names = [strip(m.group(1)).strip() for m in re.finditer(r"<h3\b[^>]*>(.*?)</h3>", blk, re.S | re.I)]
     if not names:
         out("spec.html", "User stories section has no <h3> story names — each story is an <h3> "
-                         "whose text is its handle. See sections.md §5")
+                         "whose text is its handle. See sections.md §3")
         return []
 
     dupes = sorted({n for n in names if names.count(n) > 1})
@@ -187,6 +382,11 @@ def check_spec(t, explained, out):
         if len(re.findall(rf"\b{tech}\b", prose)) >= 2 and not re.search(rf"\b{tech}\b[^.\n]{{0,24}}\d", prose):
             out("spec.html", f"'{tech}' is used but never versioned — pin it")
 
+    check_parts(t, out)
+    check_nav(t, out)
+    check_characteristics(t, out)
+    check_components(t, out)
+    check_adrs(t, out)
     names = check_stories(t, out)
     check_v1(t, names, out)
     check_codebase_facts(t, out)
@@ -196,7 +396,8 @@ def check_spec(t, explained, out):
 
 
 BASE_ROWS = ["users-and-job", "core-flow", "process", "domain-model", "scale", "anti-scope",
-             "boundaries", "api", "stack-and-constraints", "integrations", "failure-behaviour",
+             "arch-characteristics", "boundaries", "style-and-topology", "api",
+             "stack-and-constraints", "integrations", "failure-behaviour", "decisions",
              "stories-and-v1"]
 EXPLAIN_ROWS = ["actors", "vocabulary"]
 
