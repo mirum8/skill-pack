@@ -372,9 +372,53 @@ test('a gradle project gets gradle self-check commands, and no build tool gets n
   const none = await run({
     source: baseSource({ buildTool: 'none' }), review: OK_REVIEW, planfix: OK_FIX,
   })
-  const p = none.prompts['implement:backend']
+  // No JVM build means no JVM persona either, so the brief lands on the general implementer.
+  const p = none.prompts['implement:general']
   assert.match(p, /syntactically sound/)
   assert.doesNotMatch(p, /Do NOT run the full build/, 'there is no build to forbid')
+})
+
+test('REGRESSION: no JVM build routes to ONE general implementer, whatever the flags say', async () => {
+  // The two bundled implementers are a Spring/JPA persona and a Thymeleaf/HTMX persona, and their
+  // slice strings name *.java/*.kt and templates literally. hasFrontend is true for any change
+  // that touches what a project renders — a terminal UI counts — so on a Go repo the unguarded
+  // routing handed the Thymeleaf agent "the templates, HTMX wiring, and frontend assets" and it
+  // reported blockedOn, correctly. Three phases of one Go project stopped that way.
+  for (const flags of [{ hasBackend: true, hasFrontend: true },
+                       { hasBackend: false, hasFrontend: true },
+                       { hasBackend: true, hasFrontend: false },
+                       { hasBackend: false, hasFrontend: false }]) {
+    const { counts, optsBy, logText } = await run({
+      source: baseSource({ buildTool: 'none', ...flags }), review: OK_REVIEW, planfix: OK_FIX,
+    })
+    assert.equal(counts['implement:general'], 1, JSON.stringify(flags))
+    assert.equal(counts['implement:backend'], undefined, JSON.stringify(flags))
+    assert.equal(counts['implement:frontend'], undefined, JSON.stringify(flags))
+    assert.equal(optsBy['implement:general'].agentType, 'general-purpose')
+    if (flags.hasBackend || flags.hasFrontend) assert.match(logText, /no JVM build tool — routing to ONE general-purpose implementer/)
+  }
+  // The guard is on the build tool, NOT on the flags: a maven project still splits by area.
+  const jvm = await run({
+    source: baseSource({ buildTool: 'maven', hasBackend: true, hasFrontend: true }),
+    review: OK_REVIEW, planfix: OK_FIX,
+  })
+  assert.equal(jvm.optsBy['implement:backend'].agentType, 'r:java-backend-developer')
+  assert.equal(jvm.optsBy['implement:frontend'].agentType, 'r:htmx-thymeleaf-dev')
+  assert.equal(jvm.counts['implement:general'], undefined)
+})
+
+test('REGRESSION: a phantom frontend slice can no longer block a run whose work landed', async () => {
+  // The whole failure, end to end: one implementer's blockedOn stops the run regardless of what
+  // the other one did, so a Thymeleaf agent dispatched into a Go repo took a COMPLETE run down
+  // with it. With the routing guarded there is no second implementer to block.
+  const { out, counts } = await run({
+    source: baseSource({ buildTool: 'none', hasBackend: true, hasFrontend: true }),
+    review: OK_REVIEW, planfix: OK_FIX,
+    overrides: { 'implement:frontend': { done: false, summary: '', blockedOn: 'this repo has no templates' } },
+  })
+  assert.equal(out.stopped, undefined)
+  assert.equal(counts['implement:frontend'], undefined)
+  assert.equal(out.buildGreen, 'n/a')
 })
 
 test('the planner reads THIS project, never the inside of a dependency', async () => {
@@ -1209,6 +1253,132 @@ test('an implementer that says the plan is wrong is surfaced, not worked around'
   })
   assert.equal(out.stopped, 'implement-blocked')
   assert.match(out.detail, /deleted class/)
+})
+
+// ------------------------------------- a stop still says whether the plan was reviewed --
+
+test('REGRESSION: every stop after the plan review carries planReview out with it', async () => {
+  // The plan review runs before the branch, the implementers and the build, so a run that stops
+  // in any of them WAS reviewed. Dropping the block made the handoff read as "Codex never
+  // challenged this plan" — a different and much worse claim than "the run stopped later". The
+  // stats sink at the end of the script is never reached on a stop, so this is the only place
+  // those verdicts survive at all.
+  const stops = [
+    ['implement-blocked', { overrides: { implement: { done: false, summary: '', blockedOn: 'plan targets a deleted class' } } }],
+    ['implement-blocked', { overrides: { implement: null } }],
+    ['branch-failed', { overrides: { branch: { onBranch: '' } } }],
+    ['build-red', { build: () => ({ green: false, inScopeFailures: 'ImportTest.rejects' }) }],
+    ['build-red-preexisting', { build: () => ({ green: false, inScopeFailures: '', preExistingFailures: 'FlakyTest' }) }],
+  ]
+  for (const [reason, extra] of stops) {
+    const { out } = await run({ review: OK_REVIEW, planfix: OK_FIX, verdict: MIXED, ...extra })
+    assert.equal(out.stopped, reason)
+    assert.equal(out.planReview.ran, true, `${reason} must report the plan review that DID run`)
+    assert.equal(out.planReview.raised, 2, reason)
+    assert.deepEqual(out.planReview.applied, OK_FIX.applied, reason)
+    assert.equal(out.planReview.dropped.length, 1, reason)
+  }
+})
+
+test('REGRESSION: a blocked slice halts the run but no longer discards the work that landed', async () => {
+  // The halt is correct — half a plan implemented is not a finished task. Discarding the other
+  // implementer's diff is not: it is sitting UNCOMMITTED on the feature branch, so a stop that
+  // reports only the blockage reads as "nothing happened" over a real change, and the next run
+  // plans against a tree it believes is clean.
+  const { out, logText } = await run({
+    source: baseSource({ buildTool: 'maven', hasBackend: true, hasFrontend: true }),
+    review: OK_REVIEW, planfix: OK_FIX,
+    overrides: {
+      'implement:frontend': { done: false, summary: '', blockedOn: 'the plan targets a deleted fragment' },
+      'implement:backend': { done: true, summary: 'the controller returns VERSIONS_VIEW on error paths',
+                             filesChanged: ['AdminRatesController.java'],
+                             testEvidence: ['ImportTest.rejects — before: RED (expected VERSIONS_VIEW) — after: GREEN'] },
+    },
+  })
+  assert.equal(out.stopped, 'implement-blocked')
+  assert.match(out.detail, /deleted fragment/)
+  assert.deepEqual(out.implemented, ['the controller returns VERSIONS_VIEW on error paths'])
+  assert.deepEqual(out.filesChanged, ['AdminRatesController.java'])
+  assert.equal(out.testEvidence.length, 1)
+  assert.match(logText, /UNCOMMITTED on issue-81-import/)
+  // The blocked implementer contributes nothing to any of the three — a slice that did not run is
+  // not evidence of work, and a summary-less return must not become an empty "landed" entry.
+  assert.equal(out.implemented.length, 1)
+})
+
+test('a blocked run where NOTHING landed reports empty lists, not a missing field', async () => {
+  const { out } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    overrides: { implement: { done: false, summary: '', blockedOn: 'the plan targets a deleted class' } },
+  })
+  assert.equal(out.stopped, 'implement-blocked')
+  assert.deepEqual(out.implemented, [])
+  assert.deepEqual(out.filesChanged, [])
+})
+
+// ------------------------------------------------- a stop is a run, and is recorded --
+
+test('REGRESSION: a run that STOPS still records its stats row, tagged with the reason', async () => {
+  // While the sink sat below the handoff, every halt was invisible to the store — one Go project
+  // showed 7 implement rows against 10 real runs, and the three missing ones were the pathology
+  // worth finding. A stop is the outcome most worth measuring: it spent explorers, a planner and a
+  // Codex plan review and produced no diff.
+  const stops = [
+    ['implement-blocked', { overrides: { implement: { done: false, summary: '', blockedOn: 'x' } } }],
+    ['branch-failed', { overrides: { branch: { onBranch: '' } } }],
+    ['build-red', { build: () => ({ green: false, inScopeFailures: 'ImportTest.rejects' }) }],
+    ['planner-blocked', { overrides: { planner: null } }],
+  ]
+  for (const [reason, extra] of stops) {
+    const { out, counts, prompts } = await run({ review: OK_REVIEW, planfix: OK_FIX, verdict: MIXED, ...extra })
+    assert.equal(out.stopped, reason)
+    assert.equal(counts['stats'], 1, `${reason} must record exactly one row`)
+    const row = JSON.parse(prompts['stats'].match(/\{"kind":"implement".*\}/)[0])
+    assert.equal(row.stopped, reason)
+    assert.equal(row.kind, 'implement')
+    // A halt that never reached the build must not claim one ran.
+    if (reason !== 'build-red') assert.equal(row.buildGreen, 'n/a', reason)
+    else assert.equal(row.buildGreen, false, reason)
+  }
+})
+
+test("a completed run records stopped '' — a halt is distinguishable from a finish", async () => {
+  // Not `undefined`: the store keeps the record verbatim in `payload`, and a field that is absent
+  // on the happy path cannot be selected on, so every completed run would read as unclassified.
+  const { out, counts, prompts } = await run({ review: OK_REVIEW, planfix: OK_FIX, verdict: MIXED })
+  assert.equal(out.stopped, undefined)
+  assert.equal(counts['stats'], 1)
+  const row = JSON.parse(prompts['stats'].match(/\{"kind":"implement".*\}/)[0])
+  assert.equal(row.stopped, '')
+  assert.equal(row.buildGreen, true)
+})
+
+test('the stats sink is BEST EFFORT — a sink that dies costs neither a result nor a stop', async () => {
+  // The sink is the last thing a successful run does. Left unguarded, a StructuredOutput cap or an
+  // exhausted budget inside pure bookkeeping would throw away a finished run's whole handoff.
+  const ok = await run({ review: OK_REVIEW, planfix: OK_FIX, overrides: { stats: THROW } })
+  assert.equal(ok.out.stopped, undefined)
+  assert.equal(ok.out.branch, 'issue-81-import')
+  assert.equal(ok.out.buildGreen, true)
+
+  const halted = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    overrides: { stats: THROW, implement: { done: false, summary: '', blockedOn: 'the plan targets a deleted class' } },
+  })
+  assert.equal(halted.out.stopped, 'implement-blocked')
+  assert.match(halted.out.detail, /deleted class/)
+})
+
+test('a stop below full tier reports planReview.ran false, not a missing block', async () => {
+  // `ran: false` is a claim the caller can act on ("the tier bought no plan review"); an absent
+  // block is one it has to guess about. Below full the two must not look the same.
+  const { out } = await run({
+    source: baseSource({ profile: 'standard', exploreAspects: ['controller'] }),
+    args: { source: '#81', profile: 'standard' },
+    overrides: { implement: { done: false, summary: '', blockedOn: 'plan targets a deleted class' } },
+  })
+  assert.equal(out.stopped, 'implement-blocked')
+  assert.equal(out.planReview.ran, false)
 })
 
 // -------------------------------------------- red-before-green must be observed --

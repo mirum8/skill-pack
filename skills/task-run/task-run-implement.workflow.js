@@ -59,7 +59,9 @@
 //            testEvidence: string[] (what each test did BEFORE and after the change, as observed
 //                          by the implementer — a green-before test is a regression guard, not
 //                          proof the fix works; carry it into the PR body) }
-//       or { stopped: <reason>, ... } when the run cannot honestly continue. `branch` is always a
+//       or { stopped: <reason>, ... } when the run cannot honestly continue. Any stop that happens
+//   AFTER the plan review carries `planReview` too, so an interrupted run can still say whether
+//   the approach was challenged. `branch` is always a
 //   real feature branch: a run that could not leave `base` stops (branch-not-created) rather than
 //   handing back branch === base.
 //   profileForced says whether the tier came from the caller's --light/--standard/--full
@@ -708,7 +710,11 @@ ${inRepo}
       the screen should be. There is nothing for it to decide when the answer is "the same as now",
       and a design agent given that task writes a section explaining that it has nothing to design.
       It cannot be true when uiTouched is false.
-      Also set hasBackend / hasFrontend for implementer routing.
+      Also set hasBackend (*.java / *.kt files change) and hasFrontend (Thymeleaf templates, CSS
+      or frontend JS change) for implementer routing. These are about THOSE FILE KINDS, not about
+      whether the project has a backend or a user interface: a Go, Rust or Node project answers
+      false to both, and a terminal UI is not a frontend. They are read only when step 6 finds a
+      JVM build tool; elsewhere the routing ignores them.
    6. BUILD TOOL from the repo root — return BOTH commands. buildCmd is the CLEAN certifying
       build used exactly ONCE; buildCmdFast is the incremental rebuild used every time after.
       maven -> "mvn clean package" / "mvn package", runnerAgent "r:maven-build-runner".
@@ -1210,6 +1216,86 @@ if (designWanted) {
   }
 }
 
+// --- What every exit reports -------------------------------------------------
+// Declared above Phase 2 so that EVERY stop from the planner onwards can carry it and record it.
+// Phase 3 fills it in; a stop that happens before then reports `ran: false`, which is a claim the
+// caller can act on ("the tier bought no plan review") where an absent block is one it has to
+// guess about. The plan review runs before the branch, the implementers and the build, so a run
+// that stops in any of those WAS reviewed, and a stop that omits the block reads as "Codex never
+// challenged this plan" — a different and much worse claim.
+const planReview = { ran: false, passes: 0, raised: 0, applied: [], dropped: [], judged: [] }
+
+// One row per run, recorded whether the run FINISHES or STOPS. A stop is the outcome most worth
+// measuring — it spent explorers, a planner and (at full tier) a Codex plan review and produced no
+// diff — and while the sink sat below the handoff every one of them was invisible: one Go project
+// showed 7 implement rows against 10 real runs, and the three missing ones were exactly the
+// pathology worth finding. `stopped` is '' on the happy path, so the store can tell a halt from a
+// completed run instead of inferring it from a missing buildGreen.
+//
+// BEST EFFORT, in both directions and both load-bearing: it can never fail the run (the agent is
+// caught, and so is anything thrown while building the row), and it is never retried. Bookkeeping
+// is not worth losing a green run — or a stop's reason — over.
+const recordRun = async ({ stopped = '', buildGreen = 'n/a' } = {}) => {
+  try {
+    const statsRow = {
+      kind: 'implement',
+      // '' on the happy path; the stop reason otherwise. record-run.py keeps the whole record in
+      // `payload` verbatim, so this is queryable without a column of its own.
+      stopped,
+      source: src.kind,
+      profile,
+      profileForced: !!forcedProfile,
+      profileEscalated,
+      profileReason: (src.profileReason || '').slice(0, 200),
+      explorers: aspects.length || 1,
+      uiTouched,
+      // The two things worth measuring about the design gate, for the same reason profileEscalated
+      // is recorded: uiEscalated says how often the description-based guess was wrong, and
+      // designRan says whether the phase it buys actually produced a document.
+      uiEscalated,
+      // The gap between these two is the measurement the design gate exists for: uiTouched-without-
+      // uiVisualChange is the run that would have spent an Opus agent writing "nothing changes".
+      uiVisualChange,
+      designRan: !!designSection,
+      buildGreen,
+      planReviewRan: !!planReview.ran,
+      planApplied: planReview.applied.length,
+      planDropped: planReview.dropped.length,
+      // One row per finding Codex raised against the plan, with the judges' verdict. The two counts
+      // above say how many landed and how many were thrown out; these say WHICH rubric keeps
+      // producing findings nobody buys, which is the number that decides whether a plan-review pass
+      // earns its slot. `track` is the rubric because that is the only dimension this reviewer
+      // varies along.
+      findings: planReview.judged.map((j) => ({
+        track: j.rubric || 'plan-review',
+        severity: j.severity,
+        verdict: j.verdict,
+        fixed: j.verdict === 'confirmed',
+        description: j.what,
+      })),
+    }
+    await agent(
+      `Record one line of run statistics. This is bookkeeping — if anything goes wrong, say so and
+   return; do NOT retry and do NOT treat it as a failure of the run. Run exactly this from the
+   repo root, then return the script's stderr line verbatim:
+
+   python3 "${PACK}/lib/record-run.py" <<'RTI_STATS_JSON'
+${JSON.stringify(statsRow)}
+RTI_STATS_JSON
+
+   The script always exits 0 by design; its stderr says whether the row was recorded.`,
+      { label: 'stats', phase: 'Build', ...GP, ...SINK }).catch(() => null)
+  } catch { /* a sink that throws must not cost the run its result or a stop its reason */ }
+}
+
+// Every halt from here down goes through this, so a stop cannot silently lose the plan-review
+// audit trail or its stats row by one site forgetting to add them — which is exactly how
+// `implement-blocked` came to report a phase as unreviewed when Codex had in fact reviewed it.
+const stop = async (reason, extra = {}, buildGreen) => {
+  await recordRun({ stopped: reason, ...(buildGreen === undefined ? {} : { buildGreen }) })
+  return { stopped: reason, planPath, planReview, ...extra }
+}
+
 // --- Phase 2: the plan -------------------------------------------------------
 // Resume: a plan already past review is not re-planned or re-reviewed.
 phase('Plan')
@@ -1317,7 +1403,7 @@ ${uiDesignNote}
        document. What you return is copied to disk verbatim and is what Codex reviews and what the
        implementers build from, so anything that is not plan text becomes a line in the plan.${BATCH_CLAUSE}`,
       { label: 'planner', phase: 'Plan', agentType: 'Plan', ...PLAN_RUN }))
-    if (blocked(plan) || typeof plan !== 'string' || !plan.trim()) return { stopped: 'planner-blocked' }
+    if (blocked(plan) || typeof plan !== 'string' || !plan.trim()) return await stop('planner-blocked')
     planMarkdown = plan.trim()
   } else {
     // Light tier: no Codex plan review, and the plan itself stays BRIEF — but PLAN_LIGHT_RUN sits
@@ -1347,7 +1433,7 @@ ${uiDesignNote}
        return is copied to disk verbatim, so anything that is not plan text becomes a line in the
        plan.`,
       { label: 'plan-light', phase: 'Plan', ...GP, ...PLAN_LIGHT_RUN }))
-    if (blocked(lite) || typeof lite !== 'string' || !lite.trim()) return { stopped: 'planner-blocked' }
+    if (blocked(lite) || typeof lite !== 'string' || !lite.trim()) return await stop('planner-blocked')
     planMarkdown = lite.trim()
   }
 
@@ -1434,7 +1520,7 @@ ${uiDesignNote}
        agent already did.`,
       { label: 'plan-check', phase: 'Plan', schema: PLAN_ON_DISK, ...GP, ...ECHO }))
     const intact = !blocked(onDisk) && onDisk.exists && (onDisk.lastLine || '').trim() === wantLast
-    if (!intact) return { stopped: 'plan-not-written' }
+    if (!intact) return await stop('plan-not-written')
     log(`run-task-implement: plan-write reported failure${wrote.note ? ` ("${String(wrote.note).slice(0, 120)}")` : ''} but ${planPath} ends on the planner's last line — the plan is intact, continuing`)
   }
 }
@@ -1458,7 +1544,6 @@ ${uiDesignNote}
 // severity, and whether the judges bought it. `dropped` stays a flat string list because the PR
 // body prints it; the objects are what the stats row records, and they are the only place the
 // rubric and severity survive the loop below.
-const planReview = { ran: false, passes: 0, raised: 0, applied: [], dropped: [], judged: [] }
 if (!resuming && profile === 'full') {
   phase('Plan-review')
   const rubric = `Work through this fixed rubric. Tag every finding major or minor, and tag it
@@ -1581,7 +1666,7 @@ ${checks.map((c, i) => `     ${i + 1}. ${c}`).join('\n')}
   // Step 2 has no fallback: the plan is critiqued by the real Codex or not at all.
   if (blocked(review)) {
     log('run-task-implement: the Codex plan review could NOT run — stopping. No stand-in reviewer is acceptable here.')
-    return { stopped: 'codex-plan-review-unavailable', planPath, detail: (review && review.note) || '' }
+    return await stop('codex-plan-review-unavailable', { detail: (review && review.note) || '' })
   }
   planReview.ran = true
 
@@ -1822,14 +1907,14 @@ phase('Implement')
 // merge `main` into itself. See the note at the dispatch site for the guards and for issue #90.
 if (!branchP) {
   log(`run-task-implement: no usable feature-branch name — stopping rather than working on ${src.base}`)
-  return { stopped: 'branch-name-missing', base: src.base, planPath }
+  return await stop('branch-name-missing', { base: src.base })
 }
 const br = await branchP
-if (blocked(br) || !br.onBranch) return { stopped: 'branch-failed', planPath }
+if (blocked(br) || !br.onBranch) return await stop('branch-failed')
 const onBranch = String(br.onBranch).trim()
 if (onBranch === src.base) {
   log(`run-task-implement: still on ${src.base} after 2 attempts — stopping. Implementing here would put the whole task on ${src.base} and leave the caller merging ${src.base} into itself.`)
-  return { stopped: 'branch-not-created', base: src.base, wanted: wantBranch, detail: br.note || '', planPath }
+  return await stop('branch-not-created', { base: src.base, wanted: wantBranch, detail: br.note || '' })
 }
 if (onBranch !== wantBranch) log(`run-task-implement: on "${onBranch}", not the requested "${wantBranch}" — continuing (it is a feature branch, not ${src.base}), but the caller merges what the handoff names`)
 
@@ -1837,10 +1922,25 @@ if (onBranch !== wantBranch) log(`run-task-implement: on "${onBranch}", not the 
 // parallel, each owning a disjoint slice. A subagent handed only "build your slice" will happily
 // build the WRONG thing, so every brief carries the plan path, the slice boundary, the criteria,
 // and the house rules.
+// The two bundled implementers are a Spring/JPA persona and a Thymeleaf/HTMX persona, and their
+// slice strings name *.java / *.kt and templates LITERALLY. On a project with no JVM build there
+// is no honest third one, so the routing collapses to a single general-purpose agent that reads
+// the project's own conventions instead of importing somebody else's. This guard is the whole
+// difference between a working run and a false stop: `hasFrontend` is true for any change that
+// touches what the project renders — a terminal UI counts — so without it the Thymeleaf agent is
+// handed "the templates, HTMX wiring, and frontend assets" in a Go repo, reports blockedOn (which
+// is the correct answer), and one blockedOn stops the run even when the other implementer did the
+// whole job. Three phases of one Go project stopped exactly that way with the work already
+// complete on disk. /r:task-review guards its own fixers on the same condition (`domainFixer`).
 const areas = []
-if (src.hasBackend) areas.push({ label: 'backend', agentType: 'r:java-backend-developer', slice: 'the backend code (*.java / *.kt) and its tests' })
-if (src.hasFrontend) areas.push({ label: 'frontend', agentType: 'r:htmx-thymeleaf-dev', slice: 'the templates, HTMX wiring, and frontend assets' })
-if (!areas.length) areas.push({ label: 'general', agentType: 'general-purpose', slice: 'everything the plan calls for' })
+if (src.buildTool === 'none') {
+  if (src.hasBackend || src.hasFrontend) log('run-task-implement: no JVM build tool — routing to ONE general-purpose implementer rather than the Spring/Thymeleaf personas, whatever hasBackend/hasFrontend say')
+  areas.push({ label: 'general', agentType: 'general-purpose', slice: 'everything the plan calls for' })
+} else {
+  if (src.hasBackend) areas.push({ label: 'backend', agentType: 'r:java-backend-developer', slice: 'the backend code (*.java / *.kt) and its tests' })
+  if (src.hasFrontend) areas.push({ label: 'frontend', agentType: 'r:htmx-thymeleaf-dev', slice: 'the templates, HTMX wiring, and frontend assets' })
+  if (!areas.length) areas.push({ label: 'general', agentType: 'general-purpose', slice: 'everything the plan calls for' })
+}
 
 // An implementer's self-check only has to prove its slice COMPILES and that ITS OWN tests pass.
 // Phase 4 runs the certifying build the moment every implementer returns, so a full build here is
@@ -1904,12 +2004,28 @@ const impls = await parallel(areas.map((a) => () =>
   reliable(`implement:${a.label}`, 'Implement', () => agent(
     implBrief(a), { label: `implement:${a.label}`, phase: 'Implement', schema: IMPL, agentType: a.agentType, ...IMPL_RUN }))))
 
+// A blocked slice HALTS the run, and that stays true: half a plan implemented is not a finished
+// task, and the caller has to re-plan rather than build on it. What changes is that the halt no
+// longer throws away the other implementers' work. When the areas split, the ones that finished
+// have left a real diff UNCOMMITTED on the feature branch — a stop reporting only the blockage
+// reads as "nothing happened" over that diff, and the next run then plans against a tree it
+// believes is clean. So the halt carries what landed, and the caller reports both halves.
 const stuck = impls.filter((r) => r && r.blockedOn).map((r) => r.blockedOn)
 if (stuck.length) {
+  const landed = impls.filter((r) => r && !r.blockedOn && r.summary)
+  const landedFiles = landed.flatMap((r) => r.filesChanged || [])
   log(`run-task-implement: an implementer says the plan is wrong or blocked — surfacing instead of working around it`)
-  return { stopped: 'implement-blocked', detail: stuck.join(' | '), branch: onBranch, base: src.base, planPath }
+  if (landed.length) log(`run-task-implement: ${landed.length} of ${areas.length} implementer(s) finished first — their work is UNCOMMITTED on ${onBranch}${landedFiles.length ? ` (${landedFiles.slice(0, 8).join(', ')})` : ''}; the halt reports it rather than discarding it`)
+  return await stop('implement-blocked', {
+    detail: stuck.join(' | '),
+    branch: onBranch,
+    base: src.base,
+    implemented: landed.map((r) => r.summary),
+    filesChanged: landedFiles,
+    testEvidence: landed.flatMap((r) => r.testEvidence || []),
+  })
 }
-if (impls.every((r) => blocked(r))) return { stopped: 'implement-blocked', branch: onBranch, base: src.base, planPath }
+if (impls.every((r) => blocked(r))) return await stop('implement-blocked', { branch: onBranch, base: src.base })
 
 // --- Phase 5: drive the build green -----------------------------------------
 // Bounded: "loop until green" is unbounded, and an unfixable build would grind forever.
@@ -1950,8 +2066,8 @@ if (src.buildTool !== 'none') {
     const inScope = b && b.inScopeFailures && b.inScopeFailures.trim()
     if (!inScope) {
       log('run-task-implement: build RED from PRE-EXISTING failures only — not fixing them, surfacing to the user')
-      return { stopped: 'build-red-preexisting', preExisting: (b && b.preExistingFailures) || (b && b.failures) || 'unknown',
-               branch: onBranch, base: src.base, planPath }
+      return await stop('build-red-preexisting', { preExisting: (b && b.preExistingFailures) || (b && b.failures) || 'unknown',
+                                                   branch: onBranch, base: src.base }, buildGreen)
     }
     if (i < 3) await agent(
       `The build is red from failures THIS change caused. Fix ONLY these, surgically, and do NOT
@@ -1967,7 +2083,7 @@ if (src.buildTool !== 'none') {
   }
   if (!buildGreen) {
     log('run-task-implement: in-scope build still RED after 3 attempts — stopping and surfacing to the user')
-    return { stopped: 'build-red', branch: onBranch, base: src.base, planPath }
+    return await stop('build-red', { branch: onBranch, base: src.base }, buildGreen)
   }
 }
 
@@ -1977,57 +2093,9 @@ if (src.buildTool !== 'none') {
 // inside this script's agents would not be reachable.
 log(`run-task-implement: done — green build on ${onBranch}, diff left uncommitted for review`)
 
-// --- Stats sink: the implement half's row (BEST EFFORT) ----------------------
-// The review's sink records which track found what; this records the OTHER unmeasured thing —
-// how tiers get chosen and whether the plan review earns its slot. `profileEscalated` says how
-// often the description-based guess was wrong, and applied/dropped says whether Codex's plan
-// findings ever survive triage. Same rules as the review sink: it can never fail the run, and its
-// free text is kept to titles — `profileReason` is what makes a tier auditable later, and each
-// judged finding is one line, because the whole payload travels inside this step's prompt.
-const statsRow = {
-  kind: 'implement',
-  source: src.kind,
-  profile,
-  profileForced: !!forcedProfile,
-  profileEscalated,
-  profileReason: (src.profileReason || '').slice(0, 200),
-  explorers: aspects.length || 1,
-  uiTouched,
-  // The two things worth measuring about the new gate, for the same reason profileEscalated is
-  // recorded: uiEscalated says how often the description-based guess was wrong, and designRan says
-  // whether the phase it buys actually produced a document.
-  uiEscalated,
-  // The gap between these two is the measurement the design gate exists for: uiTouched-without-
-  // uiVisualChange is the run that would have spent an Opus agent writing "nothing changes visually".
-  uiVisualChange,
-  designRan: !!designSection,
-  buildGreen,
-  planReviewRan: !!(planReview && planReview.ran),
-  planApplied: (planReview && planReview.applied || []).length,
-  planDropped: (planReview && planReview.dropped || []).length,
-  // One row per finding Codex raised against the plan, with the judges' verdict. The two counts
-  // above say how many landed and how many were thrown out; these say WHICH rubric keeps producing
-  // findings nobody buys, which is the number that decides whether a plan-review pass earns its
-  // slot. `track` is the rubric because that is the only dimension this reviewer varies along.
-  findings: (planReview && planReview.judged || []).map((j) => ({
-    track: j.rubric || 'plan-review',
-    severity: j.severity,
-    verdict: j.verdict,
-    fixed: j.verdict === 'confirmed',
-    description: j.what,
-  })),
-}
-await agent(
-  `Record one line of run statistics. This is bookkeeping — if anything goes wrong, say so and
-   return; do NOT retry and do NOT treat it as a failure of the run. Run exactly this from the
-   repo root, then return the script's stderr line verbatim:
-
-   python3 "${PACK}/lib/record-run.py" <<'RTI_STATS_JSON'
-${JSON.stringify(statsRow)}
-RTI_STATS_JSON
-
-   The script always exits 0 by design; its stderr says whether the row was recorded.`,
-  { label: 'stats', phase: 'Build', ...GP, ...SINK })
+// The run's own row — the same recorder every stop above uses, so a completed run and a halt are
+// recorded the same way and can be compared in the store.
+await recordRun({ buildGreen })
 
 return {
   branch: onBranch,

@@ -134,9 +134,11 @@ A `stopped` result is a real halt, not a hint to carry on by hand. **Never re-ru
 | `planner-blocked` / `plan-not-written` | the planner returned nothing after 3 attempts, or the plan file is genuinely missing/truncated on disk | Report it. `plan-not-written` means the file was *checked* and is bad — a scribe that merely self-reports failure over an intact file does not stop the run. |
 | `codex-plan-review-unavailable` | the **real** Codex couldn't review the plan | Stop. There is no fallback reviewer and no stand-in model is acceptable — say the plan review can't run. |
 | `branch-failed` / `branch-not-created` / `branch-name-missing` | the run could not get off the base branch (the checkout never happened, or Phase 0 produced no usable branch name) | Report it. **Never continue on base** — the whole point of the halt is that the diff would land on `main` and the finish step would try to merge `main` into itself. |
-| `implement-blocked` | an implementer reports the plan is wrong or blocked | Surface *its* reason. Don't work around it. |
+| `implement-blocked` | an implementer reports the plan is wrong or blocked | Surface *its* reason. Don't work around it. When the work split by area, read `implemented` / `filesChanged`: the implementers that finished first left a **real uncommitted diff on the branch**, so report both halves — a halt described as "nothing happened" sends the next run planning against a tree it thinks is clean. |
 | `build-red-preexisting` | red build from failures that already fail on base | Surface them. Never fix or weaken an out-of-scope test to force green. |
 | `build-red` | the in-scope build is still red after 3 bounded attempts | Surface the remaining failures. |
+
+Every stop from the planner onwards carries `planReview` alongside `stopped`, and records its own stats row tagged with the reason — the plan review runs before the branch, the implementers and the build, so a run that died in any of those was still reviewed. Read the block rather than its absence: on a stop the stats sink never runs, so the handoff is the only place those verdicts survive, and reporting "this phase got no plan review" because the field looked missing is the mistake this exists to prevent.
 
 ## Step 5 — Post-task-review (mandatory, runs to completion)
 
