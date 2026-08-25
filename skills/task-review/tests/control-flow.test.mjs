@@ -1899,11 +1899,38 @@ test('REGRESSION: a web run is bit-for-bit what it was before the surfaces exist
     assert.match(prompts[l], new RegExp(`AGENT_BROWSER_SESSION=ptr-${l === 'ui-functional' ? 'func' : 'visual'}`))
   }
   // The negative half is what catches a prompt builder that leaks the terminal block into the
-  // web branch — a positive-only check would pass on a prompt carrying both.
-  for (const l of ['ui-deploy', 'ui-functional', 'ui-visual', 'ui-teardown']) {
+  // web branch — a positive-only check would pass on a prompt carrying both. `ui-deploy` is NOT
+  // in this list and must not be added: it is dispatched BEFORE anyone knows the surface, because
+  // it is the step that reads the marker, so its brief carries every branch by design. The three
+  // that ARE listed are selected in JS after the deploy answers, and there a leak is a real bug.
+  for (const l of ['ui-functional', 'ui-visual', 'ui-teardown']) {
     assert.doesNotMatch(prompts[l], /tui-session/, `${l} leaked the terminal driver`)
     assert.doesNotMatch(prompts[l], /TEST_APP_SESSION/, `${l} leaked the session handle`)
   }
+})
+
+test('the deploy brief carries the TERMINAL procedure, not just the web one', async () => {
+  // The hole every other terminal test above is blind to: they all stub `ui-deploy`'s RETURN, so a
+  // brief that told the agent how to bring up a browser stack and nothing else still passed them
+  // all — while the real agent, handed `surface=tui` and no procedure for it, could only answer
+  // ok=false. That reads downstream as a blocked track, on every run, forever. Assert the brief
+  // itself. It is ONE static string dispatched before the surface is known, so both readings of
+  // the same prompt are correct.
+  const { prompts } = await run({
+    triage: tuiTriage(), overrides: { 'ui-deploy': TUI_DEPLOY, ...TUI_HALVES } })
+  const p = prompts['ui-deploy']
+  assert.match(p, /TERMINAL surface \(tui \/ cli\)/)
+  assert.match(p, /tui-session\.sh"/, 'the deploy must name the real driver')
+  assert.match(p, /BUILD FIRST/, 'an unbuilt binary is silently the previous commit')
+  assert.match(p, /TUI_SESSION_SUFFIX=func/)
+  assert.match(p, /TUI_SESSION_SUFFIX=visual/)
+  assert.match(p, /handle="<F> <V>"/, 'both handles, space-separated — the halves split on it')
+  assert.match(p, /surface=cli/, 'a cli deploy returns the binary path and starts nothing')
+  // 127 is the one exit code that must never read as a skip here: the project DECLARED a terminal.
+  assert.match(p, /127 tmux is missing/)
+  assert.match(p, /BLOCKED track here/)
+  // And the web half is still there, in the same string.
+  assert.match(p, /"\$WTD" deploy/)
 })
 
 test('the run records WHICH surface it verified, and the tracks do not borrow browser numbers', async () => {

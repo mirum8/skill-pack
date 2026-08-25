@@ -1827,9 +1827,42 @@ const uiTrack = async () => {
        3. Run the health check against the resolved URL. Return ok=true with that url ONLY if the
           app actually answers. Otherwise return ok=false and a one-line reason — never report a
           deploy you did not observe come up.
-       If you are in a linked git worktree and the helper is missing or not executable, return
-       ok=false with that reason: deploying on the project's default port from a worktree would
-       collide with the main stack, which is the whole failure this helper exists to prevent.`,
+       On the WEB path only: if you are in a linked git worktree and the helper is missing or not
+       executable, return ok=false with that reason — deploying on the project's default port from
+       a worktree would collide with the main stack, which is the whole failure this helper exists
+       to prevent.
+       ===== TERMINAL surface (tui / cli) — these steps REPLACE 1-3, they do not follow them. =====
+       There is no compose file, no port and no URL here, and worktree-deploy.sh is NOT involved at
+       all: do not call it, do not pre-warm, do not go looking for docker. Two worktrees running a
+       terminal app cannot collide over a port, and the state directory they COULD collide over is
+       already derived from the checkout root by the driver — so there is nothing to require here
+       and nothing to refuse.
+       T1. Read \`.claude/skills/test-app/SKILL.md\` and its \`references/subagent-prompt.md\` for the
+          BUILD command, the LAUNCH command, the path of the built binary, and — on 'tui' — the
+          ready marker its first frame prints.
+       T2. BUILD FIRST. If the build fails, return ok=false with the build output in \`reason\` and
+          start nothing: an unbuilt binary is silently the PREVIOUS commit, and every check
+          downstream would then pass against code this review never saw.
+       T3a. 'cli' — that is the whole deploy. Return ok=true, surface=cli, and the ABSOLUTE path of
+          the built binary in \`handle\`. Nothing is running, so there is nothing to health-check.
+       T3b. 'tui' — start TWO sessions through the driver, one per half, and confirm BOTH are
+          drawing before you return. Never bare tmux, and never one shared session: the functional
+          half's keystrokes and the visual half's captures would land on the same stateful frame.
+            TUI="${PACK}/skills/test-app-create/scripts/tui-session.sh"
+            F=$(TUI_SESSION_SUFFIX=func   "$TUI" start --ttl 3600 -- <the launch command>)
+            V=$(TUI_SESSION_SUFFIX=visual "$TUI" start --ttl 3600 -- <the launch command>)
+            TUI_SESSION_SUFFIX=func   "$TUI" wait-for "$F" '<the ready marker>' --timeout 60
+            TUI_SESSION_SUFFIX=visual "$TUI" wait-for "$V" '<the ready marker>' --timeout 60
+          Each \`start\` prints exactly ONE line: the handle it created. Use those two strings
+          verbatim. Return ok=true, surface=tui, handle="<F> <V>" — both handles, space-separated,
+          functional first.
+       T4. A session that never draws is ok=false with the driver's exit code in \`reason\`, never a
+          deploy you did not observe come up: 127 tmux is missing, 3 the app already exited, 5 the
+          capture is EMPTY, 6 a wait-for hit its deadline. This project's /test-app DECLARED a
+          terminal, so a terminal is the instrument its verification needs — an absent tmux is a
+          BLOCKED track here, exactly as an absent docker is on the web path, and never a skip.
+       On a terminal surface, report the handle in \`handle\` and leave \`url\` empty — a session name
+       or a binary path in a field called url becomes a verifier curling a tmux handle.`,
       { label: 'ui-deploy', phase: 'UI', schema: DEPLOY, ...GP, ...DEPLOY_RUN }))
 
     // The deploy's OWN read wins over triage's, for the same reason `missing` exists: triage is a
