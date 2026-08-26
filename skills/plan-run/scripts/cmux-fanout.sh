@@ -29,8 +29,9 @@
 #         [--marker-file F] [--marker-prefix S] [--orchestrator NAME]
 #                          worktree add --detach, then a cmux workspace running
 #                          `claude --permission-mode auto '<prompt>'`. Refuses a
-#                          fourth live unit: MAX_UNITS is enforced here, where a
-#                          caller cannot forget it.
+#                          unit past the cap: MAX_UNITS comes from the config
+#                          (`steps.fanout.maxUnits`) and is enforced here, where
+#                          a caller cannot forget it.
 #   wait [--id U]... [--timeout S]
 #                          block until every live unit has a sentinel, then read
 #                          it AND verify the marker. A timeout is a stop naming
@@ -55,10 +56,22 @@
 #
 set -euo pipefail
 
-# Three full implement+review pipelines is already the machine's limit: implement
-# alone measures 20.9M tokens and ~1022s per agent. A wave that quietly spawned
-# eight would thrash rather than finish sooner.
-MAX_UNITS=3
+# The cap comes from `steps.fanout.maxUnits` in the config, resolved here rather
+# than by either caller so a skill cannot forget it and there is one place to
+# change it. The default it resolves to is 3: three full implement+review
+# pipelines is already the machine's limit — implement alone measures 20.9M
+# tokens and ~1022s per agent — and a wider wave thrashes rather than finishing
+# sooner. Its stderr is NOT swallowed: the reader prints every substitution it
+# made there, and a cap that quietly became something other than what the config
+# says is exactly what this fan-out must not do. The fallback below catches only
+# a pack with no lib/ beside it at all — an empty cap would make `-ge` succeed on
+# every spawn, which is no cap.
+PACK_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." 2>/dev/null && pwd || echo "")
+MAX_UNITS=$(python3 "$PACK_ROOT/lib/read-config.py" --step fanout --field maxUnits \
+              --pack "$PACK_ROOT") || MAX_UNITS=""
+case $MAX_UNITS in
+  ''|*[!0-9]*) MAX_UNITS=3 ;;
+esac
 
 say()  { echo "cmux-fanout: $*" >&2; }
 die()  { say "$*"; exit "${2:-2}"; }

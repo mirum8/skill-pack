@@ -230,7 +230,7 @@ Two groups are held out of any shared wave regardless of what their files say:
 - **A `deep` group always runs alone**, serially, in the primary tree. `touches` is a verifier's *estimate* of where a fix would land, not an edge in a graph somebody drew — and a `deep` change's blast radius is by definition wider than the file list anyone predicted for it. This is the margin `/r:plan-run` doesn't need, because there the file list is a written `Files:` line the plan checker already validated against its neighbours. Here it is a guess, so the guess gets a margin. Do not trim this as over-caution: it is the difference between a wave that is safe and one that merely looks it.
 - **A group holding any member with `confidence: "low"`** for the same reason — a verifier unsure whether the item is even real is not a verifier whose file list should be load-bearing.
 
-Then cap it: **at most three groups run at once**, and a wider wave keeps three live while the rest queue. The cap lives in the fan-out script, not here, so there is one place to change it.
+Then cap it: **at most three groups run at once** by default, and a wider wave keeps that many live while the rest queue. The cap is `steps.fanout.maxUnits` in the config, resolved by the fan-out script rather than restated here, so there is one place to change it and this skill cannot drift from `/r:plan-run`.
 
 Carry the partition into the gate as a `wave` on each group. A wave of one is the honest common answer and runs inline exactly as the serial loop does — say so plainly rather than dressing a single group up as a fan-out.
 

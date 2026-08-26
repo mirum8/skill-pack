@@ -26,7 +26,8 @@
 # There is no CI, so this suite is the only thing standing between an edit and any of that.
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../../.."
-FAN="$PWD/skills/plan-run/scripts/cmux-fanout.sh"
+PACK=$PWD          # the pack root; $REPO below is a throwaway git repo, not this one
+FAN="$PACK/skills/plan-run/scripts/cmux-fanout.sh"
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 pass=0; fail=0
 
@@ -181,14 +182,21 @@ out=$(CMUX_STUB_CREATE_SILENT=1 "$FAN" spawn --id px --dir "$TMP/wt-px" --base m
 
 echo
 echo "== the cap is enforced where a caller cannot forget it =="
+# The cap is a SETTING now (`steps.fanout.maxUnits`), so the spawn counts below are only meaningful
+# if this checkout resolves the shipped 3. Say so rather than failing four cases with an off-by-one
+# that reads like a broken script.
+CAP=$(cd "$PACK" && python3 lib/read-config.py --step fanout --field maxUnits 2>/dev/null)
+[[ $CAP == 3 ]] && ok "this checkout resolves the shipped cap of 3" \
+                || bad "this checkout resolves the shipped cap of 3" \
+                       "resolved '$CAP' — a .config/skill-pack.yaml in this repo would do that, and the counts below assume 3"
 "$FAN" spawn --id p2 --dir "$TMP/wt-p2" --base main --prompt x \
        --marker-file todo.md --marker-prefix 'built: ' >/dev/null 2>&1
 "$FAN" spawn --id p3 --dir "$TMP/wt-p3" --base main --prompt x \
        --marker-file todo.md --marker-prefix 'built: ' >/dev/null 2>&1
 out=$("$FAN" spawn --id p4 --dir "$TMP/wt-p4" --base main --prompt x 2>&1); rc=$?
 [[ $rc != 0 ]] && ok "a fourth live unit is refused" || bad "a fourth live unit is refused" "exit 0"
-grep -q "the cap is 3" <<<"$out" && ok "and the message names the cap" \
-                                 || bad "and the message names the cap" "$out"
+grep -q "the cap is $CAP" <<<"$out" && ok "and the message names the cap" \
+                                    || bad "and the message names the cap" "$out"
 [[ ! -d "$TMP/wt-p4" ]] && ok "and no worktree is left behind by the refusal" \
                         || bad "and no worktree is left behind by the refusal" "$TMP/wt-p4 exists"
 
@@ -284,6 +292,29 @@ out=$("$FAN" wait --id nosuch --timeout 2 2>&1); rc=$?
 out=$("$FAN" cleanup --id nosuch 2>&1); rc=$?
 [[ $rc != 0 ]] && ok "cleaning up a unit that was never spawned exits non-zero" \
                || bad "cleaning up a unit that was never spawned exits non-zero" "exit 0"
+
+echo
+echo "== the cap comes from the config, and a bad one never becomes no cap =="
+# The script compares with `-ge`, so an empty cap would let every spawn through and cap nothing.
+# That is the failure this block exists for — a cap that reads as "unlimited" looks like a working
+# fan-out right up until the machine thrashes.
+CAPREPO="$TMP/caprepo"; mkdir -p "$CAPREPO/.config"
+git -C "$CAPREPO" init -q 2>/dev/null
+capof() { (cd "$CAPREPO" && "$FAN" status 2>/dev/null | sed -n 's|.*/\([0-9]*\) slots in use|\1|p'); }
+printf 'steps:\n  fanout:\n    maxUnits: 5\n' > "$CAPREPO/.config/skill-pack.yaml"
+[[ $(capof) == 5 ]] && ok "a project config raises the cap" \
+                    || bad "a project config raises the cap" "got '$(capof)'"
+printf 'steps:\n  fanout:\n    maxUnits: 1\n' > "$CAPREPO/.config/skill-pack.yaml"
+[[ $(capof) == 1 ]] && ok "and can lower it to a serial wave" \
+                    || bad "and can lower it to a serial wave" "got '$(capof)'"
+for junk in '' 'many' '0' '-2' '400'; do
+  printf 'steps:\n  fanout:\n    maxUnits: %s\n' "$junk" > "$CAPREPO/.config/skill-pack.yaml"
+  [[ $(capof) == 3 ]] && ok "a cap of '${junk:-<empty>}' falls back to the shipped 3" \
+                      || bad "a cap of '${junk:-<empty>}' falls back to the shipped 3" "got '$(capof)'"
+done
+rm -f "$CAPREPO/.config/skill-pack.yaml"
+[[ $(capof) == 3 ]] && ok "and no project file at all resolves the shipped cap" \
+                    || bad "and no project file at all resolves the shipped cap" "got '$(capof)'"
 
 cd "$REPO" && git worktree remove --force "$TMP/wt-p6" >/dev/null 2>&1
 cd "$REPO" && git worktree remove --force "$TMP/wt-p1" >/dev/null 2>&1

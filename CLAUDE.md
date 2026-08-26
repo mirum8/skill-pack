@@ -144,8 +144,11 @@ never exits and yields no status, so completion is *reported* rather than observ
 terminal to decide whether an agent finished is exactly the confident-wrong-answer shape, so a unit
 is done only when its own sentinel **and** the marker on its branch agree — neither alone, because a
 sentinel can be written by a run that then failed to commit, and a missing marker can just mean the
-unit is still working. The `MAX_UNITS=3` cap lives there rather than in either SKILL.md, so a caller
-cannot forget it and there is one place to change it.
+unit is still working. The cap is `steps.fanout.maxUnits` in the config, resolved by the script
+rather than by either SKILL.md, so a caller cannot forget it and there is one place to change it —
+one setting, not one per skill, since both drive the same script. It defaults to 3, and the script
+refuses to run uncapped: an empty or non-numeric value falls back to 3 and is named, because the
+comparison is `-ge` and a blank cap would let every spawn through.
 
 **Every workflow edit needs its control-flow test.** `tests/control-flow.test.mjs` executes the
 script with `agent()`/`parallel()`/`phase()`/`log()` stubbed and asserts the branches — what stops

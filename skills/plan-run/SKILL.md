@@ -518,10 +518,13 @@ usual semantics: the branch stays unmerged, nothing is ticked past it, and the r
 and the `--from N` that resumes. Later waves depend on this one by construction, so carrying on would
 build real code on a premise that isn't true.
 
-**Three at a time, and the cap lives in the script** (`MAX_UNITS`), so there is one place to change
-it rather than a number repeated in two skills. Three full implement+review pipelines is already the
-machine's limit — `implement` alone measures 20.9M tokens and 1022s per agent — and a wave that
-quietly spawned eight would thrash rather than finish sooner.
+**Three at a time by default, and the cap lives in the config** — `steps.fanout.maxUnits`, resolved
+by the script itself, so there is one place to change it rather than a number repeated in two
+skills. Three full implement+review pipelines is already the machine's limit — `implement` alone
+measures 20.9M tokens and 1022s per agent — and a wave that spawned eight would thrash rather than
+finish sooner, so raise it as a measurement rather than a guess. A project that wants a different
+width writes it in its own `.config/skill-pack.yaml`; the script names anything it had to
+substitute and never runs uncapped.
 
 ### The alarm channel
 

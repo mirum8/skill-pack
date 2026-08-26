@@ -186,7 +186,13 @@ steps:
     provider: claude      # claude | codex
     model: opus           # codex: passed to the CLI; claude: fable|opus|sonnet|haiku
     effort: high          # low | medium | high | xhigh | max
+  fanout:
+    maxUnits: 3           # 1..16 — units /r:plan-run and /r:issues-fix keep live under --cmux
 ```
+
+`fanout.maxUnits` is one setting for both skills, because both drive the same fan-out script.
+Three full implement+review pipelines is already the machine's limit, so raise it as a measurement
+rather than a guess; a value the reader rejects falls back to 3 and the run never goes uncapped.
 
 `model` and `effort` belong to the **selected provider** — under `claude` they are the subagent's
 own model and reasoning effort, under `codex` they become `--model` and `--effort` on the CLI call.

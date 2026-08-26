@@ -18,3 +18,10 @@ steps:
     provider: codex       # claude | codex
     model: gpt5.6-sol     # codex: passed through to the CLI; claude: fable|opus|sonnet|haiku
     effort: low           # low | medium | high | xhigh | max
+
+  # How many units /r:plan-run and /r:issues-fix keep live at once under --cmux. One setting, not
+  # one per skill: both drive the same fan-out script. Three full implement+review pipelines is
+  # already the machine's limit — implement alone measures 20.9M tokens and ~1022s per agent — so
+  # a wider wave thrashes rather than finishing sooner. Raise it as a measurement, not a guess.
+  fanout:
+    maxUnits: 3           # 1..16

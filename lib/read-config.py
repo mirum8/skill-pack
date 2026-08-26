@@ -6,7 +6,7 @@ key, and anything neither file answers falls back to values built in here:
 
   1. <repo>/.config/skill-pack.yaml    the user's edit point, outside the install target
   2. <pack>/.config/defaults.yaml      shipped; ./install.sh rewrites it on every run
-  3. the FALLBACK table below          claude / opus / medium
+  3. the SPEC table below              every setting the pack reads, and its built-in value
 
 It lives in lib/ rather than inside one skill's scripts/ for the same reason record-run.py does:
 every skill will eventually read settings, and a reader owned by one skill stays that skill's
@@ -28,7 +28,8 @@ optionally quoted strings. No PyYAML dependency and one code path, so the behavi
 the behaviour in the field. Lists, multi-line scalars, anchors and flow style are not read; a line
 the parser cannot place becomes a note rather than a silent drop.
 
-Usage:  read-config.py [--step implement] [--repo DIR] [--pack DIR]
+Usage:  read-config.py [--step implement|fanout] [--repo DIR] [--pack DIR]
+        read-config.py --step fanout --field maxUnits     # one bare scalar, for shell callers
         read-config.py --check FILE
 """
 import argparse
@@ -39,18 +40,33 @@ import sys
 
 PACK_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# The last resort, and also where `provider: codex` lands when Codex is not installed. Kept in
-# step with IMPL_RUN in skills/task-run/task-run-implement.workflow.js, which is the same values
-# expressed for the case where this script could not be reached at all.
-FALLBACK = {"implement": {"provider": "claude", "model": "opus", "effort": "medium"}}
-
 PROVIDERS = ("claude", "codex")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 # Only meaningful for the claude provider. A codex model name is validated by the Codex CLI, not
 # here — pinning its model list in this file would go stale the week it changes.
 CLAUDE_MODELS = ("fable", "opus", "sonnet", "haiku")
 
-KEYS = ("provider", "model", "effort")
+# Every setting the pack reads, with what it falls back to. This table IS the vocabulary: a key
+# outside it is named and ignored rather than carried, so a typo cannot reach a caller looking like
+# a value. `implement`'s row is kept in step with IMPL_RUN in task-run-implement.workflow.js and
+# `fanout`'s with MAX_UNITS in plan-run/scripts/cmux-fanout.sh — those are the same values
+# expressed for the case where this script cannot be reached at all.
+SPEC = {
+    "implement": {
+        "provider": {"default": "claude", "enum": PROVIDERS},
+        # Validated against the Claude models only when the provider is claude; see resolve().
+        "model": {"default": "opus"},
+        "effort": {"default": "medium", "enum": EFFORTS},
+    },
+    # Shared by /r:plan-run and /r:issues-fix, which drive one fan-out script between them — so the
+    # cap is one setting, not one per skill. The range rejects 0, negatives and a slipped digit; it
+    # is NOT a recommendation. Three full implement+review pipelines is already the machine's limit
+    # (implement alone measures 20.9M tokens and ~1022s per agent), and a wave that spawns more
+    # thrashes rather than finishing sooner. Raising it is a measurement, not a default.
+    "fanout": {
+        "maxUnits": {"default": "3", "int": (1, 16)},
+    },
+}
 
 # The two paths check-prereqs.sh already looks in. The plugin is not a binary on PATH — it is a
 # Claude Code plugin, installed either from the marketplace or unpacked into the version cache.
@@ -139,9 +155,10 @@ def flatten(tree, step, path, notes):
     if not isinstance(block, dict):
         notes.append(f"{path}: `steps.{step}` must be a mapping — ignoring it")
         return {}
+    keys = SPEC.get(step, {})
     out = {}
     for k, v in block.items():
-        if k not in KEYS:
+        if k not in keys:
             notes.append(f"{path}: `steps.{step}.{k}` is not a setting this pack reads — ignoring it")
         elif not isinstance(v, str):
             notes.append(f"{path}: `steps.{step}.{k}` must be a scalar — ignoring it")
@@ -152,8 +169,13 @@ def flatten(tree, step, path, notes):
 
 # ------------------------------------------------------------- the resolution ---
 def resolve(step="implement", repo=None, pack=None, home=None):
+    if step not in SPEC:
+        return {"step": step, "sources": [],
+                "notes": [f"{step!r} is not a step this pack has settings for — "
+                          f"known steps are {', '.join(sorted(SPEC))}"]}
+    spec = SPEC[step]
     notes, sources = [], []
-    fallback = dict(FALLBACK.get(step, FALLBACK["implement"]))
+    fallback = {k: v["default"] for k, v in spec.items()}
 
     layers = []
     for path in (os.path.join(pack or PACK_ROOT, ".config/defaults.yaml"),
@@ -175,12 +197,22 @@ def resolve(step="implement", repo=None, pack=None, home=None):
         notes.append(f"{origin.get(key, 'built-in')}: `steps.{step}.{key}` {why} — using {fallback[key]!r}")
         values[key] = fallback[key]
 
-    if values["provider"] not in PROVIDERS:
-        bad("provider", f"{values['provider']!r} is not one of {'|'.join(PROVIDERS)}")
-    if values["effort"] not in EFFORTS:
-        bad("effort", f"{values['effort']!r} is not one of {'|'.join(EFFORTS)}")
+    for key, rule in spec.items():
+        if "enum" in rule and values[key] not in rule["enum"]:
+            bad(key, f"{values[key]!r} is not one of {'|'.join(rule['enum'])}")
+        elif "int" in rule:
+            lo, hi = rule["int"]
+            try:
+                n = int(str(values[key]).strip())
+            except ValueError:
+                bad(key, f"{values[key]!r} is not a whole number")
+                continue
+            if not lo <= n <= hi:
+                bad(key, f"{n} is outside {lo}..{hi}")
+            else:
+                values[key] = str(n)
 
-    if values["provider"] == "codex" and not codex_present(home):
+    if spec.get("provider") and values["provider"] == "codex" and not codex_present(home):
         # Every field moves together. Handing a Claude subagent a codex model name breaks the
         # dispatch outright, and carrying the codex effort across would re-tier the Claude path
         # by accident — so the fallback is the whole built-in row, and it says so.
@@ -189,29 +221,40 @@ def resolve(step="implement", repo=None, pack=None, home=None):
             f"provider {fallback['provider']!r}, model {fallback['model']!r}, effort {fallback['effort']!r}. "
             "Install it with: /plugin marketplace add openai-codex, then /plugin install codex@openai-codex")
         values = dict(fallback)
-    elif values["provider"] == "claude" and values["model"] not in CLAUDE_MODELS:
+    elif spec.get("provider") and values["provider"] == "claude" and values["model"] not in CLAUDE_MODELS:
         bad("model", f"{values['model']!r} is not one of {'|'.join(CLAUDE_MODELS)}")
 
-    return {"step": step, **{k: values[k] for k in KEYS}, "sources": sources, "notes": notes}
+    return {"step": step, **values, "sources": sources, "notes": notes}
 
 
 def check(path):
-    """Parse one file strictly. The only mode that can fail — validate.py's gate."""
+    """Parse one file strictly, EVERY step of it. The only mode that can fail — validate.py's gate.
+
+    Every step in SPEC is walked rather than just `implement`: a defaults file whose unchecked half
+    the reader would reject falls through to the built-in row on every run, which reads from the
+    outside exactly like a setting that works.
+    """
     if not os.path.isfile(path):
         print(f"{path}: no such file", file=sys.stderr)
         return 1
     with open(path, encoding="utf-8") as fh:
         tree, problems = parse(fh.read())
-    notes = []
-    values = flatten(tree, "implement", path, notes)
-    for k, v in values.items():
-        if k == "provider" and v not in PROVIDERS:
-            problems.append(f"provider {v!r} is not one of {'|'.join(PROVIDERS)}")
-        if k == "effort" and v not in EFFORTS:
-            problems.append(f"effort {v!r} is not one of {'|'.join(EFFORTS)}")
-        if k == "model" and values.get("provider") == "claude" and v not in CLAUDE_MODELS:
-            problems.append(f"model {v!r} is not one of {'|'.join(CLAUDE_MODELS)}")
-    problems += notes
+    for step, spec in SPEC.items():
+        notes = []
+        values = flatten(tree, step, path, notes)
+        for k, v in values.items():
+            rule = spec[k]
+            if "enum" in rule and v not in rule["enum"]:
+                problems.append(f"steps.{step}.{k} {v!r} is not one of {'|'.join(rule['enum'])}")
+            elif "int" in rule:
+                lo, hi = rule["int"]
+                if not (v.strip().lstrip("-").isdigit() and lo <= int(v) <= hi):
+                    problems.append(f"steps.{step}.{k} {v!r} is not a whole number in {lo}..{hi}")
+            elif k == "model" and values.get("provider", spec["provider"]["default"]) == "claude" \
+                    and v not in CLAUDE_MODELS:
+                problems.append(f"steps.{step}.model {v!r} is not one of {'|'.join(CLAUDE_MODELS)}")
+        # `flatten` reports unknown TOP-LEVEL keys once per step it is called for; keep one copy.
+        problems += [n for n in notes if n not in problems]
     for p in problems:
         print(f"{path}: {p}", file=sys.stderr)
     return 1 if problems else 0
@@ -223,6 +266,10 @@ def main():
     ap.add_argument("--repo", default=None, help="project root holding .config/skill-pack.yaml")
     ap.add_argument("--pack", default=None, help="pack root holding .config/defaults.yaml")
     ap.add_argument("--check", metavar="FILE", default=None, help="validate one file; exits non-zero")
+    # For shell callers, which want one scalar rather than a JSON document they would have to
+    # parse with a tool the script cannot assume is installed. Notes still go to stderr, so a
+    # substitution is visible in the caller's log rather than swallowed by the narrower output.
+    ap.add_argument("--field", default=None, help="print one resolved value on stdout, bare")
     args = ap.parse_args()
 
     if args.check:
@@ -230,8 +277,18 @@ def main():
     try:
         out = resolve(args.step, args.repo, args.pack)
     except Exception as exc:  # never fail the caller — an unreadable setting is not a failed run
-        out = {"step": args.step, **FALLBACK["implement"], "sources": [],
+        out = {"step": args.step, **{k: v["default"] for k, v in SPEC.get(args.step, {}).items()},
+               "sources": [],
                "notes": [f"the config reader itself failed ({exc}) — using the built-in defaults"]}
+
+    if args.field:
+        for n in out.get("notes", []):
+            print(f"read-config: {n}", file=sys.stderr)
+        if args.field not in out:
+            print(f"read-config: no such setting: steps.{args.step}.{args.field}", file=sys.stderr)
+            sys.exit(0)
+        print(out[args.field])
+        sys.exit(0)
     print(json.dumps(out))
     sys.exit(0)
 

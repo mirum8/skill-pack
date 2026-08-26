@@ -56,6 +56,13 @@ PY
 }
 mkcfg() { mkdir -p "$(dirname "$1")"; cat > "$1"; }
 
+# The bare-scalar mode shell callers use — cmux-fanout.sh resolves its cap through it, and a JSON
+# document would need a parser the script cannot assume is installed.
+field() {  # <home> <pack> <repo> <step> <field>
+  HOME="$1" python3 "$READER" --pack "$2" --repo "$3" --step "$4" --field "$5" 2>/dev/null
+}
+field_err() { HOME="$1" python3 "$READER" --pack "$2" --repo "$3" --step "$4" --field "$5" 2>&1 >/dev/null; }
+
 # --- no files at all --------------------------------------------------------
 EMPTY="$TMP/empty"; mkdir -p "$EMPTY"
 ok "no config anywhere: provider"   "$(read_cfg "$NOCODEX" "$EMPTY" "$EMPTY" provider)" claude
@@ -191,6 +198,46 @@ YAML
 ok  "a codex model under claude falls back" "$(read_cfg "$NOCODEX" "$PACK" "$BADMODEL" model)" opus
 has "and is named"                          "$(read_cfg "$NOCODEX" "$PACK" "$BADMODEL" notes)" "steps.implement.model"
 
+# --- the fan-out cap --------------------------------------------------------
+# Shared by /r:plan-run and /r:issues-fix through one script, which reads it with --field because
+# it is bash and cannot assume a JSON parser. An empty or non-numeric cap is the dangerous shape:
+# the script compares with `-ge`, so a blank would let every spawn through and cap nothing.
+FANOUT="$TMP/fanout"
+mkcfg "$FANOUT/.config/skill-pack.yaml" <<'YAML'
+steps:
+  fanout:
+    maxUnits: 5
+YAML
+ok "the fan-out cap is read"        "$(field "$NOCODEX" "$PACK" "$FANOUT" fanout maxUnits)" 5
+ok "and defaults without a file"    "$(field "$NOCODEX" "$EMPTY" "$EMPTY" fanout maxUnits)" 3
+BADUNITS="$TMP/badunits"
+mkcfg "$BADUNITS/.config/skill-pack.yaml" <<'YAML'
+steps:
+  fanout:
+    maxUnits: many
+YAML
+ok  "a non-numeric cap falls back"  "$(field "$NOCODEX" "$PACK" "$BADUNITS" fanout maxUnits)" 3
+has "and is named on stderr"        "$(field_err "$NOCODEX" "$PACK" "$BADUNITS" fanout maxUnits)" "steps.fanout.maxUnits"
+for bad in 0 -1 17; do
+  mkcfg "$BADUNITS/.config/skill-pack.yaml" <<YAML
+steps:
+  fanout:
+    maxUnits: $bad
+YAML
+  ok "a cap of $bad is out of range"  "$(field "$NOCODEX" "$PACK" "$BADUNITS" fanout maxUnits)" 3
+done
+mkcfg "$BADUNITS/.config/skill-pack.yaml" <<'YAML'
+steps:
+  fanout:
+    maxUnits: 1
+YAML
+ok "a cap of 1 is legal — serial by config" "$(field "$NOCODEX" "$PACK" "$BADUNITS" fanout maxUnits)" 1
+# The steps are independent: naming one must not disturb the other.
+ok "naming fanout leaves implement alone"   "$(read_cfg "$NOCODEX" "$PACK" "$FANOUT" model)" sonnet
+ok "an unknown step is named, not guessed"  "$(field "$NOCODEX" "$PACK" "$FANOUT" nosuchstep maxUnits)" ""
+has "and says which steps exist"            "$(field_err "$NOCODEX" "$PACK" "$FANOUT" nosuchstep maxUnits)" "known steps are"
+has "an unknown field is named"             "$(field_err "$NOCODEX" "$PACK" "$FANOUT" fanout nosuchfield)" "no such setting"
+
 # --- the exit-0 promise -----------------------------------------------------
 for dir in "$EMPTY" "$BROKEN" "$BADENUM" "$UNKNOWN" "$CODEX"; do
   HOME="$NOCODEX" python3 "$READER" --pack "$PACK" --repo "$dir" >/dev/null 2>&1
@@ -206,6 +253,18 @@ python3 "$READER" --check "$BROKEN/.config/skill-pack.yaml" >/dev/null 2>&1
 ok "--check rejects a malformed file" "$?" 1
 python3 "$READER" --check "$BADENUM/.config/skill-pack.yaml" >/dev/null 2>&1
 ok "--check rejects a bad enum" "$?" 1
+# --check walks EVERY step, not just implement: a defaults file whose unchecked half the reader
+# would reject falls through to the built-in row on every run, and from the outside that reads
+# exactly like a setting that works.
+mkcfg "$TMP/badfanout/.config/defaults.yaml" <<'YAML'
+steps:
+  implement:
+    provider: claude
+  fanout:
+    maxUnits: 40
+YAML
+python3 "$READER" --check "$TMP/badfanout/.config/defaults.yaml" >/dev/null 2>&1
+ok "--check rejects a bad cap in a step it is not asked about" "$?" 1
 python3 "$READER" --check "$TMP/no-such-file.yaml" >/dev/null 2>&1
 ok "--check rejects a missing file" "$?" 1
 # The gate that matters: the file this pack actually ships.
