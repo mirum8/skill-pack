@@ -34,6 +34,7 @@ const PLAN_TEXT = '## Context\nfix it\n## Coverage contract\ncriterion -> test'
 // The row lib/read-config.py resolves from the SHIPPED .config/defaults.yaml. Kept in step with
 // that file: the point of these assertions is what a run with no project config actually does.
 const DEFAULT_CONFIG = { provider: 'codex', model: 'gpt5.6-sol', effort: 'low',
+                         wrapperModel: 'sonnet', wrapperEffort: 'medium',
                          sources: ['/pack/.config/defaults.yaml'], notes: [] }
 const CLAUDE_CONFIG = { provider: 'claude', model: 'sonnet', effort: 'high',
                         sources: ['/repo/.config/skill-pack.yaml'], notes: [] }
@@ -504,8 +505,9 @@ test('the codex provider drives the CLI and keeps the slices, not the personas',
   })
   for (const l of ['implement:backend', 'implement:frontend']) {
     assert.equal(optsBy[l].agentType, 'general-purpose', `${l} must not keep a Claude persona`)
-    assert.equal(optsBy[l].model, undefined, `${l} must not name a Claude model on codex`)
-    assert.equal(optsBy[l].effort, 'medium', `${l} keeps the driver's own tier`)
+    // The WRAPPER's tier, not the writer's: gpt5.6-sol/low goes to the CLI, sonnet/medium drives it.
+    assert.equal(optsBy[l].model, 'sonnet', `${l} must carry the configured wrapper model`)
+    assert.equal(optsBy[l].effort, 'medium', `${l} must carry the configured wrapper effort`)
     assert.match(prompts[l], /codex-companion\.mjs/)
     assert.match(prompts[l], /--model gpt5\.6-sol --effort low --write/)
     // The collect protocol is the whole point: implementers average 963s against a ~600s cap.
@@ -524,6 +526,35 @@ test('the codex provider drives the CLI and keeps the slices, not the personas',
     review: OK_REVIEW, planfix: OK_FIX, config: CLAUDE_CONFIG,
   })
   assert.doesNotMatch(claude.prompts['implement:backend'], /codex-companion/)
+})
+
+test('the codex wrapper is tuned apart from the writer, and never dispatched untiered', async () => {
+  // Two agents, two jobs: gpt5.6-sol writes the code, a Claude subagent drives the CLI and collects
+  // a run past the ~600s cap. Tuning one must not move the other — and the wrapper's failure mode
+  // is halting the run over work Codex finished, which is why it cannot quietly become untiered.
+  const tuned = await run({
+    source: baseSource({ buildTool: 'maven', hasBackend: true, hasFrontend: false }),
+    review: OK_REVIEW, planfix: OK_FIX,
+    config: { ...DEFAULT_CONFIG, wrapperModel: 'haiku', wrapperEffort: 'high' },
+  })
+  assert.equal(tuned.optsBy['implement:backend'].model, 'haiku')
+  assert.equal(tuned.optsBy['implement:backend'].effort, 'high')
+  // The writer's pair is untouched by that — it still reaches the CLI.
+  assert.match(tuned.prompts['implement:backend'], /--model gpt5\.6-sol --effort low --write/)
+  // The plan reviewer carries its OWN constant, so tuning the wrapper cannot re-tier it.
+  assert.equal(tuned.optsBy['codex-plan-review#1'].effort, 'medium')
+  assert.equal(tuned.optsBy['codex-plan-review#1'].model, undefined)
+  assert.match(tuned.logText, /codex gpt5\.6-sol \/ low, driven by haiku \/ high/)
+
+  // A row with no wrapper keys — an older config, or an agent that dropped them — must land on the
+  // built-in pair rather than dispatching a wrapper with no model and no depth.
+  const bare = await run({
+    source: baseSource({ buildTool: 'maven', hasBackend: true, hasFrontend: false }),
+    review: OK_REVIEW, planfix: OK_FIX,
+    config: { provider: 'codex', model: 'gpt5.6-sol', effort: 'low', sources: [], notes: [] },
+  })
+  assert.equal(bare.optsBy['implement:backend'].model, 'sonnet')
+  assert.equal(bare.optsBy['implement:backend'].effort, 'medium')
 })
 
 test('the scribe steps pin sonnet, so a copy job never costs the session model', async () => {

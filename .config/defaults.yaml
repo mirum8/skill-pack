@@ -19,6 +19,13 @@ steps:
     model: gpt5.6-sol     # codex: passed through to the CLI; claude: fable|opus|sonnet|haiku
     effort: low           # low | medium | high | xhigh | max
 
+    # Under `provider: codex` only: the Claude subagent that DRIVES the CLI — it passes the brief
+    # through, collects a run that outlives the ~600s Bash cap, then reads the working tree to
+    # report what landed. Not the writer, and not free to be the cheapest thing available: a
+    # wrapper that gives up on the collect halts the run over work Codex actually finished.
+    wrapperModel: sonnet  # fable | opus | sonnet | haiku
+    wrapperEffort: medium # low | medium | high | xhigh | max
+
   # How many units /r:plan-run and /r:issues-fix keep live at once under --cmux. One setting, not
   # one per skill: both drive the same fan-out script. Three full implement+review pipelines is
   # already the machine's limit — implement alone measures 20.9M tokens and ~1022s per agent — so

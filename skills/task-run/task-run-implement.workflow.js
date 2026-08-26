@@ -382,6 +382,11 @@ const CONFIG = {
     provider: { type: 'string', enum: ['claude', 'codex'] },
     model: { type: 'string' },
     effort: { type: 'string', enum: ['low', 'medium', 'high', 'xhigh', 'max'] },
+    // The Claude subagent that drives the Codex CLI under `provider: codex`. Not required: a row
+    // that predates these keys, or an agent that drops them, falls back to IMPL_CODEX_RUN rather
+    // than dispatching a wrapper with no model and no depth.
+    wrapperModel: { type: 'string' },
+    wrapperEffort: { type: 'string', enum: ['low', 'medium', 'high', 'xhigh', 'max'] },
     sources: { type: 'array', items: { type: 'string' } },
     notes: { type: 'array', items: { type: 'string' } },
   },
@@ -521,6 +526,16 @@ const DESIGN_RUN = { model: 'opus', effort: 'high' }
 // specialized Claude types already declare opus, so this only lifts the `general` fallback to
 // match them.
 const IMPL_RUN = { model: 'opus', effort: 'medium' }
+// The WRAPPER under `provider: codex` — the Claude subagent that shells out to the Codex CLI, not
+// the writer. `steps.implement.wrapperModel`/`wrapperEffort` decide it; this is the fallback.
+// Separate from CODEX_RUN, which the plan reviewer carries, so tuning one cannot re-tier the other.
+// Sonnet because the brief is passed through verbatim rather than composed, and `medium` rather
+// than `low` for the reason CODEX_RUN gives: this agent owns the background-collect protocol that
+// produced false blocks on #82/#55, and then reads the working tree to decide filesChanged,
+// testEvidence and blockedOn. A wrapper that gives up early does not save 20s — it halts the run
+// over work Codex actually finished. It is a bet with no measurement behind it: no Codex
+// implementer has run yet, so read the paired review before defending either value.
+const IMPL_CODEX_RUN = { model: 'sonnet', effort: 'medium' }
 // Triage is SPLIT, not one agent, and the two halves want different depths. Collapsed into one
 // agent at the inherited tier that judges every finding and rewrites the plan, it measures 11
 // minutes and 122k tokens on a real run, most of it re-deriving a code map the explorers already
@@ -793,12 +808,18 @@ const implCfg = await agent(
 for (const note of (implCfg && implCfg.notes) || []) log(`run-task-implement: config — ${note}`)
 if (!implCfg) log(`run-task-implement: the config could not be read — implementers fall back to ${IMPL_RUN.model}/${IMPL_RUN.effort} on claude`)
 const implProvider = (implCfg && implCfg.provider) || 'claude'
-// Under `claude` these are the subagent's own model and depth; under `codex` they are --model and
-// --effort on the CLI call and the subagent that shells out keeps CODEX_RUN's own tier.
-const implRun = implCfg
-  ? (implProvider === 'codex' ? { ...CODEX_RUN } : { model: implCfg.model, effort: implCfg.effort })
-  : { ...IMPL_RUN }
-log(`run-task-implement: implementers — ${implProvider}${implCfg ? ` ${implCfg.model} / ${implCfg.effort}` : ` ${IMPL_RUN.model} / ${IMPL_RUN.effort}`}${(implCfg && implCfg.sources || []).length ? ` (from ${implCfg.sources.join(', ')})` : ' (built-in)'}`)
+// Under `claude` these are the writer's own model and depth. Under `codex` the writer's pair goes
+// to the CLI instead (see codexPreamble) and this dispatches the WRAPPER, which is configured
+// apart from it — the two do different work, and a cheap wrapper fails by halting rather than by
+// writing worse code.
+const implRun = !implCfg ? { ...IMPL_RUN }
+  : implProvider === 'codex'
+    ? { model: implCfg.wrapperModel || IMPL_CODEX_RUN.model, effort: implCfg.wrapperEffort || IMPL_CODEX_RUN.effort }
+    : { model: implCfg.model, effort: implCfg.effort }
+log(`run-task-implement: implementers — ${implCfg ? (implProvider === 'codex'
+      ? `codex ${implCfg.model} / ${implCfg.effort}, driven by ${implRun.model} / ${implRun.effort}`
+      : `claude ${implCfg.model} / ${implCfg.effort}`)
+    : `claude ${IMPL_RUN.model} / ${IMPL_RUN.effort}`}${(implCfg && implCfg.sources || []).length ? ` (from ${implCfg.sources.join(', ')})` : ' (built-in)'}`)
 
 // --- Phase 1: map the code BEFORE planning it --------------------------------
 // Unconditional, in every tier. A planner that has not opened the code anchors its plan to
@@ -1318,6 +1339,9 @@ const recordRun = async ({ stopped = '', buildGreen = 'n/a' } = {}) => {
       implProvider,
       implModel: implCfg ? implCfg.model : IMPL_RUN.model,
       implEffort: implCfg ? implCfg.effort : IMPL_RUN.effort,
+      // The wrapper's own tier, recorded only where it means something. On claude there is no
+      // wrapper, and a value here would read as one that ran.
+      ...(implProvider === 'codex' ? { implWrapperModel: implRun.model, implWrapperEffort: implRun.effort } : {}),
       planReviewRan: !!planReview.ran,
       planApplied: planReview.applied.length,
       planDropped: planReview.dropped.length,

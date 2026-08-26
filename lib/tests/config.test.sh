@@ -185,6 +185,44 @@ mkdir -p "$CACHED/.claude/plugins/cache/openai-codex/codex/0.146.0/scripts"
 : > "$CACHED/.claude/plugins/cache/openai-codex/codex/0.146.0/scripts/codex-companion.mjs"
 ok "the version-cache path counts as installed" "$(read_cfg "$CACHED" "$PACK" "$CODEX" provider)" codex
 
+# --- the wrapper is tuned apart from the writer ------------------------------
+# Under `provider: codex` two agents run: Codex writes the code, and a Claude subagent drives the
+# CLI and collects a run past the ~600s cap. They are separate settings because they fail
+# differently — a cheap writer writes worse code, a cheap wrapper halts the run over work Codex
+# actually finished.
+ok "the wrapper has its own default model"  "$(field "$HASCODEX" "$PACK" "$CODEX" implement wrapperModel)"  sonnet
+ok "and its own default effort"             "$(field "$HASCODEX" "$PACK" "$CODEX" implement wrapperEffort)" medium
+WRAP="$TMP/wrap"
+mkcfg "$WRAP/.config/skill-pack.yaml" <<'YAML'
+steps:
+  implement:
+    provider: codex
+    model: gpt5.6-sol
+    effort: low
+    wrapperModel: haiku
+    wrapperEffort: high
+YAML
+ok "the wrapper model is configurable"      "$(field "$HASCODEX" "$PACK" "$WRAP" implement wrapperModel)"  haiku
+ok "the wrapper effort is configurable"     "$(field "$HASCODEX" "$PACK" "$WRAP" implement wrapperEffort)" high
+ok "and tuning it leaves the writer alone"  "$(field "$HASCODEX" "$PACK" "$WRAP" implement model)"         gpt5.6-sol
+ok "and leaves the writer's effort alone"   "$(field "$HASCODEX" "$PACK" "$WRAP" implement effort)"        low
+# It is ALWAYS a Claude subagent, whatever the writer is — so a codex model name is wrong here even
+# under provider: codex, unlike `model`.
+BADWRAP="$TMP/badwrap"
+mkcfg "$BADWRAP/.config/skill-pack.yaml" <<'YAML'
+steps:
+  implement:
+    provider: codex
+    wrapperModel: gpt5.6-sol
+YAML
+ok  "a codex model is refused for the wrapper" "$(field "$HASCODEX" "$PACK" "$BADWRAP" implement wrapperModel)" sonnet
+has "and named"                                "$(field_err "$HASCODEX" "$PACK" "$BADWRAP" implement wrapperModel)" "steps.implement.wrapperModel"
+# The codex-absent fallback moves the WRITER's three fields; the wrapper describes an agent that is
+# not dispatched at all on claude, so resetting it would discard a setting for no reason and make
+# the reported row disagree with the file the user is reading.
+ok "codex absent: the wrapper setting survives" "$(field "$NOCODEX" "$PACK" "$WRAP" implement wrapperModel)" haiku
+ok "codex absent: the writer still falls back"  "$(field "$NOCODEX" "$PACK" "$WRAP" implement model)"        opus
+
 # --- model validation is provider-dependent ---------------------------------
 # Under claude the model must be one the dispatcher accepts; under codex the CLI validates it and
 # a list pinned here would go stale the week it changes.

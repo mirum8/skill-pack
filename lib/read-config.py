@@ -57,6 +57,15 @@ SPEC = {
         # Validated against the Claude models only when the provider is claude; see resolve().
         "model": {"default": "opus"},
         "effort": {"default": "medium", "enum": EFFORTS},
+        # Read only under `provider: codex`, and always a Claude subagent — this is the WRAPPER
+        # that shells out to the Codex CLI and collects the run, not the writer. It is tuned apart
+        # from the writer because the two do different work: the brief is passed through verbatim,
+        # but the wrapper owns the background-collect protocol that produced false blocks on #82
+        # and #55, and then reads the working tree to decide filesChanged, testEvidence and
+        # blockedOn. `low` is the tempting mistake — a wrapper that gives up early does not save
+        # 20s, it halts the run over work Codex actually finished.
+        "wrapperModel": {"default": "sonnet", "enum": CLAUDE_MODELS},
+        "wrapperEffort": {"default": "medium", "enum": EFFORTS},
     },
     # Shared by /r:plan-run and /r:issues-fix, which drive one fan-out script between them — so the
     # cap is one setting, not one per skill. The range rejects 0, negatives and a slipped digit; it
@@ -220,7 +229,10 @@ def resolve(step="implement", repo=None, pack=None, home=None):
             f"`steps.{step}.provider` is 'codex' but the Codex plugin is not installed — falling back to "
             f"provider {fallback['provider']!r}, model {fallback['model']!r}, effort {fallback['effort']!r}. "
             "Install it with: /plugin marketplace add openai-codex, then /plugin install codex@openai-codex")
-        values = dict(fallback)
+        # Only the writer's three fields move. The wrapper keys describe an agent that is not
+        # dispatched at all on claude, so resetting them would discard a setting for no reason and
+        # make the returned row disagree with the file the user is looking at.
+        values.update({k: fallback[k] for k in ("provider", "model", "effort")})
     elif spec.get("provider") and values["provider"] == "claude" and values["model"] not in CLAUDE_MODELS:
         bad("model", f"{values['model']!r} is not one of {'|'.join(CLAUDE_MODELS)}")
 

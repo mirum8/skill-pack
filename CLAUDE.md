@@ -228,6 +228,14 @@ stays that skill's store. Rules that are load-bearing:
   written into the run payload as `implProvider`/`implModel`/`implEffort`. The shipped default is
   codex/`gpt5.6-sol`/`low`, and it is the least-measured value in the pack: no Codex implementer
   has run here, so treat it as under evaluation and read the table once it has rows under it.
+- **On codex the writer and the wrapper are separate settings, because they fail differently.**
+  `model`/`effort` reach the Codex CLI; `wrapperModel`/`wrapperEffort` (`sonnet`/`medium`, fallback
+  `IMPL_CODEX_RUN`) are the Claude subagent that drives it, collects a run past the ~600s Bash cap
+  and reads the working tree to report what landed. A cheap *writer* writes worse code, which the
+  review catches; a cheap *wrapper* gives up on the collect and halts the run over work Codex
+  actually finished, which nothing catches. `low` is therefore the tempting mistake, and the
+  wrapper carries its own constant rather than `CODEX_RUN` so tuning it cannot re-tier the plan
+  reviewer that shares the same shape.
 - **No fallback store.** A row the db rejects is lost. That is why inserts say
   `ON CONFLICT(<key>) DO NOTHING` and never `INSERT OR IGNORE`, which also swallows a `NOT NULL`
   violation — it hid exactly that bug once.
