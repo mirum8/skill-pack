@@ -135,6 +135,17 @@ reused the main one's ports and container names, an empty terminal capture read 
 a CLI misread as a TUI so the wrong template pair is written for a whole generated skill — every
 one of those leaves a green pipeline behind it, so a passing run is not evidence and the suite is.
 
+`plan-run/scripts/cmux-fanout.sh` is the newest, and `issues-fix` drives it too — one protocol, one
+script, reached across skills as `${CLAUDE_PLUGIN_ROOT}/skills/plan-run/scripts/`, the same way
+`test-app-create`'s generated skills reach `task-review/scripts/worktree-deploy.sh`. It exists as
+code for the usual reason: `--cmux` gives each unit a **full interactive `claude` session**, which
+never exits and yields no status, so completion is *reported* rather than observed. Reading a
+terminal to decide whether an agent finished is exactly the confident-wrong-answer shape, so a unit
+is done only when its own sentinel **and** the marker on its branch agree — neither alone, because a
+sentinel can be written by a run that then failed to commit, and a missing marker can just mean the
+unit is still working. The `MAX_UNITS=3` cap lives there rather than in either SKILL.md, so a caller
+cannot forget it and there is one place to change it.
+
 **Every workflow edit needs its control-flow test.** `tests/control-flow.test.mjs` executes the
 script with `agent()`/`parallel()`/`phase()`/`log()` stubbed and asserts the branches — what stops
 the run, what is retried, what reaches the handoff. It models both agent death shapes: `agent()`

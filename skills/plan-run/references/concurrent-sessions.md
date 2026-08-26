@@ -44,7 +44,73 @@ cd ../billing
 git worktree remove ../billing-p5
 ```
 
-`--dry-run` prints these lines filled in for every wave that has more than one unbuilt leaf.
+`--dry-run` prints these lines filled in for every wave that has more than one unbuilt leaf, and
+`--cmux` runs them instead of printing them.
+
+## The same recipe, driven
+
+`--cmux` is the automated form of the block above — same worktrees, same `--no-merge`, same `--land`,
+same `--slice` preflight in front of all of it. What it removes is the typing and the watching:
+
+```sh
+FAN="${CLAUDE_PLUGIN_ROOT}/skills/plan-run/scripts/cmux-fanout.sh"
+
+"$FAN" preflight                                    # cmux reachable · primary tree · clean tree
+"$FAN" spawn --id phase-5 --dir ../billing-p5 --base main \
+       --marker-file docs/billing/todo.md --marker-prefix 'built: ' \
+       --prompt "/r:plan-run docs/billing/todo.md --phases 5 --no-merge --yes"
+"$FAN" wait                                         # blocks; exit 3 = a unit stalled, and is named
+"$FAN" cleanup --id phase-5                         # closes the workspace, removes the worktree
+```
+
+`spawn` opens a cmux workspace holding a **full interactive `claude` session**, not `claude -p`. The
+session is watchable and a human can answer a prompt inside it or take it over — which is the whole
+reason the fan-out goes through cmux rather than through background processes.
+
+**Workspace trust is per path, and a worktree is a new path.** Left alone, every unit would open on
+the trust dialog and sit there until the wait timed out — not sometimes, every time. So `spawn`
+copies the repo's own `hasTrustDialogAccepted` onto the worktree it just created, and `preflight`
+refuses when the repo itself carries no such decision. The fan-out inherits a judgement the user
+already made about this code; it never makes one on their behalf.
+
+An interactive session never exits, so **completion is reported, not observed**, and the report needs
+two independent signals:
+
+| signal | written by | catches |
+|---|---|---|
+| the sentinel at `CMUX_FANOUT_SENTINEL` | Step 3.6 / 3.7 of the child's own run | a session still working, and a run that halted |
+| the `built: <branch>` marker on the branch | the child's tick, read by `wait` and by `--land` | a session that reported success and never committed |
+
+Neither alone is enough. A sentinel can be written by a run that then failed to commit; a missing
+marker can just mean the unit is not done yet.
+
+## The alarm channel
+
+`spawn --orchestrator <name>` puts `CMUX_FANOUT_ORCHESTRATOR` in the unit's environment, so a unit
+can `SendMessage` **upwards** to the session that spawned it. Only that direction is wired, and the
+reason is discovery: a unit knows exactly who spawned it, while addressing a unit from the
+orchestrator means prefix-matching an unpredictable session name (`cmuxtest-p1-81`) against every
+session on the machine.
+
+| a unit sends when | the orchestrator does |
+|---|---|
+| the slice is wrong — it needs a file outside its `Files:` | **halt the wave** and fix the plan's edges; this is the collision the preflight exists to prevent |
+| it is blocked on something the plan can answer | answer it — the orchestrator holds the whole plan |
+| it is halting | act on the sentinel; the message is what saves the other units an hour |
+
+Nothing else. Progress reports cost every other session a turn and turn a fan-out into a chat room.
+
+**A message never closes a unit.** `wait` blocks on the sentinel and landing needs the marker,
+because a unit's own account of how it went is a claim and this pipeline lands evidence — a session
+can go idle having *declined* its work, which is exactly what completion-by-message would bank as a
+success. The orchestrator may answer and may ask read-only checks; it must not drive, and must not
+poll.
+
+`cleanup` runs per unit **the moment that unit comes back ok**, not in a sweep at the end: a stale
+worktree is what the next `spawn` collides with, a finished workspace still open is indistinguishable
+in the sidebar from a working one, and the freed slot is what admits the next leaf against the cap of
+three. **A failed or stalled unit is deliberately not cleaned up** — its workspace and worktree are
+the only thing that has anything to say about what went wrong.
 
 ## Which tree am I in
 

@@ -10,8 +10,9 @@ description: >-
   its `Risk:` line asks for, and merged into the base as one commit carrying its ticks. Where the
   plan's dependency graph says two phases share no dependency and no file, they can be built at the
   same time in separate sessions — `--no-merge` in a detached worktree each, then `--land` to merge
-  them in order. Use on "/r:plan-run", "work through todo.md", "build the whole plan", "run all the
-  remaining phases", "implement the plan end to end", "carry on with the plan from phase 4",
+  them in order — by hand, or driven for you with `--cmux`, one interactive session per leaf in its
+  own cmux workspace. Use on "/r:plan-run", "work through todo.md", "build the whole plan", "run all
+  the remaining phases", "implement the plan end to end", "carry on with the plan from phase 4",
   "build these phases in parallel". NOT for: a single phase
   run on its own (`/r:task-run "todo.md / Phase 3"`), a flat backlog of issues or bugs with no
   ordering between them (`/r:issues-fix`), writing the plan in the first place (`/r:spec-design`),
@@ -54,7 +55,7 @@ Four things shape the whole design:
 
 ## Invocation
 
-`/r:plan-run [<plan>] [--from <n>] [--to <n>] [--phases <n,n>] [--no-merge] [--land] [--yes] [--dry-run]`
+`/r:plan-run [<plan>] [--from <n>] [--to <n>] [--phases <n,n>] [--cmux] [--no-merge] [--land] [--yes] [--dry-run]`
 
 **`<plan>`** is the path to the plan file. Strip a leading `@` and any trailing `/` (Claude Code's
 `@todo.md` arrives verbatim). With no argument, look for one and **name what you found before using
@@ -70,8 +71,16 @@ choose between them: **ask**. This is the one place the run stops for input that
 - **`--phases <n,n>`** → run exactly these phases, whatever their position. The primitive `--from`
   and `--to` are sugar over; it is also how one session takes a single leaf out of a wave so the
   rest of that wave runs beside it in other sessions.
+- **`--cmux`** → run each wave's leaves at the same time instead of one after another: a detached
+  worktree and a cmux workspace per leaf, each holding a real interactive `claude` session, then land
+  the wave from here. It is the executor for the command block `--dry-run` already prints — the same
+  protocol, driven rather than typed. See [Running phases concurrently](#running-phases-concurrently).
+  **Without it nothing about this skill changes**: the run is the serial one below, phase by phase, and
+  no worktree is created. `--cmux` with `--no-merge` or `--land` is a contradiction — those two *are*
+  the halves it drives — so refuse and name which one clashed.
 - **`--no-merge`** → build, review, run `Done when:`, tick and commit on the phase branch — then
-  stop, leaving it unmerged. This is the concurrent-session mode; see
+  stop, leaving it unmerged. This is the concurrent-session mode — read [Being a
+  unit](#being-a-unit) when `CMUX_FANOUT_ORCHESTRATOR` is set; see
   [Running phases concurrently](#running-phases-concurrently). It changes nothing before the merge.
 - **`--land`** → merge the phase branches finished by concurrent sessions into the base, in phase
   order. Runs only from the primary working tree, and does no building of its own.
@@ -178,13 +187,21 @@ Resolve first: none outstanding
 - **Say what happens without you.** Once the gate clears, Step 3 runs to the end with no further
   questions — but it **stops at the first phase that fails**, and reports the `--from N` to resume.
   Saying both halves is what makes it safe for the user to walk away.
+- **Under `--cmux` only**, add the wave the checker already derived as a column, and say how many
+  leaves will be built at once and how many at a time (the cap is three). The waves come from the
+  `check_todo.py` run Step 0 already made; nothing new is computed here. Without the flag this table
+  is exactly the table above.
 
 ## Step 3 — Run the phases in order
 
 Work the run list **one phase at a time, in numeric order — never in parallel, never reordered**.
 Each phase is a re-check, two Workflow calls, a done-check and a finish, all in **your** (main)
 thread, because the `Workflow` tool exists only there and, since 2.1.217, so does the `Agent` tool.
-For each phase:
+
+This is the whole of Step 3 unless `--cmux` was passed. With it, the leaves of a wave are handed to
+sessions of their own instead and you orchestrate rather than build — [`--cmux`, the driven
+form](#--cmux--the-driven-form) — but every phase still runs exactly the loop below, in a session of
+its own. For each phase:
 
 1. **Start from a clean base.** `git checkout <base>` and confirm `git status --porcelain` is empty.
    If a previous phase left the tree dirty, **do not plow ahead** — that is a halt (Step 3.7), not
@@ -343,6 +360,13 @@ For each phase:
      branch name. The commit carrying the code and the ticks is already on it; `--land` merges it
      from the primary tree later. Nothing earlier in this step changes: the phase is still reviewed,
      still done-checked, still ticked, still one commit.
+   - **If `CMUX_FANOUT_SENTINEL` is set in the environment, write the outcome there as the very last
+     thing you do** — two lines, `status=ok` and `branch=<pb>`. That variable means this session is
+     one unit of a `--cmux` fan-out and something is waiting on it. An interactive session never
+     exits and yields no status, so this file is the only way the orchestrator learns the run ended
+     rather than stalled; without it the wave times out on a phase that actually finished. It is the
+     *last* action because a sentinel written before the commit would announce work that is not on
+     the branch yet.
    - **A plan file outside the repo, or untracked, has no commit to ride in.** Tick it anyway and
      **say so in the report**: that is the one case where reverting a phase leaves the plan still
      claiming the work is done.
@@ -356,6 +380,10 @@ For each phase:
    - **Never tick a phase that halted**, and never tick past it.
    - Report which phase stopped it, why, and the exact resume command:
      `/r:plan-run <plan> --from <n>`.
+   - **If `CMUX_FANOUT_SENTINEL` is set, write a failure sentinel there** — `status=halted`, the
+     branch if there is one, and `reason=<the halt>`. A halt that writes nothing is
+     indistinguishable from a session still thinking, and the orchestrator would sit on it until the
+     timeout instead of reporting the failure the moment it happened.
    - **Then go to Step 4 and record the run** — a halt is a result, not a reason to skip the report.
      `haltedAt` is the phase, `haltReason` the cause from the closed list there. A halted run that
      records nothing is how the store comes to hold only successes.'
@@ -421,6 +449,128 @@ The worktree/`--no-merge`/`--land` command block from the reference, filled in f
 only for a wave with **more than one unbuilt leaf**. A wave of one is the common case and the honest
 answer there is that there is nothing to parallelise; a table of hopeful commands over single-leaf
 waves buries the waves where it actually pays.
+
+Under `--dry-run --cmux`, print the same block as the `spawn` calls that would be made instead, and
+**stop**: no worktree, no workspace, nothing on screen. A dry run that opened three windows would be
+the one thing a dry run must never be.
+
+### `--cmux` — the driven form
+
+`--cmux` runs the block above instead of printing it. Everything that makes concurrency *safe* is
+unchanged — the waves, the `--slice` preflight, `--no-merge` in a detached worktree, `--land` from
+the primary tree. What changes is who types it.
+
+Each leaf gets a **full interactive `claude` session**, not a headless one. That is the point of
+routing this through cmux at all: the work is visible while it happens in a workspace the user can
+open, read, answer a question in, or take over. A `-p` run would exit tidily and leave nobody able to
+do any of that.
+
+You are the orchestrator and you **build nothing yourself while a wave is in flight** — you hold the
+primary tree, which is the only tree that can check out `<base>` to land what the units produce.
+
+The mechanics are `${CLAUDE_PLUGIN_ROOT}/skills/plan-run/scripts/cmux-fanout.sh`, and they are a
+script rather than prose because they decide two things a model must never decide by reading a
+screen: whether the tooling is there, and whether a unit is finished. Both fail by returning a
+confident wrong answer.
+
+For each wave, in wave order:
+
+1. **A wave with one unbuilt leaf runs inline**, exactly as the serial loop above. No worktree, no
+   workspace. This is the common case, and spawning a session for a single phase buys nothing while
+   costing a round trip and a context re-read.
+2. **`check_todo.py --slice <n,n>`** over the wave's unbuilt leaves — the same preflight, with the
+   same three refusals, and a missing checker is still a **stop**. Nothing else verifies the slice.
+3. **`cmux-fanout.sh preflight`.** It checks four things, and the fourth is the one nobody expects:
+   cmux is reachable, this is the primary tree, the tree is clean, and **the repo has been trusted in
+   Claude Code**. Workspace trust is per *path*, and a worktree is a new path — so a session started
+   in one opens on the trust dialog and never reads its prompt. `spawn` copies the repo's own trust
+   decision onto each worktree it makes, which is why the repo must carry one to copy: a fan-out may
+   inherit a judgement the user already made about this code, never invent one.
+
+   A non-zero exit is a **stop**, and this is deliberate: everywhere
+   else in the pack a missing tool is a named skip and the run continues, but `--cmux` was typed on
+   purpose, and quietly running serially instead would hand back something other than what was asked
+   for. Say what was missing and offer the serial run as the user's choice, not yours.
+4. **One `spawn` per leaf**, up to three live at once:
+
+   ```sh
+   FAN="${CLAUDE_PLUGIN_ROOT}/skills/plan-run/scripts/cmux-fanout.sh"
+   "$FAN" spawn --id "phase-<n>" --dir "../<repo>-p<n>" --base "<base>" \
+          --marker-file "<plan>" --marker-prefix 'built: ' \
+          --prompt "/r:plan-run <plan> --phases <n> --no-merge --yes"
+   ```
+
+   The `--marker-*` pair is what lets `wait` check the branch itself rather than trusting the
+   session's own account of how it went.
+5. **`wait`**, then `cleanup` each unit **the moment it comes back ok** — its workspace closes and
+   its worktree is removed on the spot. That is not tidiness: a stale worktree is what the next run's
+   `spawn` collides with, an open workspace that finished twenty minutes ago is indistinguishable in
+   the sidebar from one still working, and the freed slot is what admits the next queued leaf. A wave
+   wider than three is therefore a **rolling window**, not three batches waiting on the slowest.
+6. **A unit that failed or stalled is left standing** — workspace open, worktree in place, both named
+   in the report. A stall is usually a question waiting for a human, and that state is the only thing
+   that has anything to say about the failure. Tearing it down would throw the evidence away.
+7. **Land the whole wave in ascending phase order** with the `--land` logic below, once every leaf is
+   in. Order comes from the plan, never from which unit happened to finish first.
+
+A leaf that fails, or lands a branch carrying no `<!-- built: … -->` marker, is a **halt** with the
+usual semantics: the branch stays unmerged, nothing is ticked past it, and the report names the wave
+and the `--from N` that resumes. Later waves depend on this one by construction, so carrying on would
+build real code on a premise that isn't true.
+
+**Three at a time, and the cap lives in the script** (`MAX_UNITS`), so there is one place to change
+it rather than a number repeated in two skills. Three full implement+review pipelines is already the
+machine's limit — `implement` alone measures 20.9M tokens and 1022s per agent — and a wave that
+quietly spawned eight would thrash rather than finish sooner.
+
+### The alarm channel
+
+Get your own session name from `ListAgents` — its first line names this session — and pass it to
+every `spawn` as `--orchestrator <name>`. Each unit then arrives holding
+`CMUX_FANOUT_ORCHESTRATOR`, and can `SendMessage` **up** to you. Only that direction is wired,
+because it is the only one that needs no discovery: a unit knows exactly who spawned it, while
+finding a unit from here means prefix-matching an unpredictable session name against every session
+on the machine.
+
+**What a unit is told to send** — the three cases under [Being a unit](#being-a-unit): the slice
+turned out to be wrong, it is blocked on something the plan can answer, or it is halting. Each is a
+thing you want to know *before* the timeout, and each is why the channel is worth having at all.
+
+**What you may do with it.** Answer a question. Ask a read-only check — what branch it is on, whether
+it has touched a file, what it made of an ambiguous item. Three rules keep this from undoing the
+design:
+
+- **A message never closes a unit.** `wait` blocks on the sentinel; landing needs the marker. A unit
+  saying it is done is a *claim*, and this pipeline lands *evidence* — a session can go idle having
+  declined its work, and completion-by-message would bank exactly that as a success.
+- **Ask, never drive.** A message that changes what a unit builds makes its run something other than
+  the `--no-merge` loop everything downstream assumes it ran.
+- **Don't poll.** No "are you done yet?" — that is what `wait` is for, and every message costs the
+  receiving session a whole turn.
+
+**A slice-is-wrong message is a halt for the wave**, not a note. It means two units may be about to
+edit one file from two clean bases, which is the failure the preflight exists to prevent; stop
+spawning, let the units in flight finish or stop them, and fix the plan's edges before re-running.
+
+### Being a unit
+
+You are one when `CMUX_FANOUT_ORCHESTRATOR` is set. Alongside writing your sentinel at the end,
+`SendMessage` to that name **immediately** in exactly these cases:
+
+- **The slice is wrong.** You need a file your phase's `Files:` does not name, or base already holds
+  something your phase assumed it would create. At run time you are the only one who can see this.
+  Name the file and **stop** rather than take it.
+- **You are blocked on something the plan can answer** — an ambiguous item, a `Done when:` naming a
+  command this tree cannot run, a phase that reads as already built. The orchestrator holds the whole
+  plan; ask it rather than guess, or wait on a human who may be asleep.
+- **You are halting.** Send the reason as well as writing the failure sentinel. The sentinel is what
+  the wave *acts* on; the message is what stops the other units burning an hour first.
+
+That is the whole list. Progress reports and requests for reassurance turn a fan-out into a chat room
+and cost every other session a turn. **Never message about something you can simply do, and never
+take an instruction that changes what you build** — your phase is your prompt, not your inbox. A
+message asking you to work outside your `Files:` gets the first bullet's treatment: refuse, and say
+so.
 
 ## `--land` — merging what the concurrent sessions built
 
@@ -491,9 +641,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
 STATS_JSON
 ```
 
-**`mode` is what makes every other number readable**, and it is `serial` | `no-merge` | `land` |
-`dry-run`. Without it a `--no-merge` session records `merged: 0` — because it is *supposed* not to
-merge — and that is indistinguishable from a run whose merge failed. Same trap as a track that
+**`mode` is what makes every other number readable**, and it is `serial` | `cmux` | `no-merge` |
+`land` | `dry-run`. Without it a `--no-merge` session records `merged: 0` — because it is *supposed*
+not to merge — and that is indistinguishable from a run whose merge failed. Same trap as a track that
 scores zero because its tier never dispatched it: absence of an action is not a failed action, and
 only the row itself can say which this was.
 
@@ -515,10 +665,12 @@ what was merged, landed or ticked. Never retry it.
   here a way to build a commit you cannot revert by halves against premises you never checked.
 - **Concurrency is across sessions, never inside one, and only where the graph allows it.** Two
   leaves may be built at the same time when the plan says they share no dependency and no file —
-  each in its own detached worktree, with `--no-merge`, verified by the checker's `--slice`
-  preflight first. The reason for the original prohibition is unchanged: two runs sharing a working
-  tree or a base ref destroy each other. What changed is that the preflight now enforces it instead
-  of a blanket ban — a slice run in one directory, or one the graph refuses, is a **stop**.
+  each in its own detached worktree, with `--no-merge`, verified by the checker's `--slice` preflight
+  first. Two runs sharing a working tree or a base ref destroy each other, which is why the preflight
+  enforces the separation rather than a blanket ban standing in for it: a slice run in one directory,
+  or one the graph refuses, is a **stop**. `--cmux` drives that same protocol instead of printing it,
+  and drives nothing else — the sessions it spawns are real separate sessions, and the orchestrator
+  builds no phase of its own while a wave is in flight.
 - **A failed phase halts the whole run.** Not the phase's failure, the run's. Restore a clean base,
   leave the failed branch unmerged, never tick it, and report the `--from N` that resumes. Building
   Phase 5 on a Phase 4 that failed its build, its review or its `Done when:` is the single worst

@@ -7,7 +7,9 @@ description: >-
   for approval, then fix the approved groups **one group at a time** — each implemented by the
   `run-task-implement` Workflow, then reviewed by the `/r:task-review` Workflow, merged into the
   base branch, and marked done where it came from (the GitHub issue closed, the markdown checkbox
-  ticked). Use whenever the user says "/r:issues-fix", "go through the issues and fix them",
+  ticked). Groups whose fix scopes provably do not overlap can instead be fixed at the same time with
+  `--cmux` — a detached worktree and a cmux workspace holding a real interactive session each, landed
+  from the primary tree when they are in. Use whenever the user says "/r:issues-fix", "go through the issues and fix them",
   "triage and fix the open issues", "work through the bug backlog", "fix everything in issues.md",
   "clear out the bug tracker", "check the issues and fix what's broken", or hands over a list of
   issues, features or bugs — a tracker, a file or a paste — and wants them verified and fixed, not
@@ -27,13 +29,13 @@ Everything uses a **real tool** — the source's own (`gh` for a GitHub tracker,
 Five things shape the whole design:
 - **The source is an adapter, not the pipeline.** Only four things differ between a GitHub tracker, a file and an inline list: how items are discovered, how they are fetched, what identifies one, and how one is marked done. Everything else — verification, clustering, the gate, both Workflows, the merge — reads an item's *text*, its `touches` and its `risk`, none of which know where it came from. Keep new source handling inside those four seams and out of the loop; the contract is [references/issue-sources.md](references/issue-sources.md).
 - **Verification is read-only and parallelizable** — no branch, no writes, so all candidates can be vetted at once.
-- **The unit of a fix is a *group*, not an item.** Items that touch the same subsystem/files **and carry comparable risk** are fixed together as one task. What grouping buys is **cost and coherence**: one plan/implement/review pass instead of two, and a single review that sees the whole change at once. It buys **no safety** — groups run serially off a clean base, so two separate branches never actually race. But cost alone is reason enough to fold *same-tier* work, because the review is the slow half of the loop: every group you don't create saves a whole review pass, not just a plan. What cost never justifies is chaining a trivial fix to a risky one — there the cheap half inherits the expensive half's gate and its blast radius (Step 2.5).
-- **Fixing must be serial.** Each group owns one feature branch that gets merged into the base. Two fixes on the same repo collide on that base ref (git worktrees share it too). So groups run **one at a time**, each starting from a clean base — never in parallel. This is the single most important constraint in the skill.
+- **The unit of a fix is a *group*, not an item.** Items that touch the same subsystem/files **and carry comparable risk** are fixed together as one task. What grouping buys is **cost and coherence**: one plan/implement/review pass instead of two, and a single review that sees the whole change at once. It buys **no safety** — each group starts from a clean base in a tree of its own, so two separate branches never actually race. But cost alone is reason enough to fold *same-tier* work, because the review is the slow half of the loop: every group you don't create saves a whole review pass, not just a plan. What cost never justifies is chaining a trivial fix to a risky one — there the cheap half inherits the expensive half's gate and its blast radius (Step 2.5).
+- **Fixing is serial in one working tree.** Each group owns one feature branch that gets merged into the base, and two fixes running in the same tree collide on that base ref. So groups run **one at a time**, each starting from a clean base. This is the single most important constraint in the skill, and `--cmux` is the one thing that moves the boundary rather than removing it: `git worktree add --detach` takes a clean tree at base *without* claiming the ref, so groups whose fix scopes are provably disjoint may run at the same time in trees of their own (Step 2.6). Everything the rule protects still holds — one branch per group, one tree per branch, and a merge that happens only from the primary tree. **Without `--cmux` the loop is serial and nothing below changes.**
 - **Each fixed group is two Workflows and a finish, all in *your* main thread.** Both halves — implement (`run-task-implement`) and review (`/r:task-review`) — are deterministic **Workflows**, and the `Workflow` tool exists only in the main thread. Since Claude Code 2.1.217 the `Agent` tool does too, so a subagent can neither run a Workflow nor spawn the fan-out that each half depends on. Keeping both here costs you almost nothing: a Workflow holds its entire fan-out in its own agents and hands back a summary, so your context stays a clean per-group ledger across the whole backlog.
 
 ## Invocation
 
-`/r:issues-fix [<source>] [--label <label>] [--limit <n>] [--group <refs>] [--no-group] [--bugs-only] [--yes] [--dry-run]`
+`/r:issues-fix [<source>] [--only <refs>] [--label <label>] [--limit <n>] [--group <refs>] [--no-group] [--bugs-only] [--cmux] [--no-merge] [--land] [--yes] [--dry-run]`
 
 **`<source>`** is where the backlog is written down, detected in this order. Strip a leading `@` and
 any trailing `/` from path arguments (Claude Code's `@backlog.md` arrives verbatim).
@@ -60,6 +62,11 @@ Parsing rules, the per-source identity, and the write-back mechanics live in
 [references/issue-sources.md](references/issue-sources.md) — read it before touching Step 1 or
 Step 4.4.
 
+- **`--only <refs>`** → run exactly these items and skip discovery entirely, comma-separated: issue
+  numbers for a tracker (`--only 42,61`), item locators for a file (`--only "Login 500s,Signup
+  rejects"`). Every source gets the same handle this way — a GitHub run can already name its refs as
+  the source, and a file run could not. It is also how a `--cmux` unit is handed one group to fix
+  rather than re-discovering and re-verifying the whole backlog around it.
 - **`--label <x>`** → override the `bug` label used for GitHub discovery (e.g. `--label defect`).
   Ignored by the other sources, which have no labels.
 - **`--limit <n>`** → cap how many candidates discovery pulls in (default a sane 20).
@@ -73,6 +80,19 @@ Step 4.4.
 - **`--bugs-only`** → accept only still-reproducing bugs, skipping features and chores. Verification
   is otherwise glad to take any real, actionable, not-yet-done item (Step 2), which is what a
   hand-written list needs and a `bug`-labeled tracker query mostly gives you anyway.
+- **`--cmux`** → fix groups whose scopes are provably disjoint at the same time instead of one after
+  another: a detached worktree and a cmux workspace per group, each holding a real interactive
+  `claude` session, then land them from here. The safety is Step 2.6's disjointness partition, not
+  the flag. **Without it nothing about this skill changes** — the loop is the serial one, group by
+  group, and no worktree is created. `--cmux` with `--no-merge` or `--land` is a contradiction, since
+  those two *are* the halves it drives; refuse and name which one clashed.
+- **`--no-merge`** → implement, review, pass the merge gate, tick and commit on the group branch —
+  then stop, leaving it unmerged. This is what a concurrent unit runs; it changes nothing before the
+  merge, and a group that fails the gate leaves its branch **without** the `<!-- fixed: … -->` marker,
+  which is exactly how `--land` knows not to merge it.
+- **`--land`** → merge the marker-carrying branches finished by concurrent units into the base, in
+  order, then close what they fixed. Runs only from the primary working tree, and fixes nothing of
+  its own.
 - **`--yes`** → skip the approval gate; verify, cluster, then fix every group that contains real work.
 - **`--dry-run`** → run discovery + verification + clustering + triage and print the plan (groups
   included), then **stop** — never touch git, the tracker, or the list file. This is the safe way to
@@ -95,8 +115,11 @@ Step 4.4.
   file source has no such tie: the list may live anywhere, and only the *fixes* land in this repo.
 - **Record the base branch.** Note the current branch (usually `main`) — every fix branches off it and merges back into it. Fixes must always start from this same clean base.
 - **Require a clean working tree** (`git status --porcelain` empty). A dirty tree is dangerous here: `/r:task-run` leaves work uncommitted until a single final commit, so pre-existing changes would get swept into a fix's commit and into its reviewed diff. If the tree is dirty, stop and ask the user to stash or commit first. This covers the list file too when it is tracked here — an already-edited backlog file is exactly the kind of change that must not ride along in a fix's commit.
+- **Check which tree you are in when a mode depends on it.** `[ "$(git rev-parse --git-dir)" != "$(git rev-parse --git-common-dir)" ]` is true in a linked worktree. `--no-merge` requires one; `--cmux` and `--land` require the primary tree. Both wrong-way failures are quiet, which is why each is a refusal rather than a warning: a `--no-merge` run in the primary tree strands the user's own checkout on a group branch with a finished commit and no merge, and `--land` from a worktree cannot check out base at all.
 
 ## Step 1 — Discover & fetch candidates
+
+**`--only <refs>` short-circuits this step for every source**: take exactly those items and discover nothing else. For GitHub that is `gh issue view <n>` per ref; for a file, locate each ref by the item's verbatim text and take only those lines; for an inline list, take only the matching lines. An `--only` ref that resolves to nothing is a **stop**, not a quietly smaller run — a unit handed a group it cannot find must not report having fixed some of it.
 
 Per the resolved source:
 
@@ -190,7 +213,26 @@ Emit the groups as a compact structure you carry into the gate and the fix loop:
   rationale: "<why one change fixes them all>", confidence: "high" | "medium" | "low" }
 ```
 
-A group of one is fine when nothing genuinely belongs with it. But on a backlog holding several same-tier items in one area, a clustering pass that returns only singletons is one that will pay for a full review over and over — reread those before moving on. Grouping never crosses the serial rule: groups are still fixed one at a time (Step 4).
+A group of one is fine when nothing genuinely belongs with it. But on a backlog holding several same-tier items in one area, a clustering pass that returns only singletons is one that will pay for a full review over and over — reread those before moving on. Grouping never crosses the serial rule: groups are still fixed one at a time (Step 4), unless `--cmux` puts them in separate trees (Step 2.6).
+
+## Step 2.6 — Which groups may run at the same time — `--cmux` only
+
+**Skip this step entirely unless `--cmux` was passed.** Without the flag the fix loop is serial and there is nothing to partition.
+
+Clustering asked which items *one change* fixes together. This asks the opposite question about what is left: which groups can be fixed **without seeing each other**. Same inputs, no new work — the `touches` and `risk` the verifiers already reported.
+
+Two groups may share a wave only when the union of their members' `touches` is **disjoint**: no shared file, class, module or tight subsystem. Two groups editing one file from two clean bases means whichever lands second either conflicts or silently reverts the first, and the second is the dangerous one because it merges quietly.
+
+**The backlog file is excluded from that test.** Every group ticks it, so it is shared by construction; git merges ticks in separate regions cleanly, and where two regions do overlap the resolution is always **both sides' ticks** — each branch ticked what it genuinely fixed, and neither tick makes the other untrue. Never resolve by taking one side wholesale; that un-ticks finished work and the next run offers it again.
+
+Two groups are held out of any shared wave regardless of what their files say:
+
+- **A `deep` group always runs alone**, serially, in the primary tree. `touches` is a verifier's *estimate* of where a fix would land, not an edge in a graph somebody drew — and a `deep` change's blast radius is by definition wider than the file list anyone predicted for it. This is the margin `/r:plan-run` doesn't need, because there the file list is a written `Files:` line the plan checker already validated against its neighbours. Here it is a guess, so the guess gets a margin. Do not trim this as over-caution: it is the difference between a wave that is safe and one that merely looks it.
+- **A group holding any member with `confidence: "low"`** for the same reason — a verifier unsure whether the item is even real is not a verifier whose file list should be load-bearing.
+
+Then cap it: **at most three groups run at once**, and a wider wave keeps three live while the rest queue. The cap lives in the fan-out script, not here, so there is one place to change it.
+
+Carry the partition into the gate as a `wave` on each group. A wave of one is the honest common answer and runs inline exactly as the serial loop does — say so plainly rather than dressing a single group up as a fan-out.
 
 ## Step 3 — Triage & approval gate
 
@@ -219,12 +261,20 @@ are things that do not exist yet.
 - **Say what the gate is worth in both directions.** Two same-tier groups in one area are worth offering to merge (it saves a whole review pass), and a mixed-tier group is worth offering to split. State the count plainly — "3 groups, ~3 review passes" — because that number is the run's cost and the user is the only one who can change it here.
 - **Tell the user this is the last prompt.** Once the gate clears, Step 4 runs to the end with no further questions: a group that fails is recorded and the loop moves on. Saying so is what makes it safe for them to walk away, which on a long backlog saves more wall-clock than anything inside the loop.
 - With **`--yes`**, skip the pause and carry the proposed groups straight into Step 4.
+- **Under `--cmux` only**, add Step 2.6's `Wave` as a column and say how many groups will be fixed at
+  once — and, just as plainly, which ones were held back and why (`deep`, low confidence, or an
+  overlap with another group). A user reading "3 groups" without knowing two of them will run in
+  parallel is reading a different plan from the one about to run.
 
 ## Step 4 — Fix serially: two Workflows and a finish, all from the main thread
 
-Work the approved shortlist **one group at a time, in sequence — never in parallel** (a group of one is the common case). Each fix runs as **two Workflow calls** — implement, then review — followed by the finish. Everything stays in **your** (main) thread, because the `Workflow` tool exists only there and, since Claude Code 2.1.217, so does the `Agent` tool. A Workflow keeps its whole fan-out out of your context and hands back a summary, which is what lets this loop stay a clean ledger across a long backlog. For each group (write `<src>` below to mean *the source string naming every item in the group*):
+Work the approved shortlist **one group at a time, in sequence — never in parallel** (a group of one is the common case). Each fix runs as **two Workflow calls** — implement, then review — followed by the finish. Everything stays in **your** (main) thread, because the `Workflow` tool exists only there and, since Claude Code 2.1.217, so does the `Agent` tool. A Workflow keeps its whole fan-out out of your context and hands back a summary, which is what lets this loop stay a clean ledger across a long backlog.
+
+This is the whole of Step 4 unless `--cmux` was passed. With it, a wave's groups are handed to sessions of their own and you orchestrate rather than fix — [`--cmux`, the driven form](#--cmux--the-driven-form) — but every group still runs exactly the loop below, in a session of its own. For each group (write `<src>` below to mean *the source string naming every item in the group*):
 
 1. **Start from a clean base.** `git checkout <base>` and confirm the working tree is clean (`git status --porcelain` empty). If a previous iteration left the tree dirty (e.g. a fix that stopped mid-run), **don't plow ahead** — record that group as failed, restore a clean base, and move on, so one bad fix doesn't contaminate the next.
+
+   Under **`--no-merge`** this is `git checkout --detach <base>` instead: the run is in a linked worktree, where `<base>` cannot be claimed by name while the primary tree holds it. Detaching gives the same clean tree at the same commit, and the implement Workflow branches off it exactly as it would anywhere else.
 
 2. **Implement — the deterministic implement Workflow, no review yet.** `/r:task-run`'s Steps 0–4 have their own canonical script. Call it directly:
 
@@ -296,12 +346,75 @@ Work the approved shortlist **one group at a time, in sequence — never in para
      The order is the point. **After** the review, so the reviewer's diff is the code change and not a bookkeeping edit the doc-consistency hunter has to rule on; **before** the commit, so "fixed" and "marked done" land together and revert together. A tick committed separately, or not at all, is how the same item gets offered again next run.
    - **One commit** on `<gb>`: stage everything (implementation + the review's fixes + the ticks) and commit once, referencing every item in the group in the message. **Write the message to a file and use `git commit -F <file>`, never inline `-m`.** These messages carry item text, backticks and quotes straight from the source, and a single stray double-quote breaks the shell mid-commit — inline quoting buys nothing here and fails on exactly the messages that matter most.
    - **Idempotent merge into base:** if base already contains the branch tip (`git merge-base --is-ancestor <gb> <base>`), it's already merged — skip. Otherwise `git checkout <base> && git merge --no-ff <gb>`, then delete the branch. **If the merge conflicts, stop and surface it — never force it** (record the group as failed).
+
+     **Under `--no-merge`, stop here instead** — no merge, no branch deletion, and **no issue closing** — and report the branch name. The commit carrying the fix and the ticks is already on it; `--land` merges it from the primary tree and closes the issues there. Nothing earlier in this step changes: the group is still reviewed, still gated, still ticked, still one commit.
+   - **If `CMUX_FANOUT_SENTINEL` is set in the environment, write the outcome there as the very last thing you do** — `status=ok` and `branch=<gb>` on a group that passed the merge gate, or `status=failed` with a `reason=` on one that did not. That variable means this session is one unit of a `--cmux` fan-out and something is waiting on it. An interactive session never exits and yields no status, so this file is the only way the orchestrator learns the run ended rather than stalled — and a failure that writes nothing is indistinguishable from a session still thinking. It is the *last* action because a sentinel written before the commit would announce work that is not on the branch yet.
    - **Close every GitHub issue in the group — one `gh issue close <n>` call per issue.** `gh issue close` accepts exactly one issue (`gh issue close 42 90` fails: `accepts 1 arg(s), received 2`), so loop over the group's numbers. Reference the merged work, with the `planReview` note on each. This comes **after** the merge because it is the one step that touches something outside the repo, and a closed issue cannot be un-closed by `git reset`.
    - **A list file outside the repo, or untracked, has no commit to ride in.** Tick it anyway and **say so in the report**: that is the one case where reverting the fix leaves the backlog still claiming the work is done. An inline list has nothing to write back to at all — report every item it fixed by name, because nothing else will remember.
 
 5. **Record the outcome and continue.** Record fixed / stopped / failed per group (and per item within it) with the reason, restore a clean base branch, and move to the next group. A subagent-reported `stopped`, a halted review, or a merge conflict is **one group's failure — never the loop's.** One group that can't be fixed should never abort the whole run.
 
-Never run two fixes against the same repo/branch at once — see [Non-negotiables](#non-negotiables).
+Never run two fixes in the same working tree at once — see [Non-negotiables](#non-negotiables).
+
+### `--cmux` — the driven form
+
+`--cmux` fixes a wave's groups at the same time instead of one after another. What makes that safe is Step 2.6's partition, not the flag: the groups in a wave touch nothing in common, none of them is `deep`, and none rests on a low-confidence verdict. Everything else is unchanged — one branch per group, one clean base per branch, the same two Workflows, the same merge gate, and a merge that still happens only from the primary tree.
+
+Each group gets a **full interactive `claude` session**, not a headless one. That is the point of routing this through cmux at all: the work is visible in a workspace the user can open, read, answer a question in, or take over.
+
+You are the orchestrator and you **fix nothing yourself while a wave is in flight** — you hold the primary tree, which is the only tree that can check out `<base>` to land what the units produce.
+
+The mechanics are `${CLAUDE_PLUGIN_ROOT}/skills/plan-run/scripts/cmux-fanout.sh` — the same script `/r:plan-run` drives, because it is the same protocol. It is a script rather than prose because it decides two things a model must never decide by reading a screen: whether the tooling is there, and whether a unit is finished. Both fail by returning a confident wrong answer.
+
+For each wave, in order:
+
+1. **A wave of one group runs inline**, exactly as the serial loop above — no worktree, no workspace. This is the common answer on most backlogs, and spawning a session for a single group buys nothing while costing a round trip and a context re-read.
+2. **`cmux-fanout.sh preflight`.** It checks four things, and the fourth is the one nobody expects: cmux is reachable, this is the primary tree, the tree is clean, and **the repo has been trusted in Claude Code**. Workspace trust is per *path*, and a worktree is a new path — so a session started in one opens on the trust dialog and never reads its prompt. `spawn` copies the repo's own trust decision onto each worktree it makes, which is why the repo must carry one to copy: a fan-out may inherit a judgement the user already made about this code, never invent one. A non-zero exit is a **stop**, and deliberately so: everywhere else in this pack a missing tool is a named skip and the run continues, but `--cmux` was typed on purpose, and quietly running serially instead would hand back something other than what was asked for. Say what was missing and offer the serial run as the user's choice, not yours.
+3. **One `spawn` per group**, up to three live at once:
+
+   ```sh
+   FAN="${CLAUDE_PLUGIN_ROOT}/skills/plan-run/scripts/cmux-fanout.sh"
+
+   "$FAN" preflight
+   "$FAN" spawn --id "g<n>" --dir "../<repo>-g<n>" --base "<base>" \
+          --marker-file "<the backlog file>" --marker-prefix 'fixed: ' \
+          --orchestrator "<your own session name, from ListAgents>" \
+          --prompt "/r:issues-fix <source> --only <the group's refs> --no-group --yes --no-merge"
+   "$FAN" wait                  # blocks; 0 = all ok · 1 = a unit failed · 3 = a unit stalled
+   "$FAN" cleanup --id "g<n>"   # per unit, as soon as IT comes back ok
+   ```
+
+   **Every subcommand except `preflight`, `wait` and `status` takes its unit as `--id <u>`** — a bare `cleanup g1` is a usage error, not a cleanup, and the worktree survives it. `--only` is what makes the child's scope exact — it fixes this group and re-discovers nothing. `--no-group` stops it re-clustering the items it was handed. The `--marker-*` pair lets `wait` check the branch itself rather than trusting the session's own account of how it went. On a GitHub source there is no backlog file to read a marker from, so omit the pair there and let the branch's own `git merge-base` check stand in — the gate that matters ran inside the child either way.
+4. **`wait`**, then `cleanup` each unit **the moment it comes back ok** — its workspace closes and its worktree is removed on the spot. That is not tidiness: a stale worktree is what the next run's `spawn` collides with, an open workspace that finished twenty minutes ago is indistinguishable in the sidebar from one still working, and the freed slot is what admits the next queued group. A wave wider than three is therefore a **rolling window**, not batches waiting on the slowest.
+5. **A unit that failed or stalled is left standing** — workspace open, worktree in place, both named in the report. A stall is usually a question waiting for a human, and that state is the only thing that has anything to say about the failure. Tearing it down would throw the evidence away.
+6. **Land the wave** with `--land` below, once every group is in.
+
+**A failed unit is not a halt.** Groups are independent by construction here, so a failed group is recorded and named while its wave-mates land — the same rule the serial loop already follows. Only a failed *preflight* stops the run, because then nothing safe can be spawned at all.
+
+### The alarm channel
+
+Get your own session name from `ListAgents` — its first line names this session — and pass it to every `spawn` as `--orchestrator <name>`. Each unit then holds `CMUX_FANOUT_ORCHESTRATOR` and can `SendMessage` **up** to you. Only that direction is wired: a unit knows exactly who spawned it, while finding a unit from here means prefix-matching an unpredictable session name against every session on the machine.
+
+**A unit sends in exactly three cases**, and the first is the one this skill needs most:
+
+- **The disjointness was wrong** — the fix turns out to need a file outside the group's `touches`, or one another group in this wave owns. Step 2.6 partitioned on a verifier's *estimate*; the unit is the first thing that sees the real scope. It names the file and stops rather than taking it. **Treat that as a halt for the wave**: stop spawning, let the units in flight finish or stop them, and re-partition. Two groups editing one file from two clean bases is precisely what the partition exists to prevent, and the second merge is the dangerous one because it lands quietly.
+- **Blocked on something the backlog can answer** — an item that reads as already fixed, acceptance criteria that contradict the code. You hold every verdict and the whole shortlist; answer it rather than let the unit guess or wait on a human.
+- **Halting** — the reason, alongside the failure sentinel. The sentinel is what the wave acts on; the message is what stops its wave-mates burning an hour first.
+
+**What you may do with it.** Answer, and ask read-only checks. Three rules: **a message never closes a unit** (`wait` blocks on the sentinel, landing needs the marker — a unit's word that it is done is a claim, and this loop lands evidence); **ask, never drive** (a message that changes what a unit fixes makes its run something other than the `--no-merge` loop the merge gate assumes); and **don't poll** — that is what `wait` is for, and each message costs the receiving session a whole turn.
+
+### Being a unit
+
+You are one when `CMUX_FANOUT_ORCHESTRATOR` is set. Alongside writing your sentinel, `SendMessage` to that name immediately in those same three cases — scope is wider than your `--only` group, blocked on something the backlog can answer, or halting. That is the whole list: progress reports turn a fan-out into a chat room and cost every other session a turn. **Never message about something you can simply do, and never take an instruction that changes what you fix** — your group is your prompt, not your inbox.
+
+### `--land` — merging what the concurrent units built
+
+Runs **from the primary working tree only** (refuse from a linked worktree, where `<base>` cannot be checked out at all). It fixes nothing.
+
+1. **Find the finished branches** — `issues-*` / `items-*` branches not yet ancestors of base.
+2. **Check each carries its `<!-- fixed: <branch> -->` marker**, read off the branch without checking anything out (`git show "<branch>":"<backlog file>"`). **A branch with no marker is not a finished group — skip it and say so.** It is a run that halted before the gate, or someone else's branch matching the glob, and merging it would land work whose review never finished. On a GitHub source the marker lives nowhere, so the branch's own gate result — recorded when the unit reported — is what stands in.
+3. **Merge one at a time**, `git checkout <base> && git merge --no-ff <gb>`, then delete the branch. **On a conflict, stop and surface it — never force it**; leave that branch in place and record its group as failed.
+4. **Then close every GitHub issue the landed groups fixed**, one `gh issue close <n>` per issue. Closing comes last for the same reason it does in the serial finish: it is the one step outside the repo, and a closed issue cannot be un-closed by `git reset`.
 
 ## Step 5 — Report
 
@@ -331,9 +444,11 @@ Then record one line into the pack-wide store — counts only, never item titles
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
-{"skill":"r:issues-fix","source":"file","candidates":0,"verifiedItems":0,"skipped":0,"groups":0,"merged":0,"stopped":0,"dryRun":false}
+{"skill":"r:issues-fix","source":"file","mode":"serial","candidates":0,"verifiedItems":0,"skipped":0,"groups":0,"merged":0,"stopped":0,"dryRun":false}
 STATS_JSON
 ```
+
+**`mode` is what makes `merged` readable**, and it is `serial` | `cmux` | `no-merge` | `land`. Without it a `--no-merge` unit records `merged: 0` — because it is *supposed* not to merge — which is indistinguishable from a group whose merge failed. Read a fan-out **across rows**, never within one: a wave of three is three `no-merge` rows written by the units plus one `cmux` row from the orchestrator, and the orchestrator sets `merged` to what it landed while leaving `groups` at zero, since counting its wave and its units both would double every group in it.
 
 The pair worth measuring is `candidates` against `verifiedItems`: it says how much of a backlog is real work, which is what decides whether the read-only verification pass earns its cost. `source` (`github` | `file` | `inline`) is what lets that ratio be read per source — a hand-kept file and a triaged tracker are not the same population, and one ratio averaged over both answers neither question. The script always exits `0` — a lost row is a lost row, never a failed run, and it must never change what was merged or closed. Never retry it.
 
@@ -342,12 +457,12 @@ The pair worth measuring is `candidates` against `verifiedItems`: it says how mu
 - **Real tools only, the source's included.** Actually run `gh` against a GitHub tracker, actually read and actually write the file backing a file source, and run the real `/r:task-run` for every fix; never simulate a triage, a fix, or a write-back with a prose summary. If a required tool can't run, stop and say so. A source you cannot write back to is not a reason to skip the write-back quietly — it is a line in the report.
 - **Both halves are Workflows, run from your main thread.** Per group: `task-run-implement.workflow.js` for the plan/implement half, then `task-review.workflow.js` for the review. Each isolates its own fan-out and returns a summary, so neither floods your context and neither can silently degrade. Never hand either half to a subagent — since 2.1.217 a subagent has no `Agent` tool, so `/r:task-run` nested there can't spawn its planner, its Codex reviewer, or its implementers, and post-task-review nested there can't reach the `Workflow` tool at all. Both failures are silent: the work still returns something that looks like success. And never run the implement half inline via the Skill tool — it works, but it floods this loop's context by the third group.
 - **The review runs as the Workflow — verify it, never accept a silent prose fallback.** In the main thread, invoke the post-task-review **Workflow** directly (canonical `scriptPath`) and confirm it returned a `wf_…` Run ID (Step 4.3). If the `Workflow` tool isn't available, `/r:issues-fix` is not running in a real main thread (it's been nested in a subagent) — **STOP and tell the user**; don't let the review quietly degrade to prose. The whole split exists to run the deterministic pipeline, so a prose-degraded review defeats it and must never be finished (merged/closed) as if it passed.
-- **Fixing is serial — one group at a time.** Never run two fixes against the same repo/branch; each group owns one branch that gets merged to base, and overlapping runs collide. Verification may parallelize (read-only); fixing may not.
-- **Group only on real code overlap *and* comparable risk.** Both tests must pass (Step 2.5): the items' `touches` name the same file/module/subsystem, **and** their `risk` tiers are equal or adjacent — never `cosmetic` with `deep`. Grouping buys **cost and coherence** (one plan/review pass, one review seeing the whole change), never safety: the serial rule already guarantees two branches can't race. So a mismatched group trades a cheap saving for a real price — the trivial fix waits behind the risky one's review, the review's attention goes to the risky half, and one commit means you can't revert either without the other. `--no-group` turns clustering off; `--group <refs>` forces a specific cluster. Within a tier, though, **fold generously** — a group of one is not free, it buys a whole extra review pass, and the review is the slow half of this loop. Doubt about *tiers* means don't group; doubt about how tightly two same-tier `local` fixes overlap means group them.
+- **Fixing is serial in one working tree — one group at a time.** Never run two fixes in the same tree; each group owns one branch that gets merged to base, and overlapping runs there collide on the base ref. Verification may parallelize (read-only); fixing in one tree may not. `--cmux` is the only thing that moves the boundary, and it moves it exactly as far as Step 2.6 allows — groups with disjoint `touches`, no `deep` member, no low-confidence verdict, each in a detached worktree of its own with at most three live, merged only from the primary tree. Everything the rule protects survives that; what does not survive is running two of them in one directory, which is still never.
+- **Group only on real code overlap *and* comparable risk.** Both tests must pass (Step 2.5): the items' `touches` name the same file/module/subsystem, **and** their `risk` tiers are equal or adjacent — never `cosmetic` with `deep`. Grouping buys **cost and coherence** (one plan/review pass, one review seeing the whole change), never safety: one tree per branch already guarantees two branches can't race. So a mismatched group trades a cheap saving for a real price — the trivial fix waits behind the risky one's review, the review's attention goes to the risky half, and one commit means you can't revert either without the other. `--no-group` turns clustering off; `--group <refs>` forces a specific cluster. Within a tier, though, **fold generously** — a group of one is not free, it buys a whole extra review pass, and the review is the slow half of this loop. Doubt about *tiers* means don't group; doubt about how tightly two same-tier `local` fixes overlap means group them.
 - **Verification accepts real work, not only defects.** A feature or a chore that is genuinely actionable and not already built is a `fix`, and its `category` is recorded honestly so `--bugs-only` can filter on it. What earns a `skip` is an item nobody could implement from what it says, or one the code has already overtaken — never the mere fact that it adds rather than repairs.
 - **Verification is strictly read-only.** Verifier subagents diagnose and report — they never edit code, touch git, or mark anything done. All code changes happen inside the two Workflows: `run-task-implement` and `/r:task-review`.
 - **Hand `/r:task-run` references, not bodies.** Passing a raw body as free text bypasses source detection and loses the acceptance-criteria/intent behavior — the free-text arm is defined as the one with no written criteria to lift. Pass GitHub issues as refs (`#42 #90`) and file items as `<path> / <locator> | <locator>`, the locator being a short unique prefix of the item's own text.
 - **Clean base between iterations.** Every group starts from a clean checkout of the recorded base branch. Never sweep an unrelated dirty tree into a fix's commit; if the main-thread merge (Step 4.4) conflicts, stop and surface it — never force it.
 - **Mark items done only after the review passed and the merge landed, never before.** Tick a file's items after the review returns and before the single commit, so the tick rides in that commit and reverts with it; close a GitHub issue only after the merge, because `git reset` cannot reopen it. An item fixed with no write-back must be named in the report — otherwise the next run offers it again.
 - **Honor the approval gate unless `--yes`.** The gate exists because each fix mutates the repo and marks every item in the group done; don't skip it on your own initiative. `--dry-run` never mutates anything.
-- **A stopped fix is one group's failure, not the loop's — and "stopped" means the Workflow said so.** Record a `{ stopped: … }` result, restore a clean base, and keep going. An awaited Workflow's returned value **is** its completion signal: there is nothing to poll, no output file to watch, and no reason to interrupt one that is still running. If you feel the need to check on a long implement, verify ground truth read-only (branch exists, plan `status:`, tests) and let it finish. The serial rule forbids a *second, parallel* fix; it never justifies ending the one in flight.
+- **A stopped fix is one group's failure, not the loop's — and "stopped" means the Workflow said so.** Record a `{ stopped: … }` result, restore a clean base, and keep going. An awaited Workflow's returned value **is** its completion signal: there is nothing to poll, no output file to watch, and no reason to interrupt one that is still running. If you feel the need to check on a long implement, verify ground truth read-only (branch exists, plan `status:`, tests) and let it finish. The serial rule forbids a second fix in the *same tree*; it never justifies ending the one in flight.

@@ -35,9 +35,9 @@
     {
       "id": 3,
       "kind": "behaviour",
-      "name": "groups-run-one-at-a-time",
+      "name": "groups-run-one-at-a-time-in-one-tree",
       "prompt": "/r:issues-fix issues.md",
-      "expected_output": "Approved groups are fixed strictly serially, each on its own feature branch merged into the base before the next starts. Two fixes on one repo collide on that base ref — git worktrees share it too — so parallelising the fix phase is not an optimisation available here, however independent the groups look.",
+      "expected_output": "Approved groups are fixed strictly serially, each on its own feature branch merged into the base before the next starts. Two fixes running in one working tree collide on that base ref, so parallelising the fix phase is not an optimisation available to a plain run, however independent the groups look. The only thing that moves that boundary is an explicit --cmux, which puts each group in its own detached worktree — a tree that takes base without claiming the ref — and only for groups whose touches are disjoint, none of them deep and none resting on a low-confidence verdict. Without the flag, none of that happens and the loop is serial.",
       "files": [],
       "fixture": null,
       "assertions": []
@@ -58,6 +58,26 @@
       "name": "both-halves-are-workflows-in-the-main-thread",
       "prompt": "/r:issues-fix backlog.md --limit 3",
       "expected_output": "Each approved group is the real run-task-implement Workflow followed by the real /r:task-review Workflow, both driven from the caller's own main thread by scriptPath. Neither half is imitated in prose, and neither is nested inside a subagent where its fan-out would collapse.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 6,
+      "kind": "behaviour",
+      "name": "cmux-only-parallelises-what-it-can-prove-is-disjoint",
+      "prompt": "/r:issues-fix issues.md --cmux",
+      "expected_output": "Groups run at the same time only when the union of their members' touches is disjoint, and a group that is deep, or that holds any low-confidence verdict, is held out and fixed alone in the primary tree — with the reason said out loud rather than left to inference. touches is a verifier's estimate, not a written file list, which is why the margin is wider here than in a plan-run wave. At most three groups are live at once, each a full interactive claude session in its own detached worktree and cmux workspace, and each one's workspace and worktree come down the moment it reports ok, freeing the slot for the next. A group that failed or stalled is left standing and named. Merging and issue-closing happen only from the primary tree, after the wave. A wave of one runs inline and is described as such, never as a fan-out.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 7,
+      "kind": "behaviour",
+      "name": "only-restricts-the-run-to-exactly-those-items",
+      "prompt": "/r:issues-fix issues.md --only \"Login 500s,Signup rejects\" --yes",
+      "expected_output": "Discovery is skipped entirely: exactly those two items are taken, located by their verbatim text, and nothing else in issues.md is verified, grouped or fixed. A ref that resolves to no item stops the run rather than quietly fixing the remainder — a session handed a group it cannot find must not report having fixed part of it.",
       "files": [],
       "fixture": null,
       "assertions": []

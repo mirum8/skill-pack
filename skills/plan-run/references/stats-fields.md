@@ -18,7 +18,10 @@ builds nothing. A `dry-run` sets `phasesInPlan` and nothing else.
 
 **So read the concurrent flow across rows, never within one.** A wave built in three sessions and
 landed from the primary tree is *four* rows — three `no-merge` and one `land` — and no single one of
-them holds both halves. The question "how far does a plan survive contact with the code" is
+them holds both halves. A `cmux` row is that same shape seen from the orchestrator: it spawned the
+sessions and landed what they built, so it sets `landed` and leaves `phasesInRun` at zero, and the
+three units it spawned write their own `no-merge` rows through the hook. Counting the orchestrator's
+wave *and* its units would double every phase in it. The question "how far does a plan survive contact with the code" is
 `phasesInRun` against `merged + landed` **summed over a plan's rows**; asked of one row it reads as
 a string of failures. This is the one metric here that a naive per-row average gets backwards.
 

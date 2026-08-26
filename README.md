@@ -128,6 +128,12 @@ no review at all.
 | `gh` (authenticated) | `task-run` issue sources and PRs; `issues-fix` against GitHub | GitHub stops being one of the sources |
 | `codex` plugin | `code-adversarial` | the step is recorded as **skipped** and named |
 | `tmux` | driving a **terminal** app in a real pty — `test-app-create`'s TUI track and `task-review` Step 8 on a `tui` surface | the TUI checks are recorded as **not run** and named, and that track is reported blocked rather than clean; web and command-line projects are unaffected |
+| `cmux` | `--cmux` on `plan-run` and `issues-fix` — a worktree and a watchable session per concurrent unit | the flag stops and names it; both skills run their serial path and lose no coverage, only wall-clock |
+
+`--cmux` also needs the repo to have been **trusted in Claude Code** at least once. Workspace trust
+is per path and a worktree is a new path, so each unit's session would otherwise open on the trust
+dialog and never read its prompt. The fan-out copies the repo's own trust decision onto the worktrees
+it creates and refuses when there is none to copy — it inherits a judgement, never invents one.
 
 `install.sh` provisions only the mandatory tools, so it does **not** install `tmux` — the same
 rule that leaves `gh` and the codex plugin alone. Most projects have no terminal UI, a surprise
@@ -135,6 +141,12 @@ rule that leaves `gh` and the codex plugin alone. Most projects have no terminal
 server process behind, which is a thing a user opts into rather than something an installer
 decides. The CLI half of that track needs no terminal at all: argv, exit codes, stdout/stderr
 separation, piping and signals are plain shell.
+
+`--cmux` is the one optional tool whose absence is a **stop** rather than a named skip, and only
+because it is never reached by accident: the flag has to be typed. Everywhere else a missing tool
+costs coverage, so continuing and naming the gap is the honest move; here it costs only wall-clock,
+and quietly running serially would hand back something other than what was asked for. The serial run
+is then offered as the user's choice.
 
 The pack runs end to end **without GitHub**. `task-run` takes a todo phase, a list item or
 free text as its source and finishes by merging the feature branch instead of opening a PR;
@@ -155,7 +167,7 @@ which is why this is a README section and a runtime check rather than metadata.
 Known-good versions, read 2026-07-30 — recorded as tested-against, not as minimum
 floors, because no lower bound was tested: `pmd` 7.26.0 · `spotbugs` 4.10.2 ·
 `semgrep` 1.168.0 · `gh` 2.96.0 · `codex-cli` 0.146.0 · `node` v26.4.0 ·
-`agent-browser` 0.26.0 · `tmux` 3.7b · Claude Code 2.1.220.
+`agent-browser` 0.26.0 · `tmux` 3.7b · `cmux` 0.64.22 · Claude Code 2.1.220.
 
 ## Maintaining it
 
