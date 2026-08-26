@@ -143,7 +143,15 @@ both enforced:
 - **A leaf may depend only on lower-numbered leaves.** Numeric order then *is* a valid build order,
   which is what lets `/r:plan-run` run the plan straight down the page and still respect every edge.
 - **No two leaves in one wave may name the same file.** They would run at the same time in separate
-  worktrees. The fix is an edge between them, which pushes one into the next wave.
+  worktrees. **Re-cut the two leaves before you reach for an edge** — a collision usually says the
+  seam is in the wrong place, and two features editing one fat controller want the seam moved rather
+  than serialising. The edge is the fallback, and it costs a whole wave.
+
+  **When in doubt, serialise.** Write the edge. The two mistakes are not equal: a needless edge only
+  costs wall-clock, and someone can see it and remove it later. A missing one is silent and wrong —
+  the leaf builds on code that is not there, or two sessions edit one file from two clean bases and
+  whichever merges second quietly reverts the first. Never buy a wave back by dropping a true edge or
+  by leaving a file out of `Files:`. Parallelism is worth having only when it is certain.
 
 **Waves are derived, never authored**: `wave(p) = 0` with no dependency, else `1 + max(wave(d))`.
 The `## Waves` block is a generated summary — `check_todo.py` recomputes it and reports a drift,
