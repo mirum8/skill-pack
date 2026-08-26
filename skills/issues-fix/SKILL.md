@@ -296,7 +296,7 @@ This is the whole of Step 4 unless `--cmux` was passed. With it, a wave's groups
    - **Inline** — the item text itself. This is free text: there are no written criteria to lift, so
      the planner derives them. It is why the inline shape is the weakest of the three.
 
-   The workflow merges the group's acceptance criteria, maps the code, plans it on Fable, has the **real Codex** challenge the plan, implements test-first through domain subagents, and drives the build green — then stops, leaving the uncommitted diff on that branch and returning the handoff:
+   The workflow merges the group's acceptance criteria, maps the code, plans it on Opus, has the **real Codex** challenge the plan, implements test-first through domain subagents, and drives the build green — then stops, leaving the uncommitted diff on that branch and returning the handoff:
 
    ```
    { branch, base, profile: "light" | "standard" | "full", profileReason, profileForced, uiTouched: <bool>,
@@ -309,7 +309,7 @@ This is the whole of Step 4 unless `--cmux` was passed. With it, a wave's groups
 
    or `{ stopped: <reason>, … }` when it can't honestly continue.
 
-   **Why a Workflow rather than a subagent.** Handing `/r:task-run --stop-after-implement` to a `general-purpose` subagent does not work. Claude Code **2.1.217 removed the `Agent` tool from subagents**, and `/r:task-run` *is* its subagents — the explorers, the Fable planner, the Codex plan reviewer, the domain implementers, the build runner — so nested that way it cannot spawn any of them: the fix collapses into a single-context run and still reports success. The Workflow runs in your main thread and spawns every agent *itself*, so the fan-out survives **and** your context still only sees the handoff. Don't "simplify" this by invoking `/r:task-run` through the Skill tool instead — that works, but it loads a whole run into your context, and by the third group this loop would be compacting mid-run.
+   **Why a Workflow rather than a subagent.** Handing `/r:task-run --stop-after-implement` to a `general-purpose` subagent does not work. Claude Code **2.1.217 removed the `Agent` tool from subagents**, and `/r:task-run` *is* its subagents — the explorers, the Opus planner, the Codex plan reviewer, the domain implementers, the build runner — so nested that way it cannot spawn any of them: the fix collapses into a single-context run and still reports success. The Workflow runs in your main thread and spawns every agent *itself*, so the fan-out survives **and** your context still only sees the handoff. Don't "simplify" this by invoking `/r:task-run` through the Skill tool instead — that works, but it loads a whole run into your context, and by the third group this loop would be compacting mid-run.
 
    Pass **references**, not bodies — refs for issues, locators for file items. Either way the workflow re-reads the source itself for the acceptance criteria and the intent, and a body pasted in as free text arrives with none. A `stopped` result is **one group's failure** (step 5): record the reason, restore a clean base, and move on. Never re-run the work inline to get past it.
 

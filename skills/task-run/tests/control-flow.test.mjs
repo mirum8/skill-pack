@@ -748,7 +748,7 @@ test('standard tier: full planner, but no Codex plan review', async () => {
     args: { source: '#81', profile: 'standard' },
   })
   assert.equal(out.profile, 'standard')
-  assert.equal(counts['planner'], 1)          // the full Fable planner, not the brief one
+  assert.equal(counts['planner'], 1)          // the full Opus planner, not the brief one
   assert.equal(counts['plan-light'], undefined)
   assert.equal(counts['codex-plan-review#1'], undefined)
   assert.equal(out.planReview.ran, false)
@@ -1916,7 +1916,7 @@ test('the plan scribe stays sonnet/medium — it transcribes a document verbatim
 
 test('every judging track still keeps its own model and depth', async () => {
   const { optsBy } = await run({ review: OK_REVIEW, planfix: OK_FIX, verdict: MIXED })
-  assert.equal(optsBy['planner'].model, 'fable')
+  assert.equal(optsBy['planner'].model, 'opus')
   assert.equal(optsBy['planner'].effort, 'high')
   for (const l of ['source', 'judge#1.1:coverage', 'plan-fix#1']) {
     assert.equal(optsBy[l].model, undefined, `${l} classifies — it must not be down-tiered`)

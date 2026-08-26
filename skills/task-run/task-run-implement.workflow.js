@@ -3,7 +3,7 @@
 //
 // This encodes /r:task-run Steps 0 – 4 as a hardcoded subagent graph: resolve the
 // task source, map the code, design the UI when the change touches one, plan it on
-// Fable at high, have Codex challenge the plan, implement it test-first through domain
+// Opus at high, have Codex challenge the plan, implement it test-first through domain
 // subagents, and drive the build green.
 // It STOPS after the build, leaving the uncommitted diff on the feature branch
 // and returning a handoff. Steps 5 (review) and 6 (finish) are the CALLER's.
@@ -78,7 +78,7 @@ export const meta = {
     { title: 'Source',      detail: 'resolve task + criteria + tier + build tool' },
     { title: 'Explore',     detail: 'read-only fan-out over the change surface', model: 'sonnet' },
     { title: 'Design',      detail: 'UI/UX spec via frontend-design, iff the visuals change', model: 'opus' },
-    { title: 'Plan',        detail: 'Fable planner, written to .task-plans/', model: 'fable' },
+    { title: 'Plan',        detail: 'Opus planner, written to .task-plans/', model: 'opus' },
     { title: 'Plan-review', detail: 'Codex challenge + one bounded re-review' },
     { title: 'Implement',   detail: 'branch + test-first domain subagents' },
     { title: 'Build',       detail: 'build with tests, bounded retry' },
@@ -478,14 +478,14 @@ const CODEX_RUN = { effort: 'medium' }
 // the one consequential call an explorer makes is riskFlags, which gates the light->FULL
 // escalation below; medium leaves it enough budget to spot auth/money/migration/concurrency.
 const EXPLORE_RUN = { model: 'sonnet', effort: 'medium' }
-// The plan is the highest-leverage artifact in the run, so the standard/full planner is the one
-// step that names Fable — the inverse of the explorers, which run a cheaper model still. agent()
-// exposes a real effort lever here (the raw Agent tool does not), so depth is pinned rather than
-// inherited from whatever the caller was running.
-const PLAN_RUN = { model: 'fable', effort: 'high' }
+// The plan is the highest-leverage artifact in the run, so the standard/full planner runs at the
+// top tier — the inverse of the explorers, which run a cheaper model still. agent() exposes a real
+// effort lever here (the raw Agent tool does not), so depth is pinned rather than inherited from
+// whatever the caller was running.
+const PLAN_RUN = { model: 'opus', effort: 'high' }
 // The LIGHT-tier planner writes a BRIEF for a change that, by the tier's own definition, cannot
 // alter behavior — and that contract, not the depth, is what separates it from PLAN_RUN: the two
-// share a tier and the split lives in the prompt. Its own constant exists so the brief can be
+// share a model and a tier, and the split lives in the prompt. Its own constant exists so the brief can be
 // costed separately from the full plan. The tier is not load-bearing on its own either: the
 // explorers' risk flags escalate light->FULL the moment they see auth, money, migrations or
 // concurrency, so a misclassified task never actually gets planned here.
@@ -506,7 +506,7 @@ const DESIGN_RUN = { model: 'opus', effort: 'high' }
 //
 // The shipped default is codex/gpt5.6-sol/low; `medium` here is what a run falls back to, and the
 // whole question of depth is a claim UNDER MEASUREMENT rather than a settled default:
-// these agents follow a plan built at fable/high, challenged by Codex and re-read afterwards by
+// these agents follow a plan built at opus/high, challenged by Codex and re-read afterwards by
 // /r:task-review, so the argument is that the judgement left to them is bounded. What the plan
 // cannot do for them is real too — observing red-before-green, deciding a [RED] test that passes
 // is a weak test rather than a formality, and setting blockedOn when the plan is wrong — so the
@@ -1428,8 +1428,8 @@ if (!resuming) {
   // REVIEW of the plan (Phase 3), not the thinking that produces it — a medium task still
   // deserves a grounded plan, and a cheap plan would just push the cost into the implementers.
   if (profile !== 'light') {
-    // Fable (PLAN_RUN): the plan is the highest-leverage artifact in the run, so it is the one
-    // step that names its own model rather than inheriting. It is still written and critiqued by
+    // PLAN_RUN: the plan is the highest-leverage artifact in the run, so it names its own model
+    // and depth rather than inheriting them. It is still written and critiqued by
     // DIFFERENT models — Codex reviews it in Phase 3 — so a single model never grades its own plan.
     const plan = await reliable('planner', 'Plan', () => agent(
       `Plan this task at MAXIMUM reasoning depth. You are read-only: return the plan, do not write it.
