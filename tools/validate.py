@@ -409,6 +409,28 @@ def check_evals():
                           "It needs at least one behaviour case, or its suite measures nothing")
 
 # --- FR-13 ------------------------------------------------------------------
+def check_config():
+    """The shipped defaults must be a file lib/read-config.py accepts.
+
+    .config/ sits outside pack_text_files()'s bases and .yaml is not a TEXT_SUFFIX, so no other
+    check in this file ever opens it. Without this one a defaults file the reader rejects would
+    fall through to the built-in row on every run — a green gate over a setting nobody is running,
+    which from the outside is indistinguishable from a config that works.
+    """
+    cfg = os.path.join(REPO, ".config/defaults.yaml")
+    reader = os.path.join(REPO, "lib/read-config.py")
+    if not os.path.isfile(cfg):
+        fail("FR-20", ".config/defaults.yaml is missing — every skill reading settings falls back silently")
+        return
+    if not os.path.isfile(reader):
+        fail("FR-20", "lib/read-config.py is missing — nothing can read .config/defaults.yaml")
+        return
+    r = subprocess.run([sys.executable, reader, "--check", cfg], capture_output=True, text=True)
+    if r.returncode != 0:
+        for line in (r.stderr or "").strip().splitlines():
+            fail("FR-20", f"the shipped defaults are rejected by the reader: {line.strip()}")
+
+
 def check_artifacts():
     try:
         tracked = subprocess.run(["git", "ls-files"], cwd=REPO, capture_output=True,
@@ -726,6 +748,7 @@ def main():
     check_dangling()
     check_agents()
     check_evals()
+    check_config()
     check_artifacts()
     check_paths()
     check_script_refs()

@@ -1,0 +1,20 @@
+# Shipped defaults for the r skill pack.
+#
+# DO NOT EDIT THE INSTALLED COPY — ./install.sh rewrites this file on every run.
+# To change settings for a project, create <project>/.config/skill-pack.yaml holding
+# only the keys you want to override; anything left out falls back to this file, and
+# anything this file leaves out falls back to the reader's built-in values.
+#
+# `model` and `effort` belong to the SELECTED provider: under `claude` they become the
+# subagent's model and reasoning effort, under `codex` they become --model and --effort
+# on the Codex CLI call. Switching provider therefore means reviewing all three.
+#
+# When `provider: codex` is set but the Codex plugin is not installed, the reader falls
+# back to claude/opus/medium and names every substitution — a codex model string means
+# nothing to a Claude subagent, and carrying `low` across would silently re-tier it.
+
+steps:
+  implement:
+    provider: codex       # claude | codex
+    model: gpt5.6-sol     # codex: passed through to the CLI; claude: fable|opus|sonnet|haiku
+    effort: low           # low | medium | high | xhigh | max

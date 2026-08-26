@@ -89,14 +89,15 @@ The runner redirects `CLAUDE_SKILL_STATS_DB` to a throwaway so a sweep never wri
 skills/<name>/SKILL.md       the skill; plus references/ scripts/ tests/ evals/
 agents/<name>.md             the 8 agents skills dispatch to
 hooks/                       hooks.json + guard-workflow.py + record-skill-run.py
-lib/                         pack-wide stats sink + reporter, shared by every skill
+lib/                         pack-wide stats sink + reporter + config reader, shared by every skill
+.config/defaults.yaml        the shipped settings; a project overrides them in its own .config/
 tools/                       build/validation scripts — NOT shipped
 tests/, validate.sh          repo-level test + gate — NOT shipped
 docs/skill-pack-repo/        spec.html, architecture.html, interview notes — NOT shipped
 ```
 
-`install.sh` copies exactly `.claude-plugin/ skills/ agents/ hooks/ lib/ check-prereqs.sh`. Anything
-a skill needs at run time must live under one of those.
+`install.sh` copies exactly `.claude-plugin/ .config/ skills/ agents/ hooks/ lib/ check-prereqs.sh`.
+Anything a skill needs at run time must live under one of those.
 
 ## Architecture
 
@@ -209,15 +210,21 @@ stays that skill's store. Rules that are load-bearing:
   same scripts can write — that one is this classifier's own earlier answer, so a disagreement is
   it having improved; a label outside their vocabulary came from a `--label-source` run over older
   scripts and is left alone.
-- **Implementer depth is a claim under measurement, not a default.** `IMPL_RUN` in
-  `task-run-implement.workflow.js` pins the implementers at `medium`, and the `implement depth`
-  table is what decides whether that holds: it buckets every implement run by the effort mined off
-  its items and prints the paired review's yield beside it. The `high` baseline it is read against
-  is 2.11 correctness and 3.48 readability fixes per paired review, at 20.9M tokens and 1022s per
-  implementer agent — the pack's most expensive step. Read the table before moving the pin either
-  way, and read both halves: a cheaper implementer that pushes work into `fix-correctness` and
-  `end-verify-fix` has moved cost, not saved it. The pairing is positional (same repo, the next
-  pipeline-invoked review inside 12h), so it is a strong guess and never a recorded fact.
+- **Implementer depth is a claim under measurement, not a default.** The implementers' provider,
+  model and effort come from `steps.implement` in the config (below); `IMPL_RUN` in
+  `task-run-implement.workflow.js` is the fallback, not the pin. The `implement depth` table is
+  what decides whether the configured value holds: it buckets every implement run by the effort
+  mined off its items and prints the paired review's yield beside it. The `high` baseline it is
+  read against is 2.11 correctness and 3.48 readability fixes per paired review, at 20.9M tokens
+  and 1022s per implementer agent — the pack's most expensive step. Read the table before moving
+  the default either way, and read both halves: a cheaper implementer that pushes work into
+  `fix-correctness` and `end-verify-fix` has moved cost, not saved it. The pairing is positional
+  (same repo, the next pipeline-invoked review inside 12h), so it is a strong guess and never a
+  recorded fact. The table cannot yet compare **providers** — the mined effort is the *subagent's*,
+  and on codex that is the driver's rather than the writer's — which is why the resolved row is
+  written into the run payload as `implProvider`/`implModel`/`implEffort`. The shipped default is
+  codex/`gpt5.6-sol`/`low`, and it is the least-measured value in the pack: no Codex implementer
+  has run here, so treat it as under evaluation and read the table once it has rows under it.
 - **No fallback store.** A row the db rejects is lost. That is why inserts say
   `ON CONFLICT(<key>) DO NOTHING` and never `INSERT OR IGNORE`, which also swallows a `NOT NULL`
   violation — it hid exactly that bug once.
@@ -235,6 +242,32 @@ stays that skill's store. Rules that are load-bearing:
   blocks the prompt.
 - `~/.claude/skill-stats.jsonl` is the pre-SQLite archive: read by `--import-jsonl` once, never
   written.
+
+**The config is the pack's one tunable surface.** `lib/read-config.py` resolves one step's settings
+from `<repo>/.config/skill-pack.yaml`, then `.config/defaults.yaml` in the pack, then a built-in row
+— key by key, so a project file naming `effort` inherits the model rather than resetting it. Today
+only `steps.implement` is read; the shape exists so later steps drop in as sibling keys. It sits in
+`lib/` for the same reason the stats sink does: every skill will eventually read settings, and a
+reader owned by one skill stays that skill's reader. Rules that are load-bearing:
+
+- **It never fails its caller, and it never falls back silently.** A missing file, a malformed
+  line, an unknown key and a value outside its enum all resolve to the built-in value and add a
+  line to `notes` naming what was substituted and why — and the caller **logs every note**. A
+  config that quietly does nothing is indistinguishable from one that works, which is the whole
+  failure a settings file invites. `--check` is the one mode that exits non-zero, and it exists so
+  `validate.py` cannot ship a defaults file this reader would reject.
+- **YAML here is a deliberate subset** — nested mappings, scalar values, comments, optional quotes
+  — parsed in-tree so there is no PyYAML dependency and one code path. A line it cannot place
+  becomes a note, never a silent drop.
+- **`provider: codex` is verified before it is honoured**, at the two paths `check-prereqs.sh`
+  already looks in. Absent, the *whole row* falls back to claude/opus/medium: a codex model name
+  means nothing to `agent()`, and carrying the codex effort across would re-tier the Claude path by
+  accident. All three substitutions are named.
+- **Workflow scripts cannot read it themselves** — no filesystem access — so the pipeline dispatches
+  a haiku/low agent that runs the reader and returns its JSON under a schema. That read happens
+  **inside** `task-run-implement.workflow.js`, not in `SKILL.md`, because `issues-fix` and
+  `plan-run` come in by `scriptPath` and a markdown read would skip them.
+- Its suite is `lib/tests/config.test.sh`, and it is the only one it gets.
 
 **Skills that must never self-trigger** (`task-run`, `task-quick`, `issues-fix`, `plan-run`,
 `spec-design`) carry `disable-model-invocation: true` in frontmatter — the enforcement, not just a

@@ -81,6 +81,15 @@ for t in skills/spec-brainstorm/tests/check_spec.test.sh \
 done
 
 echo
+echo "==> config reader (.config resolution)"
+if out=$(bash lib/tests/config.test.sh 2>&1); then
+  printf '  ✓ %s\n' "$(tail -1 <<<"$out" | tr -s ' ')"
+else
+  rc=1
+  sed 's/^/  /' <<<"$out"
+fi
+
+echo
 echo "==> stats store (sink, hook, reporter)"
 if out=$(bash lib/tests/stats.test.sh 2>&1); then
   printf '  ✓ %s\n' "$(tail -1 <<<"$out" | tr -s ' ')"

@@ -22,6 +22,9 @@ pass=0; fail=0
 # are pinned to the same list. Hardcoding the number instead means every skill
 # added to the pack fails four unrelated installer cases with an off-by-one.
 SKILLS_EXPECTED=$(python3 -c 'import sys; sys.path.insert(0, "tools"); import rename_rules; print(len(rename_rules.packed_skills()))')
+# Same reasoning for the payload: the copy loop runs once per item, so the two cases counting
+# copy commands below read the list off install.sh rather than restating its length here.
+PAYLOAD_EXPECTED=$(sed -n 's/^PAYLOAD=(\(.*\))$/\1/p' "$REPO/install.sh" | wc -w | tr -d ' ')
 
 # Snapshot the real home before anything runs, so the last cases can prove it
 # was untouched by comparison rather than by assertion. The pack may legitimately
@@ -78,7 +81,7 @@ cp "$H/.claude/settings.json" "$TMP/seeded-settings"   # what it looked like goi
 out=$(run "$H" --dry-run)
 hasnt "--dry-run creates nothing"                  "$H/.claude/skills/r"
 is    "--dry-run says so"                          "$(grep -c 'was a --dry-run' <<<"$out")" 1
-is    "--dry-run still echoes the copy commands"   "$(grep -c 'rsync\|cp -R' <<<"$out")" 6
+is    "--dry-run still echoes the copy commands"   "$(grep -c 'rsync\|cp -R' <<<"$out")" "$PAYLOAD_EXPECTED"
 is    "--dry-run leaves settings.json alone" \
       "$(cmp -s "$H/.claude/settings.json" "$TMP/seeded-settings" && echo same || echo CHANGED)" same
 is    "--dry-run writes no backup" \
@@ -98,6 +101,10 @@ has  "hooks.json lands"                            "$D/hooks/hooks.json"
 # the sink is best-effort by contract, which is exactly why its absence has to be caught here.
 has  "the stats sink lands"                        "$D/lib/record-run.py"
 has  "the stats reporter lands"                    "$D/lib/skill-stats.py"
+# Without these two the implementers fall back to the built-in row on every run and the pack ships
+# a config nobody can reach — a settings file that silently does nothing.
+has  "the config reader lands"                     "$D/lib/read-config.py"
+has  "the shipped defaults land"                   "$D/.config/defaults.yaml"
 has  "check-prereqs.sh lands"                      "$D/check-prereqs.sh"
 is   "it says a restart is needed"                 "$(grep -c 'NEXT session' <<<"$out")" 1
 is   "the payload is byte-identical to the repo" \
@@ -177,7 +184,7 @@ done
 is   "the no-rsync PATH really has no rsync" \
      "$(PATH="$TMP/nopath" command -v rsync >/dev/null 2>&1 && echo found || echo absent)" absent
 out=$(HOME="$H4" PATH="$TMP/nopath" bash "$REPO/install.sh" --no-deps 2>&1)
-is   "without rsync it falls back to cp -R"        "$(grep -c '\$ cp -R' <<<"$out")" 6
+is   "without rsync it falls back to cp -R"        "$(grep -c '\$ cp -R' <<<"$out")" "$PAYLOAD_EXPECTED"
 is   "and still lands every skill"                   "$(ls "$H4/.claude/skills/r/skills" | wc -l | tr -d ' ')" "$SKILLS_EXPECTED"
 # Running any packed python leaves a __pycache__ in the REPO, and the repo gitignores it — so
 # neither copy path may carry one into the installed pack.

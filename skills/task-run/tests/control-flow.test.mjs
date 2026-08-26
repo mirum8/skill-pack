@@ -31,6 +31,12 @@ const THROW = Symbol('agent throws')
 // compares against when the scribe self-reports failure, so tests reuse this constant rather
 // than restating it.
 const PLAN_TEXT = '## Context\nfix it\n## Coverage contract\ncriterion -> test'
+// The row lib/read-config.py resolves from the SHIPPED .config/defaults.yaml. Kept in step with
+// that file: the point of these assertions is what a run with no project config actually does.
+const DEFAULT_CONFIG = { provider: 'codex', model: 'gpt5.6-sol', effort: 'low',
+                         sources: ['/pack/.config/defaults.yaml'], notes: [] }
+const CLAUDE_CONFIG = { provider: 'claude', model: 'sonnet', effort: 'high',
+                        sources: ['/repo/.config/skill-pack.yaml'], notes: [] }
 
 // The explorers are schema-LESS too: an 8k-char brief plus a second parameter is the payload that
 // blew the StructuredOutput retry cap on three real runs, so the brief now comes back as plain
@@ -75,7 +81,7 @@ function baseSource(over = {}) {
 // `overrides` maps a label PREFIX to the value that label should return — or THROW, or a
 // function of the call count. Anything not overridden takes the happy-path default.
 async function run({ source = baseSource(), riskFlags = [], uiFiles = [], design = designText(),
-                     review, planfix, verdict,
+                     review, planfix, verdict, config,
                      args = { source: '#81' }, overrides = {}, build } = {}) {
   const logs = []
   const prompts = {}
@@ -98,6 +104,9 @@ async function run({ source = baseSource(), riskFlags = [], uiFiles = [], design
       return typeof val === 'function' ? val(counts[l]) : val
     }
     if (l === 'source') return source
+    // What lib/read-config.py resolves from the SHIPPED .config/defaults.yaml when the project has
+    // no file of its own — so the default this suite asserts against is the default that ships.
+    if (l === 'config') return config === undefined ? DEFAULT_CONFIG : config
     if (l.startsWith('explore')) return exploreText(riskFlags, uiFiles)
     // Schema-less, like the explorers and the planner — its reply IS the section.
     if (l === 'ui-design') return design
@@ -397,10 +406,11 @@ test('REGRESSION: no JVM build routes to ONE general implementer, whatever the f
     assert.equal(optsBy['implement:general'].agentType, 'general-purpose')
     if (flags.hasBackend || flags.hasFrontend) assert.match(logText, /no JVM build tool — routing to ONE general-purpose implementer/)
   }
-  // The guard is on the build tool, NOT on the flags: a maven project still splits by area.
+  // The guard is on the build tool, NOT on the flags: a maven project still splits by area. Asked
+  // for on the claude provider, because that is the only one the two personas exist on.
   const jvm = await run({
     source: baseSource({ buildTool: 'maven', hasBackend: true, hasFrontend: true }),
-    review: OK_REVIEW, planfix: OK_FIX,
+    review: OK_REVIEW, planfix: OK_FIX, config: CLAUDE_CONFIG,
   })
   assert.equal(jvm.optsBy['implement:backend'].agentType, 'r:java-backend-developer')
   assert.equal(jvm.optsBy['implement:frontend'].agentType, 'r:htmx-thymeleaf-dev')
@@ -430,25 +440,90 @@ test('the planner reads THIS project, never the inside of a dependency', async (
   assert.match(prompts['planner'], /maven-deps MCP/)
 })
 
-test('implementers pin model+effort, so depth cannot depend on the calling session', async () => {
-  // SKILL.md invites callers (e.g. /r:gh-issues-fix) to run this script directly, which never loads
-  // the skill frontmatter — so anything left inherited here silently varies by entry point.
+test('the claude provider carries the configured model+effort, never the session\'s', async () => {
+  // SKILL.md invites callers (e.g. /r:issues-fix) to run this script directly, which never loads
+  // the skill frontmatter — so anything left inherited here silently varies by entry point. The
+  // config replaces the pin; what must not come back is an implementer with no model or effort.
   const both = await run({
     source: baseSource({ hasBackend: true, hasFrontend: true }),
-    review: OK_REVIEW, planfix: OK_FIX,
+    review: OK_REVIEW, planfix: OK_FIX, config: CLAUDE_CONFIG,
   })
   for (const l of ['implement:backend', 'implement:frontend']) {
-    assert.equal(both.optsBy[l].effort, 'medium', `${l} must pin effort`)
-    assert.equal(both.optsBy[l].model, 'opus', `${l} must pin model`)
+    assert.equal(both.optsBy[l].effort, 'high', `${l} must carry the configured effort`)
+    assert.equal(both.optsBy[l].model, 'sonnet', `${l} must carry the configured model`)
   }
 
   const fallback = await run({
     source: baseSource({ hasBackend: false, hasFrontend: false }),
-    review: OK_REVIEW, planfix: OK_FIX,
+    review: OK_REVIEW, planfix: OK_FIX, config: CLAUDE_CONFIG,
   })
   assert.equal(fallback.optsBy['implement:general'].agentType, 'general-purpose')
-  assert.equal(fallback.optsBy['implement:general'].effort, 'medium')
-  assert.equal(fallback.optsBy['implement:general'].model, 'opus')
+  assert.equal(fallback.optsBy['implement:general'].effort, 'high')
+  assert.equal(fallback.optsBy['implement:general'].model, 'sonnet')
+})
+
+test('a dead config agent falls back to the built-in row rather than to nothing', async () => {
+  // The reader itself never fails — it substitutes and names what it substituted — so the only way
+  // to reach this branch is an agent that died. An implementer dispatched with no model and no
+  // effort is the failure that matters: it silently inherits the entry point, which is exactly what
+  // pinning existed to prevent, and nothing in the run says so.
+  for (const dead of [null, THROW]) {
+    const { optsBy, logText } = await run({
+      source: baseSource({ hasBackend: true, hasFrontend: false }),
+      review: OK_REVIEW, planfix: OK_FIX, overrides: { config: dead },
+    })
+    assert.equal(optsBy['implement:backend'].model, 'opus')
+    assert.equal(optsBy['implement:backend'].effort, 'medium')
+    assert.equal(optsBy['implement:backend'].agentType, 'r:java-backend-developer')
+    assert.match(logText, /the config could not be read/)
+  }
+})
+
+test('the config is read once, cheaply, and every substitution it made is logged', async () => {
+  // A note nobody prints is a typo'd setting that reads exactly like a working one.
+  const { counts, optsBy, prompts, logText } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    config: { ...DEFAULT_CONFIG, notes: ['steps.implement.effort: \'ultra\' is not one of low|medium|high|xhigh|max — using low'] },
+  })
+  assert.equal(counts['config'], 1, 'the config is resolved once per run')
+  assert.equal(optsBy['config'].model, 'haiku', 'reading a file back is not a judgement call')
+  assert.equal(optsBy['config'].effort, 'low')
+  assert.match(prompts['config'], /\/pack\/lib\/read-config\.py/)
+  assert.doesNotMatch(prompts['config'], /CLAUDE_PLUGIN_ROOT/)
+  assert.match(logText, /config — steps\.implement\.effort/)
+  assert.match(logText, /implementers — codex gpt5\.6-sol \/ low/)
+})
+
+test('the codex provider drives the CLI and keeps the slices, not the personas', async () => {
+  // The slices still divide the work — two writers on one file is what they prevent — but the
+  // Claude personas carry their own model and describe an agent that edits directly, and here the
+  // subagent only drives the CLI. Its own tier stays CODEX_RUN's: it shells out and collects.
+  const { optsBy, prompts } = await run({
+    source: baseSource({ buildTool: 'maven', hasBackend: true, hasFrontend: true }),
+    review: OK_REVIEW, planfix: OK_FIX,
+  })
+  for (const l of ['implement:backend', 'implement:frontend']) {
+    assert.equal(optsBy[l].agentType, 'general-purpose', `${l} must not keep a Claude persona`)
+    assert.equal(optsBy[l].model, undefined, `${l} must not name a Claude model on codex`)
+    assert.equal(optsBy[l].effort, 'medium', `${l} keeps the driver's own tier`)
+    assert.match(prompts[l], /codex-companion\.mjs/)
+    assert.match(prompts[l], /--model gpt5\.6-sol --effort low --write/)
+    // The collect protocol is the whole point: implementers average 963s against a ~600s cap.
+    assert.match(prompts[l], /poll the worker PID/)
+    assert.match(prompts[l], /jobs\/\*\.json/)
+    assert.match(prompts[l], /Never poll for output-size/)
+    // A fabricated success would have the review certify code nobody wrote.
+    assert.match(prompts[l], /set blockedOn/)
+    // The brief still reaches Codex whole — the plan, the criteria and the TDD rules.
+    assert.match(prompts[l], /READ THAT FILE FIRST/)
+    assert.match(prompts[l], /WRITE THE TESTS FIRST/)
+  }
+  // And the Claude provider must carry none of it.
+  const claude = await run({
+    source: baseSource({ buildTool: 'maven', hasBackend: true, hasFrontend: false }),
+    review: OK_REVIEW, planfix: OK_FIX, config: CLAUDE_CONFIG,
+  })
+  assert.doesNotMatch(claude.prompts['implement:backend'], /codex-companion/)
 })
 
 test('the scribe steps pin sonnet, so a copy job never costs the session model', async () => {
@@ -1812,7 +1887,6 @@ test('every judging track still keeps its own model and depth', async () => {
   const { optsBy } = await run({ review: OK_REVIEW, planfix: OK_FIX, verdict: MIXED })
   assert.equal(optsBy['planner'].model, 'fable')
   assert.equal(optsBy['planner'].effort, 'high')
-  assert.equal(optsBy['implement:backend'].model, 'opus')
   for (const l of ['source', 'judge#1.1:coverage', 'plan-fix#1']) {
     assert.equal(optsBy[l].model, undefined, `${l} classifies — it must not be down-tiered`)
   }

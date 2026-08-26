@@ -66,7 +66,7 @@ printf '%sr skill pack%s %s→%s %s\n' "$B" "$R" "$DIM" "$R" "$DEST"
 
 # The payload only. docs/, tools/, validate.sh and .git stay in the repo — the
 # install needs what Claude Code loads, nothing else.
-PAYLOAD=(.claude-plugin skills agents hooks lib check-prereqs.sh)
+PAYLOAD=(.claude-plugin .config skills agents hooks lib check-prereqs.sh)
 
 step "copy the pack"
 if [[ -e $DEST && ! -f $DEST/.claude-plugin/plugin.json ]]; then

@@ -369,6 +369,23 @@ const BUILD = {
     preExistingFailures: { type: 'string' }, // already red on base -> NEVER ours to fix
   },
 }
+// What lib/read-config.py resolved for the implementers. `notes` is the load-bearing field: it
+// carries every substitution the reader made — a key outside its enum, a typo nobody reads, a
+// `provider: codex` on a machine with no Codex plugin — and this script logs every line of it.
+// Without that a typo'd setting is indistinguishable from a working one, which is exactly the
+// failure a config file invites.
+const CONFIG = {
+  type: 'object', additionalProperties: false,
+  required: ['provider', 'model', 'effort'],
+  properties: {
+    step: { type: 'string' },
+    provider: { type: 'string', enum: ['claude', 'codex'] },
+    model: { type: 'string' },
+    effort: { type: 'string', enum: ['low', 'medium', 'high', 'xhigh', 'max'] },
+    sources: { type: 'array', items: { type: 'string' } },
+    notes: { type: 'array', items: { type: 'string' } },
+  },
+}
 
 // --------------------------------------------------------------- helpers -----
 // The subagent-flow contract in code: a null return means the agent died or was
@@ -475,24 +492,34 @@ const PLAN_LIGHT_RUN = { model: 'opus', effort: 'high' }
 // whole change, and this document is reviewed downstream (by Codex at full tier, and by the
 // review's visual half against the rendered pages) rather than being the last word.
 const DESIGN_RUN = { model: 'opus', effort: 'high' }
-// The implementers' depth is PINNED here rather than inherited from the session — unpinned, the
-// same workflow writes code at `high` when entered through /r:task-run (whose frontmatter sets it)
-// and at whatever the caller happened to be running when the script is invoked directly, which
-// SKILL.md explicitly invites callers like /r:issues-fix to do. One depth, whatever the entry.
+// The implementers' provider, model and depth come from `steps.implement` in the config — never
+// inherited from the session. Unpinned, the same workflow writes code at `high` when entered
+// through /r:task-run (whose frontmatter sets it) and at whatever the caller happened to be running
+// when the script is invoked directly, which SKILL.md explicitly invites callers like /r:issues-fix
+// to do. One resolved row, whatever the entry — and it is resolved INSIDE this script rather than
+// in SKILL.md precisely because those callers come in by scriptPath and would skip a markdown read.
 //
-// `medium` is the pinned depth, and it is a claim UNDER MEASUREMENT rather than a settled default:
+// The shipped default is codex/gpt5.6-sol/low; `medium` here is what a run falls back to, and the
+// whole question of depth is a claim UNDER MEASUREMENT rather than a settled default:
 // these agents follow a plan built at fable/high, challenged by Codex and re-read afterwards by
 // /r:task-review, so the argument is that the judgement left to them is bounded. What the plan
 // cannot do for them is real too — observing red-before-green, deciding a [RED] test that passes
 // is a weak test rather than a formality, and setting blockedOn when the plan is wrong — so the
 // question is empirical. `implement depth` in lib/skill-stats.py answers it: it buckets every
 // implement run by the effort mined off its items and prints what the review found afterwards
-// beside it. The baseline it is measured against is `high`: 68 implementer agents over 41 runs,
-// 1.46B tokens, 1047s each — the pack's most expensive step. READ THAT TABLE before moving this
-// either way; a cheaper implementer that pushes work into fix-correctness and end-verify-fix has
-// moved cost rather than saved it. The model is named here too — the two specialized types already
-// declare opus, so this only lifts the `general` fallback to match them rather than letting it
-// inherit the session's model.
+// beside it. The baseline it is measured against is `high`: 2.11 correctness and 3.48 readability
+// fixes per paired review, at 20.9M tokens and 1022s per implementer agent — the pack's most
+// expensive step. READ THAT TABLE before moving the default either way; a cheaper implementer that
+// pushes work into fix-correctness and end-verify-fix has moved cost rather than saved it. The
+// table cannot compare PROVIDERS yet, which is why the resolved row is written into the stats
+// payload: after a handful of codex runs it can bucket by provider instead of guessing.
+//
+// These two values are the FALLBACK: what the run uses when the config agent could not be reached
+// at all. lib/read-config.py holds the same row for the case where it CAN be reached but the file
+// cannot, including a `provider: codex` on a machine with no Codex plugin — that lands here rather
+// than dispatching an agent that dies. The model is named rather than inherited because the two
+// specialized Claude types already declare opus, so this only lifts the `general` fallback to
+// match them.
 const IMPL_RUN = { model: 'opus', effort: 'medium' }
 // Triage is SPLIT, not one agent, and the two halves want different depths. Collapsed into one
 // agent at the inherited tier that judges every finding and rewrites the plan, it measures 11
@@ -746,6 +773,32 @@ let profile = forcedProfile || (TIERS.includes(src.profile) ? src.profile : 'ful
 let profileEscalated = false
 const planPath = src.planPath || `.task-plans/${src.slug}.md`
 log(`run-task-implement: ${src.kind} "${src.slug}" — tier ${profile} (${forcedProfile ? 'forced' : 'classified'}: ${src.profileReason || 'no reason given'}), base ${src.base}, branch ${src.branch}`)
+
+// --- the implementers' settings ----------------------------------------------
+// Read here rather than in SKILL.md because /r:issues-fix and /r:plan-run invoke this script by
+// scriptPath, and a config read in the markdown would silently skip them. Workflow scripts have no
+// filesystem access, so the file is read the way every other file in this pipeline is: an agent
+// runs the reader and hands back its JSON. The reader itself never fails — it substitutes and says
+// what it substituted — so the only thing that reaches this `null` branch is a dead agent.
+const implCfg = await agent(
+  `Resolve the pack's implementer settings. Run exactly this from the repo root and return the
+   object it prints on stdout, VERBATIM — do not re-derive, re-order or "correct" any field:
+
+     python3 "${PACK}/lib/read-config.py" --step implement --pack "${PACK}"
+
+   The script always exits 0 by design; a value it could not read comes back as the built-in
+   default with a line in \`notes\` saying so. Return \`notes\` even when it is empty.`,
+  { label: 'config', phase: 'Source', schema: CONFIG, ...GP, ...SINK }).catch(() => null)
+
+for (const note of (implCfg && implCfg.notes) || []) log(`run-task-implement: config — ${note}`)
+if (!implCfg) log(`run-task-implement: the config could not be read — implementers fall back to ${IMPL_RUN.model}/${IMPL_RUN.effort} on claude`)
+const implProvider = (implCfg && implCfg.provider) || 'claude'
+// Under `claude` these are the subagent's own model and depth; under `codex` they are --model and
+// --effort on the CLI call and the subagent that shells out keeps CODEX_RUN's own tier.
+const implRun = implCfg
+  ? (implProvider === 'codex' ? { ...CODEX_RUN } : { model: implCfg.model, effort: implCfg.effort })
+  : { ...IMPL_RUN }
+log(`run-task-implement: implementers — ${implProvider}${implCfg ? ` ${implCfg.model} / ${implCfg.effort}` : ` ${IMPL_RUN.model} / ${IMPL_RUN.effort}`}${(implCfg && implCfg.sources || []).length ? ` (from ${implCfg.sources.join(', ')})` : ' (built-in)'}`)
 
 // --- Phase 1: map the code BEFORE planning it --------------------------------
 // Unconditional, in every tier. A planner that has not opened the code anchors its plan to
@@ -1258,6 +1311,13 @@ const recordRun = async ({ stopped = '', buildGreen = 'n/a' } = {}) => {
       uiVisualChange,
       designRan: !!designSection,
       buildGreen,
+      // The resolved implementer row. `implement depth` in lib/skill-stats.py mines effort off the
+      // items, which cannot tell a codex run from a claude one — the items record the SUBAGENT's
+      // tier, and on codex that is the driver's, not the writer's. Recording the row here is what
+      // lets the table bucket by provider rather than averaging two different writers together.
+      implProvider,
+      implModel: implCfg ? implCfg.model : IMPL_RUN.model,
+      implEffort: implCfg ? implCfg.effort : IMPL_RUN.effort,
       planReviewRan: !!planReview.ran,
       planApplied: planReview.applied.length,
       planDropped: planReview.dropped.length,
@@ -1941,6 +2001,10 @@ if (src.buildTool === 'none') {
   if (src.hasFrontend) areas.push({ label: 'frontend', agentType: 'r:htmx-thymeleaf-dev', slice: 'the templates, HTMX wiring, and frontend assets' })
   if (!areas.length) areas.push({ label: 'general', agentType: 'general-purpose', slice: 'everything the plan calls for' })
 }
+// On the codex provider the slices stay — they still divide the work and keep two writers off the
+// same files — but the persona does not: the Claude implementer types would carry their own model
+// and their prompts describe an agent that edits directly, and here the agent only drives the CLI.
+if (implProvider === 'codex') for (const a of areas) a.agentType = 'general-purpose'
 
 // An implementer's self-check only has to prove its slice COMPILES and that ITS OWN tests pass.
 // Phase 4 runs the certifying build the moment every implementer returns, so a full build here is
@@ -1960,7 +2024,51 @@ const selfCheckClause = src.buildTool === 'maven'
 const noFullBuild = src.buildTool === 'none' ? ''
   : ' Do NOT run the full build or the whole test suite: the pipeline builds and runs everything the moment you return, and that is what proves your slice is green.'
 
-const implBrief = (a) => `Implement your slice of the plan at ${planPath}. READ THAT FILE FIRST — it holds
+// On the codex provider the subagent does not write the code — it drives the Codex CLI, which
+// does, and then reports what landed. Same shape as the codex-plan-review step above, and for the
+// same reason: `codex:codex-rescue` auto-loads codex-cli-runtime, becomes a one-shot forwarder that
+// cannot poll, and reports failure on every run that outlives the ~600s Bash cap. Implementers
+// average 963s, so that cap is the normal case here rather than the exception — which makes the
+// background-and-collect protocol the whole point of this preamble, not a fallback within it.
+const codexPreamble = (a) => `YOU ARE NOT WRITING THIS CODE YOURSELF. Drive the Codex CLI and let IT make the edits, then
+   report what landed. Call the companion DIRECTLY with Bash — do NOT invoke the adversarial-review
+   skill or its run.sh, which review a diff and would re-enter the wrapper that launches Codex:
+     C="$HOME/.claude/plugins/marketplaces/openai-codex/plugins/codex/scripts/codex-companion.mjs"
+     [ -f "$C" ] || C="$(ls -1d "$HOME"/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs | sort -V | tail -n1)"
+     node "$C" task --model ${implCfg.model} --effort ${implCfg.effort} --write "<the full brief below, verbatim>"
+   Writes are ENABLED here — unlike the plan review, this run edits the repo. Pass the ENTIRE brief
+   below through to Codex, including the plan path, the acceptance criteria and the TDD rules: a
+   summarized brief is how an implementer ends up building its own reinterpretation of the plan.
+
+   THIS RUN WILL ALMOST CERTAINLY OUTLIVE THE ~600s Bash CAP AND MOVE TO THE BACKGROUND. That is
+   expected, not a failure, and giving up there is the single most common way this step reports a
+   false block. Collect it: poll the worker PID, then read the job record's "rendered" field under
+   ~/.claude/plugins/data/codex-openai-codex/state/*/jobs/*.json. Never poll for output-size
+   stability — the log goes quiet for minutes mid-reasoning.
+
+   When Codex finishes, VERIFY against the working tree rather than trusting its summary: read
+   \`git status --porcelain\` and \`git diff\` for the files in your slice, and fill filesChanged and
+   testEvidence from what you can SEE there. If Codex never ran, the CLI is missing, or you could
+   not collect the finished run, set blockedOn saying so — a fabricated success here is worse than
+   an honest halt, because the review that follows would certify code nobody wrote.
+
+   `
+// The build fixer runs on the same provider as the implementers — a codex run whose red build is
+// repaired by a Claude agent has two writers on one change, which is the thing the slices exist to
+// prevent. Shorter than the implementers' preamble because the job is bounded: the failures are
+// named, so this is far less likely to reach the background cap.
+const codexFixClause = `Drive the Codex CLI for this fix rather than editing yourself — it wrote this code:
+     C="$HOME/.claude/plugins/marketplaces/openai-codex/plugins/codex/scripts/codex-companion.mjs"
+     [ -f "$C" ] || C="$(ls -1d "$HOME"/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs | sort -V | tail -n1)"
+     node "$C" task --model ${implCfg ? implCfg.model : ''} --effort ${implCfg ? implCfg.effort : ''} --write "<everything below, verbatim>"
+   If it outlives the ~600s Bash cap, collect it the same way: poll the worker PID, then read
+   "rendered" from ~/.claude/plugins/data/codex-openai-codex/state/*/jobs/*.json. If Codex cannot
+   be reached at all, say so plainly — do NOT quietly fix the build yourself, because the next
+   build is what decides whether this loop stops and a silent substitution hides which writer
+   produced the code the review is about to certify.
+
+   `
+const implBrief = (a) => `${implProvider === 'codex' ? codexPreamble(a) : ''}Implement your slice of the plan at ${planPath}. READ THAT FILE FIRST — it holds
    the Context, the acceptance criteria, and the TDD test plan, so you build what the plan intends
    rather than your own reinterpretation.
 
@@ -2002,7 +2110,7 @@ const implBrief = (a) => `Implement your slice of the plan at ${planPath}. READ 
 
 const impls = await parallel(areas.map((a) => () =>
   reliable(`implement:${a.label}`, 'Implement', () => agent(
-    implBrief(a), { label: `implement:${a.label}`, phase: 'Implement', schema: IMPL, agentType: a.agentType, ...IMPL_RUN }))))
+    implBrief(a), { label: `implement:${a.label}`, phase: 'Implement', schema: IMPL, agentType: a.agentType, ...implRun }))))
 
 // A blocked slice HALTS the run, and that stays true: half a plan implemented is not a finished
 // task, and the caller has to re-plan rather than build on it. What changes is that the halt no
@@ -2070,16 +2178,18 @@ if (src.buildTool !== 'none') {
                                                    branch: onBranch, base: src.base }, buildGreen)
     }
     if (i < 3) await agent(
-      `The build is red from failures THIS change caused. Fix ONLY these, surgically, and do NOT
+      `${implProvider === 'codex' ? codexFixClause : ''}The build is red from failures THIS change caused. Fix ONLY these, surgically, and do NOT
        touch any pre-existing or out-of-scope test or class to force a pass:
        ${inScope}
        Intent (do not undo it): ${src.taskIntent}
        Self-check by COMPILING, not by building: \`${src.buildTool === 'maven' ? 'mvn -q test-compile' : './gradlew -q testClasses'}\` plus the one
        test you touched. Do not run the full suite — this loop rebuilds and re-runs it the moment
        you return, and that is what proves the failures are gone.`,
-      // IMPL_RUN for the same reason the implementers carry it: this is the same domain agent,
-      // editing the code they just wrote. Left unpinned it took its depth from the entry point.
-      { label: `build-fix#${i}`, phase: 'Build', agentType: areas[0].agentType, ...IMPL_RUN })
+      // The resolved implementer settings, for the same reason the implementers carry them: this
+      // is the same agent on the same provider, editing the code it just wrote. Left unpinned it
+      // took its depth from the entry point, and left on Claude it would quietly hand a codex run's
+      // code to a different writer.
+      { label: `build-fix#${i}`, phase: 'Build', agentType: areas[0].agentType, ...implRun })
   }
   if (!buildGreen) {
     log('run-task-implement: in-scope build still RED after 3 attempts — stopping and surfacing to the user')

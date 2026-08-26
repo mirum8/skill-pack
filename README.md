@@ -126,7 +126,7 @@ no review at all.
 | tool | for | absent |
 |---|---|---|
 | `gh` (authenticated) | `task-run` issue sources and PRs; `issues-fix` against GitHub | GitHub stops being one of the sources |
-| `codex` plugin | `code-adversarial` | the step is recorded as **skipped** and named |
+| `codex` plugin | `code-adversarial`, and the **default implementer** (see below) | the review step is recorded as **skipped** and named; the implementers fall back to Claude and say so |
 | `tmux` | driving a **terminal** app in a real pty — `test-app-create`'s TUI track and `task-review` Step 8 on a `tui` surface | the TUI checks are recorded as **not run** and named, and that track is reported blocked rather than clean; web and command-line projects are unaffected |
 | `cmux` | `--cmux` on `plan-run` and `issues-fix` — a worktree and a watchable session per concurrent unit | the flag stops and names it; both skills run their serial path and lose no coverage, only wall-clock |
 
@@ -168,6 +168,40 @@ Known-good versions, read 2026-07-30 — recorded as tested-against, not as mini
 floors, because no lower bound was tested: `pmd` 7.26.0 · `spotbugs` 4.10.2 ·
 `semgrep` 1.168.0 · `gh` 2.96.0 · `codex-cli` 0.146.0 · `node` v26.4.0 ·
 `agent-browser` 0.26.0 · `tmux` 3.7b · `cmux` 0.64.22 · Claude Code 2.1.220.
+
+## Configuring it
+
+Two files, read in this order, each key resolved independently:
+
+| file | what it is |
+|---|---|
+| `<project>/.config/skill-pack.yaml` | your edit point — per project, outside anything the installer touches |
+| `~/.claude/skills/r/.config/defaults.yaml` | the shipped defaults; **`./install.sh` rewrites this on every run**, so edit the project file instead |
+
+Naming one key inherits the rest, so a project that only wants a different depth writes only that:
+
+```yaml
+steps:
+  implement:
+    provider: claude      # claude | codex
+    model: opus           # codex: passed to the CLI; claude: fable|opus|sonnet|haiku
+    effort: high          # low | medium | high | xhigh | max
+```
+
+`model` and `effort` belong to the **selected provider** — under `claude` they are the subagent's
+own model and reasoning effort, under `codex` they become `--model` and `--effort` on the CLI call.
+The shipped default is `codex` / `gpt5.6-sol` / `low`.
+
+Nothing here fails a run. A missing file, a malformed line, an unknown key or a value outside its
+enum resolves to the built-in default and the run **logs which key was substituted and why** — a
+config that quietly does nothing is worse than one that says so. `provider: codex` on a machine
+with no Codex plugin falls back to Claude the same way, whole row at once, and names it.
+
+Read it yourself with:
+
+```sh
+python3 ~/.claude/skills/r/lib/read-config.py --step implement
+```
 
 ## Maintaining it
 
