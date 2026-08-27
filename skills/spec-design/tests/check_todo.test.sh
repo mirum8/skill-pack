@@ -162,6 +162,43 @@ EOF
 silent "every leaf ticks the plan, so it is excluded" "cannot run concurrently"
 
 echo
+echo "== generated artefacts are not a collision, but source beside them still is =="
+plan <<'EOF'
+### Phase 1 — A
+**Implements:** S
+**Depends on:** —
+**Files:** `a.java` (new) · `src/testdata/fix.json` · `ui/testdata/help.golden` · `.claude/skills/test-app/e2e/frames/00.txt`
+- [ ] does `a`
+**Done when:** `mvn test` is green.
+
+### Phase 2 — B
+**Implements:** S
+**Depends on:** —
+**Files:** `b.java` (new) · `src/testdata/fix.json` · `ui/testdata/help.golden` · `.claude/skills/test-app/e2e/frames/00.txt`
+- [ ] does `b`
+**Done when:** `mvn test` is green.
+EOF
+silent "a shared capture, golden and testdata fixture are not a collision" "cannot run concurrently"
+
+plan <<'EOF'
+### Phase 1 — A
+**Implements:** S
+**Depends on:** —
+**Files:** `shared.java` (modify) · `.claude/skills/test-app/e2e/frames/00.txt`
+- [ ] does `a`
+**Done when:** `mvn test` is green.
+
+### Phase 2 — B
+**Implements:** S
+**Depends on:** —
+**Files:** `shared.java` (modify) · `.claude/skills/test-app/e2e/frames/00.txt`
+- [ ] does `b`
+**Done when:** `mvn test` is green.
+EOF
+says  "the source file among them is still reported" "shared\.java"
+slice "and --slice refuses that pair"                "1,2" 1
+
+echo
 echo "== a leaf item that defers outside its block =="
 plan <<'EOF'
 ### Phase 1 — A

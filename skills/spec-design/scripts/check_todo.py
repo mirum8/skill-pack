@@ -91,6 +91,25 @@ def phase_files(block):
     return {f for f in re.findall(r"`([^`\s]+\.[A-Za-z0-9]{1,6})`", m.group(1))}
 
 
+def comparable(path):
+    """Is this path worth comparing two phases over?
+
+    A collision check answers "would these two edit the same thing", and a generated artefact
+    answers it wrongly in both directions: a captured terminal frame or a golden file is rewritten
+    wholesale by whichever run touched it last, so two phases sharing one have no conflict to
+    resolve, while the volume of them buries the handful of source files that do. One project
+    carries 140 captures under `.claude/`, which turn an 11-file phase into a 48-file one.
+
+    Excluded by shape, never by a whitelist of source extensions. A whitelist silently drops a
+    language nobody listed, and a dropped file is a collision this check does not report -- it
+    would fail open, which is the one direction a safety check may not fail.
+    """
+    parts = Path(path).parts
+    return not (path.endswith(".golden")
+                or "testdata" in parts
+                or any(p == ".claude" for p in parts))
+
+
 def compute_waves(deps):
     """wave(p) = 0 with no dependency, else 1 + max(wave(d)). Longest-path layering, so a leaf
     never shares a wave with anything it depends on. Returns (waves, cycle_members)."""
@@ -412,7 +431,8 @@ def main():
         members = sorted(by_wave[w])
         for i, a in enumerate(members):
             for b_ in members[i + 1:]:
-                shared = {f for f in files_of[a] & files_of[b_] if Path(f).name != plan_name}
+                shared = {f for f in files_of[a] & files_of[b_]
+                          if Path(f).name != plan_name and comparable(f)}
                 if shared:
                     out(f"Phase {a} and Phase {b_} are both in wave {w} but touch {', '.join(sorted(shared))} "
                         f"— they cannot run concurrently. Add a 'Depends on' edge between them.")
@@ -439,7 +459,8 @@ def main():
             for b_ in sorted(slice_req)[i + 1:]:
                 if a not in known or b_ not in known:
                     continue
-                shared = {f for f in files_of[a] & files_of[b_] if Path(f).name != todo_p.name}
+                shared = {f for f in files_of[a] & files_of[b_]
+                          if Path(f).name != todo_p.name and comparable(f)}
                 if shared:
                     unsafe.append(f"Phase {a} and Phase {b_} both touch {', '.join(sorted(shared))}")
         if unsafe:
