@@ -43,13 +43,14 @@ HASCODEX="$TMP/hascodex-home"
 mkdir -p "$HASCODEX/.claude/plugins/marketplaces/openai-codex/plugins/codex/scripts"
 : > "$HASCODEX/.claude/plugins/marketplaces/openai-codex/plugins/codex/scripts/codex-companion.mjs"
 
-# Run the reader with a chosen HOME, pack root and repo root, and pull one field out.
-read_cfg() {  # <home> <pack> <repo> <jq-ish key>
-  HOME="$1" python3 - "$2" "$3" "$4" <<'PY'
+# Run the reader with a chosen HOME, pack root and repo root, and pull one field out. The step is
+# optional and defaults to `implement`, which most of the cases below are written against.
+read_cfg() {  # <home> <pack> <repo> <jq-ish key> [step]
+  HOME="$1" python3 - "$2" "$3" "$4" "${5:-implement}" <<'PY'
 import importlib.util, json, sys
 spec = importlib.util.spec_from_file_location("rc", "lib/read-config.py")
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-out = m.resolve("implement", repo=sys.argv[2], pack=sys.argv[1])
+out = m.resolve(sys.argv[4], repo=sys.argv[2], pack=sys.argv[1])
 v = out[sys.argv[3]]
 print(json.dumps(v) if isinstance(v, list) else v)
 PY
@@ -276,6 +277,62 @@ ok "an unknown step is named, not guessed"  "$(field "$NOCODEX" "$PACK" "$FANOUT
 has "and says which steps exist"            "$(field_err "$NOCODEX" "$PACK" "$FANOUT" nosuchstep maxUnits)" "known steps are"
 has "an unknown field is named"             "$(field_err "$NOCODEX" "$PACK" "$FANOUT" fanout nosuchfield)" "no such setting"
 
+# --- steps.fix, the /r:task-review fixers -----------------------------------
+# Same five keys and the same machinery as implement, so what is worth testing is that the row is
+# actually WIRED — a step present in SPEC but absent from a caller's read resolves to the built-in
+# values and looks, from the outside, exactly like a setting that works.
+FIXPACK="$TMP/fixpack"
+mkcfg "$FIXPACK/.config/defaults.yaml" <<'YAML'
+steps:
+  implement:
+    provider: claude
+    model: opus
+    effort: medium
+  fix:
+    provider: codex
+    model: gpt5.6-sol
+    effort: low
+    wrapperModel: sonnet
+    wrapperEffort: medium
+YAML
+ok "fix: the shipped row is read"        "$(read_cfg "$HASCODEX" "$FIXPACK" "$EMPTY" model fix)"    gpt5.6-sol
+ok "fix: and its effort"                 "$(read_cfg "$HASCODEX" "$FIXPACK" "$EMPTY" effort fix)"   low
+ok "fix: and its wrapper"                "$(read_cfg "$HASCODEX" "$FIXPACK" "$EMPTY" wrapperModel fix)" sonnet
+ok "fix: no notes on a clean read"       "$(read_cfg "$HASCODEX" "$FIXPACK" "$EMPTY" notes fix)"    '[]'
+# The two steps are independent rows, and the shipped file deliberately puts them on different
+# providers. Reading one must never pick up the other's values.
+ok "fix and implement do not bleed"      "$(read_cfg "$HASCODEX" "$FIXPACK" "$EMPTY" provider implement)" claude
+ok "and the implement model stays put"   "$(read_cfg "$HASCODEX" "$FIXPACK" "$EMPTY" model implement)"    opus
+
+FIXREPO="$TMP/fixrepo"
+mkcfg "$FIXREPO/.config/skill-pack.yaml" <<'YAML'
+steps:
+  fix:
+    effort: high
+YAML
+ok "fix: a project overrides one key"    "$(read_cfg "$HASCODEX" "$FIXPACK" "$FIXREPO" effort fix)"   high
+ok "fix: and inherits the rest"          "$(read_cfg "$HASCODEX" "$FIXPACK" "$FIXREPO" model fix)"    gpt5.6-sol
+ok "fix: including the provider"         "$(read_cfg "$HASCODEX" "$FIXPACK" "$FIXREPO" provider fix)" codex
+
+# codex asked for on a machine with no plugin: the WHOLE writer row moves, because a codex model
+# name means nothing to a Claude subagent and carrying `low` across would re-tier it by accident.
+ok "fix: no plugin, provider falls back" "$(read_cfg "$NOCODEX" "$FIXPACK" "$EMPTY" provider fix)" claude
+ok "fix: and the model with it"          "$(read_cfg "$NOCODEX" "$FIXPACK" "$EMPTY" model fix)"    opus
+ok "fix: and the effort with it"         "$(read_cfg "$NOCODEX" "$FIXPACK" "$EMPTY" effort fix)"   medium
+has "fix: the substitution is named"     "$(read_cfg "$NOCODEX" "$FIXPACK" "$EMPTY" notes fix)"    "steps.fix.provider"
+
+FIXTYPO="$TMP/fixtypo"
+mkcfg "$FIXTYPO/.config/skill-pack.yaml" <<'YAML'
+steps:
+  fix:
+    modell: haiku
+    effort: ultra
+YAML
+ok  "fix: a typo'd key is ignored"       "$(read_cfg "$HASCODEX" "$FIXPACK" "$FIXTYPO" model fix)"  gpt5.6-sol
+has "fix: and named"                     "$(read_cfg "$HASCODEX" "$FIXPACK" "$FIXTYPO" notes fix)"  "steps.fix.modell"
+ok  "fix: a bad effort falls back"       "$(read_cfg "$HASCODEX" "$FIXPACK" "$FIXTYPO" effort fix)" medium
+has "fix: and the key is named"          "$(read_cfg "$HASCODEX" "$FIXPACK" "$FIXTYPO" notes fix)"  "steps.fix.effort"
+
 # --- the exit-0 promise -----------------------------------------------------
 for dir in "$EMPTY" "$BROKEN" "$BADENUM" "$UNKNOWN" "$CODEX"; do
   HOME="$NOCODEX" python3 "$READER" --pack "$PACK" --repo "$dir" >/dev/null 2>&1
@@ -303,6 +360,16 @@ steps:
 YAML
 python3 "$READER" --check "$TMP/badfanout/.config/defaults.yaml" >/dev/null 2>&1
 ok "--check rejects a bad cap in a step it is not asked about" "$?" 1
+mkcfg "$TMP/badfix/.config/defaults.yaml" <<'YAML'
+steps:
+  implement:
+    provider: claude
+  fix:
+    provider: claude
+    model: gpt5.6-sol
+YAML
+python3 "$READER" --check "$TMP/badfix/.config/defaults.yaml" >/dev/null 2>&1
+ok "--check rejects a codex model under a claude fix row" "$?" 1
 python3 "$READER" --check "$TMP/no-such-file.yaml" >/dev/null 2>&1
 ok "--check rejects a missing file" "$?" 1
 # The gate that matters: the file this pack actually ships.

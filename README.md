@@ -126,7 +126,7 @@ no review at all.
 | tool | for | absent |
 |---|---|---|
 | `gh` (authenticated) | `task-run` issue sources and PRs; `issues-fix` against GitHub | GitHub stops being one of the sources |
-| `codex` plugin | `code-adversarial`, and the **default implementer** (see below) | the review step is recorded as **skipped** and named; the implementers fall back to Claude and say so |
+| `codex` plugin | `code-adversarial`, and the **default fixer** in `task-review` (see below) | the review step is recorded as **skipped** and named; the fixers fall back to Claude and say so |
 | `tmux` | driving a **terminal** app in a real pty — `test-app-create`'s TUI track and `task-review` Step 8 on a `tui` surface | the TUI checks are recorded as **not run** and named, and that track is reported blocked rather than clean; web and command-line projects are unaffected |
 | `cmux` | `--cmux` on `plan-run` and `issues-fix` — a worktree and a watchable session per concurrent unit | the flag stops and names it; both skills run their serial path and lose no coverage, only wall-clock |
 
@@ -188,6 +188,10 @@ steps:
     effort: high          # low | medium | high | xhigh | max
     wrapperModel: sonnet  # codex only — the Claude subagent that DRIVES the CLI
     wrapperEffort: medium #   (not the writer; see below)
+  fix:                    # the three fixers in /r:task-review — same five keys
+    provider: codex
+    model: gpt5.6-sol
+    effort: low
   fanout:
     maxUnits: 3           # 1..16 — units /r:plan-run and /r:issues-fix keep live under --cmux
 ```
@@ -203,9 +207,15 @@ actually finished — which is why `wrapperEffort` is not the cheapest thing ava
 Three full implement+review pipelines is already the machine's limit, so raise it as a measurement
 rather than a guess; a value the reader rejects falls back to 3 and the run never goes uncapped.
 
+`steps.fix` governs `fix-correctness`, `end-verify-fix` and `ui-fix-minor` — not the readability
+refactor, which invokes `/r:code-refactor` and has nothing to hand a CLI. A fixer's brief is one
+finding at one file and line, so it is never given more depth than the implementer whose code it
+patches; the two rows are independent and nothing enforces that for you.
+
 `model` and `effort` belong to the **selected provider** — under `claude` they are the subagent's
 own model and reasoning effort, under `codex` they become `--model` and `--effort` on the CLI call.
-The shipped default is `codex` / `gpt5.6-sol` / `low`.
+The shipped defaults are `claude` / `opus` / `medium` for the implementers and
+`codex` / `gpt5.6-sol` / `low` for the fixers — Claude writes the change, Codex patches it.
 
 Nothing here fails a run. A missing file, a malformed line, an unknown key or a value outside its
 enum resolves to the built-in default and the run **logs which key was substituted and why** — a
@@ -216,6 +226,7 @@ Read it yourself with:
 
 ```sh
 python3 ~/.claude/skills/r/lib/read-config.py --step implement
+python3 ~/.claude/skills/r/lib/read-config.py --step fix
 ```
 
 ## Maintaining it

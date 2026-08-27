@@ -28,7 +28,7 @@ optionally quoted strings. No PyYAML dependency and one code path, so the behavi
 the behaviour in the field. Lists, multi-line scalars, anchors and flow style are not read; a line
 the parser cannot place becomes a note rather than a silent drop.
 
-Usage:  read-config.py [--step implement|fanout] [--repo DIR] [--pack DIR]
+Usage:  read-config.py [--step implement|fix|fanout] [--repo DIR] [--pack DIR]
         read-config.py --step fanout --field maxUnits     # one bare scalar, for shell callers
         read-config.py --check FILE
 """
@@ -48,9 +48,10 @@ CLAUDE_MODELS = ("fable", "opus", "sonnet", "haiku")
 
 # Every setting the pack reads, with what it falls back to. This table IS the vocabulary: a key
 # outside it is named and ignored rather than carried, so a typo cannot reach a caller looking like
-# a value. `implement`'s row is kept in step with IMPL_RUN in task-run-implement.workflow.js and
-# `fanout`'s with MAX_UNITS in plan-run/scripts/cmux-fanout.sh — those are the same values
-# expressed for the case where this script cannot be reached at all.
+# a value. `implement`'s row is kept in step with IMPL_RUN in task-run-implement.workflow.js,
+# `fix`'s with FIX_RUN in task-review.workflow.js and `fanout`'s with MAX_UNITS in
+# plan-run/scripts/cmux-fanout.sh — those are the same values expressed for the case where this
+# script cannot be reached at all.
 SPEC = {
     "implement": {
         "provider": {"default": "claude", "enum": PROVIDERS},
@@ -64,6 +65,27 @@ SPEC = {
         # and #55, and then reads the working tree to decide filesChanged, testEvidence and
         # blockedOn. `low` is the tempting mistake — a wrapper that gives up early does not save
         # 20s, it halts the run over work Codex actually finished.
+        "wrapperModel": {"default": "sonnet", "enum": CLAUDE_MODELS},
+        "wrapperEffort": {"default": "medium", "enum": EFFORTS},
+    },
+    # The three fixers in /r:task-review — fix-correctness, end-verify-fix, ui-fix-minor — which
+    # patch the code an implementer wrote. Same five keys and the same meanings; the readability
+    # refactor is NOT one of them, because it invokes the /r:code-refactor skill and a codex
+    # provider would have nothing to hand the CLI.
+    #
+    # A separate row rather than a read of `steps.implement`, because the two are allowed to
+    # differ and the shipped defaults do: the writer's brief is open-ended and the fixer's is one
+    # named finding at a file and a line, so they are worth costing apart. What that permits is
+    # also the thing to watch — a fixer running DEEPER than the implementer whose code it patches
+    # is depth spent on the wrong step. It is documented rather than clamped: task-review does not
+    # read the implement row, and a silent clamp would override a value the user can see in their
+    # own file.
+    "fix": {
+        "provider": {"default": "claude", "enum": PROVIDERS},
+        "model": {"default": "opus"},
+        "effort": {"default": "medium", "enum": EFFORTS},
+        # The wrapper, exactly as above: a Claude subagent driving the CLI, tuned apart from the
+        # writer because a cheap wrapper fails by halting the run over work Codex finished.
         "wrapperModel": {"default": "sonnet", "enum": CLAUDE_MODELS},
         "wrapperEffort": {"default": "medium", "enum": EFFORTS},
     },

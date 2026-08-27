@@ -226,16 +226,35 @@ stays that skill's store. Rules that are load-bearing:
   recorded fact. The table cannot yet compare **providers** — the mined effort is the *subagent's*,
   and on codex that is the driver's rather than the writer's — which is why the resolved row is
   written into the run payload as `implProvider`/`implModel`/`implEffort`. The shipped default is
-  codex/`gpt5.6-sol`/`low`, and it is the least-measured value in the pack: no Codex implementer
-  has run here, so treat it as under evaluation and read the table once it has rows under it.
+  claude/`opus`/`medium`, which is also `IMPL_RUN`: file and fallback agreeing means a run that
+  could not reach the config is indistinguishable from one that read it, rather than quietly
+  changing tiers. `medium` itself is the thin half of that table — 4 runs against `high`'s 42 —
+  so it is a direction under measurement, not a settled answer.
+- **The fixers are configured the same way, and deliberately not on the same provider.**
+  `steps.fix` governs the three fixers in `task-review` — `fix-correctness`, `end-verify-fix`,
+  `ui-fix-minor` — with the same five keys; `FIX_RUN` is their fallback. Not the readability
+  refactor, which invokes `/r:code-refactor` and would have nothing to hand a CLI. They are the
+  pack's second-largest write-side block (595M + 493M + 238M tokens), and the shipped row is
+  codex/`gpt5.6-sol`/`low` — the least-measured value in the pack, with no Codex fixer run yet.
+  Two consequences to hold onto. A fixer must never run **deeper** than the implementer whose code
+  it patches, and nothing enforces that across two independent rows — `task-review` does not read
+  `steps.implement`, and a silent clamp would override a value the user can see in their own file.
+  And the shipped pair means Claude writes the change while Codex patches it, which **inverts**
+  the one-writer rule rather than satisfying it; it is a trial with a reason (a fixer's brief is
+  one finding at one line, and a bad patch fails the build, then end-verify, then the next review),
+  not the rule being met. `fixProvider`/`fixModel`/`fixEffort` go into the review's payload so the
+  question can eventually be answered from rows rather than argued.
 - **On codex the writer and the wrapper are separate settings, because they fail differently.**
   `model`/`effort` reach the Codex CLI; `wrapperModel`/`wrapperEffort` (`sonnet`/`medium`, fallback
-  `IMPL_CODEX_RUN`) are the Claude subagent that drives it, collects a run past the ~600s Bash cap
-  and reads the working tree to report what landed. A cheap *writer* writes worse code, which the
-  review catches; a cheap *wrapper* gives up on the collect and halts the run over work Codex
-  actually finished, which nothing catches. `low` is therefore the tempting mistake, and the
-  wrapper carries its own constant rather than `CODEX_RUN` so tuning it cannot re-tier the plan
-  reviewer that shares the same shape.
+  `IMPL_CODEX_RUN` in `task-run`, `FIX_CODEX_RUN` in `task-review`) are the Claude subagent that
+  drives it, collects a run past the ~600s Bash cap and reads the working tree to report what
+  landed. A cheap *writer* writes worse code, which the review catches; a cheap *wrapper* gives up
+  on the collect and halts the run — or reports a fix Codex applied as unfixed — over work that was
+  actually finished, which nothing catches. `low` is therefore the tempting mistake, and each
+  wrapper carries its own constant rather than the pipeline's `CODEX_RUN` so tuning it cannot
+  re-tier the plan reviewer or the review tracks that share the same shape. On a fixer the wrapper
+  owns one more thing: the edits are Codex's, but a rebuild, a redeploy or a re-verify in the brief
+  dispatches other agents, so those stay the wrapper's own work.
 - **No fallback store.** A row the db rejects is lost. That is why inserts say
   `ON CONFLICT(<key>) DO NOTHING` and never `INSERT OR IGNORE`, which also swallows a `NOT NULL`
   violation — it hid exactly that bug once.
@@ -256,8 +275,9 @@ stays that skill's store. Rules that are load-bearing:
 
 **The config is the pack's one tunable surface.** `lib/read-config.py` resolves one step's settings
 from `<repo>/.config/skill-pack.yaml`, then `.config/defaults.yaml` in the pack, then a built-in row
-— key by key, so a project file naming `effort` inherits the model rather than resetting it. Today
-only `steps.implement` is read; the shape exists so later steps drop in as sibling keys. It sits in
+— key by key, so a project file naming `effort` inherits the model rather than resetting it.
+`steps.implement`, `steps.fix` and `steps.fanout` are read today; later steps drop in as sibling
+keys, and `--check` walks every one of them. It sits in
 `lib/` for the same reason the stats sink does: every skill will eventually read settings, and a
 reader owned by one skill stays that skill's reader. Rules that are load-bearing:
 
@@ -276,8 +296,9 @@ reader owned by one skill stays that skill's reader. Rules that are load-bearing
   accident. All three substitutions are named.
 - **Workflow scripts cannot read it themselves** — no filesystem access — so the pipeline dispatches
   a haiku/low agent that runs the reader and returns its JSON under a schema. That read happens
-  **inside** `task-run-implement.workflow.js`, not in `SKILL.md`, because `issues-fix` and
-  `plan-run` come in by `scriptPath` and a markdown read would skip them.
+  **inside** `task-run-implement.workflow.js` and `task-review.workflow.js`, not in either
+  `SKILL.md`, because `issues-fix` and `plan-run` come in by `scriptPath` and a markdown read would
+  skip them. In the review it sits after the `reviewNeeded` gate, so a doc-only turn pays nothing.
 - Its suite is `lib/tests/config.test.sh`, and it is the only one it gets.
 
 **Skills that must never self-trigger** (`task-run`, `task-quick`, `issues-fix`, `plan-run`,

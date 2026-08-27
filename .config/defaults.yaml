@@ -12,17 +12,59 @@
 # When `provider: codex` is set but the Codex plugin is not installed, the reader falls
 # back to claude/opus/medium and names every substitution — a codex model string means
 # nothing to a Claude subagent, and carrying `low` across would silently re-tier it.
+#
+# The two rows below deliberately sit on different providers: Claude writes the change,
+# Codex patches it. That means two writers on one change by default, which is exactly what
+# the one-writer rule in task-run-implement.workflow.js argues against for a build fix — so
+# treat it as a trial with a reason rather than a settled shape. The reason is that a fixer's
+# brief is bounded (one named finding, one file, one line) where an implementer's is
+# open-ended, and a bad patch is the most VISIBLE failure in the pipeline: it fails the build,
+# then end-verify, then the next review. Every fix a run applies is recorded with the resolved
+# row, so `python3 lib/skill-stats.py` can bucket by provider once there are rows under it.
 
 steps:
   implement:
+    provider: claude      # claude | codex
+    model: opus           # claude: fable|opus|sonnet|haiku; codex: passed through to the CLI
+    effort: medium        # low | medium | high | xhigh | max
+
+    # This row is also IMPL_RUN in task-run-implement.workflow.js — the value a run uses when it
+    # cannot reach this file at all. File and fallback agreeing is the point: a config the reader
+    # never got to is then indistinguishable from one it read, instead of quietly changing tiers.
+    #
+    # `medium` is UNDER MEASUREMENT, not settled. Read `implement depth` in lib/skill-stats.py
+    # before moving it: `high` is the baseline at 2.04 correctness and 3.36 readability fixes per
+    # paired review over 42 runs, against 4 runs at `medium`, which the table itself labels a thin
+    # sample. And read both halves — a cheaper implementer that pushes work into fix-correctness
+    # and end-verify-fix has moved cost, not saved it.
+
+    # Read only under `provider: codex` — the Claude subagent that DRIVES the CLI. Inert here, and
+    # kept anyway: the reader still enum-checks these and deliberately does NOT reset them when a
+    # codex row falls back, so the file keeps describing what flipping the provider would do.
+    wrapperModel: sonnet  # fable | opus | sonnet | haiku
+    wrapperEffort: medium # low | medium | high | xhigh | max
+
+  # The three fixers in /r:task-review: fix-correctness, end-verify-fix, ui-fix-minor. Not the
+  # readability refactor, which invokes the /r:code-refactor skill and has nothing to hand a CLI.
+  #
+  # The pack's second-largest write-side block after the implementers themselves — ui-fix-minor
+  # 595M tokens over 64 runs, fix-correctness 493M over 53, end-verify-fix 238M over 42 — and the
+  # step where Codex is cheapest to try, for the reasons in the header above.
+  #
+  # A fixer must never run DEEPER than the implementer whose code it patches: the hard thinking
+  # (is this finding real, what should change) already happened in triage. Nothing enforces that
+  # across these two rows — task-review does not read the implement row, and a silent clamp would
+  # override a value you can see right here. It is on you when you edit them.
+  fix:
     provider: codex       # claude | codex
     model: gpt5.6-sol     # codex: passed through to the CLI; claude: fable|opus|sonnet|haiku
     effort: low           # low | medium | high | xhigh | max
 
-    # Under `provider: codex` only: the Claude subagent that DRIVES the CLI — it passes the brief
+    # Under `provider: codex` only: the Claude subagent that DRIVES the CLI — it passes the finding
     # through, collects a run that outlives the ~600s Bash cap, then reads the working tree to
     # report what landed. Not the writer, and not free to be the cheapest thing available: a
-    # wrapper that gives up on the collect halts the run over work Codex actually finished.
+    # wrapper that gives up on the collect halts the run over work Codex actually finished, and
+    # the finding is then reported unfixed.
     wrapperModel: sonnet  # fable | opus | sonnet | haiku
     wrapperEffort: medium # low | medium | high | xhigh | max
 

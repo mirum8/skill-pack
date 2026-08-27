@@ -504,8 +504,9 @@ const DESIGN_RUN = { model: 'opus', effort: 'high' }
 // to do. One resolved row, whatever the entry — and it is resolved INSIDE this script rather than
 // in SKILL.md precisely because those callers come in by scriptPath and would skip a markdown read.
 //
-// The shipped default is codex/gpt5.6-sol/low; `medium` here is what a run falls back to, and the
-// whole question of depth is a claim UNDER MEASUREMENT rather than a settled default:
+// The shipped default is this row exactly — claude/opus/medium — so the file and this fallback
+// agree, and a run that could not reach the config behaves like one that read it rather than
+// quietly changing tiers. The whole question of depth is still a claim UNDER MEASUREMENT:
 // these agents follow a plan built at opus/high, challenged by Codex and re-read afterwards by
 // /r:task-review, so the argument is that the judgement left to them is bounded. What the plan
 // cannot do for them is real too — observing red-before-green, deciding a [RED] test that passes

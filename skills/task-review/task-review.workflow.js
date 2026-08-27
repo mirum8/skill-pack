@@ -267,6 +267,25 @@ const DEPLOY = {
     handle: { type: 'string' },
   },
 }
+// What lib/read-config.py prints for `--step fix`. Mirrors the same schema in
+// task-run-implement.workflow.js: the reader is one script and both pipelines read it the same way.
+const CONFIG = {
+  type: 'object', additionalProperties: false,
+  required: ['provider', 'model', 'effort'],
+  properties: {
+    step: { type: 'string' },
+    provider: { type: 'string', enum: ['claude', 'codex'] },
+    model: { type: 'string' },
+    effort: { type: 'string', enum: ['low', 'medium', 'high', 'xhigh', 'max'] },
+    // The Claude subagent that drives the Codex CLI under `provider: codex`. Not required: a row
+    // that predates these keys, or an agent that drops them, falls back to FIX_CODEX_RUN rather
+    // than dispatching a wrapper with no model and no depth.
+    wrapperModel: { type: 'string' },
+    wrapperEffort: { type: 'string', enum: ['low', 'medium', 'high', 'xhigh', 'max'] },
+    sources: { type: 'array', items: { type: 'string' } },
+    notes: { type: 'array', items: { type: 'string' } },
+  },
+}
 // The shared diff every hunter reads (Phase 0b). Deliberately a PATH and a couple of counts, never
 // the diff text itself: a schema field holding 40k characters of patch asks the model to re-emit it
 // verbatim, and a hunter reviewing a silently paraphrased diff is worse than one that fetched its
@@ -691,21 +710,36 @@ const CODEX_RUN = { effort: 'medium' }
 // is also the most recoverable decision in the pipeline: an under-rated diff still gets the build,
 // /r:code-scan and a Codex end-verify, and the caller can force a tier outright.
 const TRIAGE_RUN = { effort: 'medium' }
+// The three fixers — fix-correctness, end-verify-fix, ui-fix-minor — take their provider, model
+// and effort from `steps.fix` in the config, resolved below. This is the FALLBACK: what they run
+// on when the config agent could not be reached at all. lib/read-config.py holds the same row for
+// the case where it CAN be reached but the file cannot, including a `provider: codex` on a machine
+// with no Codex plugin, which lands there rather than dispatching an agent that dies.
+//
 // A fixer is handed a finding, a file and a line, and told to make the smallest change that fixes
 // it. That is strictly less than an implementer, which follows a whole plan — so the implementers'
-// pinned depth is the CEILING here, never a floor to sit above: a patch applied deeper than the
-// code it patches was written is depth spent on the wrong step. run-task pins them at `medium`
-// (see IMPL_RUN there, and read `implement depth` in lib/skill-stats.py before moving either).
-// What that removes is reasoning on work whose hard thinking — is this finding real, what should
-// change — already happened in triage, which is why this is deliberately NOT applied to
-// fix-triage, where that thinking lives.
+// depth is the CEILING here, never a floor to sit above: a patch applied deeper than the code it
+// patches was written is depth spent on the wrong step. Nothing enforces that across the two
+// config rows (this pipeline does not read `steps.implement`), so it is a rule for whoever edits
+// them; read `implement depth` in lib/skill-stats.py before moving either. What the depth removes
+// is reasoning on work whose hard thinking — is this finding real, what should change — already
+// happened in triage, which is why it is deliberately NOT applied to fix-triage, where that
+// thinking lives, nor to the readability refactor, which invokes /r:code-refactor.
 //
 // It is the pack's second-largest block of tokens after the implementers themselves: ui-fix-minor
-// 583M over 61 runs, fix-correctness 487M over 50, end-verify-fix 238M over 42. A fixer that is
+// 595M over 64 runs, fix-correctness 493M over 53, end-verify-fix 238M over 42. A fixer that is
 // too shallow is also the most VISIBLE failure in the pipeline — a bad patch fails the build, then
 // end-verify, then the next review reports it — so a regression here surfaces in a run or two
-// rather than hiding in the diff.
-const FIX_RUN = { effort: 'medium' }
+// rather than hiding in the diff. That visibility is the argument for trying a cheaper writer
+// here before anywhere else, and the shipped row does.
+const FIX_RUN = { model: 'opus', effort: 'medium' }
+// The WRAPPER under `provider: codex` — the Claude subagent that shells out to the Codex CLI, not
+// the writer. `steps.fix.wrapperModel`/`wrapperEffort` decide it; this is the fallback. Separate
+// from CODEX_RUN, which the review tracks carry, so tuning one cannot re-tier the other. Sonnet
+// because the brief is passed through verbatim rather than composed, and `medium` rather than
+// `low` for the reason CODEX_RUN gives: this agent owns the background-collect protocol, and one
+// that gives up early does not save 20s — it reports a fix Codex applied as unfixed.
+const FIX_CODEX_RUN = { model: 'sonnet', effort: 'medium' }
 // The UI verifiers are a JUDGING track that must not be pushed any deeper. Measured over 59 stored
 // r:bug-hunter-ui transcripts: 66% of their wall time was model time, spread over a median of 86
 // turns (p90 144) at ~4.2s of thinking each — and the large majority of those turns drive a browser
@@ -932,6 +966,81 @@ const profile = TIERS.includes(opts.profile)
   : (TIERS.includes(triage.profile) ? triage.profile : 'full')
 const uiTouched = (typeof opts.uiTouched === 'boolean') ? opts.uiTouched : !!triage.uiTouched
 log(`post-task-review: tier=${profile}, uiTouched=${uiTouched} (${TIERS.includes(opts.profile) ? 'caller-set' : 'classified'})`)
+
+// --- the fixers' settings ----------------------------------------------------
+// The three fixers below (fix-correctness, end-verify-fix, ui-fix-minor) take their provider,
+// model and effort from `steps.fix` — never inherited from the session, for the reason the depth
+// note above FIX_RUN gives: called by scriptPath, which /r:issues-fix does for every group,
+// nothing sets this skill's frontmatter and the fixers silently take whatever the caller was
+// running. Read HERE rather than in SKILL.md so those callers cannot skip it, and after the
+// reviewNeeded gate so a doc-only turn pays nothing.
+//
+// Workflow scripts have no filesystem access, so the file is read the way every other file in
+// this pipeline is: an agent runs the reader and hands back its JSON. The reader itself never
+// fails — it substitutes and says what it substituted — so the only thing that reaches the null
+// branch is a dead agent.
+const fixCfg = await agent(
+  `Resolve the pack's fixer settings. Run exactly this from the repo root and return the object it
+   prints on stdout, VERBATIM — do not re-derive, re-order or "correct" any field:
+
+     python3 "${PACK}/lib/read-config.py" --step fix --pack "${PACK}"
+
+   The script always exits 0 by design; a value it could not read comes back as the built-in
+   default with a line in \`notes\` saying so. Return \`notes\` even when it is empty.`,
+  { label: 'config', phase: 'Triage', schema: CONFIG, ...GP, ...ECHO }).catch(() => null)
+
+for (const note of (fixCfg && fixCfg.notes) || []) log(`post-task-review: config — ${note}`)
+if (!fixCfg) log(`post-task-review: the config could not be read — fixers fall back to ${FIX_RUN.model}/${FIX_RUN.effort} on claude`)
+const fixProvider = (fixCfg && fixCfg.provider) || 'claude'
+// Under `claude` these are the fixer's own model and depth. Under `codex` the fixer's pair goes to
+// the CLI instead (see codexFixPreamble) and this dispatches the WRAPPER, which is configured
+// apart from it — the two do different work, and a cheap wrapper fails by halting the run over a
+// fix Codex actually applied.
+const fixRun = !fixCfg ? { ...FIX_RUN }
+  : fixProvider === 'codex'
+    ? { model: fixCfg.wrapperModel || FIX_CODEX_RUN.model, effort: fixCfg.wrapperEffort || FIX_CODEX_RUN.effort }
+    : { model: fixCfg.model, effort: fixCfg.effort }
+log(`post-task-review: fixers — ${fixCfg ? (fixProvider === 'codex'
+      ? `codex ${fixCfg.model} / ${fixCfg.effort}, driven by ${fixRun.model} / ${fixRun.effort}`
+      : `claude ${fixCfg.model} / ${fixCfg.effort}`)
+    : `claude ${FIX_RUN.model} / ${FIX_RUN.effort}`}${(fixCfg && fixCfg.sources || []).length ? ` (from ${fixCfg.sources.join(', ')})` : ' (built-in)'}`)
+
+// On the codex provider the fixer subagent does not write the patch — it drives the Codex CLI,
+// which does, and then reports what landed. Same shape and the same reason as the implementers'
+// preamble in task-run-implement.workflow.js: `codex:codex-rescue` auto-loads codex-cli-runtime,
+// becomes a one-shot forwarder that cannot poll, and reports failure on every run that outlives
+// the ~600s Bash cap.
+const codexFixPreamble = `YOU ARE NOT WRITING THIS PATCH YOURSELF. Drive the Codex CLI and let IT make the edits, then
+   report what landed. Call the companion DIRECTLY with Bash — do NOT invoke the adversarial-review
+   skill or its run.sh, which review a diff and would re-enter the wrapper that launches Codex:
+     C="$HOME/.claude/plugins/marketplaces/openai-codex/plugins/codex/scripts/codex-companion.mjs"
+     [ -f "$C" ] || C="$(ls -1d "$HOME"/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs | sort -V | tail -n1)"
+     node "$C" task --model ${fixCfg ? fixCfg.model : ''} --effort ${fixCfg ? fixCfg.effort : ''} --write "<everything below, verbatim>"
+   Writes are ENABLED — this run edits the repo. Pass the ENTIRE brief below through, including the
+   findings and the intent block: a summarized brief is how a surgical fix turns into a rewrite.
+
+   THE EDITS ARE CODEX'S; EVERYTHING AFTER THEM IS YOURS. Where the brief asks for a rebuild, a
+   redeploy or a re-verification, do that yourself once you have collected the run — those steps
+   dispatch other agents and run this project's tooling, which the CLI cannot reach from inside its
+   own job. Codex gets the findings and the rules; you get the loop around them.
+
+   If it outlives the ~600s Bash cap it moves to the background. That is expected, not a failure,
+   and giving up there is the most common way this step reports work as unfixed that was fixed.
+   Collect it: poll the worker PID, then read the job record's "rendered" field under
+   ~/.claude/plugins/data/codex-openai-codex/state/*/jobs/*.json. Never poll for output-size
+   stability — the log goes quiet for minutes mid-reasoning.
+
+   When Codex finishes, VERIFY against the working tree rather than trusting its summary: read
+   \`git status --porcelain\` and \`git diff\` for the files it touched, and report from what you
+   can SEE there. If Codex never ran, the CLI is missing, or you could not collect the finished
+   run, SAY SO plainly and return — do NOT quietly apply the fixes yourself. A silent substitution
+   hides which writer produced the code this review is about to certify, and an honest "not fixed"
+   is already handled: the items stay visible and the run reports them unresolved.
+
+   `
+// On codex the domain personas do not apply: they carry their own model and their prompts describe
+// an agent that edits directly, where here the subagent only drives the CLI.
+const fixAgentType = (t) => fixProvider === 'codex' ? { agentType: 'general-purpose' } : t
 
 // --- Two things started HERE, because nothing on the critical path is waiting for them -------
 //
@@ -1318,9 +1427,9 @@ if (!nothingToFix) {
   let correctnessFixed = true
   let readabilityFixed = true
   if (fixList.correctness.length) {
-    const agentType = triage.hasFrontend && !triage.hasBackend ? 'r:htmx-thymeleaf-dev' : 'r:java-backend-developer'
+    const persona = triage.hasFrontend && !triage.hasBackend ? 'r:htmx-thymeleaf-dev' : 'r:java-backend-developer'
     const fc = await fix(
-      `Surgical fixer, not a feature builder. Fix ONLY these items — the smallest diff that
+      `${fixProvider === 'codex' ? codexFixPreamble : ''}Surgical fixer, not a feature builder. Fix ONLY these items — the smallest diff that
        resolves each; no refactoring, renaming, or "improving" outside them:
        ${fixList.correctness.map((c) => c.item).join('\n')}
        - Test-first where behavioral: write the test, RUN IT and SEE IT FAIL on the current code,
@@ -1333,7 +1442,7 @@ if (!nothingToFix) {
          more than 3 fields, match the surrounding code.
        - ${selfCheckClause}${noFullBuild}
        - Return a short summary (files + one line each).${intentBlock}`,
-      { label: 'fix-correctness', phase: 'Fix', agentType, ...FIX_RUN })
+      { label: 'fix-correctness', phase: 'Fix', ...fixAgentType({ agentType: persona }), ...fixRun })
     // Same rule the end-verify fixer follows: only count what a live fixer took. Counting a dead
     // one leaves `fixed.correctness` reporting the full triaged list — the same false-confidence
     // failure the serialization above exists to prevent, arriving by a different route. The items
@@ -1599,9 +1708,9 @@ const FRONTEND_FILE = /\.(html|htm|css|scss|sass|less|js|mjs|ts|tsx|jsx|vue|svel
 // agent that reads the project's own conventions instead of importing somebody else's. A terminal
 // /test-app is the first thing that reaches this code path with buildTool 'none' — before it, all
 // 42 stored end-verify-fix runs were in one Spring repo, so this branch has never been exercised.
-const domainFixer = triage.hasFrontend ? { agentType: 'r:htmx-thymeleaf-dev' }
+const domainFixer = fixAgentType(triage.hasFrontend ? { agentType: 'r:htmx-thymeleaf-dev' }
   : triage.buildTool === 'none' ? { ...GP }
-  : { agentType: 'r:java-backend-developer' }
+  : { agentType: 'r:java-backend-developer' })
 let endVerifyTouchedFrontend = false
 const endVerifyTrack = async () => {
   if (!endVerifyWanted) return
@@ -1610,7 +1719,7 @@ const endVerifyTrack = async () => {
   // only reaches for the Thymeleaf agent when the change is frontend-ONLY.
   const fixAgent = triage.buildTool === 'none' ? null
     : (triage.hasFrontend && !triage.hasBackend ? 'r:htmx-thymeleaf-dev' : 'r:java-backend-developer')
-  const fixAgentOpts = fixAgent ? { agentType: fixAgent } : { ...GP }
+  const fixAgentOpts = fixAgentType(fixAgent ? { agentType: fixAgent } : { ...GP })
   // What pass 1 raised and what happened to it. Each pass shells out to `run.sh --mode review`,
   // which starts a FRESH Codex thread (lib/codex.mjs runAppServerReview: startThread, ephemeral) —
   // there is no session to resume, so pass 2 has literally no memory of pass 1 and, until this,
@@ -1698,11 +1807,11 @@ ${priorPass.findings.map(f => `         - ${f.file}:${f.line} [${f.category}] ${
     // just breaking) is what makes "pass 1 found X, pass 2 read the fix and was happy" resolve.
     if (!real.length) { endVerifyUnresolved = []; break }
     endVerifyUnresolved = real.map(f => `${f.file}:${f.line} [${f.category}] ${f.what}`)
-    const fx = await agent(`Fix these end-verify findings (surgical), ${rebuildClause}
+    const fx = await agent(`${fixProvider === 'codex' ? codexFixPreamble : ''}Fix these end-verify findings (surgical), ${rebuildClause}
       Fix ONLY these items; do NOT touch any pre-existing / out-of-scope test or class to
       force a pass (the green bar is never relaxed):
       ${real.map(f => `${f.file}:${f.line} ${f.what}`).join('\n')}${intentBlock}`,
-      { label: `end-verify-fix#${pass}`, phase: 'End-verify', ...fixAgentOpts, ...FIX_RUN })
+      { label: `end-verify-fix#${pass}`, phase: 'End-verify', ...fixAgentOpts, ...fixRun })
     // Only count what a live fixer took. A dead fixer must not inflate `fixed.correctness` — the
     // whole point of that number is that a caller can trust it. The findings stay in
     // endVerifyUnresolved either way, so a lost fix still shows up in the verdict.
@@ -2158,9 +2267,9 @@ try {
   // the tag alone, `fixed` says a defect was repaired on every run where the fixer died — the one
   // shape of this record that cannot be checked later, since a dead agent leaves no diff to read.
   let minorFixer = null
-  if (minor.length) minorFixer = await agent(`Fix these minor UI/runtime defects (surgical), ${rebuildClause}
+  if (minor.length) minorFixer = await agent(`${fixProvider === 'codex' ? codexFixPreamble : ''}Fix these minor UI/runtime defects (surgical), ${rebuildClause}
     Then redeploy and re-verify once:\n${minor.map(f => `${f.where}: ${f.title} — ${f.suggestedFix}`).join('\n')}${intentBlock}`,
-    { label: 'ui-fix-minor', phase: 'UI', ...domainFixer, ...FIX_RUN })
+    { label: 'ui-fix-minor', phase: 'UI', ...domainFixer, ...fixRun })
   // Same rule as the fixer above, for the same reason: whether the FILER came back, not whether
   // findings were TAGGED major. A filer that died wrote nothing, and a summary still reporting
   // them filed sends the reader to a backlog entry that does not exist.
@@ -2370,6 +2479,17 @@ const statsRow = {
   // Collapsing either of the last two into `false` invents a quiet scan that never ran.
   scanChangedCode: localScan === 'ok' ? scanChangedCode : null,
   build: buildGreen ? 'green' : (triage.buildTool === 'none' ? 'n/a' : 'red'),
+  // The resolved fixer row, for the same reason task-run records the implementer's: mined item
+  // effort is the SUBAGENT's, and on codex that is the driver's rather than the writer's — so this
+  // is the only thing that can bucket fixes by provider later. Recorded on every run, including
+  // ones where no fixer was dispatched: "this run's fixers would have been codex" is what makes a
+  // zero-fix row readable.
+  fixProvider,
+  fixModel: fixCfg ? fixCfg.model : FIX_RUN.model,
+  fixEffort: fixCfg ? fixCfg.effort : FIX_RUN.effort,
+  // The wrapper's own tier, recorded only where it means something. On claude there is no wrapper,
+  // and a value here would read as one that ran.
+  ...(fixProvider === 'codex' ? { fixWrapperModel: fixRun.model, fixWrapperEffort: fixRun.effort } : {}),
   ui: uiSummary,
   // One row per finding, with the verdict triage reached. `fixedBySource` counts only what
   // survived, so on its own a noisy track and a silent one are the same number; these rows are

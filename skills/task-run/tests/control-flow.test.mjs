@@ -33,9 +33,15 @@ const THROW = Symbol('agent throws')
 const PLAN_TEXT = '## Context\nfix it\n## Coverage contract\ncriterion -> test'
 // The row lib/read-config.py resolves from the SHIPPED .config/defaults.yaml. Kept in step with
 // that file: the point of these assertions is what a run with no project config actually does.
-const DEFAULT_CONFIG = { provider: 'codex', model: 'gpt5.6-sol', effort: 'low',
+const DEFAULT_CONFIG = { provider: 'claude', model: 'opus', effort: 'medium',
                          wrapperModel: 'sonnet', wrapperEffort: 'medium',
                          sources: ['/pack/.config/defaults.yaml'], notes: [] }
+// The codex row, which the shipped file no longer carries for THIS step — /r:task-review's fixers
+// do. Named explicitly by the tests below so the codex branch keeps its coverage whichever
+// provider the defaults happen to ship.
+const CODEX_CONFIG = { provider: 'codex', model: 'gpt5.6-sol', effort: 'low',
+                       wrapperModel: 'sonnet', wrapperEffort: 'medium',
+                       sources: ['/repo/.config/skill-pack.yaml'], notes: [] }
 const CLAUDE_CONFIG = { provider: 'claude', model: 'sonnet', effort: 'high',
                         sources: ['/repo/.config/skill-pack.yaml'], notes: [] }
 
@@ -492,7 +498,7 @@ test('the config is read once, cheaply, and every substitution it made is logged
   assert.match(prompts['config'], /\/pack\/lib\/read-config\.py/)
   assert.doesNotMatch(prompts['config'], /CLAUDE_PLUGIN_ROOT/)
   assert.match(logText, /config — steps\.implement\.effort/)
-  assert.match(logText, /implementers — codex gpt5\.6-sol \/ low/)
+  assert.match(logText, /implementers — claude opus \/ medium/)
 })
 
 test('the codex provider drives the CLI and keeps the slices, not the personas', async () => {
@@ -501,7 +507,7 @@ test('the codex provider drives the CLI and keeps the slices, not the personas',
   // subagent only drives the CLI. Its own tier stays CODEX_RUN's: it shells out and collects.
   const { optsBy, prompts } = await run({
     source: baseSource({ buildTool: 'maven', hasBackend: true, hasFrontend: true }),
-    review: OK_REVIEW, planfix: OK_FIX,
+    review: OK_REVIEW, planfix: OK_FIX, config: CODEX_CONFIG,
   })
   for (const l of ['implement:backend', 'implement:frontend']) {
     assert.equal(optsBy[l].agentType, 'general-purpose', `${l} must not keep a Claude persona`)
@@ -535,7 +541,7 @@ test('the codex wrapper is tuned apart from the writer, and never dispatched unt
   const tuned = await run({
     source: baseSource({ buildTool: 'maven', hasBackend: true, hasFrontend: false }),
     review: OK_REVIEW, planfix: OK_FIX,
-    config: { ...DEFAULT_CONFIG, wrapperModel: 'haiku', wrapperEffort: 'high' },
+    config: { ...CODEX_CONFIG, wrapperModel: 'haiku', wrapperEffort: 'high' },
   })
   assert.equal(tuned.optsBy['implement:backend'].model, 'haiku')
   assert.equal(tuned.optsBy['implement:backend'].effort, 'high')

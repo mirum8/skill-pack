@@ -46,9 +46,18 @@ const CLEAN = { ran: true, findings: [] }
 const finding = (what = 'off-by-one on the last row') =>
   ({ file: CHANGED, line: 42, category: 'logic', what, real: true })
 
+// The row lib/read-config.py resolves from the SHIPPED .config/defaults.yaml for `--step fix`.
+// Kept in step with that file: the point of these assertions is what a run with no project config
+// actually does.
+const DEFAULT_FIX_CONFIG = { provider: 'codex', model: 'gpt5.6-sol', effort: 'low',
+                             wrapperModel: 'sonnet', wrapperEffort: 'medium',
+                             sources: ['/pack/.config/defaults.yaml'], notes: [] }
+const CLAUDE_FIX_CONFIG = { provider: 'claude', model: 'opus', effort: 'medium',
+                            sources: ['/repo/.config/skill-pack.yaml'], notes: [] }
+
 // `overrides` maps a label PREFIX to what that label returns — a value, or a function of the
 // call count. Anything not overridden takes the happy-path default below.
-async function run({ triage = baseTriage(), args = {}, overrides = {} } = {}) {
+async function run({ triage = baseTriage(), args = {}, overrides = {}, config = DEFAULT_FIX_CONFIG } = {}) {
   const logs = []
   const prompts = {}
   const counts = {}
@@ -70,6 +79,7 @@ async function run({ triage = baseTriage(), args = {}, overrides = {} } = {}) {
       return typeof val === 'function' ? val(counts[l]) : val
     }
     if (l === 'triage') return triage
+    if (l === 'config') return config
     if (l === 'diff-pack') return { ok: true, path: '/tmp/review.patch', files: 1, lines: 40 }
     if (l === 'codex' || l === 'code-quality' || l.startsWith('find-bugs:')) return CLEAN
     if (l === 'fix-triage') return { correctness: [], readability: [], docDrift: [] }
@@ -303,18 +313,103 @@ test('Phase 0 triage reads the diff into a schema, so it runs at medium', async 
   assert.equal(opts['triage'].effort, 'medium')
 })
 
+const withFix = (over = {}) => ({
+  overrides: { 'fix-triage': { correctness: [finding()], readability: [], docDrift: [] } },
+  ...over,
+})
+
 test('fixers never run deeper than the implementers; the agents that JUDGE keep the top tier', async () => {
-  const { opts } = await run({
-    overrides: { 'fix-triage': { correctness: [finding()], readability: [], docDrift: [] } },
-  })
-  // A patch is strictly less than the plan-following change it patches, so this tracks IMPL_RUN in
-  // task-run-implement.workflow.js as a ceiling — never above it.
+  const { opts } = await run(withFix({ config: CLAUDE_FIX_CONFIG }))
+  // A patch is strictly less than the plan-following change it patches, so `steps.fix` tracks
+  // `steps.implement` as a ceiling — never above it. The values come from the config, so this
+  // asserts the row REACHES the dispatch, not what the row happens to say today.
+  assert.equal(opts['fix-correctness'].model, 'opus')
   assert.equal(opts['fix-correctness'].effort, 'medium')
   // fix-triage decides what is a false positive — that judgement is re-formed by nothing
   // downstream, so it is never pinned below the inherited tier.
   assert.equal(opts['fix-triage'].effort, undefined)
   assert.equal(opts['code-quality'].effort, undefined)
   assert.equal(opts['local-scan'].effort, undefined)
+})
+
+test('the fixers take steps.fix, and a config that cannot be read falls back rather than halting', async () => {
+  // The reader never fails — it substitutes and says so — so the only thing that reaches this
+  // branch is a dead agent. A review that cannot read a setting still reviews; it just runs on a
+  // value it names in its own log.
+  const { opts, logText, out } = await run(withFix({ config: null }))
+  assert.equal(opts['fix-correctness'].model, 'opus')
+  assert.equal(opts['fix-correctness'].effort, 'medium')
+  assert.match(logText, /config could not be read — fixers fall back to opus\/medium/)
+  assert.equal(out.reviewed, true)
+
+  // And every note the reader returns is logged: a config that quietly does nothing is
+  // indistinguishable from one that works, which is the whole failure a settings file invites.
+  const noted = await run(withFix({
+    config: { ...CLAUDE_FIX_CONFIG, notes: ['`steps.fix.effort` \'deep\' is not one of low|medium|high — using \'medium\''] },
+  }))
+  assert.match(noted.logText, /config — .*is not one of low\|medium\|high/)
+})
+
+test('on the codex provider the fixers DRIVE the CLI and never patch the code themselves', async () => {
+  const { opts, prompts, logText } = await run(withFix())
+  // The Claude personas carry their own model and describe an agent that edits directly; here the
+  // subagent only drives the CLI and reads back what landed.
+  assert.equal(opts['fix-correctness'].agentType, 'general-purpose')
+  // The WRAPPER's tier, not the writer's: gpt5.6-sol/low goes to the CLI, sonnet/medium drives it.
+  assert.equal(opts['fix-correctness'].model, 'sonnet')
+  assert.equal(opts['fix-correctness'].effort, 'medium')
+  assert.match(prompts['fix-correctness'], /codex-companion\.mjs/)
+  assert.match(prompts['fix-correctness'], /--model gpt5\.6-sol --effort low --write/)
+  // The collect protocol: a run that outlives the ~600s cap is the normal case, not a failure.
+  assert.match(prompts['fix-correctness'], /poll the worker PID/)
+  assert.match(prompts['fix-correctness'], /Never poll for output-size/)
+  // The one substitution that must never happen quietly — it would hide which writer produced the
+  // code this review is about to certify.
+  assert.match(prompts['fix-correctness'], /do NOT quietly apply the fixes yourself/)
+  // The findings still reach Codex whole; a summarized brief turns a surgical fix into a rewrite.
+  assert.match(prompts['fix-correctness'], /Surgical fixer, not a feature builder/)
+  assert.match(logText, /fixers — codex gpt5\.6-sol \/ low, driven by sonnet \/ medium/)
+
+  // And the claude provider must carry none of it, keeping its domain persona.
+  const claude = await run(withFix({ config: CLAUDE_FIX_CONFIG }))
+  assert.equal(claude.opts['fix-correctness'].agentType, 'r:java-backend-developer')
+  assert.doesNotMatch(claude.prompts['fix-correctness'], /codex-companion/)
+})
+
+test('the codex wrapper is tuned apart from the writer, and never dispatched untiered', async () => {
+  // Two agents, two jobs: gpt5.6-sol writes the patch, a Claude subagent drives the CLI and
+  // collects a run past the ~600s cap. Tuning one must not move the other — and the wrapper's
+  // failure mode is reporting a fix Codex applied as unfixed, which is why it cannot go untiered.
+  const tuned = await run(withFix({
+    config: { ...DEFAULT_FIX_CONFIG, wrapperModel: 'haiku', wrapperEffort: 'high' },
+  }))
+  assert.equal(tuned.opts['fix-correctness'].model, 'haiku')
+  assert.equal(tuned.opts['fix-correctness'].effort, 'high')
+  assert.match(tuned.prompts['fix-correctness'], /--model gpt5\.6-sol --effort low --write/)
+  // The review tracks carry their OWN constant, so tuning the wrapper cannot re-tier them.
+  assert.equal(tuned.opts['codex'].effort, 'medium')
+  assert.equal(tuned.opts['codex'].model, undefined)
+
+  // A row with no wrapper keys — an older config, or an agent that dropped them — must land on the
+  // built-in pair rather than dispatching a wrapper with no model and no depth.
+  const bare = await run(withFix({
+    config: { provider: 'codex', model: 'gpt5.6-sol', effort: 'low', sources: [], notes: [] },
+  }))
+  assert.equal(bare.opts['fix-correctness'].model, 'sonnet')
+  assert.equal(bare.opts['fix-correctness'].effort, 'medium')
+})
+
+test('the readability refactor is NOT one of the configured fixers, on either provider', async () => {
+  // It invokes the /r:code-refactor skill, so a codex provider has nothing to hand the CLI, and
+  // the judgement it applies is re-formed by nothing downstream — so it keeps the inherited tier.
+  const codex = await run({
+    overrides: { 'fix-triage': { correctness: [], readability: ['rename the flag'], docDrift: [] } },
+  })
+  assert.equal(codex.opts['fix-readability'].model, undefined)
+  assert.equal(codex.opts['fix-readability'].effort, undefined)
+  assert.equal(codex.opts['fix-readability'].agentType, 'general-purpose')
+  assert.doesNotMatch(codex.prompts['fix-readability'], /codex-companion/)
+  assert.match(codex.prompts['fix-readability'], /\/r:code-refactor/)
 })
 
 test('every pattern hunter runs below the top tier, security included', async () => {
@@ -1706,9 +1801,13 @@ test('every judging track still inherits the session model', async () => {
     },
   })
   for (const l of ['find-bugs:logic', 'find-bugs:security', 'code-quality', 'fix-triage',
-                   'fix-triage-readability', 'fix-correctness', 'local-scan']) {
+                   'fix-triage-readability', 'local-scan']) {
     assert.equal(opts[l].model, undefined, `${l} forms an opinion — it must not be down-tiered`)
   }
+  // fix-correctness is deliberately NOT in that list: its model comes from `steps.fix`, which is
+  // a setting rather than an inheritance. The judgement it would inherit for already happened in
+  // fix-triage, which is in the list.
+  assert.notEqual(opts['fix-correctness'].model, undefined)
 })
 
 // ------------------------------------------------ locating the pack itself ---
@@ -1958,13 +2057,15 @@ test('the effort pins hold on the terminal surface too', async () => {
 })
 
 test('a non-JVM UI fix does not go to the Java agent', async () => {
-  const t = await run({ triage: tuiTriage(), overrides: {
+  // On the CLAUDE provider, where the persona is the agent that edits. Under codex both branches
+  // flatten to general-purpose — the subagent only drives the CLI — which is asserted separately.
+  const t = await run({ triage: tuiTriage(), config: CLAUDE_FIX_CONFIG, overrides: {
     'ui-deploy': TUI_DEPLOY,
     'tui-functional': { ran: true, findings: [{ title: 'x', where: 'table.go', fixSize: 'minor' }] },
     'tui-visual': CLEAN } })
   assert.equal(t.opts['ui-fix-minor'].agentType, 'general-purpose')
 
-  const w = await run({ triage: baseTriage({ hasTestApp: true, uiTouched: true }), overrides: {
+  const w = await run({ triage: baseTriage({ hasTestApp: true, uiTouched: true }), config: CLAUDE_FIX_CONFIG, overrides: {
     'ui-functional': { ran: true, findings: [{ title: 'x', where: '/w', fixSize: 'minor' }] } } })
   assert.equal(w.opts['ui-fix-minor'].agentType, 'r:java-backend-developer')
 })
