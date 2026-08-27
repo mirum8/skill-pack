@@ -10,7 +10,8 @@ question it answers is a field that gets a plausible number instead of a true on
 1. Count what this run did, leave the rest at zero
 2. Reading the concurrent flow across rows
 3. `haltReason`
-4. `doneCheckFailed`
+4. `degraded` and `questionsQueued`
+5. `doneCheckFailed`
 
 **Count what this run actually did, and leave the rest at zero.** A `no-merge` session sets
 `phasesInRun` and `merged: 0`; a `land` pass sets `landed` and leaves `phasesInRun: 0`, because it
@@ -31,6 +32,17 @@ counted: `implement-stopped` | `review-blocked` | `tracks-blocked` | `build-red`
 The one worth separating from all the others is `review-blocked` — a review that ran and left part of
 the diff unread is a different failure from a build that went red, and it is the one that would
 otherwise have merged.
+
+**`degraded` and `questionsQueued` are what `--unattended` costs.** `degraded` counts the
+workarounds it took — a dirty base snapshotted, a conflict auto-resolved, a wave built serially
+because the preflight refused it — and `questionsQueued` the things it declined to stop for. Read
+them against `merged`: a run that merged five phases having degraded once is the flag working, and
+one that degraded six times is a plan or a repo that needs attention rather than more autonomy.
+`unattended` is the boolean that makes the pair readable, because zero means "nothing to work
+around" in an unattended run and "the flag was never passed" in every other one.
+
+A degrade is never a halt, so `haltReason` stays null when the run finished. The vocabulary above
+gains nothing: what a `--unattended` run works around is precisely what it does not halt on.
 
 **`doneCheckFailed` is the point of having a `Done when:` at all.** `doneCheckRan` says the command
 executed; only `doneCheckFailed` records the case the step exists for — a phase whose review passed

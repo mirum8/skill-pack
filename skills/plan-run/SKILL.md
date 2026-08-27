@@ -55,13 +55,15 @@ Four things shape the whole design:
 
 ## Invocation
 
-`/r:plan-run [<plan>] [--from <n>] [--to <n>] [--phases <n,n>] [--cmux] [--no-merge] [--land] [--yes] [--dry-run]`
+`/r:plan-run [<plan>] [--from <n>] [--to <n>] [--phases <n,n>] [--cmux] [--no-merge] [--land] [--auto-resolve] [--unattended] [--yes] [--dry-run]`
 
 **`<plan>`** is the path to the plan file. Strip a leading `@` and any trailing `/` (Claude Code's
 `@todo.md` arrives verbatim). With no argument, look for one and **name what you found before using
 it**: `docs/*/todo.md` first (where `/r:spec-design` writes, beside the spec), then `todo.md`,
 `PLAN.md` or `IMPLEMENTATION.md` at the repo root. Nothing found, or two candidates with nothing to
-choose between them: **ask**. This is the one place the run stops for input that isn't the gate.
+choose between them: **ask**. This is the one place the run stops for input that isn't the gate —
+except under `--unattended`, where a tie takes the first by that order and says which, since nobody
+is there to answer and the order is already the documented preference.
 
 - **`--from <phase>`** → start at this phase, skipping every earlier one whatever its checkboxes say.
   This is the resume: a halted run reports the `--from N` that continues it, and it is also how you
@@ -83,7 +85,14 @@ choose between them: **ask**. This is the one place the run stops for input that
   unit](#being-a-unit) when `CMUX_FANOUT_ORCHESTRATOR` is set; see
   [Running phases concurrently](#running-phases-concurrently). It changes nothing before the merge.
 - **`--land`** → merge the phase branches finished by concurrent sessions into the base, in phase
-  order. Runs only from the primary working tree, and does no building of its own.
+  order. Runs only from the primary working tree; it builds after each merge and nothing else.
+- **`--auto-resolve`** → with `--land`, resolve the conflicts that are **provably** additive instead
+  of stopping on them, then build and run the full test suite before accepting. Off by default, and
+  only meaningful beside `--land`. Everything it cannot prove is still handed to you.
+- **`--unattended`** → run without a person watching: work around everything that can be worked
+  around, and notify only when the run genuinely cannot continue. Implies `--yes` and
+  `--auto-resolve`. It does **not** loosen what counts as a real failure — see [Running
+  unattended](#running-unattended).
 - **`--yes`** → skip the approval gate and run every phase in the list. It does **not** disable the
   halt: a failed phase still stops the run.
 - **`--dry-run`** → read the plan, run the plan check, print the run list **and the wave table with
@@ -151,6 +160,10 @@ puts it there precisely to keep it out of an agent's reach. If it holds unticked
 them with the phase each one says it blocks, and stop for the user**, unless every blocked phase
 falls outside the run list. Never treat one as buildable and never number it yourself.
 
+**Under `--unattended`, drop the blocked phases from the run list and build the rest**, naming both
+halves in the report. The blocker still needs a person and no blocked phase is built — what changes
+is that one unresolved question stops one phase instead of a twelve-phase night.
+
 If the run list is empty, say why — "every phase in `docs/billing/todo.md` is ticked", "`--from 9`
 is past the last phase" — and stop.
 
@@ -178,15 +191,21 @@ Resolve first: none outstanding
 - **`--dry-run`** → print this, **record the run** (Step 4's stats line, `mode: "dry-run"`, with
   `phasesInPlan` set and every other count zero), and **stop**. Nothing is built; no branch, no
   commit, and not a character of the plan file.
-- **Otherwise** → present the run list and **pause for approval**, unless `--yes` was passed. At the
-  gate the user can drop phases off either end, or stop to fix the plan first — which is the cheap
-  moment to do it, since every note the checker raised is about a phase nobody has started yet.
+- **Otherwise** → present the run list and **pause for approval**, unless `--yes` or `--unattended`
+  was passed. At the gate the user can drop phases off either end, or stop to fix the plan first —
+  which is the cheap moment to do it, since every note the checker raised is about a phase nobody has
+  started yet.
 - **State the cost plainly** — "5 phases, 5 implement + 5 review passes". That number is the run's
   price and this is the only place the user can change it. Each phase is a full `/r:task-run`-grade
   pass, and the review is the slow half.
 - **Say what happens without you.** Once the gate clears, Step 3 runs to the end with no further
   questions — but it **stops at the first phase that fails**, and reports the `--from N` to resume.
   Saying both halves is what makes it safe for the user to walk away.
+- **Under `--unattended`, say that instead**: the run works around a dirty base, a conflict it can
+  prove additive, and a wave the preflight refuses (that one goes serial); it stops on a failed
+  phase, and it notifies only then. Print the table's halt column in one sentence rather than making
+  the user find [Running unattended](#running-unattended) — walking away is the whole point of the
+  flag, and what will and will not fetch them back is the one thing they need before they do.
 - **Under `--cmux` only**, add the wave the checker already derived as a column, and say how many
   leaves will be built at once and how many at a time (the cap is three). The waves come from the
   `check_todo.py` run Step 0 already made; nothing new is computed here. Without the flag this table
@@ -338,6 +357,12 @@ its own. For each phase:
    - **Confirm you are on `<pb>`**: `git rev-parse --abbrev-ref HEAD`. It should never be `<base>`
      (the implement Workflow halts rather than hand back a run that stayed on base), and this is a
      two-second check that stops a whole phase landing on `main`.
+   - **Confirm nobody else is holding the repo**, before the merge into base: `.git/MERGE_HEAD`
+     present is a merge somebody started and did not finish, and `<base>` at a different commit than
+     Step 0 read is a session that landed something while this phase was building. Either is a
+     **halt** — merging over it silently sweeps another run's work into this phase's commit, or
+     resolves against a base nobody reviewed. Report which one, and leave `<pb>` in place: it holds
+     a finished commit and `--land` merges it later.
    - **Tick the phase, now — after the review and the done-check, before staging.** Flip only the
      items that were actually implemented **and** verified, `- [ ]` → `- [x]`, and tick the phase
      heading itself when the whole phase is done. Re-locate every item by its **verbatim text**,
@@ -348,6 +373,13 @@ its own. For each phase:
      a bookkeeping edit its doc-consistency hunter has to rule on; **before** the commit, so "built"
      and "ticked" land together and revert together. A tick committed separately, or not at all, is
      how the next run offers the same phase again.
+   - **Rewrite the phase's `Files:` line from the diff**, in the same edit as the ticks:
+     `git diff --name-only <base>...<pb>`, minus generated artefacts. The plan's line was written
+     before this code existed, so it names what the feature *carries* and never what it must touch to
+     be wired in — and that line is what `--slice` compares to decide whether two phases may run at
+     once. A phase that has just built is the only thing that knows the true answer, and this is the
+     only moment it still holds it. The exact rule, and what to drop, is in
+     [references/plan-format.md](references/plan-format.md).
    - **One commit** on `<pb>`: stage everything — implementation, the review's fixes, the ticks — and
      commit once, naming the phase. **Write the message to a file and use `git commit -F <file>`,
      never inline `-m`.** These messages carry phase titles, backticks and quotes straight from the
@@ -377,6 +409,12 @@ its own. For each phase:
    preflight — **stop the whole run**:
    - Restore a clean base branch. Leave the failed phase's branch in place, unmerged, so the user can
      look at it; name the branch in the report.
+
+   **Under `--unattended`, four of those are worked around instead** — a conflict, a dirty base, a
+   refused slice, and a review or repo that was merely busy. The other four are still halts, because
+   they mean the next phase's premise is untrue. The table in [Running
+   unattended](#running-unattended) is which is which, and every workaround it takes is named in the
+   report and counted in `degraded`.
    - **Never tick a phase that halted**, and never tick past it.
    - Report which phase stopped it, why, and the exact resume command:
      `/r:plan-run <plan> --from <n>`.
@@ -431,6 +469,38 @@ It is also the first thing anyone will try, so it is a preflight refusal rather 
    graph is precisely the failure this whole mode exists to prevent. If the checker is missing, say
    so and **stop anyway** — this is the one place a named skip is not good enough, because nothing
    else checks it.
+
+   **Under `--unattended` a refusal degrades rather than stops**: build that wave's leaves serially,
+   in numeric order, and name the refusal in the report. The refusal is about *concurrency* only —
+   every one of those leaves is still buildable, just not at the same time — so stopping a whole run
+   over it refuses work that was never in question. A missing checker is still a stop, unattended or
+   not: that one is not knowing whether the slice is safe, which is a different thing from knowing it
+   is not.
+
+3. **Ask history what the plan cannot know**, once the checker has cleared the slice:
+
+   ```sh
+   python3 "${CLAUDE_PLUGIN_ROOT}/skills/plan-run/scripts/footprint-warn.py" <plan> \
+           --slice <n,n> --base <base>
+   ```
+
+   The checker compares declared `Files:` lines, and those were written before any of this code
+   existed — they name what a feature carries, never what it must touch to be wired in. So a slice
+   can be cleared honestly and still not merge. This reads what every phase *before* these ones
+   actually touched in the packages they land in, which is a fact in git rather than a prediction.
+
+   **Exit 2 is a risk, not an error.** Serially, print it and carry on: the cost of being wrong is
+   one merge conflict, and refusing correct parallelism is its own cost. Under `--cmux`, **stop** —
+   there the cost is the whole wave, built over hours before anything discovers it. Under `--cmux
+   --unattended`, build that wave serially instead of stopping, and name it: the phases are fine, it
+   is only the fan-out that was not. Exit 0 covers
+   both "looks clean" and "not enough history to judge", and it says which; exit 1 is usage or git
+   trouble and is a named skip, because this check is an improvement on the preflight rather than
+   the preflight itself.
+
+   The two answers to a risk are in the report: run one leaf per package at a time, or correct the
+   `Files:` lines from the code that now exists and re-run. Step 3.6 does the second one by itself
+   for every phase from here on, so this warning shrinks as the plan builds out.
 
 ### What changes inside the loop
 
@@ -535,9 +605,16 @@ because it is the only one that needs no discovery: a unit knows exactly who spa
 finding a unit from here means prefix-matching an unpredictable session name against every session
 on the machine.
 
-**What a unit is told to send** — the three cases under [Being a unit](#being-a-unit): the slice
-turned out to be wrong, it is blocked on something the plan can answer, or it is halting. Each is a
-thing you want to know *before* the timeout, and each is why the channel is worth having at all.
+**What a unit is told to send** — the four cases under [Being a unit](#being-a-unit): it is about to
+write a file its `Files:` line does not name, it is blocked on something the plan can answer, a test
+it did not write is failing, or it is halting. Each is a thing you want to know *before* the timeout,
+and each is why the channel is worth having at all.
+
+**Hold the union of what they report, because you are the only one who can.** A unit sees its own
+worktree; you see the wave. Keep the set of files the units have claimed, and the phase that claimed
+each. That set is the wave's real footprint, accumulating while it is still cheap to act on — the
+plan's `Files:` lines are a guess made before any of this code existed, and this is the first moment
+anything knows better.
 
 **What you may do with it.** Answer a question. Ask a read-only check — what branch it is on, whether
 it has touched a file, what it made of an ambiguous item. Three rules keep this from undoing the
@@ -551,34 +628,58 @@ design:
 - **Don't poll.** No "are you done yet?" — that is what `wait` is for, and every message costs the
   receiving session a whole turn.
 
-**A slice-is-wrong message is a halt for the wave**, not a note. It means two units may be about to
-edit one file from two clean bases, which is the failure the preflight exists to prevent; stop
-spawning, let the units in flight finish or stop them, and fix the plan's edges before re-running.
+**An undeclared file is recorded; a *claimed* one is a halt.** These arrive as the same message and
+need opposite answers. A phase reaching a file its `Files:` line does not name is the normal case —
+that line was written before the code existed and names what a feature carries, never what it must
+touch to be wired in — so the answer is "recorded, continue", and refusing it would refuse correct
+work. The same file arriving from a **second** unit is the collision the preflight exists to prevent,
+now with two clean bases about to edit one file: stop spawning, let the units in flight finish or
+stop them, and fix the plan's edges before re-running.
+
+**You can reach a unit, for two things only.** You chose its `--id`, and that is the name it is
+addressable by — so a `SendMessage` down carries either **stop**, or the answer to a question that
+unit asked. Never work, and never a correction to what it is building: "ask, never drive" binds this
+direction harder, because a message from the orchestrator reads as authority. Downward exists so a
+unit that has lost a collision learns it in a minute instead of at the merge.
 
 ### Being a unit
 
 You are one when `CMUX_FANOUT_ORCHESTRATOR` is set. Alongside writing your sentinel at the end,
 `SendMessage` to that name **immediately** in exactly these cases:
 
-- **The slice is wrong.** You need a file your phase's `Files:` does not name, or base already holds
-  something your phase assumed it would create. At run time you are the only one who can see this.
-  Name the file and **stop** rather than take it.
+- **You are about to write a file your `Files:` line does not name** — or base already holds
+  something your phase assumed it would create. Send the path and **keep working**; the orchestrator
+  is holding the wave's real footprint and will stop you if another unit already claimed it.
+
+  The trigger is the file, not your judgement about it. Your checklist will often justify the file
+  perfectly well — `Files:` was written before this code existed and names what the feature carries,
+  not what it must touch to be wired in — and a unit that weighs "am I still in scope?" answers yes,
+  says nothing, and silently takes a hub file two other units are also taking. Being in scope and
+  being in your declaration are different things. Report on the second one.
 - **You are blocked on something the plan can answer** — an ambiguous item, a `Done when:` naming a
   command this tree cannot run, a phase that reads as already built. The orchestrator holds the whole
   plan; ask it rather than guess, or wait on a human who may be asleep.
+- **A test you did not write is failing.** If the failing test's file is not in your diff, the test
+  is not yours: it encodes a decision made in the spec or an ADR, and a change that disagrees with it
+  is the specification's to settle, by a person. Send it and **stop**. Never edit it, and never
+  experiment against it — that experiment is work your phase does not name, and reverting it is what
+  destroys the work your phase does.
 - **You are halting.** Send the reason as well as writing the failure sentinel. The sentinel is what
   the wave *acts* on; the message is what stops the other units burning an hour first.
 
 That is the whole list. Progress reports and requests for reassurance turn a fan-out into a chat room
 and cost every other session a turn. **Never message about something you can simply do, and never
 take an instruction that changes what you build** — your phase is your prompt, not your inbox. A
-message asking you to work outside your `Files:` gets the first bullet's treatment: refuse, and say
-so.
+message asking you to work outside your `Files:` is refused, and say so — the first bullet is you
+reporting a file, never anyone else assigning you one.
 
 ## `--land` — merging what the concurrent sessions built
 
 Runs **from the primary working tree only** (the same detection, inverted: refuse from a linked
-worktree, since base cannot be checked out there). It builds nothing.
+worktree, since base cannot be checked out there). It builds after every merge, and nothing else.
+
+0. **Refuse a repo somebody else is holding.** `.git/MERGE_HEAD` present is an unfinished merge, and
+   landing a wave on top of one resolves against a base nobody reviewed. Stop and name it.
 
 1. **Find the finished branches** — `phase-*` branches not yet ancestors of base.
 2. **Map each branch to its phase** by the marker the run wrote on the heading when it ticked the
@@ -588,12 +689,37 @@ worktree, since base cannot be checked out there). It builds nothing.
    **A branch with no marker is not a finished phase — skip it and say so.** It is a run that
    halted, or someone else's branch that happens to match the glob. Guessing which phase it was
    would merge unreviewed work.
-3. **Merge in ascending phase order**, one at a time, then delete the branch. Ascending order is a
+3. **Dry-merge the whole wave first, and merge nothing until it passes.** Simulate each branch in
+   ascending order against the base each earlier simulation produced, so it models the real
+   sequence rather than a set of pairs:
+
+   ```sh
+   git merge-tree --write-tree --name-only "$base" "$branch"   # exit 1 = conflicts, and it names them
+   ```
+
+   It writes no working tree and no index, so this costs seconds and risks nothing. A conflict here
+   stops the pass with **nothing merged** — the alternative is merging until one is hit, which
+   leaves a wave half-landed and a base that now differs from the one every remaining branch was
+   built on. This is where a wave that took hours to build is refused in seconds.
+
+   The plan's declared `Files:` lines cannot answer this before the phases run, which is why the
+   preflight's `--slice` clears slices that do not merge. Here the branches exist, so reality is
+   readable and the guess is not needed.
+
+4. **Merge in ascending phase order**, one at a time, then delete the branch. Ascending order is a
    valid dependency order, because the plan's numbering is a topological sort of the graph.
-4. **On a conflict, stop and surface it — never force it.** Report which branch, leave it in place
+5. **Build after every merge, and halt on red before merging the next.** A clean merge is not a
+   compiling tree: two phases can each add the same package-level symbol in different files, so no
+   file collides, both branches build alone, and the merged tree does not compile. **The checker
+   reasons about files; the language reasons about packages**, and this build is the only thing in
+   the pipeline that sees the difference. Detect the runner the way Step 3 does and run it; on red,
+   stop with that branch named rather than merging the next one onto a broken base.
+6. **On a conflict, stop and surface it — never force it.** Report which branch, leave it in place
    and unmerged, and name the ones already landed so a re-run continues rather than repeats. The
    merge is idempotent (step 1 skips anything already an ancestor), so re-running after a manual
-   resolution is safe.
+   resolution is safe. With `--auto-resolve`, the conflicts that are provably additive are resolved
+   first and only the rest reach this step — see [Auto-resolving the additive
+   conflicts](#--auto-resolve--resolving-the-conflicts-that-are-provably-additive).
 
 Then **record the run** — Step 4's stats line with `mode: "land"`, `landed` set to what merged, and
 `phasesInRun: 0`, because a landing pass builds nothing. A conflict that stopped it is
@@ -604,6 +730,112 @@ why the wave collision check excludes it. In practice git merges the ticks clean
 phases occupy separate regions of the document. When two phases sit adjacent enough to conflict, the
 resolution is always **both sides' ticks**: each branch ticked what it genuinely built, and neither
 tick invalidates the other.
+
+## `--auto-resolve` — resolving the conflicts that are provably additive
+
+A wave's conflicts are mostly two phases adding wiring at the same point, and "keep both" is the
+answer to nearly all of them. That is not a licence to guess, because the ones it is *not* the
+answer to look identical: a side that quietly dropped a line reads exactly like a side that never
+had it, and the resolution that drops it **compiles clean** and fails only in the tests.
+
+So the decision is mechanical, and it is a script rather than a judgement:
+
+```sh
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/plan-run/scripts/merge-resolve.py" --plan <plan> [--dry-run]
+```
+
+Run it while `git merge` has left the tree conflicted. Each conflict is re-materialised with its
+merge **base** visible and asked one question: *does every base line still exist on both sides,
+ignoring whitespace?* Yes means neither side removed anything, so both sides are kept. No means a
+side rewrote shared code, and that file is left unmerged with the base still showing, for you.
+
+The base is the whole trick — without it "they added a field" and "they deleted a field" are the
+same picture. Whitespace matters as much: a formatter realigns a block when a longer name arrives,
+so a strict comparison reads a pure addition as a rewrite.
+
+**Then verify, and treat the verification as part of the resolution.** Format, run the build, run the
+**full** test suite. Green: commit the merge. Red: `git merge --abort` and hand the whole thing over
+— never patch up an auto-resolved merge, because the thing that failed is the evidence that the rule
+was wrong here. The residual risk the rule cannot see is ordering: two sides adding statements at one
+point produce a union in some order, and only for declarations is that order certainly irrelevant.
+The test run is what covers that, which is why it is not optional and why this flag is off by
+default.
+
+**Report both halves, always.** Every file resolved and every file handed over, by name. Silent
+auto-resolution is indistinguishable from a merge nobody had to think about, which is exactly the
+state a wave was in the last time this went wrong.
+
+Turn on `rerere` in the repo as well (`git config rerere.enabled true`): the conflicts this refuses
+are in the hub files every wave touches, so a resolution you make once replays itself in the next
+wave instead of arriving again.
+
+## Running unattended
+
+`--unattended` is for a run nobody is watching: a twelve-phase plan started before dinner, or a
+`--cmux` wave that will take hours. It changes one thing only — **what counts as a reason to stop**
+— and it does not touch what counts as a reason to fail.
+
+**The rule it must not weaken.** Phase 5 is written against what Phase 4 produced, so a phase that
+genuinely failed still halts the run. Autonomy never means building on a premise that is not true;
+it means not stopping over a premise that is fine.
+
+Most of what stops a run is not a broken premise. It is a scheduling or environment problem a person
+would simply work around, and this is the list of which is which:
+
+| what happened | premise broken | unattended |
+|---|---|---|
+| implement returned `{ stopped: … }` | yes | **halt** |
+| `Done when:` failed | yes | **halt** |
+| the per-phase re-check came back `blocked` | yes | **halt** |
+| the `Workflow` tool is unavailable | yes | **halt** — nothing can run at all |
+| the review came back **red** | yes | one retry, then halt |
+| the review came back **blocked** — a track did not run | not yet | one retry, then halt. **Never** banked as clean |
+| a merge conflict | no | `--auto-resolve`, then build + full tests; halt on what it refuses |
+| the base tree is dirty | no | snapshot to `refs/wip/pre-phase-<n>`, clean, continue |
+| `.git/MERGE_HEAD` — another session holds the repo | no | wait one poll, retry, then halt |
+| `--slice` refused the slice | no | build that wave **serially** |
+| `footprint-warn` returned 2 under `--cmux` | no | build that wave **serially** |
+
+The last two are the ones that pay for the flag. Both are facts about *scheduling*, and the correct
+response to each is obvious and local — build them one at a time — so stopping a four-hour run over
+one is the pipeline refusing to do the thing a person would have done in a second.
+
+### Answer nothing, queue everything
+
+A question is not a halt. Where an attended run stops for input, an unattended one **collects the
+question, builds everything that does not depend on the answer, and reports the queue at the end**:
+
+- **`## Resolve first` blockers** (Step 1) — drop the phases they block out of the run list and build
+  the rest. Naming them is the whole obligation.
+- **Two candidate plans with nothing to choose between them** (Step 0) — take the first by the
+  documented order and say which.
+- **An ambiguous item mid-run** — queue it and carry on. A run that dies at minute twenty over one
+  unclear checklist line has spent the whole night doing nothing.
+
+### What reaches the user, and what does not
+
+`PushNotification` pulls attention off whatever they are doing, so it fires on exactly three things:
+
+- **The run stopped and cannot continue** — the phase, the reason, the `--from N` that resumes.
+- **A person is needed** — a spec-pinned test failed, or a decision nothing in the plan can settle.
+- **The run finished** — phases built, phases skipped, questions queued.
+
+One line, under 200 characters, leading with what they would act on: `plan-run halted at Phase 7:
+done-when red. resume: --from 7` says more than "run failed". Nothing else notifies — not a phase
+completing, not a wave landing, not a conflict auto-resolved, not a degrade to serial. Those are the
+report. A notification nobody needed is expensive in a way that accumulates, and this pipeline runs
+for hours.
+
+### Every workaround is named
+
+A degrade that nobody hears about is indistinguishable from nothing having gone wrong, which is the
+state a wave was in the last time this went badly. So the report carries a line per degrade — "wave
+13 ran serially: footprint-warn flagged `internal/ui`", "Phase 9's review was blocked and passed on
+retry", "base was dirty at Phase 4; snapshotted to `refs/wip/pre-phase-4`" — and the stats line
+carries `degraded` (how many) and `questionsQueued`.
+
+**Unattended never softens these**: a blocked review is not a pass, an auto-resolved merge still runs
+the full test suite and is discarded on red, and a halted phase is never ticked and never merged.
 
 ## Step 4 — Report
 
@@ -634,13 +866,32 @@ already done, the phase that halted and why, and the phases never reached. **Say
 written back and what wasn't** — a phase merged with no tick is a phase the next run will offer
 again.
 
+**An unattended run adds two sections, and they are the whole price of the flag.** The user was not
+there, so the report is the only place any of it exists:
+
+```
+Worked around:
+  Phase 4  base was dirty — snapshotted to refs/wip/pre-phase-4, then cleaned
+  Phase 6  merge conflict in 3 files — 6 of 7 hunks resolved as additive, build + tests green
+  wave 13  footprint-warn flagged internal/ui across 5 leaves — built serially instead of fanned out
+
+Needs you:
+  Phase 8  "the retry window" is not defined anywhere in the plan or the spec — built to 24h, say if wrong
+  Resolve first: "sign the payments contract" blocks Phase 11, which was dropped from the run list
+```
+
+A workaround nobody hears about is indistinguishable from nothing having gone wrong, which is the
+state a wave was in the last time this went badly. Print both sections even when they are empty —
+"Worked around: nothing" is information, and its absence reads as the same thing as not looking.
+
 Then record one line into the pack-wide store — counts only, never phase titles or plan paths.
 **Every run records, including a halt, a `--dry-run` and a `--land`:**
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
 {"skill":"r:plan-run","mode":"serial","phasesInPlan":0,"phasesInRun":0,"merged":0,"landed":0,
- "alreadyDone":0,"doneCheckRan":0,"doneCheckFailed":0,"haltedAt":null,"haltReason":null}
+ "alreadyDone":0,"doneCheckRan":0,"doneCheckFailed":0,"haltedAt":null,"haltReason":null,
+ "unattended":false,"degraded":0,"questionsQueued":0}
 STATS_JSON
 ```
 
@@ -670,16 +921,22 @@ what was merged, landed or ticked. Never retry it.
   leaves may be built at the same time when the plan says they share no dependency and no file —
   each in its own detached worktree, with `--no-merge`, verified by the checker's `--slice` preflight
   first. Two runs sharing a working tree or a base ref destroy each other, which is why the preflight
-  enforces the separation rather than a blanket ban standing in for it: a slice run in one directory,
-  or one the graph refuses, is a **stop**. `--cmux` drives that same protocol instead of printing it,
+  enforces the separation rather than a blanket ban standing in for it: a slice run in one directory
+  is a **stop**, and one the graph refuses is a stop too — or, under `--unattended`, that wave built
+  serially, which honours the same rule by a cheaper route. `--cmux` drives that same protocol instead of printing it,
   and drives nothing else — the sessions it spawns are real separate sessions, and the orchestrator
   builds no phase of its own while a wave is in flight.
 - **A failed phase halts the whole run.** Not the phase's failure, the run's. Restore a clean base,
   leave the failed branch unmerged, never tick it, and report the `--from N` that resumes. Building
   Phase 5 on a Phase 4 that failed its build, its review or its `Done when:` is the single worst
-  outcome this skill can produce, because everything after the break still compiles.
+  outcome this skill can produce, because everything after the break still compiles. `--unattended`
+  does not touch this: what it works around is a dirty tree, a conflict it can prove additive and a
+  fan-out the preflight refused — none of which is a phase failing.
 - **Derive nothing the plan already states.** `Files:`, `Risk:` and `Done when:` are the plan
-  author's, and there is no verification fan-out here to second-guess them. The one thing that *is*
+  author's, and there is no verification fan-out here to second-guess them. The one write-back is
+  not a second guess: a phase that has committed replaces its own `Files:` line with the diff it
+  actually produced, which is a measurement replacing a guess the author could not have made before
+  the code existed. The one thing that *is*
   checked per phase is whether the code has moved underneath the plan — one read-only agent,
   immediately before that phase runs, never a sweep at the start.
 - **Both halves are Workflows, run from your main thread.** `task-run-implement.workflow.js`, then
