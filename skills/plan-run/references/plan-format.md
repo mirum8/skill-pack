@@ -24,7 +24,7 @@ phase block states versus how much has to be classified. This file is the whole 
 | `- [ ]` items | **yes** | acceptance criteria — the implement Workflow lifts them itself |
 | `**Done when:**` | no | run it after the review (Step 3.5); prose with no command is a named skip |
 | `**Risk:**` | no | present → `profile: "full"`; **absent → omit `profile`**, never "low" |
-| `**Files:**` | no | context for the re-check; never a constraint on where the change may land |
+| `**Files:**` | no | context for the re-check, and what `--slice` compares; never a constraint on where the change may land, and **rewritten from the diff** when the phase commits |
 | `**Implements:**` | no | carried into the task intent, so a later fixer doesn't undo it |
 | `**Depends on:**` | no | read it, but the numbering is what orders the run |
 
@@ -88,8 +88,36 @@ After the review returns, the `Done when:` check has run and the branch is confi
   ### Phase 4 — Idempotent payout webhook <!-- built: phase-idempotent-payout-webhook -->
   ```
 
+- **Replace the `Files:` line with what the phase actually touched**, from the branch rather than
+  from memory:
+
+  ```sh
+  git diff --name-only "$base...$pb"
+  ```
+
+  Drop generated artefacts — anything under `.claude/` or a `testdata/` segment, and any `.golden`
+  file — the same paths the collision check ignores, for the same reason: a captured frame is
+  rewritten wholesale by whichever run touched it last, so two phases sharing one have no conflict,
+  and the volume of them buries the source files that do.
+
+  This is a **measurement replacing a guess**, which is why it overwrites rather than appends.
+  `Files:` was written before any of this code existed, so it names the files a feature *carries* —
+  the new ones a planner can foresee — and never the ones it must touch to be wired in. Those are
+  unknowable until there is an app to wire into. The gap is not small: one phase declared three files
+  and changed eleven, and the eight it did not declare were the hub files every other phase in that
+  package also reaches.
+
+  It is corrected here because **nothing else can**. The line is what `check_todo.py --slice` reads
+  to decide whether two phases may run at once, and a slice cleared from an understated line is a
+  wave that builds for hours and then will not merge. A phase that has just built is the only thing
+  in the pipeline that knows the true answer, and this is the only moment it is still holding it.
+
+  A phase whose plan carried **no** `Files:` line gains one. A phase that halted writes nothing —
+  a partial footprint is worse than none, because it reads as measured.
+
 - **Idempotent**: an item already ticked, or a heading already carrying the marker, is left exactly
-  as it is.
+  as it is. The `Files:` line is the one exception: it is rewritten from the diff every time the
+  phase commits, since a re-run that changed the footprint has changed the answer.
 - Re-locate every item by its **verbatim text**, never by a line number read at parse time — the
   number stops being true the moment anything edits the file. If the text is gone because someone
   edited the plan mid-run, **do not guess**: leave the file alone and report the phase as

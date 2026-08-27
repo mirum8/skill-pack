@@ -87,18 +87,30 @@ marker can just mean the unit is not done yet.
 ## The alarm channel
 
 `spawn --orchestrator <name>` puts `CMUX_FANOUT_ORCHESTRATOR` in the unit's environment, so a unit
-can `SendMessage` **upwards** to the session that spawned it. Only that direction is wired, and the
-reason is discovery: a unit knows exactly who spawned it, while addressing a unit from the
-orchestrator means prefix-matching an unpredictable session name (`cmuxtest-p1-81`) against every
-session on the machine.
+can `SendMessage` **upwards** to the session that spawned it. Downwards works too: `spawn` creates
+the workspace with `--name "$id"`, and that id — which the orchestrator chose — is the name
+`SendMessage` addresses. Ids repeat across projects, so disambiguate by the `[ref]` `ListAgents`
+prints beside a row.
 
 | a unit sends when | the orchestrator does |
 |---|---|
-| the slice is wrong — it needs a file outside its `Files:` | **halt the wave** and fix the plan's edges; this is the collision the preflight exists to prevent |
+| it is about to write a file outside its `Files:` | **record it** against that phase and reply "continue" — the declaration was written before the code existed, so this is the normal case, not a fault |
+| …and a second unit reports the same file | **halt the wave**: two clean bases about to edit one file is the collision the preflight exists to prevent |
 | it is blocked on something the plan can answer | answer it — the orchestrator holds the whole plan |
+| a test it did not write is failing | it is a spec decision, not a phase decision — take it to a person |
 | it is halting | act on the sentinel; the message is what saves the other units an hour |
 
 Nothing else. Progress reports cost every other session a turn and turn a fan-out into a chat room.
+
+**The union of the reported files is the wave's real footprint**, and the orchestrator is the only
+party in a position to hold it: a unit sees one worktree. It accumulates while the wave is still
+running, which is the only window in which a collision is cheap — the plan's `Files:` lines were a
+guess made before this code existed, and the merge is hours too late to be told.
+
+**Downwards carries two things: `stop`, and the answer to a question that unit asked.** Never work,
+and never a correction to what it builds — a message from the orchestrator reads as authority, so
+"ask, never drive" binds harder in this direction. It exists so a unit that lost a collision hears
+about it in a minute rather than at the merge.
 
 **A message never closes a unit.** `wait` blocks on the sentinel and landing needs the marker,
 because a unit's own account of how it went is a claim and this pipeline lands evidence — a session
@@ -145,6 +157,36 @@ is not worth blocking three sessions that are about to start.
 the run continues — here it is a halt, because nothing else verifies the slice, and the failure it
 prevents is two agents writing the same file at once.
 
+## What the checker cannot know, and who asks instead
+
+```sh
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/plan-run/scripts/footprint-warn.py" <plan> --slice 5,6 --base main
+```
+
+The refusals above all read the plan's `Files:` lines. Those are written before any code exists, so
+they name the files a feature **carries** — the new ones a planner can foresee — and never the ones
+it must touch to be **wired in**. In a UI every feature wires in at the same few places, so a
+confirmation dialog and a usage-column poll share no concept and still both land in the message
+loop. One phase declared three files and changed eleven; the slice was cleared honestly and the wave
+would not merge.
+
+This asks the other question — in the packages this slice lands in, what has every phase before it
+actually touched — off git history rather than off a prediction, which is why it needs no model and
+runs unasked.
+
+| exit | means | what to do |
+|---|---|---|
+| 0 | clean, or not enough history to judge — it says which | continue |
+| 2 | a package is claimed by two leaves and its hub files are undeclared | serial: print and continue · `--cmux`: **stop** |
+| 1 | usage or git trouble | a named skip; this improves the preflight, it is not the preflight |
+
+`--cmux` is the strict one because that is where being wrong is expensive: serially it costs one
+merge conflict, across a wave it costs every hour the wave spent building.
+
+Two answers to an exit 2, and the report names both: run one leaf per package at a time, or correct
+the `Files:` lines from the code that now exists. Step 3.6 does the second for every phase it
+commits, so this warning is loudest on a plan that is mostly unbuilt and fades as it fills in.
+
 ## `--land`, and why it reads a marker
 
 Branches are `phase-<slug>`, never `phase-<n>`, so the slug alone cannot say which phase a branch
@@ -167,6 +209,33 @@ branch matching the glob — and merging it would land work whose review never f
 Then merge in **ascending phase order**, one at a time. That is a valid dependency order because the
 plan's numbering is a topological sort of the graph — the rule `spec-design` enforces when it refuses
 a leaf that depends on a higher-numbered one.
+
+## Simulate the whole wave before merging any of it
+
+`git merge-tree` answers "would this merge" without a working tree, an index or a checkout, so the
+whole wave is testable in seconds against branches that took hours to build:
+
+```sh
+sim=$(git rev-parse main)
+for b in "${ordered[@]}"; do
+  if ! out=$(git merge-tree --write-tree --name-only "$sim" "$b"); then
+    echo "CONFLICT landing $b:"; sed -n '2,$p' <<<"$out"; exit 1   # line 1 is the tree oid
+  fi
+  sim=$(head -1 <<<"$out")                                        # merge the next one onto this
+done
+```
+
+Carrying `sim` forward is the point: a branch that merges onto `main` may still conflict with the
+branch landing before it, and pairwise checks against a fixed base never see that. **Merge nothing
+until the loop finishes.** Merging until the first conflict leaves a wave half-landed, and every
+remaining branch now faces a base that is not the one the simulation cleared.
+
+## Build between merges
+
+The merge loop runs the project's build after each merge and stops on red. A clean merge is not a
+compiling tree: two phases can add the same package-level symbol in different files — no file
+collides, both branches build alone, and the merged tree does not compile. Nothing else in the
+pipeline looks at the merged tree before the next branch lands on top of it.
 
 ## The plan file
 
