@@ -46,9 +46,12 @@ case "$1 $2" in
                          echo "$n" > "$CMUX_STUB_SEQ"
                          [ "${CMUX_STUB_CREATE_SILENT:-0}" = 0 ] || exit 0
                          echo "OK workspace:$n"; exit 0 ;;
-  "workspace list")      n=$(cat "$CMUX_STUB_SEQ" 2>/dev/null || echo 0); i=1
+  "workspace list")      [ "${CMUX_STUB_LIST_FAIL:-0}" = 0 ] || exit 1
+                         [ "${CMUX_STUB_LIST_EMPTY:-0}" = 0 ] || exit 0
+                         n=$(cat "$CMUX_STUB_SEQ" 2>/dev/null || echo 0); i=1
                          while [ "$i" -le "$n" ]; do
-                           echo "  workspace:$i 0000000$i-0000-0000-0000-00000000000$i  unit-$i"
+                           [ "$i" = "${CMUX_STUB_LIST_SKIP:-}" ] || \
+                             echo "  workspace:$i 0000000$i-0000-0000-0000-00000000000$i  unit-$i"
                            i=$((i + 1))
                          done
                          exit 0 ;;
@@ -277,6 +280,28 @@ grep -q "workspace close" "$CMUX_STUB_LOG" \
 out=$("$FAN" status 2>&1)
 grep -q "^p6 live" <<<"$out" && ok "status reports it live rather than finished" \
                              || bad "status reports it live rather than finished" "$out"
+
+echo
+echo "== a unit whose session died is not waited out =="
+# p6 is still live and still has no sentinel. Its workspace is the last one the stub created,
+# so dropping that row from the listing is exactly "the session went away".
+seq=$(cat "$CMUX_STUB_SEQ")
+out=$(CMUX_STUB_LIST_SKIP="$seq" "$FAN" wait --id p6 --timeout 60 2>&1); rc=$?
+[[ $rc == 1 ]] && ok "a vanished workspace fails fast instead of timing out" \
+               || bad "a vanished workspace fails fast instead of timing out" "exit $rc: $out"
+grep -q "workspace gone" <<<"$out" && ok "and says the session died rather than stalled" \
+                                  || bad "and says the session died rather than stalled" "$out"
+[[ -d "$TMP/wt-p6" ]] && ok "and its worktree survives, holding whatever it committed" \
+                      || bad "and its worktree survives, holding whatever it committed" "removed"
+
+# The two ways the answer is "cannot tell". Both must keep waiting: declaring every live unit
+# dead because cmux hiccuped is the confident wrong answer, and it would abandon a whole wave.
+out=$(CMUX_STUB_LIST_FAIL=1 "$FAN" wait --id p6 --timeout 2 2>&1); rc=$?
+[[ $rc == 3 ]] && ok "cmux unreachable is 'cannot tell', so the wait stands" \
+               || bad "cmux unreachable is 'cannot tell', so the wait stands" "exit $rc: $out"
+out=$(CMUX_STUB_LIST_EMPTY=1 "$FAN" wait --id p6 --timeout 2 2>&1); rc=$?
+[[ $rc == 3 ]] && ok "an empty listing is 'cannot tell' too" \
+               || bad "an empty listing is 'cannot tell' too" "exit $rc: $out"
 
 echo
 echo "== usage errors are never a silent success =="

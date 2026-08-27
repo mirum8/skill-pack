@@ -301,6 +301,27 @@ unit_verdict() {
   echo "ok $branch"
 }
 
+# --- liveness ----------------------------------------------------------------
+# A unit that dies hard -- the session crashes, the workspace is closed by hand,
+# the machine sleeps -- writes no sentinel and sends no message, so it is
+# indistinguishable from one that is thinking. Waiting it out costs the whole
+# timeout, which is four hours by default, to learn something that was true in
+# the first minute.
+#
+# Says "gone" ONLY on evidence: the listing succeeded, it named other workspaces,
+# and this unit's UUID is not among them. cmux unreachable, an empty listing and
+# a unit whose UUID was never captured all mean "cannot tell", because declaring
+# every live unit dead because cmux hiccuped is the confident wrong answer this
+# script exists to refuse.
+workspace_gone() {
+  local uuid=$1 out
+  [ -n "$uuid" ] || return 1
+  out=$(CMUX_QUIET=1 cmux workspace list --id-format both 2>/dev/null) || return 1
+  [ -n "$out" ] || return 1
+  grep -qi -- "$uuid" <<<"$out" && return 1
+  return 0
+}
+
 # --- wait --------------------------------------------------------------------
 do_wait() {
   local ids=() timeout=${CMUX_FANOUT_TIMEOUT:-14400} poll=${CMUX_FANOUT_POLL:-10}
@@ -326,6 +347,17 @@ do_wait() {
       [ -e "$(sentinel "$id")" ] || pending+=("$id")
     done
     [ ${#pending[@]} -eq 0 ] && break
+    local dead=()
+    for id in "${pending[@]}"; do
+      workspace_gone "$(field "$(rec "$id")" workspace_uuid)" && dead+=("$id")
+    done
+    if [ ${#dead[@]} -gt 0 ]; then
+      say "workspace gone with no sentinel: ${dead[*]}"
+      say "the session died rather than stalled — there is nothing to answer and nothing to wait for."
+      say "Their worktrees are left in place; whatever they committed is still on their branches."
+      for id in "${ids[@]}"; do echo "$id $(unit_verdict "$id")"; done
+      exit 1
+    fi
     if [ "$waited" -ge "$timeout" ]; then
       say "timed out after ${timeout}s waiting for: ${pending[*]}"
       say "their workspaces are left OPEN — a stall is usually a question waiting for a human."
