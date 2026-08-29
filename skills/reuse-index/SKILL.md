@@ -2,17 +2,16 @@
 description: >-
   Build and maintain a project's reuse index — one tracked reference doc naming the canonical
   example of each pattern the codebase already has, so a later task copies the existing shape
-  instead of re-deriving it. Mines the plan corpus `/r:task-run` leaves in `.task-plans/`: every
-  plan's "Reuse map" names exemplars its planner found by reading the code, and an exemplar two
-  or more plans independently reached for is a convention worth writing down. Verifies each
-  anchor against the current tree, groups them by layer, and writes the doc beside the project's
-  other reference docs. Re-running merges rather than rebuilds — existing entries keep their
-  prose, newly-qualifying ones are added, moved anchors are re-resolved. Use on "build the reuse
-  index", "/r:reuse-index", "what patterns do we already have?", "refresh the reuse index",
-  "turn the plan corpus into something we can read", "index the canonical examples". NOT for:
-  reviewing whether code is readable (`/r:code-quality`), finding defects (`/r:code-bugs`),
-  compacting a CLAUDE.md (`/r:claudemd-compact`), or planning a task from a spec
-  (`/r:spec-design`).
+  instead of re-deriving it. Mines the plan corpus `/r:task-run` leaves in `.task-plans/`: each
+  plan's "Reuse map" names exemplars its planner found by reading the code, and one that two or
+  more plans independently reached for is a convention worth writing down. Verifies each anchor
+  against the current tree, groups by layer, and writes the doc beside the project's other
+  reference docs. Re-running merges, never rebuilds: existing entries keep their prose,
+  newly-qualifying ones are added, moved anchors are re-resolved. Use on "build the reuse index",
+  "/r:reuse-index", "what patterns do we already have?", "refresh the reuse index", "turn the
+  plan corpus into something we can read", "index the canonical examples". NOT for: reviewing
+  whether code is readable (`/r:code-quality`), finding defects (`/r:code-bugs`), compacting a
+  CLAUDE.md (`/r:claudemd-compact`), or planning a task from a spec (`/r:spec-design`).
 effort: high
 ---
 
@@ -22,10 +21,9 @@ Turn what the project's planners already learned about the codebase into a page 
 
 Every plan `/r:task-run` writes carries a **Reuse map** — a table of "this pattern already exists,
 here, and this is what it gives you", written by an agent that had just read the code for that one
-task. Each map is discarded after its task. The corpus of them is the most concentrated record of
-the codebase's conventions anywhere in the repo, and nothing reads it.
-
-This skill mines that corpus into **one reference doc**, and keeps it current.
+task, and discarded after it. The corpus of them is the most concentrated record of the codebase's
+conventions in the repo, and nothing reads it. This skill mines it into **one reference doc**, and
+keeps it current.
 
 **The threshold is the whole idea.** One plan reaching for a file is a choice made under one
 task's pressure. Two plans, written weeks apart, independently reaching for the same file is a
@@ -38,19 +36,18 @@ convention. Only the second kind goes in the doc.
 - `/r:reuse-index --min-cited <n>` — override the 2-plan threshold.
 - `/r:reuse-index --dry-run` — report what would change; write nothing.
 - `/r:reuse-index --rebuild` — ignore the existing index and regenerate it from scratch, a full
-  clustering pass that **overwrites** the current doc. This is the merge's escape hatch, for when
-  a refresh cannot get you there: adopting a format change (a new column like `Plan`), or a doc
-  that has drifted. It discards any prose hand-written into the current doc, so reach for it only
-  on a doc you are willing to regenerate — a merge is the safe default and this is the deliberate
-  exception.
+  clustering pass that **overwrites** the current doc. The merge's escape hatch, for when a
+  refresh cannot get you there: adopting a format change (a new column like `Plan`), or a doc that
+  has drifted. It discards any prose hand-written into the current doc, so reach for it only on a
+  doc you are willing to regenerate — a merge is the safe default.
 
 Read `${CLAUDE_SKILL_DIR}/references/output-format.md` before writing anything. It holds the
 section layout, the entry format, the merge rules, and what must be left out.
 
 ## Step 0 — Resolve the corpus and the index
 
-Run the mechanical half. It does the extraction, the counting, the path resolution and the diff
-against any index that already exists, and it is the only thing that touches the corpus:
+Run the mechanical half — extraction, counting, path resolution and the diff against any existing
+index; it is the only thing that touches the corpus:
 
 ```sh
 python3 "${CLAUDE_SKILL_DIR}/scripts/reuse-index.py" \
@@ -61,11 +58,11 @@ It prints JSON: `corpus`, `candidates` (each with `cited`, `citedBy`, resolved `
 `symbols` its rows named and which of them `symbolsVerified` in the file today), plus `new`,
 `countChanged`, `stale` and `unresolved` when an index was passed.
 
-**On `--rebuild`, run the script *without* `--index`** — you are regenerating, not diffing, so the
-existing doc's counts are irrelevant and passing it would only surface a `changed: false` you are
-about to ignore. Still locate the existing doc (below) so you overwrite it in place, and treat
-every candidate as a fresh entry: this is the **New index** path in Step 3, pointed at the old
-file. The two stops below do not apply to a rebuild.
+**On `--rebuild`, run the script *without* `--index`** — you are regenerating, not diffing, and
+passing it would only surface a `changed: false` you are about to ignore. Still locate the
+existing doc (below) so you overwrite it in place, and treat every candidate as a fresh entry:
+this is the **New index** path in Step 3, pointed at the old file. The two stops below do not
+apply to a rebuild.
 
 - `{"error": "no-corpus"}` or zero plans → **say so and stop.** There is nothing to mine, and that
   is a finding, not a failure.
@@ -79,12 +76,11 @@ also how you find the doc to overwrite.
 ## Step 1 — Read the rows
 
 For each candidate the script kept, read its `rows` — the raw reuse-map cells from every plan that
-cited it. This is where the pattern is actually described, in several plans' words. The script can
-count them; only you can tell that four differently-worded rows are one pattern, or that one file
-is carrying three.
+cited it, where the pattern is described in several plans' words. The script can count them; only
+you can tell that four differently-worded rows are one pattern, or that one file carries three.
 
 Drop a candidate whose `symbolsVerified` is empty while `symbols` is not: its file survived but the
-pattern the plans described is no longer in it.
+pattern the plans described is gone from it.
 
 ## Step 2 — Cluster into entries
 
@@ -107,12 +103,12 @@ Each entry carries a `Plan` cell linking the plans that cited its exemplar
 (`[<slug>](.task-plans/<slug>.md)`, from `citedBy`) — the trail back to the full task context.
 Beyond those links the doc narrates no tooling: it does not explain that it was mined from a
 corpus, name the pipelines, or mention this skill. Linking a tracked plan file is a reference; a
-sentence about how the index is built would be the tooling describing itself, and that stays out.
+sentence about how the index is built is the tooling describing itself, and stays out.
 
 ## Step 4 — Wire it up, so something actually reaches it
 
 **Add the pointer. An index nothing points at is a file nobody opens**, and the one place every
-session already reads is `CLAUDE.md`.
+session reads is `CLAUDE.md`.
 
 - Root `CLAUDE.md`: add **one line** to its reference list, in that list's existing wording and
   position — e.g. `` - `<path>` — canonical examples to copy, by layer. ``
@@ -120,9 +116,9 @@ session already reads is `CLAUDE.md`.
   full set in a sentence. **Never copy entries into it** — a second copy drifts, and the module
   file's own inline examples stay where they are because that file is read on its own.
 
-One line each, nothing more: `CLAUDE.md` is loaded on essentially every turn, so the pointer earns
-its place only by staying a pointer. If the file has no reference list to join, say so in the
-report rather than inventing a section for it.
+One line each, nothing more: `CLAUDE.md` is loaded on every turn, so the pointer earns its place
+only by staying a pointer. If the file has no reference list to join, say so in the report rather
+than inventing a section.
 
 Verify the path you wrote resolves before finishing — a broken pointer is worse than none.
 
@@ -137,8 +133,8 @@ Verify the path you wrote resolves before finishing — a broken pointer is wors
 ## Step 6 — Record the run
 
 Last thing, after the report — one line into the pack-wide store, so this skill's yield is measured
-rather than assumed. It is the only way to answer the question this skill exists for: does a corpus
-of plans actually converge on shared patterns, or does every task reach for something new?
+rather than assumed: does a corpus of plans converge on shared patterns, or does every task reach
+for something new?
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
@@ -153,14 +149,14 @@ STATS_JSON
 One `findings` entry per candidate the script handed you, `verdict: "confirmed"` for the ones that
 became entries and `dismissed` for every one you dropped — below threshold, file gone, pattern gone,
 folded into another entry — with the reason as the `description`. The dismissals are the more
-useful half: a corpus whose candidates are mostly noise and a corpus with nothing in it both write
-one line and no entries, and only the verdicts tell them apart.
+useful half: a corpus of noise and an empty corpus both write one line and no entries, and only
+the verdicts tell them apart.
 
 **A run that could not mine anything records `blockedReason` and NO findings.** `no-corpus`, zero
 plans, or a script that failed is an absence of judgement, not a judgement that nothing qualified —
-recording it as zero candidates would put "this project has no shared patterns" into the store on
-the strength of a directory that was never there. `changed: false` is the opposite case and a real
-result: the candidates were judged, the index already said so, and `wrote` is `false`.
+zero candidates would put "this project has no shared patterns" into the store on the strength of
+a directory that was never there. `changed: false` is the opposite case and a real result: the
+candidates were judged, the index already said so, and `wrote` is `false`.
 
 Keep each `description` to one line; the payload travels in this step's prompt. The script always
 exits `0`: a record that does not get written is a lost record, not a failed run. Never retry it.

@@ -21,14 +21,14 @@ This file owns the question rules, the round structure and the coverage floor.
 
 ## 1. The three rules
 
-Everything below is derived from these. When a situation isn't covered by the round bank,
-work it out from here rather than inventing a question.
+Everything below derives from these. When the round bank doesn't cover a situation, work it out
+from here rather than inventing a question.
 
 ### Rule 1 — order by leverage, not by topic
 
 Ask what reshapes the most first. Scope changes the entity list; the entity list changes the
-boundaries; the boundaries change the API. Asking about pagination while the scope is still
-open produces a document for the wrong system, and feels productive while doing it.
+boundaries; the boundaries change the API. Asking about pagination while the scope is open
+produces a document for the wrong system, and feels productive while doing it.
 
 ### Rule 2 — question style follows reversibility
 
@@ -43,16 +43,15 @@ This decides the *form* of every question:
 
 People correct far better than they compose. *"What are your entities?"* returns a vague
 list. *"I count `Invoice`, `GoodsReceipt`, `PurchaseOrder`, `MatchResult` — which do you own
-and which are copies?"* returns a precise correction in ten seconds.
-
-Getting this backwards is the most common way the interview fails. Open-questioning a cheap
-convention wastes a round trip; asserting a default over the scope produces a confident
-document about the wrong system.
+and which are copies?"* returns a precise correction in ten seconds. Getting this backwards is
+the most common way the interview fails: open-questioning a cheap convention wastes a round
+trip, and asserting a default over the scope produces a confident document about the wrong
+system.
 
 **The fourth style exists because the other three all fail on characteristics.** Ask openly —
 "how available does this need to be?" — and the answer is always "very"; every adjective is free
 when nothing is being spent for it. Assert a default and nobody objects, because a number they
-never had to trade for is a number they have no opinion about. So put two things they want on
+never had to trade for is one they have no opinion about. So put two things they want on
 opposite sides of a scale and make them pick:
 
 > "Under a load spike, would you rather it get slow for everyone, or start rejecting some
@@ -60,15 +59,15 @@ opposite sides of a scale and make them pick:
 > "The cluster is unreachable for ten seconds. Show stale data with a warning, or an error?"
 > "Pick one to give up: a second of startup time, or offline use."
 
-Each answer is a *ranked* characteristic with a real cost attached, which is what Part 3 needs
-and what an adjective can never become.
+Each answer is a *ranked* characteristic with a real cost attached — what Part 3 needs and what
+an adjective can never become.
 
 ### Rule 3 — two gates before any question is asked
 
 **Gate 1 — could you decide this yourself?** If you can make a reasonable call from what you
-already know, **make it**. Write it into the assumptions block and move on. The document is
-editable and `--continue` exists, so a wrong guess costs one sentence of correction. That
-makes guessing cheaper than asking almost every time.
+already know, **make it**: write it into the assumptions block and move on. The document is
+editable and `--continue` exists, so a wrong guess costs one sentence of correction — cheaper
+than asking almost every time.
 
 **Gate 2 — is this something only they can tell you?** A constraint, a preference, a
 deadline, a fact about their organisation or their users — something no amount of reading the
@@ -80,22 +79,21 @@ a failure costs today. Scope is the thing most often got wrong and it is invisib
 code. What fails the gates is business process detail with no consequence for the entities,
 the boundaries, the technology, a story, the API or a flow.
 
-If you already have the answer from the opening message, an earlier answer or the repo, state
-it as a fact. Never open a question by quoting the answer you're about to re-ask — that reads
-as not listening, because it is.
+If the opening message, an earlier answer or the repo already gave you the answer, state it as
+a fact. Never open a question by quoting the answer you're about to re-ask — that reads as not
+listening, because it is.
 
 ---
 
 ## 2. Batching
 
 Put **3–6 numbered questions in one call**, under ~150 words of question text. Round trips,
-not question counts, are what make people quit.
+not question counts, make people quit.
 
 Ask alone only what reshapes the tree: the scope in round 1, and the v1 cut in round 8.
-Everything else batches.
-
-Order inside a batch: what you most need first, cheapest last. Mark the optional ones
-`(skip — I'll default to X)` so a tired user can drop them without feeling like they failed.
+Everything else batches. Order inside a batch: what you most need first, cheapest last. Mark
+the optional ones `(skip — I'll default to X)` so a tired user can drop them without feeling
+like they failed.
 
 ---
 
@@ -103,8 +101,8 @@ Order inside a batch: what you most need first, cheapest last. Mark the optional
 
 Eight rounds on paper, typically four in practice. **Rounds collapse.** Anything already
 answered by the opening message, the repo or an earlier round is stated as fact and never
-re-asked, and a small project finishes early because the later rounds have nothing left to
-ask — not because a quota ran out.
+re-asked; a small project finishes early because the later rounds have nothing left to ask,
+not because a quota ran out.
 
 | # | Round | Style | Buys |
 |---|---|---|---|
@@ -118,17 +116,16 @@ ask — not because a quota ran out.
 | 8 | Stories & v1 | alone | stories grouped by actor, smallest end-to-end slice pre-selected |
 
 **Rounds 2 and 3 are the same subject twice** — the process in the business's own words, then
-the model that has to hold it. That pairing is what makes the model right the first time:
-round 2's unhappy endings *are* round 3's states. Collapse them into one round when the
-opening message already described the process clearly, and say that you are doing it rather
-than silently dropping the correction step.
+the model that has to hold it. The pairing is what makes the model right the first time: round
+2's unhappy endings *are* round 3's states. Collapse them into one round when the opening
+message already described the process clearly, and say so rather than silently dropping the
+correction step.
 
 **Round 5 is where it is because of what it decides.** The characteristics are the forces behind
-the component cut, the style and half the ADRs — Parts 3, 4, 5 and 6 of the document. Asked
-after the boundaries, they can only ratify a cut that was already made; asked before, they are
-what the cut is argued from. This is rule 1 applied to the one place it is easiest to get wrong,
-because characteristics *feel* like technical detail and are in fact the most load-bearing
-business answer in the interview.
+the component cut, the style and half the ADRs — Parts 3, 4, 5 and 6. Asked after the
+boundaries, they can only ratify a cut already made; asked before, they are what the cut is
+argued from. This is rule 1 applied where it is easiest to get wrong, because characteristics
+*feel* like technical detail and are the most load-bearing business answer in the interview.
 
 **→ Under `--explain`, research fires after round 1.** Read `research.md`. Without the flag it
 does not fire at all.
@@ -137,9 +134,9 @@ does not fire at all.
 
 ## 4. Round bank
 
-**This is a bank, not a script.** Every question still passes the two gates before it is
-asked. Drop any whose answer wouldn't change the document for *this* project. Reading the
-list out in order is how an interview turns into a form.
+**This is a bank, not a script.** Every question still passes the two gates. Drop any whose
+answer wouldn't change the document for *this* project. Reading the list out in order is how an
+interview turns into a form.
 
 ### Round 1 — who and the job
 
@@ -156,16 +153,16 @@ The only mostly-open round.
    does it badly — what specifically is bad?" Anti-examples are the most concrete thing users
    produce, and they seed the research with real names.
 
-Q4 decides whether the document carries a rollout section at all, and whether the code gets
-read before anything else is asked.
+Q4 decides whether the document carries a rollout section at all, and whether the code is read
+before anything else is asked.
 
 Offer the escape hatch here, and honour it instantly: *"If you'd rather not go through this,
 say **'you decide'** and I'll write it with the defaults above and list every call I made."*
 
 ### Round 2 — the process
 
-Business vocabulary, business answers. Each lands somewhere technical, which is why it's
-asked. Propose-then-correct throughout.
+Business vocabulary, business answers, each landing somewhere technical. Propose-then-correct
+throughout.
 
 1. "So the sequence is `PO Raised → Goods Received → Invoice Arrived → Matched → Approved →
    Paid`. What did I miss, and which of those is the point of no return?"
@@ -194,12 +191,12 @@ asked. Propose-then-correct throughout.
 
 **Q4 is the highest-yield question in the interview.** It sounds like a business question and
 is a technical one: it decides the class, table and endpoint names, and getting it wrong
-poisons the API for the life of the system. Every domain has one of these words.
+poisons the API for the life of the system. Every domain has such a word.
 
 ### Round 4 — scope edges
 
-Business questions, all of them. They decide what the document does *not* contain, which is
-the cheapest thing to write down and the most expensive to discover late.
+All business questions. They decide what the document does *not* contain — the cheapest thing
+to write down and the most expensive to discover late.
 
 1. "Three things this explicitly does not do in v1 — I'll start with credit notes,
    multi-currency and supplier self-service. Object to any, add your own."
@@ -232,11 +229,11 @@ produce a number nobody is committed to.
    wrong; I'll write them as the two things everything else gets traded against."
 
 **At most three come out of this round as driving.** If they want five, ask which two they would
-sacrifice to keep the other three — a list of five is a list of none, and it licenses every later
-decision to point at whichever one suits it.
+sacrifice — a list of five is a list of none, and licenses every later decision to point at
+whichever one suits it.
 
-Everything they *didn't* pick is worth one line too: those are Part 3's "what we are not
-optimising for", and writing them down is what stops the argument being had again in month four.
+Everything they *didn't* pick is worth one line too: that is Part 3's "what we are not
+optimising for", and writing it down stops the argument being had again in month four.
 
 ### Round 6 — components, style and API
 
@@ -256,8 +253,8 @@ optimising for", and writing them down is what stops the argument being had agai
    `{code, message, details}` with a stable machine-readable `code`; every list endpoint
    paginated, cursor, default 50. Push back on any of the three."
 
-Every one of these is a proposal with a live alternative, which is exactly the shape of an ADR.
-Log each outcome — corrected or accepted — in `## Decisions` (§10) as it lands.
+Each of these is a proposal with a live alternative — the shape of an ADR. Log each outcome,
+corrected or accepted, in `## Decisions` (§10) as it lands.
 
 ### Round 7 — technology and constraints
 
@@ -283,8 +280,8 @@ survivable for a month."*
 
 **Default-and-veto beats an open question** everywhere after round 2. "I'll use PostgreSQL 16
 via your existing cluster — relational integrity for the ledger, and you already run it. Push
-back if this has to be its own database." That is a decision with a reason and an escape
-hatch. Compare: "Which database do you prefer?"
+back if this has to be its own database." A decision with a reason and an escape hatch.
+Compare: "Which database do you prefer?"
 
 **Every default names a real product, version, tier or number** — never a category.
 `Clerk — free to ~10k MAU` beats "a hosted auth provider".
@@ -318,8 +315,8 @@ Invoice    received → matched → approved → paid        terminal: paid | re
 Modules    Receiving | Matching | Settlement           async between Matching and Settlement
 ```
 
-Correcting a picture is a reflex; correcting a paragraph is work. This is also what catches a
-wrong entity name before it reaches the glossary, the API and the schema.
+Correcting a picture is a reflex; correcting a paragraph is work. It also catches a wrong
+entity name before it reaches the glossary, the API and the schema.
 
 **Then name your defaults when you offer to stop.** Every round ends with a real choice:
 
@@ -327,16 +324,16 @@ wrong entity name before it reaches the glossary, the API and the schema.
 > to one Docker image behind your existing nginx — and retention, currently 12 months on my
 > guess. Keep going on those two, or generate now and let me default them?"
 
-"Three rows still open" tells someone nothing they can weigh. Naming the default is what makes
-stopping a real choice rather than a blind one. Never generate without offering the choice,
-and never keep asking after the user takes it.
+"Three rows still open" gives nothing to weigh; naming the default makes stopping a real
+choice rather than a blind one. Never generate without offering the choice, and never keep
+asking after the user takes it.
 
 ---
 
 ## 7. Existing codebase — the `--feature` path
 
-The flag means the user has already told you the scope. Don't re-ask it — read the code and
-open with what you found.
+The flag means the user has told you the scope. Don't re-ask it — read the code and open with
+what you found.
 
 **Before any question**, read in this order, capped at ~15 files: build files (real dependency
 *versions*), the migration folder (real schema), the package layout, lint or architecture
@@ -372,8 +369,8 @@ of round 6.
 
 ## 8. Pushing back on a risky answer
 
-The user decides. Your job is to make sure a decision that's hard to reverse gets made with
-the mechanism visible — not to win.
+The user decides. Your job is to make sure a hard-to-reverse decision is made with the
+mechanism visible — not to win.
 
 **Challenge on sight:** rolling own auth, crypto or JWT verification · storing a raw card PAN
 outside a PSP-hosted field · money or balances on eventual consistency · a non-transactional
@@ -394,8 +391,7 @@ with no fallback · EU personal data in a US-only region · "we'll add tests lat
 
 **Rules.** Object once per decision, never twice — re-litigating is the most annoying thing an
 AI interviewer does. Only for decisions expensive to reverse. Never "are you sure?". Never
-invoke a scale the user didn't claim. Stop challenging entirely once it reads as friction
-rather than help.
+invoke a scale the user didn't claim. Stop challenging entirely once it reads as friction.
 
 **Concede the decision, keep the risk.** When overruled, retract the objection, not the
 warning. Record it once in Risks with the accepted risk and a revisit trigger — a number or an
@@ -410,16 +406,15 @@ When **the user** says they don't know: take the default, write it into Assumpti
 **default if unanswered**, and move on — all in the same message. Never re-ask. Never block.
 
 **This is not a general escape hatch.** An open question is for something *nobody in this
-conversation can answer today* — it needs a decision from someone absent, a measurement not
-yet taken, or a third party's answer.
+conversation can answer today* — a decision from someone absent, a measurement not yet taken,
+a third party's answer.
 
 If the user could answer it in one sentence and the answer changes the document, **it is a
 question, not an open question.** "Is this repo public or private?" · "Do we delete the old
 version at cut-over?" · "Who operates this once it ships?" — each is one line of typing and
 reshapes real sections. Filing those as open questions looks diligent and is the interview
-quitting early with extra steps.
-
-Test before filing: *could the person I am talking to answer this right now?* If yes, ask it.
+quitting early with extra steps. Test before filing: *could the person I am talking to answer
+this right now?* If yes, ask it.
 
 **Ratio check before you generate.** More than about one open question per three asked means
 you under-interviewed — go back and ask the answerable ones.
@@ -428,11 +423,11 @@ you under-interviewed — go back and ask the answerable ones.
 
 ## 10. Persisting the interview
 
-After every answer batch, append to `docs/<topic>/interview-notes.md`. A long interview will
-get interrupted, and losing it costs everything.
+After every answer batch, append to `docs/<topic>/interview-notes.md`. A long interview gets
+interrupted, and losing it costs everything.
 
 This file is **not** behind the write gate — that gate covers `spec.html`, the document the
-user is asked to accept. The notes are your own transcript. Write them as you go.
+user is asked to accept. The notes are your own transcript; write them as you go.
 
 ```markdown
 ---
@@ -493,7 +488,7 @@ a third shape.
 ### The Decisions log is written live, and that is the whole point
 
 Append to `## Decisions` **the moment a decision lands**, not at generate time. Three things go
-in it, and each is already happening in the interview:
+in it, each already happening in the interview:
 
 - a **propose→correct** the user corrected — their correction is the decision, your proposal is
   the alternative;
@@ -501,14 +496,13 @@ in it, and each is already happening in the interview:
 - an **objection you made and they overruled** (§8) — the decision is theirs, the alternative is
   yours, and the accepted risk is the consequence.
 
-`sections.md` §8 turns this log into Part 6 of the document. Assembling that part from memory
-afterwards produces ADRs with invented alternatives: what you write down is the option you would
-now reject, not the one that was genuinely live at the time, and no reader can tell the
-difference. A decision recorded five rounds later has already lost the thing that made it worth
-recording.
+`sections.md` §8 turns this log into Part 6. Assembling that part from memory afterwards
+produces ADRs with invented alternatives: the option you would reject today, not the one live
+at the time, and no reader can tell the difference. A decision recorded five rounds later has
+lost what made it worth recording.
 
-Log the *force* as well as the outcome — the characteristic, the story or the constraint that
-settled it. An ADR whose context names none of those is one nobody can check later.
+Log the *force* as well as the outcome — the characteristic, story or constraint that settled
+it. An ADR whose context names none of those is one nobody can check later.
 
 ### The ledger records *how* a row was settled
 
@@ -524,10 +518,10 @@ told you) and `assumed` (you decided):
 | `assumed` | **you decided it**, nobody confirmed it | the call, and that it was never asked |
 | `open` | nothing settles it yet | — |
 
-`assumed` is a legitimate way to keep moving — rule 3 tells you to prefer it over asking. What
-is not legitimate is recording it as `answered`. The two look identical in the finished
-document, and once the difference is lost, `--continue` has no way to find the decision and
-offer it back. That single lazy word is what makes resuming worthless.
+`assumed` is a legitimate way to keep moving — rule 3 prefers it over asking. Recording it as
+`answered` is not: the two look identical in the finished document, and once the difference is
+lost `--continue` cannot find the decision and offer it back. That one lazy word makes resuming
+worthless.
 
 If you cannot write the evidence clause, the verdict is `assumed`. A row settled by several
 means takes the weakest of them.
@@ -537,18 +531,17 @@ means takes the weakest of them.
 ## 11. The coverage floor
 
 Do not generate until every row below is **settled** — answered, cited, marked not applicable
-with a reason, or assumed with the call written out. "It didn't come up" is not the same as
-"it doesn't apply", and a section written without its row is a section written from
-imagination.
+with a reason, or assumed with the call written out. "It didn't come up" is not "it doesn't
+apply", and a section written without its row is written from imagination.
 
-**Settled does not mean asked.** Four of the five ways to settle a row involve no question at
-all, and each has its own ledger verdict.
+**Settled does not mean asked.** Four of the five ways to settle a row involve no question, and
+each has its own ledger verdict.
 
 **`decisions` is settled differently from the rest.** Every other row is settled by knowing
-something; this one is settled by having *written* something — the log exists and covers the
-choices that had alternatives. A run that reaches the write gate with an empty log has not
-skipped a question, it has thrown away the reasoning behind everything it is about to write, and
-Part 6 will be reconstructed from memory. Check it before generating, not after.
+something; this one by having *written* something — the log exists and covers the choices that
+had alternatives. A run reaching the write gate with an empty log has not skipped a question; it
+has thrown away the reasoning behind everything it is about to write, and Part 6 will be
+reconstructed from memory. Check it before generating, not after.
 
 `scripts/check_spec.py` reads these keys, so a row covered under an invented name reads to the
 script as a row you skipped. Copy them verbatim.
@@ -582,7 +575,7 @@ terms of art, and the word that doesn't mean what it looks like).
 2. **The user stops it** — by taking the generate option you offered, or by saying so. Generate
    immediately, and open by naming every row you defaulted and what you defaulted it to.
 
-Nothing else ends it. Not a question count, not a feeling that you have enough. Silently
+Nothing else ends it — not a question count, not a feeling that you have enough. Silently
 skipping a row and silently defaulting it look identical in the finished document; the
 difference is whether the reader knows.
 

@@ -1,16 +1,16 @@
 # What NOT to Flag — the anti-dogma guard
 
-Read this before you report anything. Both reviewers apply it as a hard filter. The goal of the whole skill is to surface the handful of changes that genuinely help the next reader — and to stay silent about everything else. A tool that flags taste is a tool people learn to ignore.
+Read this before you report anything; both reviewers apply it as a hard filter. The skill exists to surface the handful of changes that genuinely help the next reader and stay silent about everything else — a tool that flags taste is a tool people learn to ignore.
 
 ## The one test
 
 For every candidate finding, ask: **would a thoughtful senior engineer, looking at this, agree the change makes the code meaningfully easier to read or maintain?**
 
-If the honest answer is "it's a matter of preference," "it's the rule but it doesn't actually help here," or "both forms read fine" → **drop it.** When genuinely torn, drop it. A false positive here costs more than a missed minor nit, because it erodes trust in every other finding.
+If the honest answer is "it's a matter of preference," "it's the rule but it doesn't help here," or "both forms read fine" → **drop it.** When torn, drop it. A false positive costs more than a missed nit, because it erodes trust in every other finding.
 
 ## Clean-code dogma to NOT enforce
 
-These are the classic rules that get applied mechanically and do more harm than good. Do not flag code for any of them on its own:
+Classic rules that, applied mechanically, do more harm than good. Do not flag code for any of them on its own:
 
 - **Method/class length as a number.** A clear 40-line method that does one coherent thing is fine. Only flag length when the method actually does *several unrelated things* and there's a real seam to split along — and then the reason is "it mixes parsing, validation, and persistence," never "it's over N lines."
 - **"Every method must be tiny."** Splitting one readable method into five one-liners that are only called once usually makes code *harder* to follow — the reader now hops between fragments to reconstruct one thought. Don't.

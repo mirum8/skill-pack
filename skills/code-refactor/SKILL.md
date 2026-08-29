@@ -1,15 +1,15 @@
 ---
 description: >-
   Refactor existing code for better readability, maintainability, or performance while preserving
-  behavior. Triggers on "refactor", "/r:code-refactor", "clean up this code", "simplify this
-  method", "reduce duplication", "this class is too complex". Writes a unit test first to lock
-  behavior, then refactors safely. NOT for: adding new features, fixing bugs, restructuring entire
-  modules (use refactor-module), or writing tests without refactoring.
+  behavior — writes a unit test first to lock behavior, then refactors safely. Triggers on
+  "refactor", "/r:code-refactor", "clean up this code", "simplify this method", "reduce
+  duplication", "this class is too complex". NOT for: adding new features, fixing bugs,
+  restructuring entire modules, or writing tests without refactoring.
 ---
 
-# Refactor
+# code-refactor
 
-You are a senior Java/Spring engineer performing a code review focused on eliminating code smells and improving readability. Analyze the target code and apply safe, behavior-preserving improvements.
+You are a senior Java/Spring engineer eliminating code smells and improving readability. Analyze the target code and apply safe, behavior-preserving improvements.
 
 ## Workflow
 
@@ -32,13 +32,13 @@ Before making ANY changes, write tests that capture current behavior:
 3. **Run tests to verify they pass** with current implementation
 4. **Use existing test patterns** from the project
 
-**Hard behavior-lock gate.** This skill's entire safety guarantee is "lock behavior with a test, then change form." If you cannot get a behavior-lock test that passes **green on the current, unchanged code** — because the seam is untestable, there's no harness, or the test won't go green as-is — then **STOP and report**. Do NOT refactor. An unlocked refactor is unverified and may silently change behavior; "refactor and hope" is not allowed. Report what blocked the lock test so the user can decide.
+**Hard behavior-lock gate.** The skill's whole safety guarantee is "lock behavior with a test, then change form." If you cannot get a behavior-lock test that passes **green on the current, unchanged code** — the seam is untestable, there is no harness, or the test will not go green as-is — **STOP and report** what blocked it so the user can decide. Do NOT refactor: an unlocked refactor may silently change behavior, and "refactor and hope" is not allowed.
 
 ### Step 3: Refactor the Code
 
-With tests as a safety net, apply improvements from the categories below. Do NOT change any business logic or external behavior. Make each change minimal and atomic — prefer many small improvements over large rewrites.
+With tests as a safety net, apply improvements from the categories below. Do NOT change any business logic or external behavior. Make each change minimal and atomic — many small improvements over large rewrites.
 
-**Stay in scope.** Constrain the refactor to the resolved scope from Step 1 (the changed lines / the files you were asked about). Do not balloon into rewriting untouched code just because the catalog below lists a pattern that technically applies — touching unrelated code adds behavior risk and review burden for no clarity gain on the actual change. Treat the categories below as a menu, not a checklist: apply only the ones that make *this* code genuinely clearer, to the bar a senior engineer would agree with.
+**Stay in scope.** Constrain the refactor to the resolved scope from Step 1 (the changed lines / the files you were asked about). Do not rewrite untouched code because the catalog below lists a pattern that technically applies — that adds behavior risk and review burden for no clarity gain on the actual change. The categories are a menu, not a checklist: apply only the ones that make *this* code genuinely clearer, to the bar a senior engineer would agree with.
 
 #### Naming & Structure
 - Rename vague variables, methods, and classes to express intent (e.g., `data` → `userProfileResponse`, `process()` → `validateAndPersistOrder()`)
@@ -95,7 +95,7 @@ After refactoring:
 1. Run the tests written in Step 2
 2. All tests must pass — behavior must be preserved
 3. If tests fail, fix the **refactoring** (never the test, and never the behavior). Bound this to **2–3 fix attempts**.
-4. **On exhaustion, REVERT and report.** If the tests still fail after the bounded attempts, `git restore` / `git checkout --` the files you touched to return them to the locked-green starting point, then report the failure. Never leave a half-refactored, test-failing tree, and never make the lock test pass by weakening the test or changing behavior — a refactor that can't be made safe is abandoned, not forced.
+4. **On exhaustion, REVERT and report.** If the tests still fail after the bounded attempts, `git restore` / `git checkout --` the files you touched back to the locked-green starting point, then report the failure. Never leave a half-refactored, test-failing tree, and never make the lock test pass by weakening the test or changing behavior — a refactor that cannot be made safe is abandoned, not forced.
 
 ### Step 5: Summarize Changes
 
@@ -109,11 +109,11 @@ python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
 STATS_JSON
 ```
 
-`lockTest: "impossible"` is the Step 2 gate firing — the run stopped without refactoring, and that is a real outcome worth counting, not a failure to hide. The script always exits `0`; a row that does not get written is a lost row, never a failed refactor. Never retry it.
+`lockTest: "impossible"` is the Step 2 gate firing — the run stopped without refactoring, a real outcome worth counting. The script always exits `0`; a row that does not get written is a lost row, never a failed refactor. Never retry it.
 
 ## Implementation
 
-Use the `r:java-backend-developer` agent for implementing:
+Use the `r:java-backend-developer` agent for:
 - Writing the initial tests
 - Performing the refactoring
 - Running verification tests
@@ -122,7 +122,7 @@ Use the `r:java-backend-developer` agent for implementing:
 
 - Do NOT change any business logic or external behavior
 - Preserve all existing tests — they must still pass
-- If a refactor is too risky without test coverage, skip it. If a behavior-lock test can't be made green on the unchanged code at all (Step 2 gate), STOP and report — do not refactor
+- If a refactor is too risky without test coverage, skip it. If a behavior-lock test cannot be made green on the unchanged code at all (Step 2 gate), STOP and report — do not refactor
 - Stay within the resolved scope (Step 1); do not rewrite untouched code. There is no hard method-length rule — split only along real seams that make the code clearer
 - Make each change minimal and atomic — prefer many small improvements over large rewrites
 - Do not over-engineer or add unnecessary abstractions

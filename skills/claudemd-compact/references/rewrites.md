@@ -17,17 +17,15 @@ Sections **3–6 are the progressive-disclosure family** — the three destinati
 that keep a rule while taking it off the always-on path, differing only in what
 triggers the reload (a task → §3, a directory → §4, an invocation → §6), plus
 §5, the repair for the one link form that *looks* like disclosure and isn't.
-Reach for these first. Unlike a cut or a prune they can't lose anything, so they
-need no evidence and no argument about whether the content still deserves its
-place — the text survives word for word and simply stops being charged every
-turn. Most of the size delta in a good compaction comes from this family, not
-from deletion.
+Reach for these first: they can't lose anything, so they need no evidence. Most
+of the size delta in a good compaction comes from this family, not from
+deletion.
 
 ---
 
 ## 1. Rigid rule → intent
 
-The commonest constraint-cost fix. A prohibition stack anticipates the cases its
+The commonest constraint-cost fix. A prohibition stack covers the cases its
 author thought of and fights the user on the rest; one sentence of intent
 generalizes and leaves room for the exception.
 
@@ -49,7 +47,7 @@ Match the comment density and style of the surrounding code.
 ```
 
 The intent — *don't spray generated commentary over this codebase* — survives,
-and the model can still write a real explanation where one genuinely helps.
+and the model can still explain where an explanation helps.
 
 The same shape applies broadly: "never use `var`; never use streams for more than
 two operations; never nest ternaries" → "prefer the plainest construct that reads
@@ -82,18 +80,17 @@ Hexagonal: `core` holds domain logic and defines the ports; the `*-adapter`
 modules implement them and may depend on `core`, never on each other.
 ```
 
-Every deleted sentence was true and freely discoverable. What replaced it is the
-part that *isn't* discoverable — the dependency rule you'd only learn by breaking
-it. Keep the build command itself if it's non-obvious (a specific profile, a
-required flag); drop it if `mvn test` is simply `mvn test`.
+Every deleted sentence was true and freely discoverable; what replaced it is the
+part that *isn't* — the dependency rule you'd only learn by breaking it. Keep
+the build command if it's non-obvious (a specific profile, a required flag);
+drop it if `mvn test` is simply `mvn test`.
 
 ---
 
 ## 3. Long section → reference
 
 The workhorse of this skill. A section that is correct, wanted, and read on one
-turn in twenty is the clearest case there is: it costs its full length every
-turn to be useful occasionally.
+turn in twenty costs its full length every turn to be useful occasionally.
 
 **Before** — ~55 lines in the root, relevant only when someone touches the
 integration suite:
@@ -124,27 +121,26 @@ before running or fixing an `*IT` test.
 with `.claude/docs/integration-tests.md` holding the original text unchanged.
 
 Nothing was judged and nothing was lost, which is why this needs no evidence and
-is safe to apply unattended. Note what the surviving sentence does: it names the
-**trigger** ("before running or fixing an `*IT` test"), so the model knows both
-that the file exists and when it becomes relevant. A bare `see
-.claude/docs/integration-tests.md` is a file nobody opens — and an extraction the
-model never opens is a deletion with extra steps.
+is safe to apply unattended. The surviving sentence names the **trigger**
+("before running or fixing an `*IT` test"), so the model knows when the file
+becomes relevant. A bare `see .claude/docs/integration-tests.md` is a file
+nobody opens — and an extraction the model never opens is a deletion with extra
+steps.
 
-The everyday command stays inline. Disclose the depth, not the thing people need
-on every turn.
+The everyday command stays inline. Disclose the depth, not what people need on
+every turn.
 
-> The one way to overdo this: extracting a genuinely tiny, genuinely
-> always-relevant snippet just to link it. Four lines inline beat four lines plus
-> a hop. "Long" is the trigger for this move — not "could theoretically live
-> elsewhere".
+> The one way to overdo this: extracting a tiny, always-relevant snippet just to
+> link it. Four lines inline beat four lines plus a hop. "Long" is the trigger
+> for this move — not "could theoretically live elsewhere".
 
 ---
 
 ## 4. Module rule → nested `CLAUDE.md`
 
-The cheapest disclosure of all, because the trigger is the file path itself —
-nobody has to remember to mention a doc. Rules that only bind inside one module
-belong next to that module.
+The cheapest disclosure, because the trigger is the file path itself — nobody
+has to remember to mention a doc. Rules that only bind inside one module belong
+next to that module.
 
 **Before** — in the root, loaded on backend-only turns too:
 
@@ -169,11 +165,11 @@ server owns stays on the server.
 
 The root keeps nothing: work inside `web-adapter/` picks the file up on its own.
 
-The one thing to check before moving a rule down is **who needs to read it**. A
-boundary rule binds the side that would violate it — "`core` must not import
-adapter packages" is useless in `web-adapter/CLAUDE.md` and belongs in the root
-or in `core/`. Rules about *how this module is written* move; rules about *how
-others may use it* don't.
+Before moving a rule down, check **who needs to read it**. A boundary rule
+binds the side that would violate it — "`core` must not import adapter
+packages" is useless in `web-adapter/CLAUDE.md` and belongs in the root or in
+`core/`. Rules about *how this module is written* move; rules about *how others
+may use it* don't.
 
 ---
 
@@ -199,8 +195,7 @@ boundaries. For the full API and conversion rules, read
 ```
 
 `result-monad.md` doesn't change — only how it's linked, and the link gained the
-trigger it needs (§3). This is a pure win and counts as compaction even if
-nothing else moves.
+trigger it needs (§3). A pure win, even if nothing else moves.
 
 ---
 
@@ -208,7 +203,7 @@ nothing else moves.
 
 A multi-step routine with its own trigger is a skill wearing a CLAUDE.md
 costume. Inline, it loads on every unrelated turn; as a skill it loads when
-invoked and can carry its own progressive disclosure.
+invoked and carries its own progressive disclosure.
 
 **Before** — 40 lines in the root, loaded whether or not anyone is shipping:
 
@@ -229,11 +224,10 @@ invoked and can carry its own progressive disclosure.
 plus a real `.claude/skills/verify-change/SKILL.md` whose description names the
 triggers ("verify my change", "am I ready to ship", "run the pre-ship checks").
 
-Propose this when the content has a clear trigger *and* steps of its own. A rule
-with no procedure attached is not a skill — it's a rule. And *propose* is the
-word: unlike the other three disclosures, a new skill lands outside the repo
-where `git revert` can't reach it, so `--auto` reports this one instead of doing
-it.
+Propose this when the content has a clear trigger *and* steps of its own; a
+rule with no procedure attached is a rule, not a skill. And *propose* is the
+word: a new skill lands outside the repo where `git revert` can't reach it, so
+`--auto` reports this one instead of doing it.
 
 ---
 
@@ -258,15 +252,15 @@ Shape and the ignore-unknown-types rule are pinned by
 `WebhookPayloadTest` — read it before changing the contract.
 ```
 
-The test already states every rule the prose stated, executably. The same applies
-to design: an HTML mockup beats a description of a layout, and an existing
-function beats a paragraph about what the new one should look like.
+The test states every rule the prose stated, executably. Likewise an HTML mockup
+beats a description of a layout, and an existing function beats a paragraph
+about what the new one should look like.
 
 ---
 
 ## 8. Decision log → memory
 
-History explains why something is the way it is. It's worth keeping — just not in
+History explains why something is the way it is. Worth keeping — not in
 always-on context, where it competes with instructions.
 
 **Before**, in CLAUDE.md:
@@ -296,14 +290,14 @@ with a one-line pointer added to that directory's `MEMORY.md`.
 
 Keep the *rule* in CLAUDE.md if one exists ("cache with Caffeine, don't add a
 network cache") — move the *story* to memory. Dated entries, meeting notes, and
-"we tried X and it didn't work" are all memory.
+"we tried X and it didn't work" are memory.
 
 ---
 
 ## 9. Cross-layer conflict → resolution
 
 Two live instructions that disagree force the model to litigate before it acts.
-Surface both with their locations; which one wins is the user's call.
+Surface both with their locations; which wins is the user's call.
 
 **Found:**
 
@@ -319,9 +313,9 @@ Conflict — javadoc:
 These can't both hold. Which wins for this project?
 ```
 
-Resolve it only once the user answers. If the project rule wins it should say so
-explicitly ("javadoc on public API here, overriding my global default") so the
-next reader doesn't re-open the same question.
+Resolve it only once the user answers. If the project rule wins, it should say
+so explicitly ("javadoc on public API here, overriding my global default") so
+the next reader doesn't re-open the question.
 
 The same treatment applies to a project rule that contradicts a skill, or two
 nested `CLAUDE.md` files that disagree about the same directory.

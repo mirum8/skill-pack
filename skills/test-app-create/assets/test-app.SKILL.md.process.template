@@ -9,7 +9,7 @@ description: Use this skill to verify {{APP_NAME}} after changes — smoke tests
 
 Verifies that recent changes to {{APP_NAME}} actually work — by building it with `{{BUILD_CMD}}` and then driving the real program: {{#IF_TUI}}a real terminal through `{{TUI_DRIVER_PATH}}`, {{/IF_TUI}}direct `{{BIN_PATH}}` invocations, persisted e2e scripts, and `{{LOGS_CMD}}`. It checks the happy path, {{#IF_TUI}}what the app actually renders, {{/IF_TUI}}the failure paths, **and** the security rules that apply to a program running on someone's machine, then reports concrete pass/fail.
 
-That marker line above is not decoration: `/r:task-review` reads it to decide what to start and what to hand a verifier. Keep it, and keep it accurate — if this project grows a web surface, re-run `/r:test-app-create` rather than editing the line, because the rest of this file would still describe a terminal app.
+That marker line above is not decoration: `/r:task-review` reads it to decide what to start and what to hand a verifier. Keep it accurate — if this project grows a web surface, re-run `/r:test-app-create` rather than editing the line, because the rest of this file would still describe a terminal app.
 
 This skill owns its artifacts under its own directory — credentials in `{{CREDS_PATH}}`, generated e2e scripts and captured frames in `{{E2E_DIR}}/` — so it never collides with the project's own `scripts/`.
 
@@ -29,9 +29,9 @@ There is no server here and no port. What decides whether you are testing *this*
 
 Four cases, in priority order:
 
-1. **Caller supplied `TEST_APP_SESSION` / `TEST_APP_BIN`** (the post-task-review verifier already built and started the app): use them, and do **not** build, start or stop anything — the caller owns the lifecycle, and a second instance of a program that owns a config file or a lock is a collision, not a spare.
+1. **Caller supplied `TEST_APP_SESSION` / `TEST_APP_BIN`** (the `/r:task-review` verifier already built and started the app): use them, and do **not** build, start or stop anything — the caller owns the lifecycle, and a second instance of a program that owns a config file or a lock is a collision, not a spare.
 2. **Anywhere else**: run `{{BUILD_CMD}}` first. {{REBUILD_NOTE}} This matters more here than on a web stack, where a running server at least tells you *something* is up: an unbuilt binary is silently the previous commit, and every check passes against code you did not change.
-3. **A linked git worktree needs nothing extra.** This is the interesting difference from a compose-backed app, so it is worth stating rather than leaving implicit: two worktrees running a terminal program collide only through its **state directory**, never through a port, and {{#IF_TUI}}the driver already derives that directory from the checkout root{{/IF_TUI}}{{#IF_CLI}}the checks below point the app at a throwaway directory{{/IF_CLI}}. There is no "refuse to run from a worktree" case, because there is nothing to refuse.
+3. **A linked git worktree needs nothing extra.** Unlike a compose-backed app, two worktrees running a terminal program collide only through its **state directory**, never through a port, and {{#IF_TUI}}the driver already derives that directory from the checkout root{{/IF_TUI}}{{#IF_CLI}}the checks below point the app at a throwaway directory{{/IF_CLI}}. There is no "refuse to run from a worktree" case, because there is nothing to refuse.
 {{#IF_TUI}}4. **tmux is missing** (the driver exits `127`): the checks that need a real terminal did **not run**. Record them as such and **name tmux** — never report the app as verified, and never substitute a hand-rolled `expect` wrapper. The surface-independent checks below still run and still count.
 {{/IF_TUI}}{{#IF_CLI}}4. **`{{BIN_PATH}}` is missing after the build**: stop and report the build failure. A `/test-app` run that tests a stale binary is worse than one that does not run.
 {{/IF_CLI}}

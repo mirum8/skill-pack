@@ -1,19 +1,18 @@
 # Process surfaces — TUI and CLI
 
 Read this only when Step 0 of `detection-guide.md` resolved the surface to `tui` or `cli`. It is
-kept out of that file on purpose: Step 0 runs for every project, and making every compose-backed
-Maven scaffold read two hundred lines of ratatui signatures is a context tax on the common case.
+kept out of that file on purpose: Step 0 runs for every project, and the common compose-backed
+Maven scaffold should not pay to read two hundred lines of ratatui signatures.
 
 Everything here fills the *process pair* half of the placeholder map. Where a signal is missing,
-fall back as noted — and where the fallback is "ask", ask rather than guessing, because the surface
-decides which template pair the user's whole generated skill comes from.
+fall back as noted — and where the fallback is "ask", ask rather than guessing.
 
 ## Framework signatures
 
-These identify **candidates**. On their own they never settle anything — see the discriminator in
-`detection-guide.md`, which is what actually decides. A dependency is not a surface: `ratatui` sits
-in `[dev-dependencies]`, `rich` prints coloured tables from a program that is unambiguously a CLI,
-`bubbles` gets vendored for one spinner.
+These identify **candidates**. On their own they settle nothing — the discriminator in
+`detection-guide.md` decides. A dependency is not a surface: `ratatui` sits in
+`[dev-dependencies]`, `rich` prints coloured tables from a plain CLI, `bubbles` gets vendored for
+one spinner.
 
 | language | TUI candidates | CLI candidates |
 | --- | --- | --- |
@@ -27,11 +26,10 @@ in `[dev-dependencies]`, `rich` prints coloured tables from a program that is un
 ## `{{LAUNCH_CMD}}` and `{{BIN_PATH}}` — two values, and the difference matters
 
 `{{LAUNCH_CMD}}` starts the app from the project root with **no arguments**. `{{BIN_PATH}}` is the
-**built executable**. They are separate placeholders because every exit-code, stdout/stderr and
-piping check has to invoke `{{BIN_PATH}}`: a source runner writes its own lines to stderr and
-returns its own exit code, so a check that ran `cargo run -- --bad-flag` and saw exit 101 learned
-something about cargo, not about the app. Fold them into one and the whole CLI catalog silently
-tests the wrong program.
+**built executable**. They are separate because every exit-code, stdout/stderr and piping check
+has to invoke `{{BIN_PATH}}`: a source runner writes its own lines to stderr and returns its own
+exit code, so a check that ran `cargo run -- --bad-flag` and saw exit 101 learned something about
+cargo, not the app. Fold them into one and the whole CLI catalog silently tests the wrong program.
 
 ```
 grep -nA2 '^\[\[bin\]\]' Cargo.toml 2>/dev/null; ls src/main.rs src/bin/*.rs 2>/dev/null
@@ -55,10 +53,10 @@ an empty string, so the generated skill's shell block still parses.
 
 ## `{{STATE_DIR}}` and `{{STATE_ISOLATION_BLOCK}}`
 
-Isolation on this surface is a **state directory**, never a port. That is the whole reason the
-generated skill has no "refuse to run from a worktree" case: two worktrees running a terminal
-program cannot collide over a port they do not open, but they will happily corrupt each other's
-config, history or embedded database.
+Isolation on this surface is a **state directory**, never a port — which is why the generated
+skill has no "refuse to run from a worktree" case: two worktrees running a terminal program cannot
+collide over a port they do not open, but they will corrupt each other's config, history or
+embedded database.
 
 ```
 grep -rn 'XDG_CONFIG_HOME\|XDG_DATA_HOME\|dirs::config_dir\|os.UserConfigDir\|platformdirs\|appdirs\|envPaths' --include='*.rs' --include='*.go' --include='*.py' --include='*.ts' --include='*.js' . 2>/dev/null
@@ -71,14 +69,13 @@ grep -rn '\.config/\|\.local/share/\|APP_HOME\|--config' --include='*.rs' --incl
   precise and does not depend on the app honouring XDG at all.
 - A `--config` flag with a default → pass the flag.
 - Nothing found → `{{STATE_DIR}}` is `~/.config/<app>` as a stated guess, and the summary marks it
-  guessed. **Do not** reach for overriding `HOME` as a blanket answer: it also hides the
-  toolchain's own caches from the build, and the build failure that follows reads as an app
-  failure.
+  guessed. **Do not** override `HOME` as a blanket answer: it also hides the toolchain's own caches
+  from the build, and the build failure that follows reads as an app failure.
 
 ## `{{KEYMAP_BLOCK}}` — the TUI's analogue of the web pair's routes
 
-Without it a subagent guesses `q`, gets nothing, and reports the app unresponsive. That is the
-commonest false finding this surface produces, and it is entirely preventable by reading the table.
+Without it a subagent guesses `q`, gets nothing, and reports the app unresponsive — the commonest
+false finding on this surface, and preventable by reading the table.
 
 ```
 grep -rn 'KeyCode::\|key.String()\|BINDINGS\|Binding(\|bind(\|keymap\|key_bindings' --include='*.rs' --include='*.go' --include='*.py' . 2>/dev/null | head -40
@@ -87,7 +84,7 @@ grep -rn 'BINDINGS *=\|def key_\|on_key\|handle_key\|KeyEvent' --include='*.py' 
 
 Read it from the binding table in code first, the help screen (`?` / `F1`) second, the README last.
 Fill `{{KEYMAP_BLOCK}}` as a short table of key → what it does → which screen it applies to. Where
-the bindings are screen-specific, say so — a key that quits the app from the list and closes a modal
+bindings are screen-specific, say so — a key that quits the app from the list and closes a modal
 from inside it is two behaviours, and a test that conflates them fails for the wrong reason.
 
 ## `{{CLI_INVOCATION_BLOCK}}` and `{{EXIT_CODE_TABLE}}`
@@ -105,9 +102,8 @@ the app against itself and always pass.
 
 `{{EXIT_CODE_TABLE}}`: look for named constants, a `sysexits.h` include, or a documented table in
 the README. Found → set `{{IF_EXIT_CODES}}` true and list them. Not found → leave it false; the
-catalog item degrades to "0 on success, and a **distinct** non-zero per failure class", which is
-still the check that catches the real defect (an error path that prints a message and then returns
-success).
+catalog item degrades to "0 on success, and a **distinct** non-zero per failure class", which still
+catches the real defect (an error path that prints a message and then returns success).
 
 ## Native harnesses → `{{IF_NATIVE_HARNESS}}` / `{{NATIVE_HARNESS_BLOCK}}`
 
@@ -119,14 +115,14 @@ success).
 | ink | `ink-testing-library`, `lastFrame()` | `npm test` |
 
 **Never put the baseline-updating flag in the block** — not `--snapshot-update`, not `-update`.
-Those rewrite the golden file to match whatever the code now does, which turns a regression into a
-pass. That is the one way a snapshot harness can actively hide the defect it exists to catch.
+Those rewrite the golden file to match whatever the code now does, turning a regression into a
+pass — the one way a snapshot harness can hide the defect it exists to catch.
 
 **A harness never replaces the terminal track**, and the generated skill says so. It renders into a
-fake backend, so it structurally cannot observe the three things that break most often in practice:
-the alternate screen left on at exit, the terminal not restored after a panic, and behaviour under
-a real TTY versus a pipe. It *is* better than a captured frame at deterministic assertions on paths
-it already covers, which is why both run.
+fake backend, so it cannot observe the three things that break most often: the alternate screen
+left on at exit, the terminal not restored after a panic, and behaviour under a real TTY versus a
+pipe. It *is* better than a captured frame at deterministic assertions on paths it covers, which is
+why both run.
 
 ## The remaining conditional flags
 
@@ -137,9 +133,9 @@ flip a flag on.
   `lipgloss.`, `chalk.`, `rich.console`, `colorama`, or any `\033[3` literal. Enables the colour
   and `NO_COLOR` checks.
 - `{{IF_MOUSE}}` — `EnableMouseCapture`, `tea.WithMouseCellMotion`, `screen.EnableMouse()`,
-  `mouse=True`. Enables the mouse item, which is deliberately written as *covered by the harness or
-  recorded as not covered* — a mouse report cannot be honestly synthesized into a pane, and a check
-  that cannot fail is worse than an admitted gap.
+  `mouse=True`. Enables the mouse item, deliberately written as *covered by the harness or recorded
+  as not covered* — a mouse report cannot be honestly synthesized into a pane, and a check that
+  cannot fail is worse than an admitted gap.
 - `{{IF_STDIN}}` — the app reads stdin: a `-` argument, `io.stdin`, `os.Stdin`, `process.stdin`,
   `sys.stdin`. Enables the piping and EOF checks.
 - `{{IF_SIGNALS}}` — `signal.Notify`, `ctrlc::set_handler`, `signal.signal(`, a `SIGINT` trap.
@@ -148,24 +144,24 @@ flip a flag on.
   `Authorization` header, an OAuth flow, a keyring call. Enables the client-side token checks.
 - `{{IF_SHELLS_OUT}}` — `Command::new("sh")`, `exec.Command("sh", "-c"`, `os.system`,
   `subprocess(..., shell=True)`, `child_process.exec`, backticks in a built string. Enables the
-  injection checks, which matter more here than on a web app because the shell is right there.
+  injection checks, which matter more here than on a web app: the shell is right there.
 - `{{IF_PATH_ARGS}}` — the app takes a filesystem path as an argument or a config value. Enables
-  the traversal checks, which are this surface's honest analogue of a cross-user access bug.
+  the traversal checks, this surface's analogue of a cross-user access bug.
 
 ## `{{TERM_GEOMETRY}}` and `{{GEOMETRY_SWEEP}}`
 
 `{{TERM_GEOMETRY}}` is the size the app is designed for — from a minimum-size guard
-(`if width < N`), its layout constraints, or its README. Default `120x40` when nothing says.
+(`if width < N`), its layout constraints, or its README. Default `120x40`.
 
 `{{GEOMETRY_SWEEP}}` is always three sizes: something wide (`160x50`), `{{TERM_GEOMETRY}}`, and
-**`80x24`**. That last one is not arbitrary and is worth keeping when someone trims this list: it is
-the size every terminal guarantees, and it is where a layout that quietly assumes width falls apart
-— the same role the mobile viewport plays on the web pair, and for the same reason.
+**`80x24`**. Keep that last one when trimming: it is the size every terminal guarantees, and where
+a layout that quietly assumes width falls apart — the mobile viewport of the web pair, for the same
+reason.
 
 ## `{{LOGS_CMD}}` — almost never stdout
 
 On a TUI, stdout **is** the UI, so a log line printed there corrupts the frame. Look for a logfile
 path, a `--log-file` flag, a `RUST_LOG`/`DEBUG`/`<APP>_LOG` env var whose output is redirected, or
-a `journalctl` unit. If the app genuinely has no log channel, say so in the summary rather than
-pointing `{{LOGS_CMD}}` at stdout: the generated skill would then instruct a subagent to grep the
-rendered screen for stack traces, which is not the same check and quietly always passes.
+a `journalctl` unit. If the app has no log channel, say so in the summary rather than pointing
+`{{LOGS_CMD}}` at stdout: the generated skill would then tell a subagent to grep the rendered
+screen for stack traces, which is not the same check and quietly always passes.

@@ -76,7 +76,7 @@ beside a plan that never had contracts is worse than none.
 **Only the leaf is addressable**, and its heading shape is fixed: `### Phase N — title`, numbered
 continuously from 1 across every milestone, gap-free, no repeats. `/r:task-run` locates a leaf by
 that heading; `/r:plan-run` orders the run by that number; `check_todo.py` enforces both. A
-milestone is `##` — writing one as `###` turns a grouping into something an agent will try to build.
+milestone is `##` — as `###` it becomes something an agent will try to build.
 
 ## Why the contracts never reach the implementer
 
@@ -87,12 +87,11 @@ into acceptance criteria. It does not read upward and follows no links out. So:
 - A leaf item that points at it ("per the milestone design") arrives as a dangling pointer — the
   contract it names is in another file, and the planner re-derives whatever it can.
 - Therefore **every item repeats the part of the contract it needs.** Repetition between a contracts
-  section and the items it produced is correct, not duplication to factor out. They have different
-  readers: one is read by a person deciding whether the design is right, the other by a planner that
-  will never see the first.
+  section and the items it produced is correct, not duplication to factor out: one is read by a
+  person deciding whether the design is right, the other by a planner that never sees the first.
 - The milestone heading may carry one `Contracts: design.md#…` pointer line for the reader. It sits
-  on the milestone, never on a `- [ ]` line, which is exactly the difference between a signpost and
-  a dangling pointer.
+  on the milestone, never on a `- [ ]` line — the difference between a signpost and a dangling
+  pointer.
 
 `check_todo.py` reports items that defer outside their block.
 
@@ -111,11 +110,10 @@ into acceptance criteria. It does not read upward and follows no links out. So:
 - **`file:LINE` references and reuse maps.** For a leaf six weeks out these are imagined, and an
   imagined citation is worse than none because it reads exactly like a real one. `/r:task-run`'s
   planner writes both at execution time with the files open, and its reuse map is explicitly "the
-  evidence you explored rather than imagined". Counterfeiting that is the one thing this document
-  must never do.
+  evidence you explored rather than imagined". This document must never counterfeit that.
 - **Approach prose, algorithms, pseudocode, file-by-file change lists.** A diff plan against a
-  codebase that does not exist. By the time leaf 9 runs, the earlier leaves may have ruled the
-  approach out — and an implementer following a stale one lands somewhere nobody chose.
+  codebase that does not exist. By the time leaf 9 runs, earlier leaves may have ruled the approach
+  out, and an implementer following a stale one lands somewhere nobody chose.
 - **Anything used by exactly one leaf.** It belongs in that leaf's items. Hoisting it adds a hop
   for the reader and reaches nobody extra.
 
@@ -133,7 +131,7 @@ An item names the concrete thing and stands alone:
 ```
 
 5–12 items per leaf. A deeper plan means **richer items, not more of them** — the leaf is still one
-focused session, which is the size `/r:task-run` is built around.
+focused session, the size `/r:task-run` is built around.
 
 ## The graph
 
@@ -141,7 +139,7 @@ focused session, which is the size `/r:task-run` is built around.
 both enforced:
 
 - **A leaf may depend only on lower-numbered leaves.** Numeric order then *is* a valid build order,
-  which is what lets `/r:plan-run` run the plan straight down the page and still respect every edge.
+  which lets `/r:plan-run` run the plan straight down the page and still respect every edge.
 - **No two leaves in one wave may name the same file.** They would run at the same time in separate
   worktrees. **Re-cut the two leaves before you reach for an edge** — a collision usually says the
   seam is in the wrong place, and two features editing one fat controller want the seam moved rather
@@ -158,13 +156,13 @@ The `## Waves` block is a generated summary — `check_todo.py` recomputes it an
 because a stale summary is worse than none: it is the half a person reads when deciding what to run
 at once.
 
-The plan file itself is excluded from the collision check. Every leaf ticks it, so it is shared by
-construction, and git merges the ticks — separate leaves edit separate regions of the document.
+The plan file itself is excluded from the collision check: every leaf ticks it, so it is shared by
+construction, and git merges the ticks — separate leaves edit separate regions.
 
 ## Rewriting a plan that already exists
 
 A plan on disk is an **input**, never something to overwrite. The rewrite runs the same passes over
-it: reformat it into the shape above, and re-derive it against the documents.
+it: reformat into the shape above, re-derive against the documents.
 
 | shape found | how you know | what carries over |
 |---|---|---|
@@ -179,20 +177,20 @@ partly-ticked one has landed work, and re-splitting it orphans those ticks. The 
 `--from N`, the branch and the PR body name; the ticks are what stop `/r:plan-run` rebuilding what
 already shipped.
 
-What that still allows, and why each is safe:
+What that still allows:
 
 - **Unticked items in a frozen leaf may be rewritten**, and a frozen leaf may *gain* a missing
   `Implements:` / `Depends on:` / `Done when:` line. Those annotate what was built rather than
-  changing it — which is how a `foreign` plan becomes conformant without falsifying its history.
+  changing it — how a `foreign` plan becomes conformant without falsifying its history.
 - **Anything unbuilt is free**: re-split, re-scope, renumber, drop, rewire. New leaves number above
   the highest frozen one, so numeric order stays a valid build order and no edge points backwards.
 - **A story the documents changed after a leaf shipped is new work**, never an edit to that leaf.
 
 Two things the rewrite must not manufacture. A milestone grouping, an edge or an `Implements:` name
-that no author wrote is **inferred**, and every one is named as inferred at the gate — an inferred
-edge reads exactly like an authored one, which is the same reason `file:LINE` is banned above. And
-`Done when:` is never invented to satisfy the checker: derive a real command from the build files,
-or leave it absent and let the check fail.
+no author wrote is **inferred**, and every one is named as inferred at the gate — an inferred edge
+reads exactly like an authored one, the same reason `file:LINE` is banned above. And `Done when:`
+is never invented to satisfy the checker: derive a real command from the build files, or leave it
+absent and let the check fail.
 
 ## Checking it
 
@@ -205,8 +203,8 @@ python3 "${CLAUDE_SKILL_DIR}/scripts/check_todo.py" docs/<topic>/todo.md --slice
 
 `--design` checks the two files are one document: a milestone with no contracts section, a section
 with no milestone, a name changed on one side, contracts left inline beside a `design.md`. Nothing
-else will ever notice — no tool reads the contracts file, which is what makes moving them there
-safe and this check the only guard.
+else will notice — no tool reads the contracts file, which makes moving them there safe and this
+check the only guard.
 
 `--against` is the mechanical guard on the freeze rule, and it is not optional on a rewrite: a
 frozen leaf that vanished or was retitled, one that was renumbered, a lost or un-ticked item, a
@@ -214,6 +212,6 @@ dropped built marker. Against a previous plan with no `### Phase N` numbering it
 thing that plan carried — that every tick survived.
 
 `--slice` answers a different question: may these leaves run **concurrently**, right now? It reports
-only what makes that unsafe — a dependency that isn't built yet, a dependency inside the same slice,
-a shared file — and stays quiet about plan quality, because refusing to start concurrent work over a
-missing `Implements:` line would be noise at the worst moment. This is `/r:plan-run`'s preflight.
+only what makes that unsafe — a dependency not built yet, a dependency inside the same slice, a
+shared file — and stays quiet about plan quality, because refusing concurrent work over a missing
+`Implements:` line would be noise at the worst moment. This is `/r:plan-run`'s preflight.

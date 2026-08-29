@@ -1,21 +1,19 @@
 # Documentation Consistency
 
-Real-world drift between a change and the project's written intent — places where the code
-and the docs now contradict each other. Hunter focus: **Documentation Consistency.**
+Drift between a change and the project's written intent — places where the code and the docs
+contradict each other. Hunter focus: **Documentation Consistency.**
 
-This hunter is different from the bug hunters. It does not hunt for code that will break in
-production. It hunts for code that disagrees with what the project's documentation *says*
-should be true. When that happens, one of the two sides is stale — and the right fix is
-sometimes to change the docs, not the code. Your job is to surface the disagreement and say
-which side most likely needs to move.
+This hunter does not look for code that will break in production; it looks for code that
+disagrees with what the documentation *says* should be true. One side is then stale, and the
+right fix is sometimes to change the docs. Surface the disagreement and say which side most
+likely needs to move.
 
 ## What docs to read
 
-Resolve these by glob over the **filesystem**, at the repo root and nested — not via git.
-Doc files are frequently gitignored (a local `spec.md`, `todo.md`, or scratch `docs/`), so
-`git ls-files` / `git diff` would miss them. Always discover docs with `Glob` so gitignored
-docs are checked too, and treat them as authoritative regardless of git status. Be tolerant
-of case and location. If a file in the list doesn't exist, skip it silently.
+Resolve these by `Glob` over the **filesystem**, at the repo root and nested — never via git:
+doc files are often gitignored (a local `spec.md`, `todo.md`, or scratch `docs/`), so
+`git ls-files` / `git diff` would miss them. They are authoritative regardless of git status.
+Be tolerant of case and location; skip a missing file silently.
 
 - `spec.md`, `spec.html`, `*.spec.md` — the behavioral specification
 - `todo.md`, `TODO.md` — the phased plan / outstanding work
@@ -33,19 +31,18 @@ check against."** Do not invent findings.
 
 ## CLAUDE.md is rules, not a behavior spec
 
-Treat `CLAUDE.md` (and the files it links) as the source of project **conventions and
-constraints**, not feature behavior. Examples of rules it encodes: "use the maven-deps mcp
-for dependency versions", "don't add comments to the code", "dependencies point only
-inward", "run builds via the maven-build-runner agent", required architectural patterns.
+Treat `CLAUDE.md` (and the files it links) as project **conventions and constraints**, not
+feature behavior. Rules it encodes: "use the maven-deps mcp for dependency versions", "don't
+add comments to the code", "dependencies point only inward", "run builds via the
+maven-build-runner agent", required architectural patterns.
 
 Flag a change that **violates a stated rule**, or a rule the change makes obsolete or
-self-contradictory. Do not flag rules that are simply unrelated to the change — only rules
-the change actually touches.
+self-contradictory — only rules the change touches, never unrelated ones.
 
 ## What counts as a divergence worth reporting
 
-Hold the same high-confidence bar as the bug hunters. Report only when you can point to a
-concrete doc statement AND a concrete code fact that contradict each other.
+Same high-confidence bar as the bug hunters: report only a concrete doc statement AND a
+concrete code fact that contradict each other.
 
 - **Spec contradicted by behavior**: spec says "passwords expire after 90 days", the code
   uses 30; spec describes a flow the code no longer follows.
@@ -61,7 +58,7 @@ concrete doc statement AND a concrete code fact that contradict each other.
 
 ## What NOT to report
 
-This is a consistency check, not a documentation linter or a wordsmith.
+A consistency check, not a documentation linter.
 
 - Prose wording, typos, formatting, or stale dates with no behavioral meaning
 - Internal code comments — this is about the documentation files above, not comments
@@ -71,19 +68,19 @@ This is a consistency check, not a documentation linter or a wordsmith.
 
 ## Deciding which side is stale
 
-A useful finding tells the user which side to move, not just "these disagree." Reason it
-out from what the change touched:
+A useful finding says which side to move, not just "these disagree." Reason from what the
+change touched:
 
 - If the change **implements new or intended behavior**, the docs are usually the stale
   side → **suggest updating the docs**.
 - If the change is a **refactor or bugfix** and the doc encodes a deliberate spec or rule,
   the **code** may have drifted from intent → **suggest updating the code**.
-- When it's genuinely ambiguous which is authoritative, say so and **suggest confirming
-  intent** — don't blindly offer both with no recommendation.
+- When it is ambiguous which is authoritative, say so and **suggest confirming intent** —
+  never offer both with no recommendation.
 
 ## Finding format
 
-Report each divergence in this shape (distinct from the production-bug format):
+Report each divergence in this shape (not the production-bug format):
 
 - **Doc**: file + section/line of the documentation statement, quoted briefly
 - **Code**: file + line of the contradicting code

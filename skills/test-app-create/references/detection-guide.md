@@ -1,12 +1,11 @@
 # Detection guide
 
-Read-only probes for filling the placeholder map. Run from the project root. Record what you find; where a signal is missing or ambiguous, fall back as noted (and ask the user for the base URL rather than guessing).
+Read-only probes for filling the placeholder map. Run from the project root. Record what you find; where a signal is missing or ambiguous, fall back as noted — and ask the user for the base URL rather than guessing.
 
 ## Step 0 — which surface
 
-Run this **first**, before anything below. Its answer picks the template pair, and it decides
-whether the base-URL section is even read. Fill `{{SURFACE}}` with exactly one of `web`, `tui`
-or `cli`.
+Run this **first**, before anything below. Its answer picks the template pair and decides whether
+the base-URL section is read at all. Fill `{{SURFACE}}` with exactly one of `web`, `tui` or `cli`.
 
 ### Stage A — collect candidates, never answers
 
@@ -24,17 +23,15 @@ grep -n '"bin"' package.json 2>/dev/null
 grep -nA3 '\[project.scripts\]\|console_scripts' pyproject.toml setup.py 2>/dev/null
 ```
 
-Record everything. A hit here is a candidate.
+Record everything; a hit here is a candidate.
 
 ### Stage B — the discriminator, and it is the load-bearing probe
 
 **A dependency is not a surface.** `ratatui` can sit in `[dev-dependencies]`; `rich` prints
-coloured tables from a program that is unambiguously a CLI; `bubbles` gets vendored for one
-spinner; `prompt_toolkit` in its default `PromptSession` mode is a readline replacement, not a
-TUI. What decides is whether the program **takes over the terminal**.
-
-Getting this wrong is uniquely expensive: it picks the wrong template pair for the user's entire
-generated skill, and every check in it then asks the wrong questions of the right program.
+coloured tables from a plain CLI; `bubbles` gets vendored for one spinner; `prompt_toolkit` in its
+default `PromptSession` mode is a readline replacement, not a TUI. What decides is whether the
+program **takes over the terminal**. Getting this wrong picks the wrong template pair for the
+whole generated skill, and every check in it asks the wrong questions of the right program.
 
 **B1 — static evidence, at the call site rather than the import.** The rawest signal first,
 because it is language- and framework-independent:
@@ -68,8 +65,8 @@ CLI evidence is the absence of all of that plus an arg parser at the entrypoint 
 `Parser::parse()`, `rootCmd.Execute()`, `parse_args()`, `program.parse(`,
 `new CommandLine(...).execute(` — with explicit exits and a `--help` string.
 
-**B2 — the runtime probe, which is what actually settles it.** Static evidence gets this wrong in
-both directions. Start the program and ask the terminal what it did:
+**B2 — the runtime probe, which settles it.** Static evidence gets this wrong in both
+directions. Start the program and ask the terminal what it did:
 
 ```
 ${CLAUDE_SKILL_DIR}/scripts/tui-session.sh probe --timeout 8 -- <the launch command, no arguments>
@@ -78,38 +75,36 @@ ${CLAUDE_SKILL_DIR}/scripts/tui-session.sh probe --timeout 8 -- <the launch comm
 It prints one word — `tui`, `cli` or `unknown` — and always tears down its own session.
 
 **Probe the real entrypoint, never `--help`.** No TUI enters the alternate screen to print its
-help, so probing `--help` reports `cli` for every program on earth.
+help, so probing `--help` reports `cli` for every program.
 
 The ladder inside `probe`, first hit wins:
 
 1. tmux reports the pane is on the alternate screen → **`tui`**. Definitive, and the one signal
    that owes nothing to the language or the framework.
 2. The program exited inside the deadline, with a status recorded → **`cli`**. Definitive the
-   other way: it terminated without being given any input.
+   other way: it terminated without any input.
 3. Still alive, no alternate screen — one harmless key is sent and the frame re-read. **Changed,
    with no line appended** → **`tui`**: an inline TUI (bubbletea without `WithAltScreen`, ink's
    default render) repaints in place.
 4. Still alive, frame unchanged, a prompt on the last line → **`cli`**, a REPL. Say so in the
-   summary; a REPL is a CLI wearing a loop, and the CLI catalog is the right one for it.
+   summary; a REPL is a CLI wearing a loop, and the CLI catalog fits it.
 5. Anything else → **`unknown`**, exit 9. It never guesses, and neither should you.
 
 If the driver exits `127`, tmux is absent and the ladder degrades to B1 alone. **When B1 is not
 unanimous, ask the user.** Never fall back to `web`: a repo with a `Cargo.toml`, no compose file
-and no HTTP framework is not a web app with a missing base URL, and generating the web pair for it
-produces a skill whose every placeholder is a guess.
+and no HTTP framework is not a web app with a missing base URL, and the web pair for it is a skill
+whose every placeholder is a guess.
 
 ### Stage C — both surfaces present → ASK (don't auto-pick)
 
 When Stage A finds a web signal **and** a terminal entrypoint that Stage B classifies as `tui` or
-`cli`, they are two different products with two different verifications, and nothing in the tree
-says which one the user wants tested. List what you found — surface → entrypoint → framework → how
-it launches → what it looks like it is for — and **ask which one `/test-app` should target**. Take
-the whole placeholder map from the matching column.
+`cli`, they are two products with two verifications, and nothing in the tree says which one the
+user wants tested. List what you found — surface → entrypoint → framework → how it launches → what
+it looks like it is for — and **ask which one `/test-app` should target**. Take the whole
+placeholder map from the matching column.
 
-The common real shape is a server binary plus an admin CLI in one repo. The answer is usually the
-server, and the user is the only one who knows.
-
-This is the same rule as the multiple-compose-files ask below, for the same reason: several
+The common shape is a server binary plus an admin CLI in one repo; the answer is usually the
+server, and only the user knows. Same rule as the multiple-compose-files ask below: several
 plausible targets, no way to rank them from the code, and a wrong pick that is invisible until
 someone reads the generated skill.
 
@@ -136,12 +131,12 @@ First match wins, but record everything (multi-module repos have several):
 
 ## How the app runs + `{{BASE_URL}}` / `{{RUN_MODEL}}` (the careful one)
 
-The base URL is **not** mechanically derivable from compose ports — ai-support publishes `8080:8080` but is tested via a Cloudflare tunnel. Treat published ports as candidates and confirm with the user when anything is unclear.
+The base URL is **not** mechanically derivable from compose ports — a project can publish `8080:8080` and still be tested through a Cloudflare tunnel. Published ports are candidates; confirm with the user when anything is unclear.
 
 1. **Compose?** `ls docker-compose*.yml compose*.yml 2>/dev/null`. Parse published ports of the app service:
    `grep -nE '"?[0-9]+:[0-9]+"?' docker-compose.yml`. Host (left) port → candidate `http://localhost:<host>`. `{{RUN_MODEL}}=docker compose stack`, `{{HEALTH_CHECK_CMD}}=docker compose ps`, `{{LOGS_CMD}}=docker compose logs app`.
-   - **Several compose files → ASK (don't auto-pick).** If that `ls` returns more than one file (e.g. `docker-compose.yml` + `docker-compose.dev.yml` + `docker-compose.prod.yml`, or a `*.override.yml`), they describe different deployments — local dev, a tunnel/staging deploy, prod — with different URLs, ports, and `compose -f` invocations. The skill has no way to know which one the user runs tests against. List the candidates you found (file → app URL/port → what it looks like it's for) and **ask the user which deployment `/test-app` should target**. Bake their answer into `{{BASE_URL}}`, `{{RUN_MODEL}}`, and the `{{HEALTH_CHECK_CMD}}`/`{{LOGS_CMD}}`/`{{REBUILD_NOTE}}` commands (include the right `-f <file>` if it's not the default `docker-compose.yml`).
-2. **Tunnel / public URL?** `grep -rIl "cloudflared\|trycloudflare\|tunnel\|\.space\|ngrok" docker-compose*.yml *.yml .env* 2>/dev/null`; check `APP_BASE_URL`/`BASE_URL` in `.env*`. A stable public URL (e.g. `ask2.mirum8.space`) wins over the localhost candidate **only when there's a single compose file**; when several exist, fold it into the ask above (the tunnel usually belongs to one specific deployment). → `{{RUN_MODEL}}=tunnel over compose`, `{{BASE_URL}}=https://<that-host>`.
+   - **Several compose files → ASK (don't auto-pick).** If that `ls` returns more than one file (e.g. `docker-compose.yml` + `docker-compose.dev.yml` + `docker-compose.prod.yml`, or a `*.override.yml`), they describe different deployments — local dev, a tunnel/staging deploy, prod — with different URLs, ports, and `compose -f` invocations, and the skill cannot know which one the user tests against. List the candidates (file → app URL/port → what it looks like it's for) and **ask the user which deployment `/test-app` should target**. Bake the answer into `{{BASE_URL}}`, `{{RUN_MODEL}}`, and the `{{HEALTH_CHECK_CMD}}`/`{{LOGS_CMD}}`/`{{REBUILD_NOTE}}` commands (include the right `-f <file>` if it's not the default `docker-compose.yml`).
+2. **Tunnel / public URL?** `grep -rIl "cloudflared\|trycloudflare\|tunnel\|\.space\|ngrok" docker-compose*.yml *.yml .env* 2>/dev/null`; check `APP_BASE_URL`/`BASE_URL` in `.env*`. A stable public URL (e.g. `app.example.com`) wins over the localhost candidate **only when there's a single compose file**; when several exist, fold it into the ask above (the tunnel usually belongs to one specific deployment). → `{{RUN_MODEL}}=tunnel over compose`, `{{BASE_URL}}=https://<that-host>`.
 3. **`deploy` skill?** `ls .claude/skills/deploy 2>/dev/null`. If present, the generated skill must note "containers are managed via `/deploy`; this skill never starts/stops them — if they're down, tell the user."
 4. **In-container port (informational):** `grep -rn "server.port\|SERVER_PORT" src/main/resources/application*.yml *.properties docker-compose*.yml 2>/dev/null`. The host port from step 1 still wins for the URL.
 5. **No compose (plain dev server):** default to the framework port (Spring `8080`, Django `8000`, FastAPI/Uvicorn `8000`, Vite `5173`, Express commonly `3000`) → `{{RUN_MODEL}}=local dev server`, `{{HEALTH_CHECK_CMD}}` = a health curl or a `pgrep`/`lsof -i:<port>` process check, `{{LOGS_CMD}}` = the app's logfile or stdout.
@@ -156,15 +151,15 @@ Write it as a complete sentence starting with a capital letter (it gets inlined 
 
 ## Worktree-isolation knobs → `{{IF_COMPOSE}}` / `{{COMPOSE_FILE}}` / `{{APP_SERVICE}}` / `{{APP_CONTAINER_PORT}}` / `{{REDEPLOY_CMD}}`
 
-These feed the generated skill's *Where the app runs* section, which delegates to the shared `worktree-deploy.sh` helper so the skill is parallel-safe across git worktrees (isolated ephemeral stack per worktree, default behavior in the main tree). Only relevant when the app runs as a **docker compose** stack.
+These feed the generated skill's *Where the app runs* section, which delegates to the shared `worktree-deploy.sh` helper so the skill is parallel-safe across git worktrees (isolated ephemeral stack per worktree, default behavior in the main tree). Relevant only when the app runs as a **docker compose** stack.
 
-- `{{IF_COMPOSE}}` — `true` when the run model is docker compose (a compose file exists and is the test target, including `tunnel over compose`). `false` for plain dev servers, non-web projects, or anything not fronted by compose → the whole isolation block is dropped and the skill keeps today's single-target behavior.
-- `{{COMPOSE_FILE}}` — the compose file the test target uses, as the helper should see it (compose-native, colon-separated for multiple): usually `docker-compose.yml`, or the specific file the user chose when several exist (e.g. `docker-compose.dev.yml`). The helper passes this to `docker compose` via the `COMPOSE_FILE` env var.
-- `{{APP_SERVICE}}` — the compose **service** that serves the app (the one the base URL points at). Detect it as the service with a `build:` section, or the one publishing the app's host port. Needed so the helper republishes the *right* service on an ephemeral port.
-- `{{APP_CONTAINER_PORT}}` — the **container-side** port the app listens on (the `target` of the app service's port mapping, or `server.port` / `SERVER_PORT` inside the container — e.g. `8080` even when the host publishes `8088:8080`). This is the in-container port, not the host port.
+- `{{IF_COMPOSE}}` — `true` when the run model is docker compose (a compose file exists and is the test target, including `tunnel over compose`). `false` for plain dev servers, non-web projects, or anything not fronted by compose → the whole isolation block is dropped and the skill keeps its single-target behavior.
+- `{{COMPOSE_FILE}}` — the compose file the test target uses, as the helper should see it (compose-native, colon-separated for multiple): usually `docker-compose.yml`, or the file the user chose when several exist (e.g. `docker-compose.dev.yml`). The helper passes it to `docker compose` via the `COMPOSE_FILE` env var.
+- `{{APP_SERVICE}}` — the compose **service** that serves the app (the one the base URL points at): the service with a `build:` section, or the one publishing the app's host port. The helper republishes this service on an ephemeral port.
+- `{{APP_CONTAINER_PORT}}` — the **container-side** port the app listens on (the `target` of the app service's port mapping, or `server.port` / `SERVER_PORT` inside the container — e.g. `8080` even when the host publishes `8088:8080`). Not the host port.
 - `{{REDEPLOY_CMD}}` — the command that rebuilds + restarts the running app, i.e. the actionable command inside `{{REBUILD_NOTE}}` (e.g. `docker compose up -d --build app`). The helper runs it verbatim in the main tree and ignores it in a worktree (where it builds its own isolated stack). If nothing needs rebuilding (bind-mounted / live-reload), use a no-op like `true`.
 
-When several compose files exist you already ask the user which deployment is the test target (above) — use that same answer for `{{COMPOSE_FILE}}` and the matching `-f` in `{{REDEPLOY_CMD}}`. For a `tunnel over compose` deployment, `{{IF_COMPOSE}}` is still `true` (the helper isolates the local compose stack); the tunnel URL stays the main-tree `{{BASE_URL}}` default.
+When several compose files exist, the deployment the user chose (above) also fills `{{COMPOSE_FILE}}` and the matching `-f` in `{{REDEPLOY_CMD}}`. For a `tunnel over compose` deployment, `{{IF_COMPOSE}}` is still `true` (the helper isolates the local compose stack); the tunnel URL stays the main-tree `{{BASE_URL}}` default.
 
 ## In-repo HTTP helpers to prefer over curl
 
@@ -173,7 +168,7 @@ ls scripts/*.py bin/* tools/* 2>/dev/null
 grep -nE "test|api|smoke|e2e" Makefile justfile Taskfile.yml 2>/dev/null
 ```
 
-**Important — keep login out of `{{HTTP_TOOL_BLOCK}}`.** The block holds **probes only** (GET examples, a raw/escape-hatch call, an HTMX-header example). The login flow lives once in `{{LOGIN_EXAMPLE}}` (see Auth model). This avoids showing the same login snippet twice in the generated prompt.
+**Important — keep login out of `{{HTTP_TOOL_BLOCK}}`.** The block holds **probes only** (GET examples, a raw/escape-hatch call, an HTMX-header example). The login flow lives once in `{{LOGIN_EXAMPLE}}` (see Auth model), so the generated prompt never shows the same login snippet twice.
 
 - **A REST client like `scripts/api.py`** → `{{HTTP_TOOL_NAME}}=scripts/api.py`; `{{HTTP_TOOL_BLOCK}}` = help-discovery + `raw` escape hatch (no login); `{{CURL_FORBIDDEN_NOTE}}` = "Do **not** reach for curl — prefer the helper and extend it rather than reaching for curl; it keeps auth/tenant handling consistent, which avoids flaky tests and missed auth bugs." Phrase the note as a full sentence (the template puts a space before it).
 - **None** → `{{HTTP_TOOL_NAME}}=curl`; `{{HTTP_TOOL_BLOCK}}` = GET probes + the HMX-header example (no login); `{{CURL_FORBIDDEN_NOTE}}` = empty. python e2e scripts (requests) carry the persisted flows.
@@ -181,16 +176,16 @@ grep -nE "test|api|smoke|e2e" Makefile justfile Taskfile.yml 2>/dev/null
 ### Second helper → `{{IF_E2E_HELPER}}` / `{{E2E_HELPER_BLOCK}}`
 If a **distinct end-to-end helper** exists beyond the REST client — e.g. a chat client (`scripts/chat.py`), a seeding/fixture script, a synthetic-user driver — set `{{IF_E2E_HELPER}}=true` and fill `{{E2E_HELPER_BLOCK}}` with a short "### `<name>`" usage section (discover via `--help`, one example). This is how RAG/chat apps keep their end-to-end driver in the prompt. None found → `{{IF_E2E_HELPER}}=false`.
 
-Note: these are the **project's own** helpers — the generated skill uses them in place but never modifies the project's `scripts/`. Newly generated e2e scripts go under `{{E2E_DIR}}` (the skill's own `e2e/`), never into the project's `scripts/`.
+These are the **project's own** helpers — the generated skill uses them in place but never modifies the project's `scripts/`. Newly generated e2e scripts go under `{{E2E_DIR}}` (the skill's own `e2e/`), never into the project's `scripts/`.
 
 ## `{{UI_IN_SCOPE}}` (web pair only)
 
-This is a **web-pair placeholder**. It gates the `/agent-browser` blocks and nothing else — every
+A **web-pair placeholder**. It gates the `/agent-browser` blocks and nothing else — every
 `{{#IF_UI}}` block in both web templates is browser material. The process pair does not have it,
 and a terminal app never sets it: a TUI is a user interface, but not one a browser can open. Use
 `{{SURFACE}}` to choose the pair, and this only to decide whether the *web* pair keeps its browser
-blocks. Unifying the two is tempting and produces a generated skill that tells a subagent to open
-a URL against a program with no HTTP server.
+blocks; unifying the two produces a skill that tells a subagent to open a URL against a program
+with no HTTP server.
 
 ```
 find . -type d -name templates -path "*resources*" 2>/dev/null     # Thymeleaf/JTE/Freemarker
@@ -203,7 +198,7 @@ ls -d */templates templates 2>/dev/null                            # Django temp
 
 ## Credentials → `{{CREDS_PATH}}` = `.claude/skills/test-app/test_creds.txt`
 
-The generated skill standardizes on its **own** creds file (skill-dir, conflict-free), regardless of where the project keeps credentials today.
+The generated skill standardizes on its **own** creds file (skill-dir, conflict-free), wherever the project keeps credentials.
 
 - `ls .claude/skills/test-app/test_creds.txt` — if missing, the generator writes the stub (workflow step 7).
 - If the project already has creds (repo-root `test_creds.txt`, `.env` `ADMIN_EMAIL`/`ADMIN_PASSWORD`, a `test_tenant_creds.txt`), read the **format and role list** (not the secrets) to shape the stub and the prompt's role list, and offer to seed the new file from it.
@@ -211,7 +206,7 @@ The generated skill standardizes on its **own** creds file (skill-dir, conflict-
 
 ## Auth model → `{{AUTH_MODEL}}` / `{{LOGIN_EXAMPLE}}` / `{{ROUTES_BLOCK}}`
 
-Scope probes to `*/src/main` and exclude scratch/worktree copies so you don't match test code or duplicated trees:
+Scope probes to `*/src/main` and exclude scratch/worktree copies, so test code and duplicated trees don't match:
 
 ```
 find . -path '*/src/main/*SecurityConfig*.java' -o -path '*/src/main/*SecurityConfiguration*.java' 2>/dev/null
@@ -226,14 +221,14 @@ Classify by what carries the credential on each request, **not** by whether a he
 - A real **bearer token** (`oauth2ResourceServer`, a JWT/`Authorization: Bearer` filter, the client sends `Authorization: Bearer …`) → `{{AUTH_MODEL}}=JWT bearer`; `{{LOGIN_EXAMPLE}}` = the bearer-token snippet (often via the in-repo helper). Do **not** call it JWT just because a token is cached on disk — look for `Bearer` on the wire.
 - Django → session login via the login form (CSRF token in the form); shape accordingly.
 - No auth → `{{AUTH_MODEL}}=none`; drop the login example and the authorization pass.
-- `{{ROUTES_BLOCK}}`: from the `permitAll` / `hasRole` matchers, list public vs role-gated routes (like avtoportal's Routes section). If undiscoverable, emit a generic "log in, then exercise the affected routes."
+- `{{ROUTES_BLOCK}}`: from the `permitAll` / `hasRole` matchers, list public vs role-gated routes (the shape of a project's own Routes section). If undiscoverable, emit a generic "log in, then exercise the affected routes."
 
 ## Conditional catalog signals
 
 Scope every grep below to `*/src/main` and add `--exclude-dir=worktrees --exclude-dir=.claude --exclude-dir=test` so test-only and duplicated-tree matches don't flip a flag on.
 
 - `{{IF_IDOR}}` — multi-tenant or per-user ownership in production code: `grep -rln "tenant\|TenantId\|ownerId\|getCurrentUser" --include=*.java --exclude-dir=worktrees --exclude-dir=.claude */src/main 2>/dev/null`. Present → enable the IDOR check.
-- `{{IF_RATELIMIT}}` — a rate limiter on the **auth/login path**, actually active. `grep -rln "bucket4j\|RateLimit\|resilience4j.*ratelimiter" --include=*.java */src/main 2>/dev/null`. A match alone isn't enough: confirm the limiter is registered/enabled on the chain and applies to login (e.g. not `registration.setEnabled(false)`, not only a widget/chat throttle). Only then enable the login rate-limiting check; otherwise leave it off rather than test a disabled feature.
+- `{{IF_RATELIMIT}}` — a rate limiter on the **auth/login path**, actually active. `grep -rln "bucket4j\|RateLimit\|resilience4j.*ratelimiter" --include=*.java */src/main 2>/dev/null`. A match alone isn't enough: confirm the limiter is registered/enabled on the chain and applies to login (not `registration.setEnabled(false)`, not only a widget/chat throttle). Only then enable the login rate-limiting check; otherwise leave it off rather than test a disabled feature.
 - `{{IF_I18N}}` — `find . -path '*/src/main/*messages*.properties' 2>/dev/null; grep -rln "LocaleResolver\|react-i18next\|vue-i18n" */src/main 2>/dev/null`. Present with ≥2 locales → enable the localization check.
 
 ## `{{EXTRA_SERVICES}}`

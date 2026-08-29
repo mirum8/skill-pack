@@ -1,11 +1,11 @@
 # Idioms & Conventions
 
-Reviewer focus: **is this written the way code in this language, this framework, and this project is normally written?** Idiomatic code is readable precisely because it meets the reader's expectations — they recognize the pattern instead of decoding a novel one. Non-idiomatic code makes a fluent reader stop and ask "why did they do it *this* way?"
+Reviewer focus: **is this written the way code in this language, this framework, and this project is normally written?** Idiomatic code is readable because it meets the reader's expectations — they recognize the pattern instead of decoding a novel one; non-idiomatic code makes a fluent reader stop and ask "why *this* way?"
 
 Two layers, and the project layer wins ties:
 
 1. **Language/framework idioms** — the standard, well-understood way to do a thing in Java/Kotlin/Spring/etc.
-2. **Project conventions** — how *this* codebase already does it. **Always check the neighbors first** (skim sibling files, the relevant `CLAUDE.md`). Code that matches the surrounding code is correct even if it isn't your personal first choice; flag deviations *from the project's own pattern*, not failures to meet an external ideal.
+2. **Project conventions** — how *this* codebase already does it. **Always check the neighbors first** (skim sibling files, the relevant `CLAUDE.md`). Code that matches the surrounding code is correct even if it isn't your first choice; flag deviations *from the project's own pattern*, not failures to meet an external ideal.
 
 Apply `what-not-to-flag.md` as a hard filter — especially the "respect the local code" and "don't force functional style" sections. When torn, drop it.
 

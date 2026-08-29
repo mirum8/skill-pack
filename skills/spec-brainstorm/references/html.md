@@ -18,11 +18,10 @@
 No external fonts, images or stylesheets. **No `<script>` at all** — not for a theme, not for
 a toggle, not for anything. No `localStorage`, no dark-mode block.
 
-It is one file. There is no companion page, no shared `style.css`, and no second document to
-link to. Every `href` in it is either an external `https:` URL or an in-page `#anchor`.
-
-That constraint is the point: a single file survives being emailed, dropped in a ticket,
-opened from a USB stick two years later, and printed by someone who will annotate it in pen.
+It is one file — no companion page, no shared `style.css`, no second document to link to.
+Every `href` in it is an external `https:` URL or an in-page `#anchor`. A single file survives
+being emailed, dropped in a ticket, opened from a USB stick two years later, and printed by
+someone who will annotate it in pen.
 
 ---
 
@@ -86,7 +85,7 @@ are anchors.
 
 ### The part header
 
-A part is a divider the eye can find while scrolling, not just another heading:
+A part is a divider the eye can find while scrolling, not another heading:
 
 ```html
 <h2 class="part" id="p3"><span class="pnum">Part 3</span> Architectural characteristics</h2>
@@ -96,11 +95,11 @@ this part.</p>
 ```
 
 Give `.part` a rule above it and clearly more weight than a section heading — a reader
-scrolling fast should be able to count seven of them. `.pnum` is `--mono` and `--clay`.
+scrolling fast should count seven of them. `.pnum` is `--mono` and `--clay`.
 
 Every part's lede is `<p class="lede">` immediately after its `<h2 class="part">`.
 
-### Two conventions worth holding, because they are what a reader scans for
+### Two conventions a reader scans for
 
 - **Entity names, state names, component names and API paths always in `--mono`**, everywhere
   they appear. The glossary's "maps to in code" column, the `Owns` column in Part 4 and the
@@ -113,8 +112,8 @@ class in `--mono`, so they read as metadata rather than prose.
 
 ### The tables that carry markup contracts
 
-Three tables have classes the checker reads. They are cheap to write and they are what turns a
-prose rule into something a script can hold:
+Three tables have classes the checker reads — cheap to write, and what turns a prose rule into
+something a script can hold:
 
 - **Part 3, driving characteristics** — `<tr class="driving">` on each driving row. The checker
   counts them and reports more than three.
@@ -136,8 +135,8 @@ not like an appendix.
 
 ## 4. Navigation — the sidebar and the glance card
 
-A specification runs to several thousand words and is read by people who arrive looking for one
-thing. Two elements do almost all of that work, and both are cheap.
+A specification runs to several thousand words and is read by people looking for one thing.
+Two cheap elements do almost all of that work.
 
 ### The contents sidebar
 
@@ -169,16 +168,16 @@ missing sidebar, an entry that is not a link, and any `#anchor` resolving to no 
 }
 ```
 
-Those two media blocks are what let the sidebar exist at all. Un-stick it and the same markup is
-a contents page on paper and a contents block on a phone — so there is exactly one list in the
-file, correct in every medium, with nothing to drift out of sync. A sidebar that stays fixed in
-print, or that stays a narrow column on a 400px screen, costs the document the property it was
-built for: that it survives being emailed, printed and annotated in pen.
+Those two media blocks are what let the sidebar exist at all. Un-stuck, the same markup is a
+contents page on paper and a contents block on a phone — one list in the file, correct in every
+medium, nothing to drift out of sync. A sidebar fixed in print, or a narrow column on a 400px
+screen, costs the document the property it was built for: surviving being emailed, printed and
+annotated in pen.
 
 **There is no active-section highlight.** Scroll-spy needs a script and this document has none;
-faking it with `:target` marks only the section you last clicked, which is worse than nothing
-because it goes stale the moment the reader scrolls. What `:target` *is* worth is one line of
-arrival feedback — `section:target > h2 { color: var(--clay); }` — so a click visibly lands.
+faking it with `:target` marks only the section last clicked, which goes stale the moment the
+reader scrolls. What `:target` *is* worth is one line of arrival feedback —
+`section:target > h2 { color: var(--clay); }` — so a click visibly lands.
 
 ### At a glance
 
@@ -199,8 +198,7 @@ Someone who reads only this card and the seven part ledes should be able to desc
 correctly. That is the test for both.
 
 Nothing else is navigation. No sticky header, no back-to-top links, no breadcrumb — the sidebar
-already answers "where am I and what else is there", and each of those costs print fidelity to
-repeat it.
+already answers "where am I and what else is there", and each of those costs print fidelity.
 
 ---
 
@@ -225,7 +223,7 @@ scattered on individual shapes. Wrap each in `<figure class="svg-figure">` with 
 `<figcaption>` that says what to notice, not what it is.
 
 Each diagram belongs to exactly one part, and the part decides what may appear in it. Drawing
-the same thing twice at two altitudes is the most expensive mistake available here.
+the same thing twice at two altitudes is the most expensive mistake here.
 
 **Every run:**
 
@@ -234,10 +232,9 @@ the same thing twice at two altitudes is the most expensive mistake available he
   cardinality labels. **No column types** — this is a domain diagram, not a schema.
 - **One primary sequence** — *Part 2, with the key flows.* Vertical lanes per **actor or domain
   step** with a dashed lifeline, horizontal labelled arrows, 6–10 steps. Draw the flow that best
-  repays being drawn, usually the one with a failure branch. The other flows are step lists in
-  prose.
+  repays it, usually the one with a failure branch. The other flows are step lists in prose.
 - **Components** — *Part 4.* A box per component with the entities it owns listed inside it, and
-  arrows for what calls what. No processes, no containers, no network — this picture is true
+  arrows for what calls what. No processes, containers or network — this picture is true
   whatever the deployment turns out to be.
 - **Context / container** — *Part 5.* What is inside the system, what is outside, what crosses
   the line. Boxes for deployables, a dashed band for anything external, labelled arrows for what
@@ -247,8 +244,8 @@ the same thing twice at two altitudes is the most expensive mistake available he
 
 - **The event timeline** — *Part 2.* A horizontal spine of past-tense events. Mark ★ pivotal
   events in `--clay`, hang unhappy endings below the spine as short branches, and show waiting
-  points as a gap with a label saying what is being waited on. This is the single most useful
-  picture in a domain document: it is where the component boundaries in Part 4 come from.
+  points as a gap labelled with what is being waited on. The single most useful picture in a
+  domain document: it is where Part 4's component boundaries come from.
 - **Entity lifecycles** — *Part 2.* A small state diagram per core entity. Terminal states get a
   double border. Two or three of these; the rest as `a → b → c` lines in prose.
 
@@ -258,16 +255,15 @@ resolve across separate inline SVGs. Label text at 13–14 units minimum. Fills 
 `--surface`/`--gray-150`, strokes from `--gray-300`/`--gray-500`, one accent from `--clay`.
 
 Omit any diagram whose subject doesn't exist — a single-binary tool with no external systems has
-no context diagram worth drawing, and an empty box is worse than no diagram. Four figures is a
-normal document; seven is a lot for any.
+no context diagram worth drawing, and an empty box is worse than none. Four figures is a normal
+document; seven is a lot for any.
 
 ---
 
 ## 7. Writing it without degrading
 
 The document runs long, and a single `Write` at that size loses quality toward the end — the
-confidence tags, the `--mono` naming convention and the `id` attributes are the first things to
-go.
+confidence tags, the `--mono` naming convention and the `id` attributes go first.
 
 **Write it part by part.** Start with `Write` for the shell and its CSS, the header, the
 At-a-glance card, a sidebar carrying the seven part links, and Part 1. Then append one part at a
@@ -275,9 +271,9 @@ time with `Edit`. Two things are written **last**, when the parts they describe 
 drift from them:
 
 1. **The section links nested under each part** in the sidebar — you now know which sections
-   survived, and a link to a section you ended up cutting is a dead anchor.
-2. **The seven part ledes** — written from what each part actually says, then read alone as a
-   summary of the document.
+   survived, and a link to a section you cut is a dead anchor.
+2. **The seven part ledes** — written from what each part says, then read alone as a summary of
+   the document.
 
 Keep the part-and-section plan in front of you so the order doesn't drift, and re-read the
 tagging rule in `research.md` §3 before writing any section that names a third-party product.

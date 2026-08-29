@@ -22,9 +22,9 @@ This file owns which parts and sections exist and what each must contain.
 
 ## 1. The seven parts
 
-The document is read **top-down**, and the order is the point: each part is the summary of
-the one after it, so a reader can stop at any part boundary and hold a true picture — coarser
-than the one below it, never a wrong one.
+The document is read **top-down**, and the order is the point: each part summarises the one
+after it, so a reader can stop at any part boundary and hold a true picture — coarser than the
+one below it, never a wrong one.
 
 | Part | Answers | Sections |
 |---|---|---|
@@ -37,34 +37,34 @@ than the one below it, never a wrong one.
 | **7 · Technical details** | with what | Technologies · API · Rollout |
 | *closing* | what could still be wrong | Risks, assumptions & open questions |
 
-Read the chain backwards and you can see why any other order reads as a wall: components
-make no sense before you know what the architecture is optimising for, and the style makes no
-sense before you know what components it is arranging.
+Any other order reads as a wall: components make no sense before you know what the
+architecture is optimising for, and the style makes no sense before you know what components it
+is arranging.
 
-**The seven parts always exist. The sections inside them do not.** "A section with nothing
-real to say is deleted, not padded" is unchanged and it is still what makes this document fit
-a weekend tool and a work system without ever asking which. But a weekend tool has all seven
-parts: it has requirements, a domain, a characteristic it is being optimised for (a terminal
-client's is *start in under a second*), components, a style (one binary), decisions, and
-technologies. A part reduced to three sentences is a correct part. A part **deleted** leaves a
-reader unable to tell whether the question was answered badly or never asked at all.
+**The seven parts always exist. The sections inside them do not.** A section with nothing real
+to say is deleted, not padded — that is what makes this document fit a weekend tool and a work
+system without asking which. But a weekend tool has all seven parts: requirements, a domain, a
+characteristic it is optimised for (a terminal client's is *start in under a second*),
+components, a style (one binary), decisions, and technologies. A part reduced to three sentences
+is a correct part. A part **deleted** leaves a reader unable to tell whether the question was
+answered badly or never asked.
 
 **Every part opens with a lede** — 2–4 sentences saying what this part settles. Write the seven
-ledes last, from what the parts actually ended up saying, and then read them alone: they must be
-a true summary of the whole document. That test is the cheapest quality check here, and a lede
-that lists the sections below it instead of summarising them has failed it.
+ledes last, from what the parts ended up saying, then read them alone: they must be a true
+summary of the whole document. That is the cheapest quality check here, and a lede that lists
+the sections below it instead of summarising them has failed it.
 
 ---
 
 ## 2. How to choose what goes in them
 
 Start from §§3–9. Add the `--explain` sections from §11 when the flag was passed. That is the
-whole rule — there are no tiers, no depth, no size bands.
+whole rule — no tiers, no depth, no size bands.
 
-Merging neighbouring **sections** is always allowed; dropping a **part** is not. What is never
-allowed anywhere is a heading followed by a restatement of the heading. Ten sections of "the
-system will follow industry best practices" make a document worse than one that omits them,
-because they hide the real content.
+Merging neighbouring **sections** is always allowed; dropping a **part** is not. Never allowed
+anywhere: a heading followed by a restatement of the heading. Ten sections of "the system will
+follow industry best practices" make a document worse than one that omits them, because they
+hide the real content.
 
 Draft the part-and-section plan before writing any HTML, and say in one line how you read the
 project: *"Reading this as a small internal tool — no integrations, no operations section, and
@@ -74,15 +74,15 @@ Part 5 is two paragraphs because there is one binary. Say if that's wrong."*
 the style, the decisions, technologies and the API. It does not go below that: no column types,
 no indexes, no code, no build order, no step-by-step walkthrough. Everything one level down —
 the schema with real types and indexes, the endpoint signatures, the build order — is
-`/r:spec-design`'s job; writing the code is `/r:task-run`'s. A section that starts specifying
-`VARCHAR(255)` has left this document's altitude and is writing `spec-design`'s design pass a
-day early, from less evidence.
+`/r:spec-design`'s job; writing the code is `/r:task-run`'s. A section specifying `VARCHAR(255)`
+has left this document's altitude and is writing `spec-design`'s design pass a day early, from
+less evidence.
 
 ---
 
 ## 3. Part 1 — Business requirements
 
-What has to become true, said in the business's words, before any of it is architecture.
+What has to become true, in the business's words, before any of it is architecture.
 
 | Section | Must contain |
 |---|---|
@@ -119,8 +119,8 @@ Stories that are deferred are still written; the v1 line is what separates them.
 
 ## 4. Part 2 — Domain
 
-What the words mean and which rules are not allowed to break. A developer new to this industry
-must read this part and then understand why Parts 4–7 are what they are.
+What the words mean and which rules must not break. A developer new to this industry must read
+this part and then understand why Parts 4–7 are what they are.
 
 ### Domain model
 
@@ -154,16 +154,16 @@ not worth the tokens.
 
 **Flows live here, with the domain, not with the components.** A flow is the process in the
 business's own words; it has to be true before there are components to route it through, and it
-is what Part 4's cut is checked against. The sequence diagram therefore has actors and domain
-steps in its lanes. The picture of components talking to each other is a different diagram and
-belongs to Part 5.
+is what Part 4's cut is checked against. So the sequence diagram has actors and domain steps in
+its lanes; the picture of components talking to each other is a different diagram and belongs to
+Part 5.
 
 ---
 
 ## 5. Part 3 — Architectural characteristics
 
-What the architecture is being optimised for, as numbers. This part is short, and everything
-after it is downstream of it.
+What the architecture is optimised for, as numbers. This part is short, and everything after it
+is downstream of it.
 
 **At most three driving characteristics.** Ranked, in a table whose rows carry
 `class="driving"` so the checker can count them:
@@ -179,25 +179,25 @@ Then two shorter lists:
 - **Supporting characteristics** — real, measured, but not what gets traded for. Same four
   columns.
 - **What we are not optimising for** — 2–4 named characteristics we are deliberately spending,
-  each with one clause of why. This is the cheapest section in the document and it stops more
-  argument later than any other.
+  each with one clause of why. The cheapest section in the document, and it stops more argument
+  later than any other.
 
 Four rules:
 
 - **Use the field's own names** — availability, elasticity, deployability, startup latency,
   fault tolerance, portability, auditability, testability. The name carries a body of known
   trade-offs; a phrase invented here carries none.
-- **Every row is a number or an enumerated rule.** This is the one part whose entire job is
-  turning "fast" into *keystroke to repaint under 16 ms*. An adjective here is a defect, and
-  `scripts/check_spec.py` reports an adjective sitting in a row with no number in it.
+- **Every row is a number or an enumerated rule.** This part's entire job is turning "fast"
+  into *keystroke to repaint under 16 ms*. An adjective here is a defect, and
+  `scripts/check_spec.py` reports an adjective sitting in a row with no number.
 - **Three is a ceiling, not a target.** A list of eight characteristics says nothing and
   licenses everything, because every later decision can point at one of them.
 - Anything defaulted rather than asked is marked `Assumed — not confirmed` in the row itself.
 
 **Why it sits here and not inside Technologies.** These are the forces that decide Parts 4, 5
-and 6. Printed after them, they read as a footnote to decisions they actually caused, and no
-reader can check whether the architecture answers them. Printed before, every later part is
-checkable against three lines.
+and 6. Printed after them, they read as a footnote to decisions they caused, and no reader can
+check whether the architecture answers them. Printed before, every later part is checkable
+against three lines.
 
 ---
 
@@ -223,9 +223,9 @@ Then **the component diagram**: boxes for components, the entities each owns, an
 what calls what. No deployment, no network, no processes.
 
 **Nothing in this part says process, container, service, cluster or repository.** Whether these
-components are one deployable or nine is Part 5's question, and answering it here is what makes
-the two impossible to change independently — which is how a codebase ends up with a service
-boundary nobody can explain.
+components are one deployable or nine is Part 5's question; answering it here makes the two
+impossible to change independently, which is how a codebase ends up with a service boundary
+nobody can explain.
 
 ---
 
@@ -291,13 +291,13 @@ Six fields, and the two that carry the weight are **Alternatives** and **Consequ
 `interview-notes.md` carries a `## Decisions` log written **as the interview runs**
 (`interview.md` §10). Every `propose→correct` the user corrected, every `default→veto` they
 vetoed or let stand, and every objection they overruled is a decision with a real context and a
-real alternative, captured at the moment both were still true. Assemble this part from that log.
+real alternative, captured while both were still true. Assemble this part from that log.
 
 **Never invent this part at write time.** An ADR reconstructed afterwards has a fabricated
-Alternatives field — you write down the option you would have rejected, not the one that was
-actually on the table — and a reader cannot tell the two apart, which makes every ADR in the
-document worth less. If the log is thin, the honest Part 6 is short and says so: name the choices
-that were defaults nobody discussed, and let `--continue` turn them into real decisions later.
+Alternatives field — the option you would have rejected, not the one on the table — and a reader
+cannot tell the two apart, which makes every ADR in the document worth less. If the log is thin,
+the honest Part 6 is short and says so: name the choices that were defaults nobody discussed,
+and let `--continue` turn them into real decisions later.
 
 Five to fifteen ADRs is normal. An overruled objection (`interview.md` §8) becomes an ADR whose
 Consequences carry the accepted risk, and the Risks section cites it rather than re-arguing it.
@@ -315,12 +315,12 @@ A table: `Technology · Version · What it's for · Why / ADR`
 - **Every technology carries a version or a pricing tier.** `PostgreSQL 16`, not "a relational
   database". `scripts/check_spec.py` reports anything used twice and never versioned.
 - **The last column is one clause or one ADR reference, never both.** A technology chosen against
-  a live alternative points at its ADR and says nothing else; one that was a conventional default
-  carries a single clause and no ADR. That split is what keeps this table scannable at a glance
-  while the reasoning stays reachable in one jump.
+  a live alternative points at its ADR and says nothing else; a conventional default carries a
+  single clause and no ADR. That split keeps the table scannable while the reasoning stays one
+  jump away.
 - **What it rules out later** stays, as a short line under the table for the two or three
-  technologies that genuinely constrain the future: *"no SCIM, so enterprise SSO later is a
-  migration, not a config change."*
+  technologies that constrain the future: *"no SCIM, so enterprise SSO later is a migration, not
+  a config change."*
 - **Never state a price, quota, limit or version you did not read this session.** Under
   `--explain`, every third-party claim carries a confidence tag — see `research.md` §3.
 
@@ -335,7 +335,7 @@ A sketch, never a pasted OpenAPI document. Request and response as a small `<pre
 shape where it helps; field names matter, field types do not — that is below the ceiling.
 
 State the cross-cutting conventions once, above the table: authentication, the idempotency rule
-for mutating endpoints, the error contract, and the pagination default. Repeating them per row is
+for mutating endpoints, the error contract, and the pagination default. Per-row repetition is
 noise.
 
 ### Rollout
@@ -363,8 +363,8 @@ not like an appendix.
 
 ## 11. Added by `--explain`
 
-The layer that teaches the domain. Without the flag, none of it exists. Each of these slots into
-an existing part rather than forming one of its own.
+The layer that teaches the domain. Without the flag, none of it exists. Each slots into an
+existing part rather than forming one of its own.
 
 | Section | Part | Must contain |
 |---|---|---|
@@ -382,8 +382,8 @@ industry needs the words before the entities.
 ### How this is usually built
 
 `--explain` only, and it comes from the research. It sits at the end of Part 5 because the
-canonical decomposition and the field's disagreements are exactly what our components and style
-are being judged against. In this order:
+canonical decomposition and the field's disagreements are what our components and style are
+judged against. In this order:
 
 1. **The problem's name** in the industry's own vocabulary — the analyst category, the phrase
    practitioners themselves use. This is what makes the rest of the field searchable.
@@ -418,14 +418,14 @@ This is the rule that makes the document top-down rather than merely reordered:
 - **The v1 line names stories verbatim**, and Risks cite the ADR that accepted them.
 
 The reason is what the reader does with it. Someone who trusts the *what* skims Parts 4–7 in two
-minutes. Someone who doubts one row jumps to one ADR and reads three hundred words. Inlining
-every reason forces both readers through the same eight thousand words, and it is the single
-biggest reason a long specification reads as a wall.
+minutes; someone who doubts one row jumps to one ADR and reads three hundred words. Inlining
+every reason forces both through the same eight thousand words — the single biggest reason a
+long specification reads as a wall.
 
 **The only ids in this document are `ADR-<n>`.** Story handles are their `<h3>` names, and parts
 and sections are addressed by the HTML `id` attributes `html.md` defines. There is deliberately
 **no FR-, NFR-, BR-, R- or OQ- numbering**: those schemes buy a traceability matrix nobody
-maintains at this size, and they push a writer into one-line requirements that lose exactly the
+maintains at this size, and push a writer into one-line requirements that lose exactly the
 reasoning this document exists to carry.
 
 ---

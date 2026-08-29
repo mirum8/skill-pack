@@ -9,7 +9,7 @@ description: Use this skill to verify deployed app functionality after changes �
 
 Verifies that recent changes to {{APP_NAME}} actually work — by hitting the running app at `{{BASE_URL}}` ({{RUN_MODEL}}) through `{{HTTP_TOOL_NAME}}`, persisted python e2e scripts, the `/agent-browser` skill, and `{{LOGS_CMD}}`. It checks the happy path, the UI, **and** the security/authorization rules, then reports concrete pass/fail.
 
-That marker line is not decoration: `/r:task-review` reads it to decide what to start and what to hand a verifier. Keep it, and keep it accurate — if this project's tested surface changes, re-run `/r:test-app-create` rather than editing the line, because the rest of this file would still describe the old one.
+That marker line is not decoration: `/r:task-review` reads it to decide what to start and what to hand a verifier. Keep it accurate — if this project's tested surface changes, re-run `/r:test-app-create` rather than editing the line, because the rest of this file would still describe the old one.
 
 This skill owns its artifacts under its own directory — credentials in `{{CREDS_PATH}}` and generated e2e scripts in `{{E2E_DIR}}/` — so it never collides with the project's own `scripts/`.
 
@@ -27,7 +27,7 @@ This skill owns its artifacts under its own directory — credentials in `{{CRED
     elif [ -x "$WTD" ]; then
         BASE_URL=$("$WTD" deploy '{{REDEPLOY_CMD}}') # (3) WORKTREE + helper: isolated ephemeral stack, free host port
     else
-        echo "STOP: in a git worktree but $WTD is missing — refusing to test on the default port (it would clash with the main stack). Install the post-task-review skill, or run /test-app from the main working tree." >&2
+        echo "STOP: in a git worktree but $WTD is missing — refusing to test on the default port (it would clash with the main stack). Install the r plugin (the helper ships with /r:task-review), or run /test-app from the main working tree." >&2
         exit 1                                       # (4) WORKTREE, no helper: never fall back to the default port
     fi
 
@@ -37,8 +37,8 @@ This skill owns its artifacts under its own directory — credentials in `{{CRED
 
 Four cases, in priority order:
 
-1. **Caller supplied `TEST_APP_BASE_URL`** (e.g. the post-task-review verifier already brought up the stack): test against that URL and do **not** deploy or tear anything down — the caller owns the stack's lifecycle.
-2. **Main working tree**: test against `{{BASE_URL}}` ({{RUN_MODEL}}), exactly as before. This skill does **not** start or stop that stack — run `{{HEALTH_CHECK_CMD}}` first and, if it's down, stop and tell the user. {{REBUILD_NOTE}}
+1. **Caller supplied `TEST_APP_BASE_URL`** (e.g. the `/r:task-review` verifier already brought up the stack): test against that URL and do **not** deploy or tear anything down — the caller owns the stack's lifecycle.
+2. **Main working tree**: test against `{{BASE_URL}}` ({{RUN_MODEL}}). This skill does **not** start or stop that stack — run `{{HEALTH_CHECK_CMD}}` first and, if it's down, stop and tell the user. {{REBUILD_NOTE}}
 3. **Linked git worktree with the helper installed** (no caller URL): bring up an **isolated, ephemeral** stack (unique compose project, a free host port, every supporting service's port freed too, throwaway per-worktree volumes → a **fresh ephemeral DB**), test against `$BASE_URL`, then tear it down at the very end so nothing leaks across worktrees. **Set up the teardown as a `trap … EXIT` immediately after the deploy succeeds, so the stack is removed on ANY exit path** — a failed assertion, an error, or an aborted run — not just the happy path:
 
        # case (3) only — right after the worktree deploy above succeeded:
@@ -57,7 +57,7 @@ Four cases, in priority order:
        # ... after all tests/screenshots are captured (the EXIT trap also covers this) ...
        "$WTD" teardown                             # docker compose -p <id> down — only this worktree's stack
 
-4. **Linked git worktree, helper missing**: **stop** — do not test on the default port from a worktree, it would clash with the main stack. Tell the user to install post-task-review or run from the main tree.
+4. **Linked git worktree, helper missing**: **stop** — do not test on the default port from a worktree, it would clash with the main stack. Tell the user to install the `r` plugin (`/r:task-review` ships the helper) or run from the main tree.
 
 Use the resolved `$BASE_URL` everywhere below, and pass it to the subagent (as `TEST_APP_BASE_URL` and in its prompt) as the app URL. **Only case 3 deploys and tears down** — cases 1 and 2 leave the stack exactly as they found it, and case 4 doesn't run.
 

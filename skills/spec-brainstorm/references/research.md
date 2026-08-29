@@ -15,8 +15,8 @@
 
 ## 1. When it fires
 
-**After round 1, before round 2.** Round 1 tells you what to research; researching earlier
-produces a generic comparison nobody needed.
+**After round 1, before round 2.** Round 1 tells you what to research; earlier produces a
+generic comparison nobody needed.
 
 Announce it in one line, dispatch all three agents in a **single message** so they run in
 parallel, and ask nothing while waiting:
@@ -27,9 +27,9 @@ parallel, and ask nothing while waiting:
 
 **On the `--feature` path the repo is the research** and the external fan-out stays off even
 under `--explain`, unless a specific question survives reading the code: a library the repo
-doesn't have yet, a domain the codebase has never had to handle, or a user who explicitly
-asked how this is usually built. Say in one line which way it went, so the user knows whether
-anything was searched.
+doesn't have yet, a domain the codebase has never handled, or a user who explicitly asked how
+this is usually built. Say in one line which way it went, so the user knows whether anything
+was searched.
 
 ---
 
@@ -51,9 +51,9 @@ a glossary of terms of art, flagging any word that means something different ins
 industry than outside it · the top edge cases, each with what it forces a system to contain ·
 dated sources.
 
-This is the agent that makes `--explain` worth running. Its output feeds the glossary, the
-domain narrative and the entity list — and a false-friend term it catches saves renaming
-every class later.
+This is the agent that makes `--explain` worth running: its output feeds the glossary, the
+domain narrative and the entity list, and a false-friend term it catches saves renaming every
+class later.
 
 **B — the decomposition.**
 
@@ -81,14 +81,14 @@ enterprise SSO later is a migration, not a config change". Prices and limits mus
 **fetched, never recalled**.
 
 Cap the whole fan-out at ~8 vendor or documentation lookups. Stop when two consecutive sources
-add no new component and no new evaluation axis; more searching past that is theatre.
+add no new component and no new evaluation axis; searching past that is theatre.
 
 ---
 
 ## 3. Honesty rules
 
-These are what make a researched document more trustworthy than an unresearched one. Without
-them research makes the document *worse*, because wrong facts arrive wearing confidence.
+These make a researched document more trustworthy than an unresearched one. Without them
+research makes the document *worse*, because wrong facts arrive wearing confidence.
 
 **One standard, no alternatives:** every claim about a third-party product, price, limit,
 version or regulation carries exactly one of these tags. A bare URL is not a tag.
@@ -126,19 +126,16 @@ Three channels. Research that reaches none of them is deleted.
    structure, and "how this is usually built". C → technologies.
 
 If the research changed no question and no section, delete it and write one line saying what
-was searched and that nothing decision-relevant came back. That is a legitimate result and an
-honest one.
+was searched and that nothing decision-relevant came back. That is a legitimate, honest result.
 
 ---
 
 ## 5. If the `Agent` tool is unavailable
 
-This skill normally runs in the main thread, where it can spawn agents. If it has been invoked
-from inside a subagent the `Agent` tool will be missing. Degrade to serial `WebSearch` /
-`WebFetch` at half the lookup cap, and **say so in one line**.
-
-Never claim a parallel fan-out ran when it didn't, and never imitate a search with prose. A
-fabricated table of vendors is the worst possible output of this skill.
+Subagents have no `Agent` tool, so a run invoked from inside one cannot fan out. Degrade to
+serial `WebSearch` / `WebFetch` at half the lookup cap, and **say so in one line**. Never claim
+a parallel fan-out ran when it didn't, and never imitate a search with prose — a fabricated
+table of vendors is the worst possible output of this skill.
 
 ---
 

@@ -1,8 +1,8 @@
 # Readability & Clarity
 
-Reviewer focus: **can the next person read this code and understand what it does and why, without re-reading it three times or stepping through a debugger?** You are the cold reader. Flag the things that made *you* stop and reconstruct intent — those are exactly what will slow down the next maintainer.
+Reviewer focus: **can the next person read this code and understand what it does and why, without re-reading it three times or stepping through a debugger?** You are the cold reader: flag what made *you* stop and reconstruct intent — that is what will slow down the next maintainer.
 
-Apply `what-not-to-flag.md` as a hard filter. Only report a finding when a thoughtful senior engineer would agree it genuinely improves clarity. When torn, drop it.
+Apply `what-not-to-flag.md` as a hard filter. Report only what a thoughtful senior engineer would agree genuinely improves clarity. When torn, drop it.
 
 ## Names that mislead or hide intent
 

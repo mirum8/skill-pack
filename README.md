@@ -1,6 +1,6 @@
 # r — a personal Claude Code skill pack
 
-Sixteen engineering skills and the eight agents they dispatch, in one repository,
+Twenty engineering skills and the eight agents they dispatch, in one repository,
 loaded as a skills-directory plugin named `r`. Every skill is reachable as
 `/r:<name>`.
 
@@ -19,13 +19,13 @@ git clone <this repo> ~/projects/skill-pack && cd ~/projects/skill-pack
 ```
 
 `install.sh` copies the pack into `~/.claude/skills/r`, provisions the mandatory
-prerequisites, removes a superseded global hook registration, and retires the
-pre-pack originals still installed under their old flat names — the pack renames
-what it carries, so an original left behind is a twin that answers to the old
-name with the old behaviour. Pass `--keep-originals` to leave them. Then **restart
-the session** — skills-directory plugins are discovered at session start, never
-mid-session. An install that appears to have done nothing is almost always a
-session that was not restarted.
+prerequisites, removes the global hook registration that points at the retired flat-name `guard-workflow.py` path from
+`settings.json` (the pack wires its own from `hooks/hooks.json`), and retires the
+flat-named originals of the skills it carries — an original left behind is a twin
+that answers to the old name with the old behaviour. `--keep-originals` leaves
+them. Then **restart the session** — skills-directory plugins are discovered at
+session start, never mid-session. An install that appears to have done nothing is
+almost always a session that was not restarted.
 
 Verify in two steps, in this order:
 
@@ -80,8 +80,8 @@ pack does not rely on it.
 
 Names are domain-first (`<domain>-<action>`, at most three kebab segments) so the
 alphabetically sorted `/` menu groups the families: `claudemd-*`, `code-*`,
-`issues-*`, `spec-*`, `task-*`. `hexagonal-architecture` is the one exception — it is a
-rulebook rather than an action, and "hexagonal" is the word someone reaches for.
+`issues-*`, `spec-*`, `task-*`. `hexagonal-architecture` is the one exception — it
+is a rulebook rather than an action, and "hexagonal" is the word someone reaches for.
 
 `task-run`, `task-quick`, `issues-fix`, `plan-run` and `spec-design` carry
 `disable-model-invocation: true` — each says in its own text that it must never
@@ -95,8 +95,8 @@ against the 16,000-character listing budget below.
 all-or-nothing: it blocks the Skill tool outright, so it cannot tell "the model
 auto-loaded this" from "the model was told to run this" — and `task-run`'s Step 5
 is *required* to invoke `/r:task-review`. With the flag on, that step could not
-reach it and the mandatory review quietly became something the user had to type.
-For that one skill the no-auto-fire rule is carried by its description and its
+reach it and the mandatory review would be something the user has to type. For
+that one skill the no-auto-fire rule is carried by its description and its
 non-negotiables instead.
 
 The eight agents in `agents/` are what the review fan-out dispatches to — four
@@ -145,8 +145,8 @@ separation, piping and signals are plain shell.
 `--cmux` is the one optional tool whose absence is a **stop** rather than a named skip, and only
 because it is never reached by accident: the flag has to be typed. Everywhere else a missing tool
 costs coverage, so continuing and naming the gap is the honest move; here it costs only wall-clock,
-and quietly running serially would hand back something other than what was asked for. The serial run
-is then offered as the user's choice.
+and quietly running serially would hand back something other than what was asked for. The serial
+run is then offered as the user's choice.
 
 The pack runs end to end **without GitHub**. `task-run` takes a todo phase, a list item or
 free text as its source and finishes by merging the feature branch instead of opening a PR;
@@ -237,32 +237,36 @@ python3 ~/.claude/skills/r/lib/read-config.py --step fix
 ```
 
 There is no CI, so `validate.sh` is the whole gate. It checks that the manifest
-parses with `name == "r"`, eighteen skill directories sit exactly two levels deep,
-every frontmatter is valid YAML with a `description` under the 1,536-character
-cap, the listing cost of the model-invocable skills stays under 16,000, no skill name is referenced
-without its `r:` prefix, no reference dangles, every bundled agent is dispatched
-by some skill, every skill has an eval suite with both case kinds, no absolute
-path points into a skill directory, no build artefact is tracked, and no two
-descriptions open with nearly the same sentence. Then it runs the two workflow
-test suites, `claude plugin validate`, the guard's behaviour tests, the plan
-graph's (edges, derived waves, same-wave file collisions and the concurrency
-preflight), the stats store's, and the installer's. The whole run is a few
-seconds; `SKIP_INSTALL_TEST=1` drops the slowest part.
+parses with `name == "r"`, the skill directories are exactly the set
+`tools/rename_rules.py` names and sit two levels deep, every frontmatter is valid
+YAML with a `description` under the 1,536-character cap, the listing cost of the
+model-invocable skills stays under 16,000, no skill name is referenced without its
+`r:` prefix, no reference dangles, every bundled agent is dispatched by some skill,
+every skill has an eval suite with the case kinds its flag requires, the shipped
+`.config/defaults.yaml` is accepted by the reader, no absolute path points into a
+skill directory, no build artefact is tracked, and no two descriptions open with
+nearly the same sentence. Then it runs the two workflow test suites,
+`claude plugin validate`, the guard's behaviour tests, the plan graph's (edges,
+derived waves, same-wave file collisions and the concurrency preflight), the suite
+beside every bundled script, the config reader's, the stats store's, and the
+installer's. The whole run is a few seconds; `SKIP_INSTALL_TEST=1` drops the
+slowest part.
 
 ### Layout
 
 ```
 .claude-plugin/plugin.json   identity and namespace — nothing else
+.config/defaults.yaml        the shipped settings; a project overrides them in its own .config/
 skills/<name>/               SKILL.md, plus references/ scripts/ tests/ evals/
 agents/<name>.md             the eight the skills dispatch
 hooks/                       hooks.json, the workflow-immutability guard, the stats hook
-lib/                         the pack-wide stats sink and reporter, shared by every skill
+lib/                         the pack-wide stats sink, reporter and config reader, shared by every skill
 tools/                       build and validation scripts, not shipped
 docs/skill-pack-repo/        the design write-up, not shipped
 ```
 
-`install.sh` copies only `.claude-plugin/`, `skills/`, `agents/`, `hooks/`, `lib/`
-and `check-prereqs.sh`. Everything else stays in the repo.
+`install.sh` copies only `.claude-plugin/`, `.config/`, `skills/`, `agents/`,
+`hooks/`, `lib/` and `check-prereqs.sh`. Everything else stays in the repo.
 
 ### Measuring the pack
 
@@ -295,14 +299,14 @@ one. Both pipelines and the report-only skills therefore record what they *dropp
 not just what they kept. Descriptions are one line — the store holds titles, never
 finding bodies, because the payload travels inside an agent's prompt.
 
-**`items` is mined, not recorded.** Claude Code already persists every workflow
-run under `~/.claude/projects/<project>/<session>/subagents/workflows/wf_*/` — a
+**`items` is mined, not recorded.** Claude Code persists every workflow run under
+`~/.claude/projects/<project>/<session>/subagents/workflows/wf_*/` — a
 `journal.jsonl` of each item's return value, plus a full transcript per agent
 carrying its prompt, model, effort, timestamps and token usage. `--mine-items`
-reads those, so the pipelines pay nothing at run time and every run already on
-disk is recoverable. `prompt` and `result` are capped and `transcript_path` keeps
-the full text one read away. Neither workflow could time itself in any case:
-`Date.now()` is unavailable inside a `Workflow` script.
+reads those, so the pipelines pay nothing at run time and every run on disk is
+recoverable. `prompt` and `result` are capped and `transcript_path` keeps the full
+text one read away. Neither workflow could time itself in any case: `Date.now()`
+is unavailable inside a `Workflow` script.
 
 **Cost is reported per pipeline step, not per agent type.** Claude Code persists a
 subagent's `agentType` but not the workflow's `label`, and one type covers many
@@ -311,19 +315,20 @@ deploy and the sink. So `items.label` is recovered by matching the prompt agains
 the literal chunks of each `agent()` dispatch in the shipped `*.workflow.js`. The
 mapping is read from the scripts rather than kept in a table, so a reworded prompt
 updates it with the wording, and a rename fails to an **unlabelled** row — counted
-and named in the report — never a confidently wrong one. Pre-pack skill names are
-aliased so history still classifies; for runs recorded by a script the pack no
-longer ships, point `--label-source <script>` at it.
+and named in the report — never a confidently wrong one. Flat pre-pack skill names
+are aliased so rows recorded under them still classify; for rows recorded by a
+script the pack does not ship, point `--label-source <script>` at it.
 
-The hook is registered on two events because a skill is reachable two ways and the
-two are disjoint in the transcript: `PostToolUse`/`Skill` when the model invokes
-one, `UserPromptSubmit` when a person types `/r:<name>`. Only `r:`-prefixed names
-are recorded.
+The stats hook watches three routes, because no one of them sees the others:
+`PostToolUse`/`Skill` when the model invokes a skill, `PostToolUse`/`Workflow` when
+a pipeline runs by its canonical `scriptPath` or workflow `name`, and
+`UserPromptSubmit` when a person types `/r:<name>`. Only `r:`-prefixed names are
+recorded.
 
-`~/.claude/skill-stats.jsonl` is the append-only store that predates the db, and it
-is never written now. `--import-jsonl` copies its rows in, deriving each `run_id`
-from a hash of the line it came from so a second import inserts nothing. The file
-stays where it is — the import is a copy, never a move.
+`~/.claude/skill-stats.jsonl` is the pre-SQLite archive: read by `--import-jsonl`
+once, never written. The import derives each `run_id` from a hash of the line it
+came from, so a second import inserts nothing, and the file stays where it is —
+the import is a copy, never a move.
 
 There is **no fallback store**: a row the db rejects is lost, and the reason goes to
 stderr. That is why the inserts name the one conflict they mean to ignore rather
@@ -361,8 +366,10 @@ do not.
 ### Eval suites
 
 Every skill has `evals/evals.json` with at least one **trigger** case and one
-**neighbour-exclusion** case. They need a model, so run them deliberately — after
-editing any description, and before a release — rather than on every push.
+**neighbour-exclusion** case — except the five `disable-model-invocation` skills,
+which no prompt can route to and which carry a **behaviour** case instead. They
+need a model, so run them deliberately — after editing any description, and before
+a release — rather than on every push.
 
 They are the only instrument the pack has for its most likely failure. The router
 is a model reading prose, so a description that drifts until it stops triggering
@@ -372,18 +379,18 @@ that skill is mis-routing right now.
 ### Rollback
 
 Fix a wrong skill here and re-run `./install.sh` — the repo is the copy to edit.
-It is **not** the only copy on this machine: pre-pack originals under their old
-flat names still sit in `~/.agents/skills/`, and an edit that lands there works
-under the old name and is missing under the new one. `validate.sh` names them on
-every run for exactly that reason; treat that line as a standing warning, not as
-noise. The pre-pack versions are also archived under `~/.claude-backups/`:
+It is **not** necessarily the only copy on this machine: while a flat-named
+original sits in `~/.agents/skills/`, an edit that lands there works under the old
+name and is missing under the new one. `validate.sh` names any that remain on
+every run; treat that line as a standing warning, not as noise. The pre-pack
+versions are also archived under `~/.claude-backups/`:
 
 ```sh
 tar -xzf ~/.claude-backups/claude-skills-<stamp>.tar.gz -C ~/.claude
 ```
 
-That archive holds `~/.claude/skills`, `agents/` and `settings.json` as they were
-before the pack was installed.
+That archive holds `~/.claude/skills`, `agents/` and `settings.json` from before
+the pack was installed.
 
 ## Provenance
 

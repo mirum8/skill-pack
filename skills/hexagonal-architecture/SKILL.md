@@ -1,24 +1,24 @@
 ---
 description: >-
-  Hexagonal Lite — a module layout for multi-module Maven Spring Boot projects: one core
-  module, adapters around it, dependencies pointing only inward, cross-module calls through
-  inbound *UseCase and outbound port interfaces, ArchUnit-enforced. Core never imports adapter
-  packages, tech SDKs, JPA or Spring Web; adapters own their tech types and map to core's plain
-  records. Deliberately skips DDD tactical patterns, CQRS handler splits and speculative
-  single-call-site ports — only the hexagonal parts that pay for themselves. Use on "where should
-  this class live?", "can core import X?", "should I extract a UseCase interface?", or any
-  question about ports, adapters, module boundaries or dependency direction.
+  Hexagonal Lite — a module layout for multi-module Maven Spring Boot projects: one core module,
+  adapters around it, dependencies pointing only inward, cross-module calls through inbound
+  *UseCase and outbound port interfaces, ArchUnit-enforced. Core never imports adapter packages,
+  tech SDKs, JPA or Spring Web; adapters own their tech types and map to core's plain records.
+  Skips DDD tactical patterns, CQRS handler splits and speculative single-call-site ports — only
+  the parts that pay for themselves. Use on "where should this class live?", "can core import X?",
+  "should I extract a UseCase interface?", or any question about ports, adapters, module
+  boundaries or dependency direction.
 ---
 
 # Hexagonal Lite Architecture (Java + Maven + Spring Boot)
 
-A pragmatic take on hexagonal (ports & adapters) for Spring Boot backends built as Maven multi-module projects. The goal is clean module boundaries you can enforce in CI — nothing more. This skill deliberately does not layer DDD tactical patterns, CQRS handler splits, or ceremonial interfaces on top of the module structure. Keep what pays for itself; leave the rest out.
+A pragmatic take on hexagonal (ports & adapters) for Spring Boot backends built as Maven multi-module projects. The goal is clean module boundaries you can enforce in CI — nothing more. It layers no DDD tactical patterns, CQRS handler splits, or ceremonial interfaces on top of the module structure: keep what pays for itself, leave the rest out.
 
-> **Do you need physical Maven modules at all?** This skill assumes you've decided they earn their cost. If you haven't: the same boundaries are enforceable inside a *single* module — same package layout — with the ArchUnit `onionArchitecture()` rule below, or with [Spring Modulith](https://docs.spring.io/spring-modulith/)'s `ApplicationModules.of(App.class).verify()`. Physical modules buy exactly two extra things: hard *compile-time* prevention (you can't import a non-dependency) and independent buildability. Reach for them when you need those — until then, package-by-feature plus a boundary test is lighter, and you can always split a stable boundary out into its own module later.
+> **Do you need physical Maven modules at all?** This skill assumes they earn their cost. If not: the same boundaries are enforceable inside a *single* module — same package layout — with the ArchUnit `onionArchitecture()` rule below, or with [Spring Modulith](https://docs.spring.io/spring-modulith/)'s `ApplicationModules.of(App.class).verify()`. Physical modules buy exactly two extra things: hard *compile-time* prevention (you can't import a non-dependency) and independent buildability. Until you need those, package-by-feature plus a boundary test is lighter, and a stable boundary can be split into its own module later.
 
 ## The Core Idea
 
-One central Maven module holds the domain and the **interfaces** for everything the domain needs from the outside world. Every other module is an **adapter** that either drives the core (inbound) or implements one of those interfaces (outbound). Adapters never know about each other. The single Spring Boot application context wires them together at runtime.
+One central Maven module holds the domain and the **interfaces** for everything the domain needs from the outside world. Every other module is an **adapter** that either drives the core (inbound) or implements one of those interfaces (outbound). Adapters never know about each other; the single Spring Boot application context wires them together at runtime.
 
 ```
         ┌──────────────┐    ┌──────────────┐
@@ -43,9 +43,9 @@ One central Maven module holds the domain and the **interfaces** for everything 
 - Every adapter module declares `core` in its `pom.xml`.
 - No adapter declares another adapter as a dependency.
 - `core` declares no other project module as a dependency.
-- **Boundary:** `core` never imports a class from any adapter package. Each adapter never imports a class from a sibling adapter package. These are boundaries, not just dependency directions — violating them by dragging an adapter's types into core (or one adapter's DTO into another) breaks the architecture even if the pom still compiles.
+- **Boundary:** `core` never imports a class from any adapter package, and no adapter imports a class from a sibling adapter package. These are boundaries, not only dependency directions — dragging an adapter's types into core (or one adapter's DTO into another) breaks the architecture even if the pom still compiles.
 
-When a developer thinks "I'll just import that class from the other adapter," that's the moment a port should be born.
+The moment a developer thinks "I'll just import that class from the other adapter" is the moment a port should be born.
 
 ### Rule 2: Cross-Module Calls Go Through Ports
 
@@ -55,13 +55,13 @@ When code in adapter A needs behavior from adapter B:
 2. Implement it in the adapter that owns the technology (annotated with `@Component`, `@Service`, or `@Repository`).
 3. Inject the interface anywhere it's used — Spring's component scan in the `app` module wires the implementation.
 
-The interface lives in `core` because `core` is what describes the *need*. The implementation lives in the adapter because that's what owns the *technology*. The consumer of the port never knows which adapter (or which technology) fulfills it.
+The interface lives in `core` because `core` describes the *need*; the implementation lives in the adapter because it owns the *technology*. The consumer of the port never knows which adapter (or which technology) fulfills it.
 
 ### Rule 3: Enforce It in the Build with ArchUnit
 
-Architecture rules that aren't enforced rot within a quarter. Add an ArchUnit test in the `app` module (so it sees every class on the classpath) that fails Maven's `verify` phase if any boundary is broken.
+Unenforced architecture rules rot within a quarter. Add an ArchUnit test in the `app` module (so it sees every class on the classpath) that fails Maven's `verify` phase if any boundary is broken.
 
-ArchUnit ships a built-in `onionArchitecture()` rule that already encodes this whole style — it treats "onion" as a synonym for hexagonal / ports-and-adapters, keeps the domain free of every adapter, and bars adapters from depending on each other. Prefer it: one declarative block replaces a pile of hand-written per-adapter rules.
+ArchUnit's built-in `onionArchitecture()` rule encodes this whole style — "onion" is its synonym for hexagonal / ports-and-adapters; it keeps the domain free of every adapter and bars adapters from depending on each other. Prefer it: one declarative block replaces a pile of hand-written per-adapter rules.
 
 ```java
 @AnalyzeClasses(packages = "com.example", importOptions = ImportOption.DoNotIncludeTests.class)
@@ -79,7 +79,7 @@ class ArchitectureTest {
 }
 ```
 
-Drop down to an explicit `noClasses()` rule only for a boundary the DSL can't express — for instance, keeping a specific tech package out of `core` entirely (the framework-free check `onionArchitecture()` doesn't cover, since it only knows about the adapters you named):
+Drop down to an explicit `noClasses()` rule only for a boundary the DSL can't express — for instance keeping a specific tech package out of `core` entirely, the framework-free check `onionArchitecture()` doesn't cover because it only knows the adapters you named:
 
 ```java
 @ArchTest
@@ -93,7 +93,7 @@ If the rule isn't testable in the build, it isn't a rule — it's a wish.
 
 ## What belongs on each side of the boundary
 
-This is the single most frequently violated part of the style. Be explicit with yourself.
+The most frequently violated part of the style. Be explicit with yourself.
 
 **Allowed in `core`:**
 - JDK (`java.*`, `java.time`, `java.util`, etc.)
@@ -111,7 +111,7 @@ This is the single most frequently violated part of the style. Be explicit with 
 - Any adapter package (`com.example.web..`, `com.example.jpa..`, etc.)
 - DTOs defined by adapters (request/response classes, JPA entities, SDK payloads)
 
-**How types cross the boundary:** adapters own their tech-specific types and each adapter maps to and from `core`'s domain records in a `*Mapper` class sitting inside the adapter. Core never sees a `FooEntity`, a `FooRequest`, or a `FooSdkPayload`. This is the boundary — not a convention, a boundary.
+**How types cross the boundary:** adapters own their tech-specific types and each maps to and from `core`'s domain records in a `*Mapper` class inside the adapter. Core never sees a `FooEntity`, a `FooRequest`, or a `FooSdkPayload`. A boundary, not a convention.
 
 ## Maven Module Layout
 
@@ -152,17 +152,17 @@ app/
   src/test/java/.../ArchitectureTest.java       # ArchUnit tests run here
 ```
 
-The `app` module is the **composition root**. It carries `@SpringBootApplication` and depends on every adapter — otherwise nothing would get wired into the context. Leaf modules carry no `@SpringBootApplication` and no `main()`.
+The `app` module is the **composition root**: it carries `@SpringBootApplication` and depends on every adapter — otherwise nothing would get wired into the context. Leaf modules carry no `@SpringBootApplication` and no `main()`.
 
 ### Why component scanning works across modules
 
-Spring Boot's default `@SpringBootApplication` scans the package containing it. Put `Application.java` in a parent package (`com.example`) and every adapter under that package (`com.example.web`, `com.example.jpa`, etc.) gets picked up automatically — no manual `@ComponentScan` needed.
+`@SpringBootApplication` scans the package containing it. Put `Application.java` in a parent package (`com.example`) and every adapter under it (`com.example.web`, `com.example.jpa`, etc.) is picked up — no manual `@ComponentScan` needed.
 
 ## Inbound Ports (`*UseCase`)
 
-Interfaces in `core.port.in` representing **use cases the system supports**. Inbound adapters (controllers, schedulers, CLI) call these. The implementation lives in `core.service` annotated with `@Service`.
+Interfaces in `core.port.in` representing **use cases the system supports**. Inbound adapters (controllers, schedulers, CLI) call these; the implementation lives in `core.service` annotated with `@Service`.
 
-A `*UseCase` is not a DDD application service, not a CQRS command or query handler, not a mediator target — it's just a Java interface describing what an inbound caller can invoke. Keep it that simple.
+A `*UseCase` is not a DDD application service, not a CQRS command or query handler, not a mediator target — it's a Java interface describing what an inbound caller can invoke. Keep it that simple.
 
 Suffix: `*UseCase`.
 
@@ -184,22 +184,22 @@ class CreateOrderService implements CreateOrderUseCase {   // package-private �
 
 ### Is the inbound interface worth it? (it's the one to question)
 
-Outbound ports are **non-negotiable**: the port lives in `core`, the adapter implements it, so the compile-time arrow points *inward* and `core` never sees the technology. That interface *inverts a dependency* — it earns its place every time.
+Outbound ports are **non-negotiable**: the port lives in `core`, the adapter implements it, so the compile-time arrow points *inward* and `core` never sees the technology. That interface *inverts a dependency* and earns its place every time.
 
-The inbound `*UseCase` interface is different. A controller already depends inward on `core`; both the interface and its implementation live in `core`, so the interface **inverts nothing**. Its only payoffs are a named, documented entry point and a mock seam — which makes it the one interface in this style worth a second thought. The deciding factor is **visibility**:
+The inbound `*UseCase` interface is different. A controller already depends inward on `core`; both the interface and its implementation live in `core`, so the interface **inverts nothing**. Its only payoffs are a named entry point and a mock seam. The deciding factor is **visibility**:
 
-- **Keep the `*UseCase` interface when the implementing `@Service` is package-private.** A package-private service can't be referenced from the web adapter's package at all, so the public `*UseCase` *is* the core's published API — the seam is real and the compiler enforces it. (That's why `CreateOrderService` above has no `public` modifier.)
+- **Keep the `*UseCase` interface when the implementing `@Service` is package-private.** A package-private service can't be referenced from the web adapter's package, so the public `*UseCase` *is* the core's published API — the seam is real and the compiler enforces it. (That's why `CreateOrderService` above has no `public` modifier.)
 - **Skip it when the service would be `public` anyway.** A controller depending on a public `*UseCase` over a public service buys nothing but indirection — let the controller call the `@Service` directly.
 
-Default to **package-private service + interface**; reach for **public service + no interface** when a use case is trivial and you don't care about hiding it. Either way, the use-case service is the **transaction boundary** — put `@Transactional` there. One use case is one unit of work, and the core service is the only place that sees the whole use case; a transaction opened inside a single repository call in an adapter can't wrap a use case that touches several ports.
+Default to **package-private service + interface**; use **public service + no interface** when a use case is trivial and you don't care about hiding it. Either way, the use-case service is the **transaction boundary** — put `@Transactional` there. One use case is one unit of work, and the core service is the only place that sees the whole use case; a transaction opened inside a single repository call in an adapter can't wrap a use case that touches several ports.
 
 ## Outbound Ports (`core.port.out`)
 
-Interfaces representing **what the core needs from the outside world**. Outbound adapters implement these and register them as Spring beans.
+Interfaces for **what the core needs from the outside world**. Outbound adapters implement them and register them as Spring beans.
 
-**Name ports in domain vocabulary, not tech vocabulary** — a reader of `core` should understand what a port is *for* without ever opening an adapter. `EmailSender.send(EmailMessage)` is a port; `EmailSender.sendSmtp(SmtpRequest)` is a leaky abstraction.
+**Name ports in domain vocabulary, not tech vocabulary** — a reader of `core` should understand what a port is *for* without opening an adapter. `EmailSender.send(EmailMessage)` is a port; `EmailSender.sendSmtp(SmtpRequest)` is a leaky abstraction.
 
-The port interface in `core` is a plain Java interface with **no Spring annotations** (no `@Component`, no `@Repository`). Annotations belong on the implementation in the adapter.
+The port interface in `core` is a plain Java interface with **no Spring annotations** (no `@Component`, no `@Repository`); annotations belong on the implementation in the adapter.
 
 Suffix by role — five that pull their weight:
 
@@ -211,16 +211,16 @@ Suffix by role — five that pull their weight:
 | `-Notifier`  | Fire-and-forget side-effect                       | `AlertNotifier`                  |
 | `-Service`   | A capability the core delegates to infrastructure | `LlmService`, `EncryptionService`|
 
-Pick the one that describes *what the port does for the core*, not what technology backs it.
+Pick the one that says *what the port does for the core*, not what technology backs it.
 
 ## Adapters
 
 ### Naming
 
 - **Technology-prefixed** when multiple implementations exist or the technology matters at the call site: `TelegramMessageSender`, `JpaOrderRepository`.
-- **`*Impl` suffix** when there's one obvious default and naming it after the technology would just be noise: `OrderProviderImpl`, `EncryptionServiceImpl`.
+- **`*Impl` suffix** when there's one obvious default and naming it after the technology would be noise: `OrderProviderImpl`, `EncryptionServiceImpl`.
 
-Pick one and apply it uniformly — don't bikeshed.
+Pick one and apply it uniformly.
 
 ### JPA adapter pattern
 
@@ -236,7 +236,7 @@ jpa-adapter/
       OrderEntityMapper.java    # concrete class: OrderEntity ↔ Order (domain record)
 ```
 
-`core` defines `OrderRepository` (the port) and `Order` (the domain record). The adapter implements the port by delegating to Spring Data and mapping at the boundary. `OrderEntityMapper` is a **concrete class**, not an interface — there's no seam to justify one.
+`core` defines `OrderRepository` (the port) and `Order` (the domain record); the adapter implements the port by delegating to Spring Data and mapping at the boundary. `OrderEntityMapper` is a **concrete class**, not an interface — there's no seam to justify one.
 
 ### Inbound adapter (web)
 
@@ -250,11 +250,11 @@ web-adapter/
       OrderWebMapper.java       # concrete class: Request/Response ↔ domain types
 ```
 
-The controller builds `ResponseEntity` and handles HTTP concerns — none of that leaks into core.
+The controller builds `ResponseEntity` and handles HTTP concerns; none of that leaks into core.
 
 ## Registry pattern
 
-Sometimes one outbound port has many implementations and you need to dispatch to the right one at runtime (e.g., send a message over whichever channel the user registered with). Put the registry itself in `core` as a `@Component` that takes a `List<SomePort>` in its constructor — Spring will inject every implementation across all adapters.
+When one outbound port has many implementations and the right one is chosen at runtime (e.g. send a message over whichever channel the user registered with), put the registry in `core` as a `@Component` that takes a `List<SomePort>` in its constructor — Spring injects every implementation across all adapters.
 
 ```java
 @Component
@@ -278,7 +278,7 @@ public interface MessageSender {
 }
 ```
 
-One port, many adapters, routed at runtime. No service locator, no framework magic — just `List<T>` injection and a lookup map.
+One port, many adapters, routed at runtime. No service locator, no framework magic — `List<T>` injection and a lookup map.
 
 ## When to Create a New Port
 
@@ -290,13 +290,13 @@ Three signals, in order of urgency:
 
 ## When NOT to Create an Interface
 
-The anti-bloat rules. Each has a reason, not just a prohibition:
+The anti-bloat rules. Each has a reason, not only a prohibition:
 
-- **DDD tactical markers** — no `AggregateRoot`, `ValueObject`, `DomainEvent`, or base entity interfaces. Hexagonal's module discipline doesn't require DDD. A domain type is just a Java `record` (or a Lombok `@Builder` class for wide payloads). Markers add ceremony without enabling anything the compiler or tests care about.
-- **CQRS handler splits** — don't split a `ReportUseCase` into a `CreateReportCommandHandler` + `GetReportQueryHandler` hierarchy with separate command/query types and a mediator. One `*UseCase` interface with a handful of methods, or two focused `*UseCase` interfaces if they truly have different callers. The command-vs-query distinction belongs in method naming, not in a parallel type system.
-- **Speculative / single-call-site ports** — an interface with one implementation called from one place is pure indirection. Wait for a real second caller or a real need to swap before extracting an interface.
-- **An inbound `*UseCase` over a service you're not hiding** — unlike an outbound port, it inverts no dependency. If the implementing `@Service` is `public`, the interface buys only indirection; let the controller call the service directly. It pays for itself only when the service is package-private and the interface is the core's published API (see *Inbound Ports* above).
-- **Adapter-internal interfaces** — inside an adapter, call concrete classes directly. `OrderEntityMapper`, `StripeSignatureValidator`, a request parser — these are not ports and earn no seams. Add an interface only when you hit a concrete mocking pain point you can't solve with a real instance and test data.
+- **DDD tactical markers** — no `AggregateRoot`, `ValueObject`, `DomainEvent`, or base entity interfaces. Hexagonal's module discipline doesn't require DDD; a domain type is a Java `record` (or a Lombok `@Builder` class for wide payloads). Markers add ceremony without enabling anything the compiler or tests care about.
+- **CQRS handler splits** — don't split a `ReportUseCase` into a `CreateReportCommandHandler` + `GetReportQueryHandler` hierarchy with separate command/query types and a mediator. One `*UseCase` interface with a handful of methods, or two focused `*UseCase` interfaces if they truly have different callers. Command-vs-query belongs in method naming, not in a parallel type system.
+- **Speculative / single-call-site ports** — an interface with one implementation called from one place is pure indirection. Wait for a real second caller or a real need to swap before extracting one.
+- **An inbound `*UseCase` over a service you're not hiding** — it inverts no dependency. If the implementing `@Service` is `public`, the interface buys only indirection; let the controller call the service directly. It pays for itself only when the service is package-private and the interface is the core's published API (see *Inbound Ports* above).
+- **Adapter-internal interfaces** — inside an adapter, call concrete classes directly. `OrderEntityMapper`, `StripeSignatureValidator`, a request parser — not ports, no seams. Add an interface only at a concrete mocking pain point you can't solve with a real instance and test data.
 - **Pure functions and value-like records** — `Money.add(Money)`, `DateRange.overlaps(DateRange)`. No port needed.
 - **Spring's `ApplicationEventPublisher`** for in-process events — it's a standard mechanism. Tests can use `@RecordApplicationEvents`.
 
@@ -320,7 +320,7 @@ The `web-adapter` needs to send a message via the `messaging-adapter`:
   → KafkaMessageSender (@Component)          ← implementation in messaging-adapter
 ```
 
-The web adapter never has `messaging-adapter` in its `pom.xml`. Spring's component scan from `app` finds the `KafkaMessageSender` and injects it.
+The web adapter never has `messaging-adapter` in its `pom.xml`; Spring's component scan from `app` finds the `KafkaMessageSender` and injects it.
 
 ### Composition root
 
@@ -331,18 +331,18 @@ The `app` module:
 - Is the only place `main()` lives.
 - Hosts integration tests (`@SpringBootTest` or a `BaseIntegrationTest` extending Testcontainers).
 
-Every other module stays unaware of the full system and can be tested with a slice of the context.
+Every other module stays unaware of the full system and is tested with a slice of the context.
 
 ## Testing
 
-The test strategy falls straight out of the boundaries — and the way you test a core service is the concrete payoff that justifies its outbound ports:
+The test strategy falls out of the boundaries — and how you test a core service is the payoff that justifies its outbound ports:
 
 - **Core services** — plain unit tests. Substitute **fake or mock outbound ports** (`OrderRepository`, `EmailSender`) so the use case runs with no database and no network. *This is what the outbound interface buys you.*
 - **Outbound adapters** (JPA, SDK) — integration tests against the real technology: Testcontainers for the JPA adapter, a sandbox or WireMock for an HTTP SDK. You're testing the mapping and the query, so use the real thing.
 - **Inbound adapters** (web) — `@WebMvcTest` with the `*UseCase` (or service) mocked. You're testing HTTP wiring, serialization, and status codes — not business logic.
 - **ArchUnit test** — lives in `app`, runs in `verify`, sees the whole classpath.
 
-This gives a one-line test for "should this be a port?": **will I fake it in a core unit test, or is there a genuine second implementation?** If neither, don't add the interface.
+One-line test for "should this be a port?": **will I fake it in a core unit test, or is there a genuine second implementation?** If neither, don't add the interface.
 
 ## Anti-Patterns
 
