@@ -140,8 +140,9 @@ rm -f scratch.txt
 
 echo
 echo "== spawn builds the worktree and a watchable interactive session =="
+P1_PROMPT='/r:plan-run todo.md --phases 1 --no-merge --yes'
 out=$("$FAN" spawn --id p1 --dir "$TMP/wt-p1" --base main \
-        --prompt '/r:plan-run todo.md --phases 1 --no-merge --yes' \
+        --prompt "$P1_PROMPT" \
         --marker-file todo.md --marker-prefix 'built: ' --orchestrator 'orch-99' 2>&1); rc=$?
 [[ $rc == 0 ]] && ok "spawn exits 0" || bad "spawn exits 0" "exit $rc: $out"
 [[ -d "$TMP/wt-p1" ]] && ok "and creates the detached worktree" \
@@ -163,6 +164,15 @@ grep -q "CMUX_FANOUT_SENTINEL=" "$CMUX_STUB_LOG" \
 grep -q -- "--add-dir '$PACK'" "$CMUX_STUB_LOG" \
   && ok "and is given the pack root, so it can run the canonical pipelines" \
   || bad "and is given the pack root, so it can run the canonical pipelines" "$(cat "$CMUX_STUB_LOG")"
+# Presence is not enough, which is the whole reason this assertion is separate: `--add-dir` takes a
+# variadic list, so a prompt placed after it is swallowed as one more directory and the session
+# comes up empty — with the flag still present, spelled exactly as the check above wants it. Such a
+# unit runs no skill, so it never halts, never sentinels, and `wait` calls it live for four hours.
+cmd_line=$(grep -F -- "--add-dir" "$CMUX_STUB_LOG" | head -1)
+before_dirs=${cmd_line%%--add-dir*}
+[[ "$before_dirs" == *"'$P1_PROMPT'"* ]] \
+  && ok "with the prompt AHEAD of them — a variadic --add-dir would eat it" \
+  || bad "with the prompt AHEAD of them — a variadic --add-dir would eat it" "$cmd_line"
 trusted "$TMP/wt-p1" && ok "the new worktree inherits the repo's workspace trust" \
                      || bad "the new worktree inherits the repo's workspace trust" "not marked trusted"
 # The unit is told who spawned it, so an alarm goes UPWARDS to a known address. Downwards would need
@@ -192,6 +202,12 @@ grep -q -- "--add-dir '$TMP/packlink'" "$CMUX_STUB_LOG" \
 grep -q -- "--add-dir '$PACK_REAL'" "$CMUX_STUB_LOG" \
   && ok "and its resolved path too — the tool re-checks after resolving" \
   || bad "and its resolved path too — the tool re-checks after resolving" "$(cat "$CMUX_STUB_LOG")"
+# Two flags is where the variadic bite is worst, so the ordering is asserted here as well as on the
+# single-flag spawn above.
+link_line=$(grep -F -- "--add-dir" "$CMUX_STUB_LOG" | head -1)
+[[ "${link_line%%--add-dir*}" == *"'x'"* ]] \
+  && ok "and the prompt still leads, with two directories trailing it" \
+  || bad "and the prompt still leads, with two directories trailing it" "$link_line"
 "$FAN" cleanup --id plink >/dev/null 2>&1
 
 

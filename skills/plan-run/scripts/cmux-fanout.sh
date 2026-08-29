@@ -247,10 +247,15 @@ do_spawn() {
   [ -n "$PACK_ROOT" ] && add_dirs=" --add-dir '$PACK_ROOT'"
   [ -n "$PACK_ROOT_REAL" ] && [ "$PACK_ROOT_REAL" != "$PACK_ROOT" ] \
     && add_dirs="$add_dirs --add-dir '$PACK_ROOT_REAL'"
+  # The prompt goes BEFORE the directories, never after: `--add-dir <directories...>` is variadic,
+  # so a positional that follows it is eaten as one more path and the session comes up empty --
+  # `claude -p --add-dir /tmp 'x'` answers "Input must be provided", the prompt already gone. That
+  # failure is invisible to everything downstream: a unit with no prompt runs no skill, so it never
+  # halts and never writes a sentinel, and `wait` reads it as live until the 4h timeout.
   if ! out=$(CMUX_QUIET=1 cmux workspace create \
                 --name "$id" --cwd "$dir" --focus false \
                 --env "CMUX_FANOUT_SENTINEL=$sfile" ${orch_env[@]+"${orch_env[@]}"} \
-                --command "claude --permission-mode auto$add_dirs '$prompt'" 2>&1); then
+                --command "claude --permission-mode auto '$prompt'$add_dirs" 2>&1); then
     git worktree remove --force "$dir" >/dev/null 2>&1 || true
     die "spawn: cmux workspace create failed: $out"
   fi
