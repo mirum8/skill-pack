@@ -101,6 +101,9 @@ KIND_SKILL = {"review": "r:task-review", "implement": "r:task-run"}
 #         without the boundary this hunter inherits 27 rev-1/2 runs at 0.00 fixes/run measured on
 #         a tool that read a different changeset every time — the exact false evidence the
 #         retirement list acts on.
+# rev 4 — `docs` retired from this pipeline. It is still /r:code-bugs' Agent 5, so the track name
+#         survives in the store and in SURFACED_ONLY below; what changed is that a review no
+#         longer dispatches it, and rows from here on must not count as opportunities it had.
 TRACK_REVS = {
     1: {
         "light":    set(),
@@ -116,6 +119,11 @@ TRACK_REVS = {
         "light":    set(),
         "standard": {"codex", "security", "docs"},
         "full":     {"codex", "security", "docs", "logic", "runtime-and-failures"},
+    },
+    4: {
+        "light":    set(),
+        "standard": {"codex", "security"},
+        "full":     {"codex", "security", "logic", "runtime-and-failures"},
     },
 }
 LATEST_REV = max(TRACK_REVS)

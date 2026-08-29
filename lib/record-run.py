@@ -61,7 +61,11 @@ DESC_CAP = 400
 #       security.md. Same track name, same tier membership, entirely different tool — so the rev
 #       is what stops rev-1/2 rows (49 dispatches, 0 findings, on a tool that read the wrong diff)
 #       from being counted as this hunter's evidence and retiring it before it has run once.
-PIPELINE_REV = 3
+#   4 — `docs` retired from the review (150.7M tokens over 59 dispatches for 35 findings the
+#       pipeline never adjudicated). It still exists as /r:code-bugs' Agent 5, but no review row
+#       from this rev on dispatched it — and without the boundary every such row would read as an
+#       opportunity the track had and missed.
+PIPELINE_REV = 4
 
 # The two skills that identify themselves by `kind` rather than by name — every row the store held
 # before it went pack-wide, and anything still sending the older payload.

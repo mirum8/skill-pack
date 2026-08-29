@@ -82,7 +82,7 @@ async function run({ triage = baseTriage(), args = {}, overrides = {}, config = 
     if (l === 'config') return config
     if (l === 'diff-pack') return { ok: true, path: '/tmp/review.patch', files: 1, lines: 40 }
     if (l === 'codex' || l === 'code-quality' || l.startsWith('find-bugs:')) return CLEAN
-    if (l === 'fix-triage') return { correctness: [], readability: [], docDrift: [] }
+    if (l === 'fix-triage') return { correctness: [], readability: [] }
     if (l === 'stats') return { ok: true }
     if (l.startsWith('build#') || l.startsWith('rebuild#')) return { green: true }
     if (l === 'local-scan') return { status: 'ok', changedCode: false }
@@ -132,10 +132,8 @@ test('standard tier runs Codex --mode review + the security hunter only', async 
   assert.equal(out.profile, 'standard')
   // Security is the hunter standard keeps while trading away its siblings: a missed N+1 degrades
   // a page, a missed injection or authorization hole is exploitable and nothing later re-derives
-  // it. The docs hunter also runs here, but outside the barrier — it feeds a list handed to the
-  // user, so nothing downstream waits on it.
+  // it.
   assert.equal(counts['find-bugs:security'], 1)
-  assert.equal(counts['find-bugs:docs'], 1)
   // The pattern hunters are what standard trades for the Codex read.
   assert.equal(counts['find-bugs:logic'], undefined)
   assert.equal(counts['find-bugs:runtime-and-failures'], undefined)
@@ -164,7 +162,7 @@ test('standard tier runs Codex --mode review + the security hunter only', async 
 
 test('full tier keeps every hunter and the ADVERSARIAL codex — never the light reviewer', async () => {
   const { counts, prompts } = await run() // baseTriage is full, and no plan review is certified
-  for (const h of ['logic', 'runtime-and-failures', 'security', 'docs']) {
+  for (const h of ['logic', 'runtime-and-failures', 'security']) {
     assert.equal(counts[`find-bugs:${h}`], 1, `full must dispatch the ${h} hunter`)
   }
   // The merged hunter must still own BOTH pattern files. Merging was a cost decision (two fresh
@@ -194,7 +192,7 @@ test('a caller that already had Codex review the PLAN gets the lighter up-front 
   assert.match(prompts['codex'], /--mode review/)
   assert.doesNotMatch(prompts['codex'], /adversarial\/challenge review/)
   assert.match(logText, /already reviewed the PLAN/)
-  for (const h of ['logic', 'runtime-and-failures', 'security', 'docs']) {
+  for (const h of ['logic', 'runtime-and-failures', 'security']) {
     assert.equal(counts[`find-bugs:${h}`], 1, `the ${h} hunter is unaffected`)
   }
   assert.equal(counts['code-quality'], 1)
@@ -302,7 +300,7 @@ test('the verifiers are pinned at high, the deploy lower still', async () => {
 
 test('the Codex tracks run at wrapper depth — Codex does the reviewing, not the agent', async () => {
   const { opts } = await run({
-    overrides: { codex: { ran: true, findings: [finding()] }, 'fix-triage': { correctness: [finding()], readability: [], docDrift: [] } },
+    overrides: { codex: { ran: true, findings: [finding()] }, 'fix-triage': { correctness: [finding()], readability: [] } },
   })
   assert.equal(opts['codex'].effort, 'medium')
   assert.equal(opts['end-verify#1'].effort, 'medium')
@@ -314,7 +312,7 @@ test('Phase 0 triage reads the diff into a schema, so it runs at medium', async 
 })
 
 const withFix = (over = {}) => ({
-  overrides: { 'fix-triage': { correctness: [finding()], readability: [], docDrift: [] } },
+  overrides: { 'fix-triage': { correctness: [finding()], readability: [] } },
   ...over,
 })
 
@@ -403,7 +401,7 @@ test('the readability refactor is NOT one of the configured fixers, on either pr
   // It invokes the /r:code-refactor skill, so a codex provider has nothing to hand the CLI, and
   // the judgement it applies is re-formed by nothing downstream — so it keeps the inherited tier.
   const codex = await run({
-    overrides: { 'fix-triage': { correctness: [], readability: ['rename the flag'], docDrift: [] } },
+    overrides: { 'fix-triage': { correctness: [], readability: ['rename the flag'] } },
   })
   assert.equal(codex.opts['fix-readability'].model, undefined)
   assert.equal(codex.opts['fix-readability'].effort, undefined)
@@ -420,9 +418,6 @@ test('every pattern hunter runs below the top tier, security included', async ()
   const { opts } = await run()
   assert.equal(opts['find-bugs:logic'].effort, 'high')
   assert.equal(opts['find-bugs:runtime-and-failures'].effort, 'high')
-  // Doc drift is never auto-fixed — it resolves to a decision the USER owns — so this hunter
-  // matches code against written statements rather than adjudicating anything.
-  assert.equal(opts['find-bugs:docs'].effort, 'medium')
   // Asserted as 'high', never as undefined: r:bug-hunter-pattern's own frontmatter already pins
   // `high`, so an unpinned row would land at the right depth for the wrong reason and this
   // assertion would stay green on it. The pin is what makes the claim and the run agree — and what
@@ -430,16 +425,15 @@ test('every pattern hunter runs below the top tier, security included', async ()
   assert.equal(opts['find-bugs:security'].effort, 'high')
 })
 
-test('the docs hunter is the one hunter pinned to a cheaper MODEL, not just a lower effort', async () => {
-  // Every hunter agent carries `model: opus` in its frontmatter, so an effort pin alone leaves the
-  // top model in place. That is right where a track adjudicates. The docs hunter does not: it
-  // matches a diff against written statements, and its output is never auto-fixed, so a false
-  // positive costs a user one read. The hunters that DO decide what is broken keep the tier.
+test('every hunter keeps the inherited top model — each one decides what is broken', async () => {
+  // Every hunter agent carries `model: opus` in its frontmatter, and none of the three is pinned
+  // below it: each adjudicates whether a hunk is actually a defect, which is the job that earns
+  // the tier. A cheaper model belongs to a track that MATCHES rather than decides — this pipeline
+  // no longer has one, and a pin appearing here means somebody added one without saying so.
   const { opts } = await run()
-  assert.equal(opts['find-bugs:docs'].model, 'sonnet')
-  assert.equal(opts['find-bugs:logic'].model, undefined)
-  assert.equal(opts['find-bugs:runtime-and-failures'].model, undefined)
-  assert.equal(opts['find-bugs:security'].model, undefined)
+  for (const h of ['logic', 'runtime-and-failures', 'security']) {
+    assert.equal(opts[`find-bugs:${h}`].model, undefined, `the ${h} hunter keeps the inherited model`)
+  }
 })
 
 test('the pattern hunters use the lean sweep agent, never the single-bug investigator', async () => {
@@ -451,8 +445,6 @@ test('the pattern hunters use the lean sweep agent, never the single-bug investi
     assert.equal(opts[`find-bugs:${h}`].agentType, 'r:bug-hunter-pattern',
       `the ${h} hunter must sweep, not investigate`)
   }
-  // The docs hunter is the one specialist left: it reads the doc tree as well as the diff.
-  assert.equal(opts['find-bugs:docs'].agentType, 'r:bug-hunter-docs')
 })
 
 test('the security hunter reads its own pattern file, not a bundled skill', async () => {
@@ -482,7 +474,7 @@ test('the diff is captured once, after triage, and every hunter is pointed at th
   assert.ok(order.indexOf('diff-pack') < order.indexOf('find-bugs:logic'))
   // Cheapest tier: it runs one fixed command and reports a path. It decides nothing.
   assert.equal(opts['diff-pack'].model, 'haiku')
-  for (const h of ['security', 'logic', 'runtime-and-failures', 'docs']) {
+  for (const h of ['security', 'logic', 'runtime-and-failures']) {
     assert.match(prompts[`find-bugs:${h}`], /\/tmp\/review\.patch/,
       `the ${h} hunter must read the shared capture`)
     assert.match(prompts[`find-bugs:${h}`], /Do NOT re-derive it/)
@@ -549,19 +541,41 @@ test('the hunt is ordered and bounded — diff first, then a budget', async () =
   }
 })
 
-test('the docs hunter is handed triage\'s doc list instead of re-globbing the tree', async () => {
-  const { prompts } = await run({
-    triage: baseTriage({ docFiles: ['CLAUDE.md', 'docs/spec.md'] }),
-  })
-  assert.match(prompts['find-bugs:docs'], /docs\/spec\.md/)
-  assert.match(prompts['find-bugs:docs'], /do not spend shell calls re-discovering/)
+test('no runtime surface in the diff means the runtime-and-failures hunter is not dispatched', async () => {
+  // The same per-DIFF gate the security hunter carries, on a hunter that costs 2.70M tokens and
+  // 326s per dispatch for 0.42 fixes/run: on a diff with no threading, shared state, IO, query or
+  // error handling, its two pattern files have nothing to match.
+  const { counts, out, logText } = await run({ triage: baseTriage({ runtimeSurface: false }) })
+  assert.equal(counts['find-bugs:runtime-and-failures'], undefined)
+  assert.equal(counts['find-bugs:logic'], 1)       // the other hunters are untouched
+  assert.equal(counts['find-bugs:security'], 1)
+  assert.match(logText, /runtime-and-failures hunter SKIPPED/)
+  // Recorded, not merely logged: the stats report derives this track's denominator from the tier,
+  // so a run that never dispatched it must not count as an opportunity it had and missed.
+  assert.ok(out.tracksSkipped.includes('runtime-and-failures'))
+  assert.ok(!out.tracksBlocked.includes('find-bugs'))  // a closed gate is not a failed tool
 })
 
-test('no doc list from triage means the hunter locates them itself, as before', async () => {
-  // Fail-open: an empty or missing list is a triage that found nothing to hand over, never an
-  // instruction to skip the doc side of the check.
-  const { prompts } = await run({ triage: baseTriage({ docFiles: [] }) })
-  assert.match(prompts['find-bugs:docs'], /Glob over the filesystem/)
+test('the runtime gate is fail-open — only an explicit false skips the hunter', async () => {
+  // An unanswered field is a triage that did not check, never a licence to skip. Same shape as
+  // securitySurface: every hunk it never reads is a hunk nothing looked at.
+  for (const v of [undefined, true, 'no', 0]) {
+    const t = baseTriage()
+    if (v === undefined) delete t.runtimeSurface
+    else t.runtimeSurface = v
+    const { counts } = await run({ triage: t })
+    assert.equal(counts['find-bugs:runtime-and-failures'], 1, `runtimeSurface=${v} must still hunt`)
+  }
+})
+
+test('the runtime gate is a full-tier decision — standard never dispatched that hunter anyway', async () => {
+  // Below full the hunter is already out of HUNTER_SET, so the gate has nothing to close and must
+  // not log a skip for a track this tier never owed.
+  const { counts, logText } = await run({
+    args: { profile: 'standard' }, triage: baseTriage({ runtimeSurface: false }),
+  })
+  assert.equal(counts['find-bugs:runtime-and-failures'], undefined)
+  assert.doesNotMatch(logText, /runtime-and-failures hunter SKIPPED/)
 })
 
 test('a failed deploy blocks the UI track — it never tests whatever is already running', async () => {
@@ -696,7 +710,7 @@ test('a security hunter that read a DIFFERENT changeset is not a clean bill', as
   assert.ok(!/hunter\(s\) BLOCKED — security/.test(logText))
   // The RECORD has to make that same distinction, not just the log. Collapsed into tracksBlocked
   // this reads as "the bug scan failed" — sending a reader after a tool that is not broken, while
-  // hiding that the pattern and docs hunters completed and produced findings.
+  // hiding that the pattern hunters completed and produced findings.
   assert.deepEqual(out.tracksDrifted, ['find-bugs (security)'])
   assert.ok(!out.tracksBlocked.includes('find-bugs'))
 })
@@ -738,7 +752,7 @@ test('below full tier the drifted entry does not repeat the hunter it is already
 })
 
 test('a track with no hunter fan-out keeps landing in tracksBlocked', async () => {
-  // codex, docs and code-quality are one agent each, not a fan-out, so they carry no hunter-level
+  // codex and code-quality are one agent each, not a fan-out, so they carry no hunter-level
   // detail. The split must not quietly drop them out of the list their failure has always been in.
   const { out } = await run({ overrides: { codex: null } })
   assert.ok(out.tracksBlocked.includes('codex'))
@@ -767,28 +781,17 @@ test('the four security outcomes are distinguishable in the summary', async () =
   assert.equal(light.out.security, 'not-dispatched')
 })
 
-test('the docs hunter is reported on its own, because it runs outside the barrier', async () => {
-  // It is still a dispatched track: a caller has to be able to see that nothing checked the change
-  // against the documentation. Being off the critical path is not the same as being optional.
-  const { out, logText } = await run({ overrides: { 'find-bugs:docs': null } })
-  assert.ok(out.tracksBlocked.includes('docs'))
-  assert.ok(!out.tracksBlocked.includes('find-bugs'), 'the blocking hunters were fine')
-  assert.match(logText, /docs hunter track BLOCKED/)
-  assert.match(logText, /coverage hole, not a clean bill/)
-})
-
-test('doc drift comes straight from the docs hunter, never through triage', async () => {
-  // It is a list handed to the USER — never a fix, never an input to the build — so routing it
-  // through a filter that cannot act on it only made the fix phase wait for it.
-  const { out, prompts } = await run({
-    overrides: {
-      'find-bugs:docs': { ran: true, findings: [
-        { file: 'README.md', line: 4, category: 'doc-drift', what: 'documents the old flag name' }] },
-    },
-  })
-  assert.deepEqual(out.docDrift, ['README.md:4 documents the old flag name'])
-  assert.doesNotMatch(prompts['fix-triage'], /docDrift/,
-    'correctness triage must not be handed a bucket it does not own')
+test('REGRESSION: no docs hunter is dispatched, at any tier', async () => {
+  // Retired from this pipeline on its own numbers: 150.7M tokens over 59 dispatches for 35
+  // findings, of which 0 were confirmed and 0 dismissed — the review never adjudicated one,
+  // because doc drift resolves to a decision the USER owns. It survives as /r:code-bugs' Agent 5,
+  // which is where someone asking for a code-vs-intent check gets one. Reinstating it here needs
+  // rows showing the list is acted on, not a re-read of the same argument.
+  for (const args of [{}, { profile: 'standard' }, { profile: 'light' }]) {
+    const { counts, out } = await run({ args })
+    assert.equal(counts['find-bugs:docs'], undefined, `no docs hunter at ${args.profile || 'full'}`)
+    assert.ok(!('docDrift' in out), 'the return carries no doc-drift bucket')
+  }
 })
 
 // --------------------------------------------- the security hunter's own gate ---
@@ -800,8 +803,8 @@ test('doc drift comes straight from the docs hunter, never through triage', asyn
 test('no security surface in the diff means the security hunter is not dispatched', async () => {
   const { counts, logText } = await run({ triage: baseTriage({ securitySurface: false }) })
   assert.equal(counts['find-bugs:security'], undefined)
-  assert.equal(counts['find-bugs:docs'], 1)      // the other hunters are untouched
-  assert.equal(counts['find-bugs:logic'], 1)
+  assert.equal(counts['find-bugs:logic'], 1)     // the other hunters are untouched
+  assert.equal(counts['find-bugs:runtime-and-failures'], 1)
   assert.match(logText, /security hunter SKIPPED/)
   assert.match(logText, /this is a skip, not a clean bill/)
 })
@@ -821,7 +824,7 @@ test('a skipped security hunter is reported as a SKIP, never as coverage', async
   // collapse into one, because only the first is a reason to merge.
   const { prompts } = await run({
     triage: baseTriage({ securitySurface: false }),
-    overrides: { 'fix-triage': { correctness: [], readability: [], docDrift: [] } },
+    overrides: { 'fix-triage': { correctness: [], readability: [] } },
   })
   assert.match(prompts['fix-triage'], /NOT DISPATCHED/)
   assert.match(prompts['fix-triage'], /skip, not a clean bill/)
@@ -842,16 +845,14 @@ test('a security hunter closed by its per-diff gate is RECORDED as skipped', asy
   assert.ok(!ran.out.tracksSkipped.includes('security'))
 })
 
-test('at standard with no security surface, no hunter is dispatched inside the barrier', async () => {
-  // Both members of the standard set are gone — the security hunter by its own surface gate, the
-  // docs hunter because it never belonged to this barrier. The name has to say that plainly rather
-  // than report a tool failure.
+test('at standard with no security surface, no hunter is dispatched at all', async () => {
+  // Standard's only hunter is gone, closed by its own per-diff gate. The run has to say that
+  // plainly rather than report a tool failure over a track nothing dispatched.
   const { out, counts, logText } = await run({
     args: { profile: 'standard' },
     triage: baseTriage({ securitySurface: false }),
   })
   assert.equal(counts['find-bugs:security'], undefined)
-  assert.equal(counts['find-bugs:docs'], 1, 'the docs hunter still runs, off the barrier')
   assert.deepEqual(out.tracksBlocked, [])
   assert.match(logText, /security hunter SKIPPED/)
 })
@@ -877,7 +878,7 @@ test('correctness fixes are attributed to the track that found them', async () =
         correctness: [{ item: 'A.java:10 off-by-one', source: 'codex' },
                       { item: 'B.java:20 missing authz check', source: 'security' },
                       { item: 'C.java:30 unbounded fetch', source: 'concurrency' }],
-        readability: [], docDrift: [],
+        readability: [],
       },
     },
   })
@@ -902,7 +903,7 @@ test('a triage that returns bare strings still yields a fixable list', async () 
   // Attribution is worth less than the fix phase: a degraded/older-shaped response must not
   // crash the run, it must just lose the labels.
   const { out } = await run({
-    overrides: { 'fix-triage': { correctness: ['A.java:10 off-by-one'], readability: [], docDrift: [] } },
+    overrides: { 'fix-triage': { correctness: ['A.java:10 off-by-one'], readability: [] } },
   })
   assert.equal(out.fixed.correctness, 1)
   assert.deepEqual(out.fixedBySource, { unattributed: 1 })
@@ -911,7 +912,7 @@ test('a triage that returns bare strings still yields a fixable list', async () 
 test('end-verify fixes are attributed to end-verify', async () => {
   const { out } = await run({
     overrides: {
-      'fix-triage': { correctness: [{ item: 'A.java:1 x', source: 'codex' }], readability: [], docDrift: [] },
+      'fix-triage': { correctness: [{ item: 'A.java:1 x', source: 'codex' }], readability: [] },
       'end-verify#1': { ran: true, findings: [finding('regression from the fix')] },
       'end-verify#2': CLEAN,
     },
@@ -930,7 +931,6 @@ test('end-verify fixes are attributed to end-verify', async () => {
 const ONE_OF_EACH = {
   correctness: [{ item: 'A.java:10 off-by-one', source: 'codex' }],
   readability: ['A.java:1 extract a method'],
-  docDrift: [],
 }
 
 test('REGRESSION: the readability refactor never runs while the correctness fixer is still editing', async () => {
@@ -1061,8 +1061,6 @@ test('the stats row is written once, with counts rather than finding text', asyn
   assert.equal(row.profile, 'full')
   assert.equal(row.build, 'green')
   assert.ok('fixedBySource' in row)
-  assert.equal(typeof row.docDriftCount, 'number')  // a count, not the drift text
-  assert.ok(!('docDrift' in row))
 })
 
 test('what triage REJECTED reaches the stats row, and never the fixer', async () => {
@@ -1077,7 +1075,7 @@ test('what triage REJECTED reaches the stats row, and never the fixer', async ()
       'fix-triage': {
         correctness: [{ item: 'RateSheetImporter:42 guard the last row', source: 'logic' }],
         dismissed: [{ item: 'RateSheetImporter:88 unreachable branch', source: 'security' }],
-        readability: [], docDrift: [],
+        readability: [],
       },
     },
   })
@@ -1104,7 +1102,7 @@ test('appliedFindings returns the real findings for the plan, dismissed ones fil
       'fix-triage': {
         correctness: [{ item: 'RateSheetImporter:42 guard the last row', source: 'logic' }],
         dismissed: [{ item: 'RateSheetImporter:88 unreachable branch', source: 'security' }],
-        readability: [], docDrift: [],
+        readability: [],
       },
     },
   })
@@ -1287,7 +1285,7 @@ test('a local-scan that errors is treated exactly like a dead one', async () => 
 test('REGRESSION: a dead end-verify is "blocked", never "passed"', async () => {
   const { out, logText } = await run({
     overrides: {
-      'fix-triage': { correctness: [`${CHANGED}:42 guard the empty batch`], readability: [], docDrift: [] },
+      'fix-triage': { correctness: [`${CHANGED}:42 guard the empty batch`], readability: [] },
       'end-verify#': null,
     },
   })
@@ -1304,7 +1302,7 @@ test('REGRESSION: an end-verify finding with no `real` flag reaches a fixer, it 
   const unflagged = { file: CHANGED, line: 7, category: 'correctness', what: 'the swap targets a detached node' }
   const { out, counts } = await run({
     overrides: {
-      'fix-triage': { correctness: [`${CHANGED}:42 guard the empty batch`], readability: [], docDrift: [] },
+      'fix-triage': { correctness: [`${CHANGED}:42 guard the empty batch`], readability: [] },
       'end-verify#1': { ran: true, findings: [unflagged] },
       'end-verify#2': CLEAN,
     },
@@ -1318,7 +1316,7 @@ test('REGRESSION: end-verify findings that survive 2 passes are surfaced, never 
   const still = { file: CHANGED, line: 7, category: 'correctness', what: 'still races on the badge swap', real: true }
   const { out, logText } = await run({
     overrides: {
-      'fix-triage': { correctness: [`${CHANGED}:42 guard the empty batch`], readability: [], docDrift: [] },
+      'fix-triage': { correctness: [`${CHANGED}:42 guard the empty batch`], readability: [] },
       'end-verify#': { ran: true, findings: [still] },
     },
   })
@@ -1337,7 +1335,7 @@ test('pass 2 is told what pass 1 raised and that a fixer edited the code', async
   const first = { file: CHANGED, line: 7, category: 'correctness', what: 'races on the badge swap', real: true }
   const { prompts, counts } = await run({
     overrides: {
-      'fix-triage': { correctness: [`${CHANGED}:42 guard the empty batch`], readability: [], docDrift: [] },
+      'fix-triage': { correctness: [`${CHANGED}:42 guard the empty batch`], readability: [] },
       'end-verify#1': { ran: true, findings: [first] },
     },
   })
@@ -1354,7 +1352,7 @@ test('pass 2 is told when the pass-1 fixer died, so re-finding the item is corre
   const first = { file: CHANGED, line: 7, category: 'correctness', what: 'races on the badge swap', real: true }
   const { prompts } = await run({
     overrides: {
-      'fix-triage': { correctness: [`${CHANGED}:42 guard the empty batch`], readability: [], docDrift: [] },
+      'fix-triage': { correctness: [`${CHANGED}:42 guard the empty batch`], readability: [] },
       'end-verify#1': { ran: true, findings: [first] },
       'end-verify-fix#1': null,
     },
@@ -1368,7 +1366,7 @@ test('an end-verify finding explicitly marked real:false is still dropped', asyn
   const fp = { file: CHANGED, line: 7, category: 'correctness', what: 'false alarm', real: false }
   const { out, counts } = await run({
     overrides: {
-      'fix-triage': { correctness: [`${CHANGED}:42 guard the empty batch`], readability: [], docDrift: [] },
+      'fix-triage': { correctness: [`${CHANGED}:42 guard the empty batch`], readability: [] },
       'end-verify#': { ran: true, findings: [fp] },
     },
   })
@@ -1485,7 +1483,7 @@ test('still red after three attempts halts, and says a RESUME will not retry it'
 test('a JSON-string arg is parsed, so deferCommit is not silently lost', async () => {
   const { prompts } = await run({
     args: JSON.stringify({ deferCommit: true, profile: 'full', packRoot: '/pack' }),
-    overrides: { 'fix-triage': { correctness: [], readability: ['A.java:1 extract a method'], docDrift: [] } },
+    overrides: { 'fix-triage': { correctness: [], readability: ['A.java:1 extract a method'] } },
   })
   assert.match(prompts['fix-readability'], /WITHOUT committing/)
 })
@@ -1507,7 +1505,7 @@ test('a malformed arg is survived, then halts cleanly on the missing pack root',
 // fixes applied earlier in that same run had therefore been reviewed by nothing, and only a
 // caller noticing that "blocked" is not "passed" kept an unreviewed diff off main.
 
-const NEEDS_FIX = { correctness: [`${CHANGED}:42 guard the empty batch`], readability: [], docDrift: [] }
+const NEEDS_FIX = { correctness: [`${CHANGED}:42 guard the empty batch`], readability: [] }
 
 test('REGRESSION: an end-verify that reports ran:false is re-dispatched before the diff is called unverified', async () => {
   // Exit 4 means the wrapper burned its OWN three Codex attempts on an environment error. Running
