@@ -157,6 +157,12 @@ grep -q -- "-p " "$CMUX_STUB_LOG" \
 grep -q "CMUX_FANOUT_SENTINEL=" "$CMUX_STUB_LOG" \
   && ok "and is handed the sentinel path it must write" \
   || bad "and is handed the sentinel path it must write" "$(cat "$CMUX_STUB_LOG")"
+# Without this the unit reaches its implement step and is refused the canonical pipeline, because
+# the Workflow tool only accepts a scriptPath under the cwd or a directory the session was given.
+# It fails late and quietly: the worktree is clean, so the wave looks merely unproductive.
+grep -q -- "--add-dir '$PACK'" "$CMUX_STUB_LOG" \
+  && ok "and is given the pack root, so it can run the canonical pipelines" \
+  || bad "and is given the pack root, so it can run the canonical pipelines" "$(cat "$CMUX_STUB_LOG")"
 trusted "$TMP/wt-p1" && ok "the new worktree inherits the repo's workspace trust" \
                      || bad "the new worktree inherits the repo's workspace trust" "not marked trusted"
 # The unit is told who spawned it, so an alarm goes UPWARDS to a known address. Downwards would need
@@ -170,6 +176,23 @@ grep -q "CMUX_FANOUT_ORCHESTRATOR" "$CMUX_STUB_LOG" \
   && bad "omitting --orchestrator leaves the variable unset, never empty" "$(cat "$CMUX_STUB_LOG")" \
   || ok "omitting --orchestrator leaves the variable unset, never empty"
 "$FAN" cleanup --id pnoorch >/dev/null 2>&1
+
+# A pack reached through a symlink — the shipped layout, where ~/.claude is one — passes the tool's
+# pre-resolution check under the name it was called by and fails the post-resolution one under its
+# real path. So both spellings go across, and the link is built here rather than assumed: this repo
+# is not itself behind one, and a case that only fires on someone else's machine tests nothing.
+: > "$CMUX_STUB_LOG"
+ln -s "$PACK" "$TMP/packlink"
+"$TMP/packlink/skills/plan-run/scripts/cmux-fanout.sh" \
+  spawn --id plink --dir "$TMP/wt-plink" --base main --prompt x >/dev/null 2>&1
+PACK_REAL=$(cd "$PACK" && pwd -P)
+grep -q -- "--add-dir '$TMP/packlink'" "$CMUX_STUB_LOG" \
+  && ok "a pack reached through a symlink sends the path it was called by" \
+  || bad "a pack reached through a symlink sends the path it was called by" "$(cat "$CMUX_STUB_LOG")"
+grep -q -- "--add-dir '$PACK_REAL'" "$CMUX_STUB_LOG" \
+  && ok "and its resolved path too — the tool re-checks after resolving" \
+  || bad "and its resolved path too — the tool re-checks after resolving" "$(cat "$CMUX_STUB_LOG")"
+"$FAN" cleanup --id plink >/dev/null 2>&1
 
 
 out=$("$FAN" spawn --id p1 --dir "$TMP/wt-dup" --base main --prompt x 2>&1); rc=$?

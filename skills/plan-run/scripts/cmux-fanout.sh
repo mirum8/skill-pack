@@ -67,6 +67,13 @@ set -euo pipefail
 # a pack with no lib/ beside it at all — an empty cap would make `-ge` succeed on
 # every spawn, which is no cap.
 PACK_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." 2>/dev/null && pwd || echo "")
+# The same root as the physical path. The `Workflow` tool accepts a `scriptPath` only inside the
+# session's cwd or a directory it was given, and it re-checks that AFTER resolving symlinks — so a
+# pack reached through a symlinked ~/.claude passes the first check under the name it was called by
+# and fails the second under its real one. A unit is handed both spellings for that reason; without
+# them every unit reaches its implement step, is refused the canonical pipeline, and halts with a
+# clean worktree, which is a whole wave that produced nothing.
+PACK_ROOT_REAL=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." 2>/dev/null && pwd -P || echo "")
 MAX_UNITS=$(python3 "$PACK_ROOT/lib/read-config.py" --step fanout --field maxUnits \
               --pack "$PACK_ROOT") || MAX_UNITS=""
 case $MAX_UNITS in
@@ -234,10 +241,16 @@ do_spawn() {
   # the only messaging direction wired here.
   local orch_env=()
   [ -n "$orch" ] && orch_env=(--env "CMUX_FANOUT_ORCHESTRATOR=$orch")
+  # Both spellings of the pack root, so the unit can run the canonical pipelines rather than
+  # discovering at its implement step that it cannot reach them (see PACK_ROOT_REAL above).
+  local add_dirs=""
+  [ -n "$PACK_ROOT" ] && add_dirs=" --add-dir '$PACK_ROOT'"
+  [ -n "$PACK_ROOT_REAL" ] && [ "$PACK_ROOT_REAL" != "$PACK_ROOT" ] \
+    && add_dirs="$add_dirs --add-dir '$PACK_ROOT_REAL'"
   if ! out=$(CMUX_QUIET=1 cmux workspace create \
                 --name "$id" --cwd "$dir" --focus false \
                 --env "CMUX_FANOUT_SENTINEL=$sfile" ${orch_env[@]+"${orch_env[@]}"} \
-                --command "claude --permission-mode auto '$prompt'" 2>&1); then
+                --command "claude --permission-mode auto$add_dirs '$prompt'" 2>&1); then
     git worktree remove --force "$dir" >/dev/null 2>&1 || true
     die "spawn: cmux workspace create failed: $out"
   fi
