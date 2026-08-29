@@ -13,7 +13,7 @@
 # back to claude/opus/medium and names every substitution — a codex model string means
 # nothing to a Claude subagent, and carrying `low` across would silently re-tier it.
 #
-# The two rows below deliberately sit on different providers: Claude writes the change,
+# The `implement` and `fix` rows below deliberately sit on different providers: Claude writes the change,
 # Codex patches it. That means two writers on one change by default, which is exactly what
 # the one-writer rule in task-run-implement.workflow.js argues against for a build fix — so
 # treat it as a trial with a reason rather than a settled shape. The reason is that a fixer's
@@ -23,6 +23,44 @@
 # row, so `python3 lib/skill-stats.py` can bucket by provider once there are rows under it.
 
 steps:
+  # The planning half of /r:task-run: the planner, the explorers that map the code for it, and the
+  # judges that triage the Codex plan review. Planning costs MORE per run than the implementation
+  # it feeds — judge 11.0M tokens, planner 10.3M, explore 7.5M, plan-fix 3.9M, ~39M in all against
+  # implement's 33.1M — and ~97% of that is cache reads, i.e. context re-read, not output. So these
+  # are the values to move when a run is too expensive, and `plan depth` in lib/skill-stats.py is
+  # what says whether moving them cost anything.
+  #
+  # THE STANDING RULE: the judges must never run DEEPER than the planner whose plan they check. A
+  # judge answers one narrow question with the explorer briefs already in hand; depth spent there is
+  # depth taken from the artifact everything downstream is built on. Nothing enforces it — a silent
+  # clamp would override a value you can see right here — so it is on you when you edit them.
+  #
+  # No `provider` here, unlike the two rows below: the planner returns markdown the pipeline copies
+  # to disk verbatim, and the explorers and judges return schema'd objects it branches on. None of
+  # that survives a hand-off to a CLI, so codex is not an option for this row.
+  plan:
+    model: opus           # the planner — fable | opus | sonnet | haiku
+    effort: high          # low | medium | high | xhigh | max
+
+    # The explorers that map the code before the plan is written. Cheaper than the planner by
+    # design — read-and-map work, not judgement. `medium` rather than `low` because the one
+    # consequential call an explorer makes is riskFlags, which escalates a light task to full the
+    # moment it sees auth, money, migrations or concurrency.
+    exploreModel: sonnet
+    exploreEffort: medium
+
+    # The judges that triage the Codex plan review. Most plan findings never reach one: a finding
+    # from a rubric whose precision is ~91% (grounding, test-adequacy, ui-design) and that names a
+    # file:LINE goes to a haiku citation check instead, and only coverage, risk, simplicity and
+    # findings with no usable citation are judged here.
+    #
+    # `opus` is the measured status quo, not a recommendation — 223 judge items in the store, every
+    # one of them opus/high, back when the tier was inherited instead of named. Now that it is a
+    # setting, dropping the judges to sonnet is the obvious first experiment: read `plan depth` in
+    # lib/skill-stats.py afterwards, and read the per-lane precision split beside it.
+    judgeModel: opus
+    judgeEffort: high
+
   implement:
     provider: claude      # claude | codex
     model: opus           # claude: fable|opus|sonnet|haiku; codex: passed through to the CLI

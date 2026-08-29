@@ -822,6 +822,151 @@ def summarize_impl_depth(db, rows):
               " — read these as a direction to keep watching, not a verdict.")
     print()
 
+# -------------------------------------------------------------------- plan depth ---
+# The planning half costs MORE per run than the implementation it feeds — measured per run that
+# reaches a plan: judges 11.0M tokens, planner 10.3M, explorers 7.5M, plan-fix 3.9M, ~39M in all
+# against the implementers' 33.1M, and ~97% of it cache reads rather than output. So the same
+# question the table above asks of the implementers is worth asking here, and it is asked the same
+# way: bucket the runs by the depth they ran at, and print what the review found afterwards beside
+# it, because a cheaper planner that pushes work into fix-correctness has moved cost, not saved it.
+#
+# The one thing it does NOT do is mine the effort off the items. It cannot: the planner's items come
+# back at xhigh while the shipped row asks for high, because a subagent reports the tier it resolved
+# to rather than the one it was dispatched with. The pipeline records the resolved row instead
+# (planModel/planEffort, and the judges' beside it), so a run is bucketed by the setting somebody
+# chose. Runs made before that field existed have nothing to bucket on and are named `unrecorded`
+# rather than folded into a tier they may not have run at.
+PLAN_LABELS = ("explore", "planner", "plan-light", "plan-write", "plan-check",
+               "codex-plan-review", "judge", "cite", "plan-fix")
+# The rubrics the Codex plan review tags its findings with. Only these tracks come from the plan
+# review; every other track in the store belongs to /r:task-review.
+PLAN_TRACKS = ("coverage", "grounding", "test-adequacy", "simplicity", "risk", "ui-design")
+
+
+def plan_depth_groups(db):
+    """One entry per workflow run that planned: its planning cost and how many readers it took."""
+    con = connect(db, create=False)
+    if con is None:
+        return {}
+    try:
+        groups = {}
+        for wf, rid, label, tok, ms in con.execute(
+                "SELECT wf_run_id, run_id, label, "
+                "       COALESCE(tokens_in,0)+COALESCE(tokens_out,0)+COALESCE(tokens_cache,0), "
+                "       COALESCE(duration_ms,0) FROM items WHERE label IS NOT NULL"):
+            step = str(label).split("#")[0]
+            if step not in PLAN_LABELS:
+                continue
+            g = groups.setdefault(wf, {"run_id": None, "tokens": 0, "ms": 0,
+                                       "planned": False, "batches": 0, "cites": 0})
+            if rid:
+                g["run_id"] = rid
+            g["tokens"] += tok or 0
+            g["ms"] += ms or 0
+            if step in ("planner", "plan-light"):
+                g["planned"] = True
+            # The two triage lanes, counted apart: batches/run is the number the batching change is
+            # read on, and the citation share is what says whether the cheap lane is reaching work.
+            if step == "judge":
+                g["batches"] += 1
+            elif step == "cite":
+                g["batches"] += 1
+                g["cites"] += 1
+        return {wf: g for wf, g in groups.items() if g["planned"]}
+    finally:
+        con.close()
+
+
+def plan_findings(db):
+    """{run_id: (confirmed, dismissed, unresolved)} over the plan review's own rubrics."""
+    con = connect(db, create=False)
+    if con is None:
+        return {}
+    try:
+        out = collections.defaultdict(collections.Counter)
+        marks = ",".join("?" * len(PLAN_TRACKS))
+        for rid, verdict, n in con.execute(
+                f"SELECT run_id, COALESCE(verdict,'unresolved'), COUNT(*) FROM findings "
+                f"WHERE track IN ({marks}) GROUP BY run_id, verdict", PLAN_TRACKS):
+            out[rid][verdict] += n
+        return out
+    finally:
+        con.close()
+
+
+def summarize_plan_depth(db, rows):
+    """Cost and yield per PLANNING depth — the same question, asked of the pipeline's other half."""
+    groups = plan_depth_groups(db)
+    if not groups:
+        return
+    impls = {r.get("run_id"): r for r in rows if r.get("kind") == "implement" and r.get("run_id")}
+    pairs = pair_reviews(list(impls.values()), [r for r in rows if r.get("kind") == "review"])
+    found = plan_findings(db)
+
+    buckets = {}
+    for g in groups.values():
+        run = impls.get(g["run_id"]) or {}
+        model, effort = run.get("planModel"), run.get("planEffort")
+        key = f"{model}/{effort}" if model and effort else "unrecorded"
+        b = buckets.setdefault(key, {"runs": 0, "tokens": 0, "ms": 0, "batches": 0, "cites": 0,
+                                     "conf": 0, "dism": 0, "unres": 0, "reviews": [],
+                                     "judges": collections.Counter()})
+        b["runs"] += 1
+        b["tokens"] += g["tokens"]
+        b["ms"] += g["ms"]
+        b["batches"] += g["batches"]
+        b["cites"] += g["cites"]
+        if run.get("judgeModel") and run.get("judgeEffort"):
+            b["judges"][f"{run['judgeModel']}/{run['judgeEffort']}"] += 1
+        f = found.get(g["run_id"])
+        if f:
+            b["conf"] += f["confirmed"]
+            b["dism"] += f["dismissed"]
+            b["unres"] += f["unresolved"]
+        review = pairs.get(g["run_id"])
+        if review:
+            b["reviews"].append(review)
+
+    order = sorted(buckets, key=lambda k: (k == "unrecorded", -buckets[k]["runs"]))
+    print("plan depth   (the row the run RECORDED — the items report the tier they resolved to)")
+    print(f"  {'planner':<16}{'runs':>6}{'plan Mtok':>11}{'plan secs':>11}"
+          f"{'batches/run':>13}{'cited%':>8}{'raised/run':>12}{'confirmed':>11}   judges")
+    for k in order:
+        b = buckets[k]
+        raised = b["conf"] + b["dism"] + b["unres"]
+        judged = b["conf"] + b["dism"]
+        # Only judged findings count toward precision: an unresolved one says nobody decided, and
+        # folding it into either column would invent the judgement that is missing.
+        prec = f"{b['conf'] / judged:.0%}" if judged else "—"
+        cited = f"{b['cites'] / b['batches']:.0%}" if b["batches"] else "—"
+        judges = " · ".join(f"{m} {n}" for m, n in b["judges"].most_common()) or "—"
+        print(f"  {k:<16}{b['runs']:>6}{b['tokens'] / b['runs'] / 1_000_000:>11.1f}"
+              f"{b['ms'] / b['runs'] / 1000:>11.0f}{b['batches'] / b['runs']:>13.1f}"
+              f"{cited:>8}{raised / b['runs']:>12.1f}{prec:>11}   {judges}")
+
+    print()
+    print(f"  what the review found next   (same repo, within {int(PAIR_WINDOW.total_seconds() // 3600)}h, "
+          f"pipeline-invoked reviews only)")
+    print(f"  {'planner':<16}{'paired':>8}{'correctness/run':>17}{'readability/run':>17}")
+    for k in order:
+        rev = buckets[k]["reviews"]
+        if not rev:
+            print(f"  {k:<16}{0:>8}{'—':>17}{'—':>17}")
+            continue
+        cor = sum(r.get("fixedCorrectness") or 0 for r in rev) / len(rev)
+        rea = sum(r.get("fixedReadability") or 0 for r in rev) / len(rev)
+        print(f"  {k:<16}{len(rev):>8}{cor:>17.2f}{rea:>17.2f}")
+    print()
+    print("  A cheaper planner that pushes work into fix-correctness has moved cost, not saved it —")
+    print("  read both halves. `batches/run` and `cited%` are the triage split: a citation lane that")
+    print("  reaches nothing costs the same as no lane at all.")
+    thin = [k for k in order if k != "unrecorded" and buckets[k]["runs"] < 10]
+    if thin:
+        print("  Thin sample (<10 runs): " + ", ".join(thin) +
+              " — a direction to keep watching, not a verdict.")
+    print()
+
+
 # Where Claude Code persists one workflow run: a journal of every item's return value, plus a full
 # transcript and a metadata file per agent. Nothing in the pack has to record any of this — mining
 # it costs the pipelines nothing at run time and reaches every run already on disk.
@@ -1296,6 +1441,29 @@ def summarize_findings(db):
             print("  (a track can be retired for being WRONG, not only for being quiet)")
         print()
 
+        # The plan review's findings are triaged by TWO instruments two orders of magnitude apart
+        # in cost — a haiku lookup against the line a finding cites, or a full judge — so the one
+        # precision number above describes neither. Split them. Rows written before the lanes
+        # existed carry no category and are printed apart rather than folded into either: they were
+        # all judged, but saying so here would make the judge lane look larger than it is measured.
+        marks = ",".join("?" * len(PLAN_TRACKS))
+        lanes = con.execute(
+            f"SELECT track, category, COALESCE(verdict,'unresolved'), COUNT(*) FROM findings "
+            f"WHERE track IN ({marks}) GROUP BY track, category, verdict", PLAN_TRACKS).fetchall()
+        split = collections.defaultdict(collections.Counter)
+        for t, cat, v, n in lanes:
+            split[(t, cat or "<pre-lane>")][v] += n
+        if any(cat != "<pre-lane>" for _, cat in split):
+            print("plan triage by lane   (a lookup against the cited line, or a full judge)")
+            print(f"  {'rubric':<18}{'lane':<12}{'confirmed':>10}{'dismissed':>11}{'precision':>11}")
+            for (t, cat) in sorted(split, key=lambda k: (k[0], k[1])):
+                c, d = split[(t, cat)]["confirmed"], split[(t, cat)]["dismissed"]
+                rate = f"{c / (c + d):.0%}" if (c + d) else "—"
+                print(f"  {t:<18}{cat:<12}{c:>10}{d:>11}{rate:>11}")
+            print("  A citation lane materially below the judge lane on the same rubric is the")
+            print("  wrong lane for it — move the rubric back, rather than tuning its prompt.")
+            print()
+
         hot = con.execute(
             "SELECT file, COUNT(*) n FROM findings WHERE file IS NOT NULL AND file != '' "
             "GROUP BY file ORDER BY n DESC LIMIT 8").fetchall()
@@ -1416,6 +1584,7 @@ def main():
         print()
     summarize_reviews(rows)
     summarize_impl_depth(db, rows)
+    summarize_plan_depth(db, rows)
     return 0
 
 

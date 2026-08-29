@@ -36,6 +36,10 @@ const PLAN_TEXT = '## Context\nfix it\n## Coverage contract\ncriterion -> test'
 const DEFAULT_CONFIG = { provider: 'claude', model: 'opus', effort: 'medium',
                          wrapperModel: 'sonnet', wrapperEffort: 'medium',
                          sources: ['/pack/.config/defaults.yaml'], notes: [] }
+// And what it resolves for `steps.plan` — the planner, its explorers, and the judges that triage
+// the plan review. Same rule: the default this suite asserts against is the default that ships.
+const DEFAULT_PLAN_CONFIG = { model: 'opus', effort: 'high', exploreModel: 'sonnet',
+  exploreEffort: 'medium', judgeModel: 'opus', judgeEffort: 'high', sources: [], notes: [] }
 // The codex row, which the shipped file no longer carries for THIS step — /r:task-review's fixers
 // do. Named explicitly by the tests below so the codex branch keeps its coverage whichever
 // provider the defaults happen to ship.
@@ -88,7 +92,7 @@ function baseSource(over = {}) {
 // `overrides` maps a label PREFIX to the value that label should return — or THROW, or a
 // function of the call count. Anything not overridden takes the happy-path default.
 async function run({ source = baseSource(), riskFlags = [], uiFiles = [], design = designText(),
-                     review, planfix, verdict, config,
+                     review, planfix, verdict, config, planConfig, citation,
                      args = { source: '#81' }, overrides = {}, build } = {}) {
   const logs = []
   const prompts = {}
@@ -114,6 +118,7 @@ async function run({ source = baseSource(), riskFlags = [], uiFiles = [], design
     // What lib/read-config.py resolves from the SHIPPED .config/defaults.yaml when the project has
     // no file of its own — so the default this suite asserts against is the default that ships.
     if (l === 'config') return config === undefined ? DEFAULT_CONFIG : config
+    if (l === 'config-plan') return planConfig === undefined ? DEFAULT_PLAN_CONFIG : planConfig
     if (l.startsWith('explore')) return exploreText(riskFlags, uiFiles)
     // Schema-less, like the explorers and the planner — its reply IS the section.
     if (l === 'ui-design') return design
@@ -127,12 +132,18 @@ async function run({ source = baseSource(), riskFlags = [], uiFiles = [], design
     // verdict per finding. The stub recovers which findings its batch holds by reading the
     // numbered list out of the prompt (every test finding is literally named "finding K"), so a
     // `verdict(pass, i)` stub still answers per finding exactly as it did per agent.
-    if (l.startsWith('judge#')) {
-      const p = Number(l.slice('judge#'.length).split('.')[0])
+    // `cite#<pass>.<n>:<file>` is the same shape from the cheap lane: a high-precision rubric
+    // whose finding named a line gets a LOOKUP against that line instead of a judge, and answers
+    // the same VERDICTS schema. `citation` stubs it; unstubbed it agrees with the finding, which
+    // is what the lane does ~91% of the time in the store.
+    if (l.startsWith('judge#') || l.startsWith('cite#')) {
+      const cite = l.startsWith('cite#')
+      const p = Number(l.slice((cite ? 'cite#' : 'judge#').length).split('.')[0])
       const items = [...prompt.matchAll(/^\s*(\d+)\. \[[^\]]*\]\[[^\]]*\] finding (\d+)/gm)]
         .map((m) => ({ n: Number(m[1]), i: Number(m[2]) }))
-      const one = (i) => typeof verdict === 'function' ? verdict(p, i)
-        : (verdict === undefined ? { real: true, why: 'holds', fix: `fix for finding ${i}` } : verdict)
+      const stub = cite ? citation : verdict
+      const one = (i) => typeof stub === 'function' ? stub(p, i)
+        : (stub === undefined ? { real: true, why: 'holds', fix: `fix for finding ${i}` } : stub)
       return { verdicts: items.map(({ n, i }) => ({ n, ...one(i) })) }
     }
     // `plan-fix#N` — the pass number comes off the label, so a function stub can answer
@@ -278,6 +289,197 @@ test('a batch that answers only some of its findings leaves the rest UNJUDGED', 
   assert.match(logText, /2 UNJUDGED/)
   assert.match(prompts['plan-fix#1'], /finding 2/)
   assert.match(prompts['plan-fix#1'], /finding 3/)
+})
+
+// ------------------------------------------------------ the citation lane ---
+// Triage runs two instruments. A finding from a rubric the store measures at ~91% precision
+// (grounding, test-adequacy, ui-design) that names a line gets a haiku LOOKUP against that line;
+// everything else gets a full judge. What every test here defends is the direction of failure:
+// the lane must only ever route work AWAY from itself, never accept a finding it could not check.
+
+test('a cited finding from a high-precision rubric goes to the cheap lane, not a judge', async () => {
+  const findings = [{ severity: 'major', rubric: 'grounding', what: 'finding 1', where: 'src/Rates.java:167' }]
+  const { counts, optsBy, prompts } = await run({ review: { ran: true, findings }, planfix: OK_FIX })
+  assert.deepEqual(Object.keys(counts).filter((l) => l.startsWith('judge#')), [],
+    'a checkable citation must not buy a judge')
+  assert.equal(counts['cite#1.1:src/Rates.java'], 1)
+  assert.equal(optsBy['cite#1.1:src/Rates.java'].model, 'haiku')
+  assert.equal(optsBy['cite#1.1:src/Rates.java'].effort, 'low')
+  // The saving IS the reading it does not do: the briefs are ~24k characters and this lane has an
+  // exact line to open instead.
+  assert.match(prompts['cite#1.1:src/Rates.java'], /CITED: src\/Rates\.java:167/)
+  assert.doesNotMatch(prompts['cite#1.1:src/Rates.java'], /controller \+ templates/)
+})
+
+test('a low-precision rubric is judged however well it cites', async () => {
+  // coverage is 76% and risk 79%; the question there is judgement, not lookup, and a citation
+  // cannot settle "is this criterion actually covered".
+  const findings = [
+    { severity: 'major', rubric: 'coverage', what: 'finding 1', where: 'src/Rates.java:167' },
+    { severity: 'major', rubric: 'risk', what: 'finding 2', where: 'src/Rates.java:170' },
+    { severity: 'minor', rubric: 'simplicity', what: 'finding 3', where: 'src/Rates.java:12' },
+  ]
+  const { counts } = await run({ review: { ran: true, findings }, planfix: OK_FIX })
+  assert.deepEqual(Object.keys(counts).filter((l) => l.startsWith('cite#')), [])
+  assert.equal(counts['judge#1.1:src/Rates.java'], 1)
+})
+
+test('a finding with no usable citation falls back to a judge — the lane fails CLOSED', async () => {
+  // Both shapes: absent, and present but too vague to open. A lookup against a line that does not
+  // exist is the confident-wrong-answer failure this whole pack is built to refuse.
+  const findings = [
+    { severity: 'major', rubric: 'grounding', what: 'finding 1' },
+    { severity: 'major', rubric: 'test-adequacy', what: 'finding 2', where: 'the plan' },
+  ]
+  const { counts } = await run({ review: { ran: true, findings }, planfix: OK_FIX })
+  assert.deepEqual(Object.keys(counts).filter((l) => l.startsWith('cite#')), [])
+  assert.equal(counts['judge#1.1:grounding'], 1)
+  assert.equal(counts['judge#1.2:test-adequacy'], 1)
+})
+
+test('a citation reader that cannot settle a finding escalates it to a judge in the same pass', async () => {
+  const findings = [{ severity: 'major', rubric: 'grounding', what: 'finding 1', where: 'src/Rates.java:167' }]
+  const { out, counts, logText } = await run({
+    review: { ran: true, findings }, planfix: OK_FIX,
+    citation: () => ({ escalate: true, why: 'the line has moved' }),
+    verdict: () => ({ real: true, why: 'src/Rates.java:171 confirms it', fix: 'cite line 171' }),
+  })
+  assert.equal(counts['cite#1.1:src/Rates.java'], 1)
+  assert.equal(counts['judge#1.2:src/Rates.java'], 1, 'the escalation is judged in this pass')
+  assert.match(logText, /1 finding\(s\) escalated/)
+  assert.deepEqual(out.planReview.dropped, [], 'an escalation is not a dismissal')
+  assert.equal(out.planReview.judged[0].verdict, 'confirmed', "the judge's answer is the one kept")
+  assert.equal(out.planReview.judged[0].by, 'judge')
+})
+
+test('a dead citation reader leaves its findings UNJUDGED, exactly as a dead judge does', async () => {
+  const findings = [{ severity: 'major', rubric: 'grounding', what: 'finding 1', where: 'src/Rates.java:167' }]
+  const { out, counts, prompts, logText } = await run({
+    review: { ran: true, findings }, planfix: OK_FIX,
+    overrides: { 'cite#1.1': null },
+  })
+  assert.equal(counts['cite#1.1:src/Rates.java'], 3, 'reliable() retries it, bounded at 3')
+  assert.deepEqual(out.planReview.dropped, [], 'a dead agent is not a dismissal')
+  assert.match(logText, /1 UNJUDGED/)
+  assert.match(prompts['plan-fix#1'], /NOT JUDGED/)
+  assert.equal(out.stopped, undefined)
+})
+
+test('the citation lane can never buy a second Codex review', async () => {
+  // changesApproach costs a full re-review, and it belongs to a reader that worked the fix out of
+  // the whole approach. Enforced in the script rather than trusted from the prompt.
+  const findings = [{ severity: 'minor', rubric: 'grounding', what: 'finding 1', where: 'src/Rates.java:167' }]
+  const { counts } = await run({
+    review: { ran: true, findings }, planfix: OK_FIX,
+    citation: () => ({ real: true, why: 'holds', fix: 'fix it', changesApproach: true }),
+  })
+  assert.equal(counts['codex-plan-review#2'], undefined)
+})
+
+// ------------------------------------------- batching by the code, not the rubric ---
+
+test('findings pointing at the same file share one batch, whatever rubric raised them', async () => {
+  // The unit of work is the CODE a finding cites. Grouped by rubric, a rubric with one finding
+  // bought a whole batch — measured 8.0 batches a run for ~15.5 findings.
+  const findings = [
+    { severity: 'major', rubric: 'coverage', what: 'finding 1', where: 'src/Rates.java:167' },
+    { severity: 'major', rubric: 'risk', what: 'finding 2', where: 'src/Rates.java:170' },
+    { severity: 'major', rubric: 'coverage', what: 'finding 3', where: 'src/Other.java:4' },
+  ]
+  const { counts, prompts } = await run({ review: { ran: true, findings }, planfix: OK_FIX })
+  const judges = Object.keys(counts).filter((l) => l.startsWith('judge#')).sort()
+  assert.deepEqual(judges, ['judge#1.1:src/Rates.java', 'judge#1.2:src/Other.java'].sort())
+  assert.match(prompts['judge#1.1:src/Rates.java'], /finding 2/, 'two rubrics, one file, one reader')
+  assert.doesNotMatch(prompts['judge#1.1:src/Rates.java'], /finding 3/, 'two files are never one batch')
+})
+
+test('a file with more findings than one reader can hold is split, not swallowed', async () => {
+  const findings = Array.from({ length: 12 }, (_, i) =>
+    ({ severity: 'minor', rubric: 'coverage', what: `finding ${i + 1}`, where: 'src/Rates.java:1' }))
+  const { counts } = await run({ review: { ran: true, findings }, planfix: OK_FIX })
+  assert.equal(Object.keys(counts).filter((l) => l.startsWith('judge#')).length, 3,
+    '12 findings at 5 per batch = 3 batches')
+})
+
+test('every judged finding reaches the stats row with the LANE that answered it', async () => {
+  // Two instruments two orders of magnitude apart in cost. A precision number that averages them
+  // describes neither, so the lane rides into the findings table's `category`.
+  const findings = [
+    { severity: 'major', rubric: 'grounding', what: 'finding 1', where: 'src/Rates.java:167' },
+    { severity: 'major', rubric: 'coverage', what: 'finding 2', where: 'src/Rates.java:170' },
+  ]
+  const { out, prompts } = await run({ review: { ran: true, findings }, planfix: OK_FIX })
+  assert.deepEqual(out.planReview.judged.map((j) => [j.rubric, j.by]),
+    [['grounding', 'citation'], ['coverage', 'judge']])
+  const row = JSON.parse(prompts['stats'].match(/\{"kind":"implement".*\}/)[0])
+  assert.deepEqual(row.findings.map((f) => [f.track, f.category, f.verdict]),
+    [['grounding', 'citation', 'confirmed'], ['coverage', 'judge', 'confirmed']])
+})
+
+// ------------------------------------------------- the planning half's settings ---
+
+test('the resolved planning row is RECORDED, not left to be mined off the items', async () => {
+  // The items cannot answer it: the planner's own items come back at xhigh while the row asks for
+  // high, because a subagent reports the tier it resolved to rather than the one it was dispatched
+  // with. `plan depth` buckets on what is written here, so it buckets on the setting somebody chose.
+  const { prompts } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    planConfig: { ...DEFAULT_PLAN_CONFIG, effort: 'xhigh', judgeModel: 'sonnet' },
+  })
+  const row = JSON.parse(prompts['stats'].match(/\{"kind":"implement".*\}/)[0])
+  assert.equal(row.planModel, 'opus')
+  assert.equal(row.planEffort, 'xhigh')
+  assert.equal(row.exploreModel, 'sonnet')
+  assert.equal(row.judgeModel, 'sonnet')
+  assert.equal(row.judgeEffort, 'high')
+})
+
+
+test('the planner, explorers and judges take their tiers from steps.plan', async () => {
+  const { optsBy, prompts, logText } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    planConfig: { model: 'fable', effort: 'xhigh', exploreModel: 'haiku', exploreEffort: 'low',
+                  judgeModel: 'sonnet', judgeEffort: 'medium', sources: ['/repo/.config/skill-pack.yaml'], notes: [] },
+  })
+  assert.match(prompts['config-plan'], /--step plan/)
+  assert.equal(optsBy['planner'].model, 'fable')
+  assert.equal(optsBy['planner'].effort, 'xhigh')
+  assert.equal(optsBy['explore#1:controller + templates'].model, 'haiku')
+  assert.equal(optsBy['explore#1:controller + templates'].effort, 'low')
+  assert.equal(optsBy['judge#1.1:coverage'].model, 'sonnet')
+  assert.equal(optsBy['judge#1.1:coverage'].effort, 'medium')
+  assert.match(logText, /planning — planner fable\/xhigh/)
+})
+
+test('the three planning tiers are independent — a deeper planner does not lift the judges', async () => {
+  const { optsBy } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    planConfig: { ...DEFAULT_PLAN_CONFIG, effort: 'max' },
+  })
+  assert.equal(optsBy['planner'].effort, 'max')
+  assert.equal(optsBy['judge#1.1:coverage'].effort, 'high', 'the judges stay where the file put them')
+  assert.equal(optsBy['explore#1:controller + templates'].effort, 'medium')
+})
+
+test('a dead plan-config agent falls back to the constants and SAYS so', async () => {
+  // The reader itself never fails — it substitutes and names the substitution — so the only thing
+  // that reaches this branch is an agent that died. A run on the fallbacks must be distinguishable
+  // from one that read the file, which is why both are logged.
+  const { optsBy, logText } = await run({
+    review: OK_REVIEW, planfix: OK_FIX, planConfig: null,
+  })
+  assert.equal(optsBy['planner'].model, 'opus')
+  assert.equal(optsBy['planner'].effort, 'high')
+  assert.equal(optsBy['judge#1.1:coverage'].model, 'opus')
+  assert.match(logText, /the plan config could not be read/)
+})
+
+test("every note the plan config returns is logged — a silent substitution is the whole failure", async () => {
+  const { logText } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    planConfig: { ...DEFAULT_PLAN_CONFIG, notes: ['steps.plan.judgeEffort: \'turbo\' is not one of low|medium|high|xhigh|max — using \'high\''] },
+  })
+  assert.match(logText, /config — steps\.plan\.judgeEffort/)
 })
 
 test('a triage that dismisses EVERY finding is logged, and buys one adjudication re-review', async () => {
@@ -1924,7 +2126,13 @@ test('every judging track still keeps its own model and depth', async () => {
   const { optsBy } = await run({ review: OK_REVIEW, planfix: OK_FIX, verdict: MIXED })
   assert.equal(optsBy['planner'].model, 'opus')
   assert.equal(optsBy['planner'].effort, 'high')
-  for (const l of ['source', 'judge#1.1:coverage', 'plan-fix#1']) {
+  // The judges NAME opus rather than inheriting it, and the value is the measured status quo —
+  // 223 judge items in the store, every one of them opus/high. A config row cannot express
+  // "whatever the caller was running", so naming it is what makes a run that never reached the
+  // config indistinguishable from one that read the shipped defaults.
+  assert.equal(optsBy['judge#1.1:coverage'].model, 'opus', 'the judges must not be down-tiered')
+  assert.equal(optsBy['judge#1.1:coverage'].effort, 'high')
+  for (const l of ['source', 'plan-fix#1']) {
     assert.equal(optsBy[l].model, undefined, `${l} classifies — it must not be down-tiered`)
   }
   // build#1 is the one classifier that names a model rather than inheriting: its AGENT is haiku,

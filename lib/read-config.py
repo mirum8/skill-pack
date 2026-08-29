@@ -28,7 +28,7 @@ optionally quoted strings. No PyYAML dependency and one code path, so the behavi
 the behaviour in the field. Lists, multi-line scalars, anchors and flow style are not read; a line
 the parser cannot place becomes a note rather than a silent drop.
 
-Usage:  read-config.py [--step implement|fix|fanout] [--repo DIR] [--pack DIR]
+Usage:  read-config.py [--step implement|plan|fix|fanout] [--repo DIR] [--pack DIR]
         read-config.py --step fanout --field maxUnits     # one bare scalar, for shell callers
         read-config.py --check FILE
 """
@@ -49,8 +49,8 @@ CLAUDE_MODELS = ("fable", "opus", "sonnet", "haiku")
 # Every setting the pack reads, with what it falls back to. This table IS the vocabulary: a key
 # outside it is named and ignored rather than carried, so a typo cannot reach a caller looking like
 # a value. `implement`'s row is kept in step with IMPL_RUN in task-run-implement.workflow.js,
-# `fix`'s with FIX_RUN in task-review.workflow.js and `fanout`'s with MAX_UNITS in
-# plan-run/scripts/cmux-fanout.sh — those are the same values expressed for the case where this
+# `plan`'s with PLAN_RUN/EXPLORE_RUN/JUDGE_RUN in the same file, `fix`'s with FIX_RUN in
+# task-review.workflow.js and `fanout`'s with MAX_UNITS in plan-run/scripts/cmux-fanout.sh — those are the same values expressed for the case where this
 # script cannot be reached at all.
 SPEC = {
     "implement": {
@@ -88,6 +88,36 @@ SPEC = {
         # writer because a cheap wrapper fails by halting the run over work Codex finished.
         "wrapperModel": {"default": "sonnet", "enum": CLAUDE_MODELS},
         "wrapperEffort": {"default": "medium", "enum": EFFORTS},
+    },
+    # The planning half of /r:task-run: the planner itself, the explorers that map the code for it,
+    # and the judges that triage the Codex plan review. One row rather than three, because the three
+    # are chosen together — a deeper planner wants shallower judges, not deeper ones.
+    #
+    # THE STANDING RULE, documented and not clamped, exactly as `fix` carries one against
+    # `implement`: the judges must never run DEEPER than the planner whose plan they check. A judge
+    # answers one narrow question with the explorer briefs already in hand; depth spent there is
+    # depth taken from the artifact everything downstream is built on. Nothing enforces it, because
+    # a silent clamp would override a value the user can see in their own file.
+    #
+    # No `provider` key, and it is not an oversight. The planner returns markdown that the script
+    # copies to disk verbatim, and the explorers and judges return schema'd objects the script
+    # branches on — none of that survives a hand-off to a CLI, so codex is not an option here the
+    # way it is for a writer or a fixer. `resolve()` skips its codex branch on a row with no
+    # provider, so the `model` keys carry their own enum instead.
+    "plan": {
+        "model": {"default": "opus", "enum": CLAUDE_MODELS},
+        "effort": {"default": "high", "enum": EFFORTS},
+        # The explorers, which map the code BEFORE the plan is written. Cheaper than the planner by
+        # design: this is read-and-map work, not judgement. `medium` rather than `low` because the
+        # one consequential call an explorer makes is riskFlags, which gates the light->full
+        # escalation.
+        "exploreModel": {"default": "sonnet", "enum": CLAUDE_MODELS},
+        "exploreEffort": {"default": "medium", "enum": EFFORTS},
+        # The judges that triage the Codex plan review. `high` is depth on a narrow question, and
+        # the model is named rather than inherited so the tier does not drift with whatever the
+        # caller happened to be running.
+        "judgeModel": {"default": "opus", "enum": CLAUDE_MODELS},
+        "judgeEffort": {"default": "high", "enum": EFFORTS},
     },
     # Shared by /r:plan-run and /r:issues-fix, which drive one fan-out script between them — so the
     # cap is one setting, not one per skill. The range rejects 0, negatives and a slipped digit; it
@@ -284,7 +314,11 @@ def check(path):
                 lo, hi = rule["int"]
                 if not (v.strip().lstrip("-").isdigit() and lo <= int(v) <= hi):
                     problems.append(f"steps.{step}.{k} {v!r} is not a whole number in {lo}..{hi}")
-            elif k == "model" and values.get("provider", spec["provider"]["default"]) == "claude" \
+            # `and "provider" in spec` is load-bearing, not defensive: a row with no provider
+            # (steps.plan) carries its own enum on `model`, which the first branch already
+            # checked — reaching here would only be to read a key that row does not have.
+            elif k == "model" and "provider" in spec \
+                    and values.get("provider", spec["provider"]["default"]) == "claude" \
                     and v not in CLAUDE_MODELS:
                 problems.append(f"steps.{step}.model {v!r} is not one of {'|'.join(CLAUDE_MODELS)}")
         # `flatten` reports unknown TOP-LEVEL keys once per step it is called for; keep one copy.

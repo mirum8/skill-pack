@@ -199,6 +199,25 @@ stays that skill's store. Rules that are load-bearing:
   `<session>/subagents/workflows/wf_*/`; `--mine-items` reads the prompts, results, models, tokens
   and timestamps from there, so the pipelines pay nothing at run time. They could not do it
   themselves anyway — `Date.now()` is unavailable inside a `Workflow` script.
+- **Planning is not the cheap half, and it is bucketed on what the run RECORDED.** Per run that
+  reaches a plan: judges 11.0M tokens, planner 10.3M, explorers 7.5M, plan-fix 3.9M, ~39M in all
+  against the implementers' 33.1M, and ~97% of it cache reads rather than output. `plan depth` in
+  `skill-stats.py` asks of it what `implement depth` asks of the write side, and prints the paired
+  review's correctness fixes beside each bucket for the same reason. It buckets on `planModel`/
+  `planEffort` in the run payload and **never on the items**: a subagent reports the tier it
+  resolved to, not the one it was dispatched with, which is why the planner's items read xhigh
+  under a row that asks for high. Runs made before that field existed are named `unrecorded`
+  rather than folded into a tier they may not have run at.
+- **Two instruments triage the plan review, and `findings.category` is which one.** A finding from
+  a rubric the store measures at ~91% (grounding, test-adequacy, ui-design) that names a `file:LINE`
+  gets a haiku LOOKUP against that line; coverage, risk, simplicity and anything without a usable
+  citation get a full judge. The two cost two orders of magnitude apart, so one precision number
+  over both describes neither — `plan triage by lane` reads them apart, and rows written before the
+  lanes existed print as `<pre-lane>` rather than being folded into the judge column they would
+  otherwise inflate. A citation lane materially below the judge lane on the same rubric is the
+  wrong lane for that rubric: move it back, rather than tuning its prompt. The lane only ever
+  routes work AWAY from itself — no citation means no lane, an unresolvable reference escalates to
+  a judge in the same pass, and a dead reader leaves its findings unjudged.
 - **The step label is recovered from the prompt**, by matching it against the literal chunks of
   each `agent()` dispatch in the shipped workflow scripts — `agentType` is persisted but `label`
   is not, and one type covers many steps. Read from the scripts, never a table here, so a reworded
@@ -276,8 +295,8 @@ stays that skill's store. Rules that are load-bearing:
 **The config is the pack's one tunable surface.** `lib/read-config.py` resolves one step's settings
 from `<repo>/.config/skill-pack.yaml`, then `.config/defaults.yaml` in the pack, then a built-in row
 — key by key, so a project file naming `effort` inherits the model rather than resetting it.
-`steps.implement`, `steps.fix` and `steps.fanout` are read today; later steps drop in as sibling
-keys, and `--check` walks every one of them. It sits in
+`steps.plan`, `steps.implement`, `steps.fix` and `steps.fanout` are read today; later steps drop
+in as sibling keys, and `--check` walks every one of them. It sits in
 `lib/` for the same reason the stats sink does: every skill will eventually read settings, and a
 reader owned by one skill stays that skill's reader. Rules that are load-bearing:
 
@@ -294,6 +313,20 @@ reader owned by one skill stays that skill's reader. Rules that are load-bearing
   already looks in. Absent, the *whole row* falls back to claude/opus/medium: a codex model name
   means nothing to `agent()`, and carrying the codex effort across would re-tier the Claude path by
   accident. All three substitutions are named.
+- **`steps.plan` is the planning half, and it is three tiers in one row** — the planner, the
+  explorers that map the code for it, and the judges that triage the plan review. One row because
+  the three are chosen together: a deeper planner wants shallower judges, not deeper ones. The
+  standing rule, documented and not clamped for the same reason `fix` is not clamped against
+  `implement`: **the judges must never run deeper than the planner whose plan they check**. It has
+  no `provider` key, and that is not an oversight — the planner returns markdown the pipeline copies
+  to disk verbatim and the explorers and judges return schema'd objects it branches on, so nothing
+  here survives a hand-off to a CLI; `resolve()` skips its codex branch on a provider-less row, and
+  the `model` keys carry their own enum instead. The shipped `judgeModel: opus` is the **measured
+  status quo**, not a recommendation: 223 judge items in the store, every one opus/high, from when
+  the tier was inherited rather than named. A config row cannot express "whatever the caller was
+  running", so naming it is what keeps a run that never reached the config indistinguishable from
+  one that read the file. Dropping the judges to sonnet is the obvious first experiment, and
+  `plan depth` is where its answer shows up.
 - **Workflow scripts cannot read it themselves** — no filesystem access — so the pipeline dispatches
   a haiku/low agent that runs the reader and returns its JSON under a schema. That read happens
   **inside** `task-run-implement.workflow.js` and `task-review.workflow.js`, not in either

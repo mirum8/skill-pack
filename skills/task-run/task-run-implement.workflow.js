@@ -283,6 +283,14 @@ const REVIEW = {
                     enum: ['coverage', 'grounding', 'test-adequacy', 'simplicity', 'risk',
                            'ui-design'] },
           what: { type: 'string' },
+          // The one line this finding is about, as file:LINE — in the code, or in the plan. It is
+          // what routes the finding: a well-formed citation on a high-precision rubric sends it to
+          // the cheap citation lane, where the check IS re-reading that line. Optional on purpose,
+          // and empty is a legitimate answer — some findings are about a whole section or an
+          // absence, and a reviewer pressed for a citation it does not have invents one. An empty
+          // or malformed `where` routes to a full judge, so the failure direction is depth, never
+          // a lookup against a line that does not exist.
+          where: { type: 'string' },
         },
       },
     },
@@ -321,6 +329,12 @@ const VERDICTS = {
           // only a fix list and runs at the lowest depth in this phase. A flag that gates a review
           // has to be set by whoever has the evidence for it.
           changesApproach: { type: 'boolean' },
+          // The citation lane's escape hatch: this finding needs a judge, not a lookup. Set when
+          // the reference cannot be resolved, or when the line says something neither the plan nor
+          // the finding claims — the two cases where a cheap reader answering anyway is worse than
+          // no answer. `real` is then ignored and the finding goes to a judge batch in the same
+          // pass. Judges never set it: they ARE the escalation.
+          escalate: { type: 'boolean' },
         },
       },
     },
@@ -477,11 +491,23 @@ const CODEX_RUN = { effort: 'medium' }
 // runs on a cheaper/faster tier than the inherited main-loop model. medium (not low) because
 // the one consequential call an explorer makes is riskFlags, which gates the light->FULL
 // escalation below; medium leaves it enough budget to spot auth/money/migration/concurrency.
+//
+// This and the two constants below are the FALLBACK for `steps.plan` — what the run uses when the
+// config agent could not be reached at all. File and fallback agree, so a run that never read the
+// config behaves like one that did rather than quietly changing tiers.
 const EXPLORE_RUN = { model: 'sonnet', effort: 'medium' }
 // The plan is the highest-leverage artifact in the run, so the standard/full planner runs at the
 // top tier — the inverse of the explorers, which run a cheaper model still. agent() exposes a real
 // effort lever here (the raw Agent tool does not), so depth is pinned rather than inherited from
-// whatever the caller was running.
+// whatever the caller was running. `steps.plan` in the config decides it; this is the fallback.
+//
+// Planning is not the cheap half of this pipeline — measured per run that reaches a plan, the
+// judges cost 11.0M tokens, this planner 10.3M, the explorers 7.5M and the plan-fix editor 3.9M,
+// ~39M against the implementers' 33.1M, and ~97% of it is cache reads rather than output. So when
+// a run is too expensive these are the values to move, and `plan depth` in lib/skill-stats.py is
+// what says whether moving them cost anything: it buckets runs by the recorded row and prints the
+// paired review's correctness fixes beside it, because a cheaper planner that pushes work into
+// fix-correctness has moved cost rather than saved it.
 const PLAN_RUN = { model: 'opus', effort: 'high' }
 // The LIGHT-tier planner writes a BRIEF for a change that, by the tier's own definition, cannot
 // alter behavior — and that contract, not the depth, is what separates it from PLAN_RUN: the two
@@ -547,7 +573,29 @@ const IMPL_CODEX_RUN = { model: 'sonnet', effort: 'medium' }
 // collapsed step slow. Nor is it the last word: a dismissal is re-read by Codex in pass 2 (the
 // dismissedAll branch below) and the diff is re-read by /r:task-review, which covers what a
 // "no reviewer after it" argument for a deeper tier would be defending against.
-const JUDGE_RUN = { effort: 'high' }
+//
+// `steps.plan.judgeModel`/`judgeEffort` decide it; this is the fallback. The standing rule the
+// config file states and does not enforce: the judges must never run DEEPER than the planner whose
+// plan they check. Depth spent here is depth taken from the artifact everything downstream is
+// built on.
+//
+// The model is NAMED rather than inherited, and named as what the judges have actually been
+// running: 223 judge items in the store, every one of them claude-opus-5/high. A config row has to
+// carry a concrete value — it cannot express "whatever the caller was" — so the shipped one is the
+// measured status quo, and dropping the judges to sonnet becomes a change someone makes and reads
+// off `plan depth` rather than one this row makes for them.
+const JUDGE_RUN = { model: 'opus', effort: 'high' }
+// The citation lane. Most plan findings never reach a judge: a finding from a rubric measured at
+// ~91% precision (grounding, test-adequacy, ui-design) that names a file:LINE needs a LOOKUP, not
+// a judgement — does that line say what the finding claims — and a lookup does not want a judge's
+// tier. Measured over 435 judged findings on 28 runs, those three rubrics are 252 of them, and the
+// judges cost 11.0M tokens a run to remove a 12% false-positive rate overall.
+//
+// haiku/low is the whole point and also the whole risk, which is why the lane fails CLOSED in
+// three directions: a finding with no well-formed citation never enters it, an agent that cannot
+// resolve the reference escalates to a real judge, and a dead one leaves its findings UNJUDGED
+// exactly as a dead judge does. Silence must never read as agreement.
+const CITATION_RUN = { model: 'haiku', effort: 'low' }
 // The editor applies fixes that are already written down and flips one header line. There is no
 // judgement left in it except "did this change the approach".
 const EDIT_RUN = { effort: 'medium' }
@@ -796,17 +844,28 @@ log(`run-task-implement: ${src.kind} "${src.slug}" — tier ${profile} (${forced
 // filesystem access, so the file is read the way every other file in this pipeline is: an agent
 // runs the reader and hands back its JSON. The reader itself never fails — it substitutes and says
 // what it substituted — so the only thing that reaches this `null` branch is a dead agent.
-const implCfg = await agent(
-  `Resolve the pack's implementer settings. Run exactly this from the repo root and return the
+//
+// Two rows, two agents, one wave. `implement` decides who writes the code; `plan` decides the
+// planner, the explorers and the judges that come before it. Separate agents rather than one
+// reading twice, because the CONFIG schema describes ONE resolved row — a combined shape would
+// have to be nullable in halves, and a half that came back empty would be indistinguishable from
+// one that resolved to the built-in values.
+const readCfg = (step) => agent(
+  `Resolve the pack's ${step} settings. Run exactly this from the repo root and return the
    object it prints on stdout, VERBATIM — do not re-derive, re-order or "correct" any field:
 
-     python3 "${PACK}/lib/read-config.py" --step implement --pack "${PACK}"
+     python3 "${PACK}/lib/read-config.py" --step ${step} --pack "${PACK}"
 
    The script always exits 0 by design; a value it could not read comes back as the built-in
    default with a line in \`notes\` saying so. Return \`notes\` even when it is empty.`,
-  { label: 'config', phase: 'Source', schema: CONFIG, ...GP, ...SINK }).catch(() => null)
+  { label: step === 'implement' ? 'config' : `config-${step}`, phase: 'Source', schema: CONFIG, ...GP, ...SINK })
+const [implCfg, planCfg] = await parallel([
+  () => readCfg('implement').catch(() => null),
+  () => readCfg('plan').catch(() => null),
+])
 
 for (const note of (implCfg && implCfg.notes) || []) log(`run-task-implement: config — ${note}`)
+for (const note of (planCfg && planCfg.notes) || []) log(`run-task-implement: config — ${note}`)
 if (!implCfg) log(`run-task-implement: the config could not be read — implementers fall back to ${IMPL_RUN.model}/${IMPL_RUN.effort} on claude`)
 const implProvider = (implCfg && implCfg.provider) || 'claude'
 // Under `claude` these are the writer's own model and depth. Under `codex` the writer's pair goes
@@ -821,6 +880,18 @@ log(`run-task-implement: implementers — ${implCfg ? (implProvider === 'codex'
       ? `codex ${implCfg.model} / ${implCfg.effort}, driven by ${implRun.model} / ${implRun.effort}`
       : `claude ${implCfg.model} / ${implCfg.effort}`)
     : `claude ${IMPL_RUN.model} / ${IMPL_RUN.effort}`}${(implCfg && implCfg.sources || []).length ? ` (from ${implCfg.sources.join(', ')})` : ' (built-in)'}`)
+
+// --- the planning half's settings --------------------------------------------
+// The planner, its explorers and the judges that triage the plan review, resolved from the same
+// file. Each falls back to its own constant, so a run that could not read the config runs the same
+// tiers as one that read the shipped defaults — the file and the fallbacks say the same thing.
+// The three are deliberately independent: raising the planner must not drag the judges up with it.
+const pick = (a, b, key) => (planCfg && planCfg[a]) || b[key]
+const planRun = { model: pick('model', PLAN_RUN, 'model'), effort: pick('effort', PLAN_RUN, 'effort') }
+const exploreRun = { model: pick('exploreModel', EXPLORE_RUN, 'model'), effort: pick('exploreEffort', EXPLORE_RUN, 'effort') }
+const judgeRun = { model: pick('judgeModel', JUDGE_RUN, 'model'), effort: pick('judgeEffort', JUDGE_RUN, 'effort') }
+if (!planCfg) log(`run-task-implement: the plan config could not be read — planning falls back to planner ${PLAN_RUN.model}/${PLAN_RUN.effort}, explorers ${EXPLORE_RUN.model}/${EXPLORE_RUN.effort}, judges ${JUDGE_RUN.model}/${JUDGE_RUN.effort}`)
+log(`run-task-implement: planning — planner ${planRun.model}/${planRun.effort}, explorers ${exploreRun.model}/${exploreRun.effort}, judges ${judgeRun.model}/${judgeRun.effort}${(planCfg && planCfg.sources || []).length ? ` (from ${planCfg.sources.join(', ')})` : ' (built-in)'}`)
 
 // --- Phase 1: map the code BEFORE planning it --------------------------------
 // Unconditional, in every tier. A planner that has not opened the code anchors its plan to
@@ -898,7 +969,7 @@ ${inRepo}
     // The label carries the slice INDEX, not just its first 24 characters. Three explorers on one
     // task routinely share an opening phrase ("Map the calculator…"), and when they do, three
     // identical rows in the progress tree make the one that died unidentifiable.
-    { label: `explore#${i + 1}:${aspect.slice(0, 24)}`, phase: 'Explore', agentType: 'Explore', ...EXPLORE_RUN })))))
+    { label: `explore#${i + 1}:${aspect.slice(0, 24)}`, phase: 'Explore', agentType: 'Explore', ...exploreRun })))))
 
 const liveBriefs = briefs.filter((b) => b && !blocked(b) && b.brief)
 // Two accountings that would otherwise be silent. A slice that came back unusable is a hole in the code map
@@ -1343,6 +1414,17 @@ const recordRun = async ({ stopped = '', buildGreen = 'n/a' } = {}) => {
       // The wrapper's own tier, recorded only where it means something. On claude there is no
       // wrapper, and a value here would read as one that ran.
       ...(implProvider === 'codex' ? { implWrapperModel: implRun.model, implWrapperEffort: implRun.effort } : {}),
+      // The resolved PLANNING row — the planner, its explorers and the judges. Recorded rather
+      // than mined for a reason the items make plain: the planner's own items come back at xhigh
+      // while this row asks for high, because the subagent reports the tier it resolved to and not
+      // the one it was dispatched with. `plan depth` in lib/skill-stats.py buckets on what is
+      // written here, so a run is bucketed by the setting somebody chose.
+      planModel: planRun.model,
+      planEffort: planRun.effort,
+      exploreModel: exploreRun.model,
+      exploreEffort: exploreRun.effort,
+      judgeModel: judgeRun.model,
+      judgeEffort: judgeRun.effort,
       planReviewRan: !!planReview.ran,
       planApplied: planReview.applied.length,
       planDropped: planReview.dropped.length,
@@ -1353,6 +1435,11 @@ const recordRun = async ({ stopped = '', buildGreen = 'n/a' } = {}) => {
       // varies along.
       findings: planReview.judged.map((j) => ({
         track: j.rubric || 'plan-review',
+        // The lane that answered it — 'citation' or 'judge'. Two instruments triage these findings
+        // and they cost two orders of magnitude apart, so a precision number that averages them
+        // describes neither. Rows written before the lanes existed carry no category, and
+        // skill-stats.py prints those apart rather than folding them into either.
+        category: j.by,
         severity: j.severity,
         verdict: j.verdict,
         fixed: j.verdict === 'confirmed',
@@ -1429,8 +1516,8 @@ if (!resuming) {
   // REVIEW of the plan (Phase 3), not the thinking that produces it — a medium task still
   // deserves a grounded plan, and a cheap plan would just push the cost into the implementers.
   if (profile !== 'light') {
-    // PLAN_RUN: the plan is the highest-leverage artifact in the run, so it names its own model
-    // and depth rather than inheriting them. It is still written and critiqued by
+    // planRun: the plan is the highest-leverage artifact in the run, so it names its own model
+    // and depth (from `steps.plan`, PLAN_RUN as the fallback) rather than inheriting them. It is still written and critiqued by
     // DIFFERENT models — Codex reviews it in Phase 3 — so a single model never grades its own plan.
     const plan = await reliable('planner', 'Plan', () => agent(
       `Plan this task at MAXIMUM reasoning depth. You are read-only: return the plan, do not write it.
@@ -1487,7 +1574,7 @@ ${uiDesignNote}
        preamble, no "Here is the plan:", no closing remark, no fenced code block around the whole
        document. What you return is copied to disk verbatim and is what Codex reviews and what the
        implementers build from, so anything that is not plan text becomes a line in the plan.${BATCH_CLAUSE}`,
-      { label: 'planner', phase: 'Plan', agentType: 'Plan', ...PLAN_RUN }))
+      { label: 'planner', phase: 'Plan', agentType: 'Plan', ...planRun }))
     if (blocked(plan) || typeof plan !== 'string' || !plan.trim()) return await stop('planner-blocked')
     planMarkdown = plan.trim()
   } else {
@@ -1636,6 +1723,12 @@ if (!resuming && profile === 'full') {
        coverage | grounding | test-adequacy | simplicity | risk${designSection ? ' | ui-design' : ''}
      One tag, never two joined by a slash, and never a name of your own: a finding that seems
      to span two rubrics belongs to the one that would have caught it first.
+
+     Give every finding a \`where\`: the ONE line it is about, as file:LINE — the source line the
+     plan misreads, or the plan's own line. This is what a finding is checked against downstream,
+     so cite the line that would settle it. Leave it EMPTY when the finding is genuinely about a
+     whole section, an absence, or the shape of the approach — an invented citation is worse than
+     none, and an empty one simply routes the finding to a deeper reader.
      1. Coverage — does every acceptance criterion map to a concrete implementation AND a test
         that proves it? A criterion covered only in prose is a gap.
      2. Grounding — do the cited file:LINE references and the Reuse map actually exist and behave
@@ -1645,8 +1738,11 @@ if (!resuming && profile === 'full') {
         the CURRENT code genuinely fails. A green guard mislabelled as a red gate is a MAJOR
         finding — it makes a suite look like it proved a fix when it only re-stated what the code
         already did. Say which tag is wrong and what it should be.
-     4. Simplicity (YAGNI) — is anything over-built for needs that aren't here? Is there a simpler
-        approach that still satisfies every criterion?
+     4. Simplicity (YAGNI) — is anything over-built for needs that aren't here? Raise this ONLY
+        with both halves in hand: name the concrete simpler approach, and name the acceptance
+        criterion it still satisfies. A finding that asserts over-building without saying what to
+        build instead is the shape triage throws out — measured, this rubric's minors are dismissed
+        44% of the time, more than any other rubric here.
      5. Risk — are the risky spots (migration, money math, concurrency, auth, external calls)
         called out and handled, or waved past?${designSection ? `
      6. UI/UX design — the plan opens with a "## UI/UX design" section, decided in its own phase
@@ -1783,38 +1879,94 @@ ${checks.map((c, i) => `     ${i + 1}. ${c}`).join('\n')}
     planReview.passes = pass
     planReview.raised += review.findings.length
 
-    // BATCHED, not one agent per finding. Judging is genuine work — does this hold against the
-    // real code — but the unit of work is the CODE a finding cites, not the finding itself, and a
-    // measured ~24 findings per run meant ~24 cold contexts each re-reading the plan and reopening
-    // the same files, two waves deep at a concurrency cap of 16. Grouping by rubric puts the
-    // findings that are checked the same way in front of one reader: every `grounding` item is
-    // "does the cited file:LINE say what the plan claims", every `coverage` item is a walk of the
-    // same criteria table. One context read then serves the whole group.
+    // TWO LANES, then batches by the CODE a finding cites — never one agent per finding, and
+    // never one agent over all of them. A single agent at the inherited tier that judges every
+    // finding and rewrites the plan measures 11 minutes and 122k tokens, most of it re-deriving a
+    // code map the explorers already produced. Splitting it one-agent-per-finding fixed that and
+    // then became the widest fan-out in the pipeline — ~24 cold contexts a run, two waves deep at
+    // a concurrency cap of 16, each re-reading the plan and reopening the same files to answer one
+    // question.
     //
-    // What this deliberately does NOT do is judge less. Every finding still gets its own verdict,
-    // its own evidence and its own changesApproach flag; a batch that dies leaves its findings
-    // UNJUDGED exactly as a dead single judge did. Depth stays at JUDGE_RUN.
+    // The lane split is the newer half, and it is argued from the store rather than from
+    // mechanism. Over 435 judged plan findings on 28 runs, precision is not uniform:
+    // test-adequacy 95%, grounding 89% and ui-design 89% against coverage 76%, risk 79% and
+    // simplicity 62%. The first three are 252 of the 435, and what they need is a LOOKUP — does
+    // the cited line say what the finding claims — not a judgement. A lookup does not want a
+    // judge's tier, and the judges are the most expensive step in the planning half at 11.0M
+    // tokens a run, 7.5x the Codex review they are triaging.
+    //
+    // So a finding goes to the cheap citation lane only when BOTH hold: its rubric is one of the
+    // three, and it named a line specific enough to re-read. Everything else — the low-precision
+    // rubrics, and anything whose `where` is missing or vague — goes to a full judge. The lane
+    // fails closed in three directions: no citation means no lane, a reader that cannot resolve
+    // the reference escalates to a judge in the same pass, and a dead one leaves its findings
+    // UNJUDGED exactly as a dead judge does. Silence must never read as agreement.
+    //
+    // Batching is by the FILE a finding cites, not by its rubric. The unit of work is the code,
+    // and grouping by rubric made a rubric with one minor finding buy a whole batch — measured 8.0
+    // batches a run for ~15.5 findings. Findings that point at the same file are read together
+    // whatever rubric raised them; a finding with no file falls back to grouping by rubric, which
+    // is the best proxy left. What none of this does is judge LESS: every finding still gets its
+    // own verdict, its own evidence and its own changesApproach flag.
     const CHUNK = 5
-    const batches = []
-    for (const rubric of [...new Set(review.findings.map((f) => f.rubric || 'other'))]) {
-      const group = review.findings.filter((f) => (f.rubric || 'other') === rubric)
-      // A rubric that ran long is split rather than allowed to swallow the pass: one reader with
-      // twelve findings is back to being the serial step this replaced.
-      for (let i = 0; i < group.length; i += CHUNK) batches.push({ rubric, items: group.slice(i, i + CHUNK) })
+    const CITATION_RUBRICS = new Set(['grounding', 'test-adequacy', 'ui-design'])
+    // The file half of a `file:LINE`. Deliberately loose about the line — a finding citing a file
+    // with no line still groups with its neighbours, which is the whole point of grouping by code.
+    const fileOf = (w) => {
+      const m = /([^\s:()[\]<>"'`,]+\.[A-Za-z0-9_]+)/.exec(String(w || ''))
+      return m ? m[1] : ''
     }
-    log(`run-task-implement: plan review pass ${pass} — judging ${review.findings.length} finding(s) in ${batches.length} batch(es) by rubric`)
+    // `looksLikeEvidence` is the same gate the explorers' risk flags pass through — a citation has
+    // to name a path or an extension and be long enough to mean something. One test, not two.
+    const laneOf = (f) => (CITATION_RUBRICS.has(f.rubric) && looksLikeEvidence(f.where)) ? 'citation' : 'judge'
+    const batchesFor = (findings, lane) => {
+      const out = []
+      const keyOf = (f) => fileOf(f.where) || (f.rubric || 'other')
+      for (const key of [...new Set(findings.map(keyOf))]) {
+        const group = findings.filter((f) => keyOf(f) === key)
+        // A file that ran long is split rather than allowed to swallow the pass: one reader with
+        // twelve findings is back to being the serial step this replaced.
+        for (let i = 0; i < group.length; i += CHUNK) out.push({ lane, key, items: group.slice(i, i + CHUNK) })
+      }
+      return out
+    }
 
-    const batchVerdicts = await parallel(batches.map((b, bi) => () =>
-      reliable(`judge#${pass}.${bi + 1}:${b.rubric}`, 'Plan-review', () => agent(
-        `Judge ${b.items.length === 1 ? 'ONE finding' : `these ${b.items.length} findings`} from Codex's review of the plan at ${planPath}. Decide whether each
-         holds against the real code, and nothing else — you are not editing the plan.
-
-         They all come from the same rubric (${b.rubric}), so they are checked the same way and
-         largely against the same code. Read that code ONCE and answer all of them from it; do not
-         restart your reading for each.
+    const citePrompt = (b) => `Check ${b.items.length === 1 ? 'ONE finding' : `these ${b.items.length} findings`} from Codex's review of the plan at ${planPath} against the
+         line each one cites. This is a LOOKUP, not a judgement call: open the cited line, read it,
+         and say whether it says what the finding claims. You are not editing the plan.
 
          FINDINGS:
-${b.items.map((f, n) => `         ${n + 1}. [${f.severity}][${f.rubric}] ${f.what}`).join('\n')}
+${b.items.map((f, n) => `         ${n + 1}. [${f.severity}][${f.rubric}] ${f.what}\n            CITED: ${f.where}`).join('\n')}
+
+         Open each CITED reference and enough around it to read it honestly — the function it sits
+         in, not the whole file. They mostly point at the same file, so read it ONCE and answer all
+         of them from it. Do NOT go exploring the codebase: everything you need is the plan at
+         ${planPath} and the lines above.
+
+         Return one verdict per finding, with 'n' set to its number above:
+         - real=true if the cited line supports the finding. Put the evidence in 'why' as
+           file:LINE, and in 'fix' write what the plan should say instead — concretely enough that
+           someone editing the plan can apply it without re-doing your reading.
+         - real=false if the line does not support it — the plan's claim is accurate, or the code
+           says what the plan says it says. 'why' is then the dismissal reason, and it is
+           answerable: Codex may be shown it and given a chance to push back, so quote the line
+           that convinced you rather than asserting.
+         - escalate=true if you CANNOT settle it here: the reference does not resolve, the line has
+           moved, or what you read is something neither the plan nor the finding describes. It then
+           goes to a deeper reader in this same pass, which is the right outcome — a guess from
+           here is worse than no answer. Leave 'real' out when you escalate.
+         Never set changesApproach. That flag buys a second full Codex review, and it belongs to a
+         reader who worked out the fix from the whole approach, not to this check.${BATCH_CLAUSE}`
+
+    const judgePrompt = (b) => `Judge ${b.items.length === 1 ? 'ONE finding' : `these ${b.items.length} findings`} from Codex's review of the plan at ${planPath}. Decide whether each
+         holds against the real code, and nothing else — you are not editing the plan.
+
+         They are grouped by the code they point at, so they are largely checked against the same
+         file. Read that code ONCE and answer all of them from it; do not restart your reading for
+         each.
+
+         FINDINGS:
+${b.items.map((f, n) => `         ${n + 1}. [${f.severity}][${f.rubric}] ${f.what}${f.where ? `\n            CITED: ${f.where}` : ''}`).join('\n')}
 
          The codebase was already mapped for this task. Start from these briefs and open only what
          you still need to confirm — each finding cites specific code, so check THAT:
@@ -1838,21 +1990,52 @@ ${b.items.map((f, n) => `         ${n + 1}. [${f.severity}][${f.rubric}] ${f.wha
          adjust a detail? Adding a test, correcting a file:LINE citation, tightening wording or
          filling a coverage gap is a detail. Set it true only for the first kind: it costs the run
          a second full Codex review of the rewritten plan, which is worth paying when the plan
-         really did change shape and is pure delay when it did not.${BATCH_CLAUSE}`,
-        { label: `judge#${pass}.${bi + 1}:${b.rubric}`, phase: 'Plan-review', schema: VERDICTS, ...GP, ...JUDGE_RUN }))))
+         really did change shape and is pure delay when it did not.${BATCH_CLAUSE}`
 
-    // Flatten back to one verdict per finding, in the original order. A missing 'n' — a batch that
-    // answered four of its five — leaves that finding with no verdict, which the UNJUDGED branch
-    // below then handles exactly as it handles a dead judge.
+    // Which lane actually answered each finding, so the store can read the two apart. Without it
+    // the precision table averages two instruments into one number and this split is unmeasurable.
+    const laneUsed = new Map()
     const verdicts = new Map()
-    batches.forEach((b, bi) => {
-      const r = batchVerdicts[bi]
-      if (blocked(r) || !Array.isArray(r.verdicts)) return
-      for (const v of r.verdicts) {
-        const f = b.items[Number(v.n) - 1]
-        if (f) verdicts.set(f, v)
-      }
-    })
+    // Dispatch a wave and fold its answers back into `verdicts`, one verdict per finding, in the
+    // original order. A missing 'n' — a batch that answered four of its five — leaves that finding
+    // with no verdict, which the UNJUDGED branch below then handles exactly as a dead batch.
+    const runWave = async (waveBatches, offset) => {
+      const out = await parallel(waveBatches.map((b, bi) => () => {
+        const n = offset + bi + 1
+        const label = `${b.lane === 'citation' ? 'cite' : 'judge'}#${pass}.${n}:${b.key}`
+        return reliable(label, 'Plan-review', () => agent(
+          b.lane === 'citation' ? citePrompt(b) : judgePrompt(b),
+          { label, phase: 'Plan-review', schema: VERDICTS, ...GP, ...(b.lane === 'citation' ? CITATION_RUN : judgeRun) }))
+      }))
+      waveBatches.forEach((b, bi) => {
+        for (const f of b.items) laneUsed.set(f, b.lane)
+        const r = out[bi]
+        if (blocked(r) || !Array.isArray(r.verdicts)) return
+        for (const v of r.verdicts) {
+          const f = b.items[Number(v.n) - 1]
+          // Enforced here rather than trusted from the prompt: a cheap reader that never worked
+          // out the fix has no evidence for a flag that buys a second full Codex review.
+          if (f) verdicts.set(f, b.lane === 'citation' ? { ...v, changesApproach: false } : v)
+        }
+      })
+    }
+
+    const cited = review.findings.filter((f) => laneOf(f) === 'citation')
+    const judged = review.findings.filter((f) => laneOf(f) !== 'citation')
+    const batches = [...batchesFor(cited, 'citation'), ...batchesFor(judged, 'judge')]
+    log(`run-task-implement: plan review pass ${pass} — ${review.findings.length} finding(s) in ${batches.length} batch(es) by cited file: ${cited.length} checked against their citation, ${judged.length} judged`)
+    await runWave(batches, 0)
+
+    // A citation reader that could not settle its finding sends it to a judge, in this same pass.
+    // The verdict it returned is discarded rather than kept alongside: an escalation is the reader
+    // saying it has no answer, and a half-answer left in the map would be read as one.
+    const escalated = cited.filter((f) => { const v = verdicts.get(f); return v && v.escalate })
+    if (escalated.length) {
+      for (const f of escalated) verdicts.delete(f)
+      const extra = batchesFor(escalated, 'judge')
+      log(`run-task-implement: plan review pass ${pass} — ${escalated.length} finding(s) escalated from the citation check to a judge`)
+      await runWave(extra, batches.length)
+    }
 
     // A judge that died is UNJUDGED — not dismissed. Silently dropping it would let a finding
     // disappear because an agent fell over, which is the failure mode every other track here is
@@ -1878,9 +2061,13 @@ ${b.items.map((f, n) => `         ${n + 1}. [${f.severity}][${f.rubric}] ${f.wha
         // A judge that died leaves `unresolved`, which is a different claim from `dismissed` —
         // one says nobody decided, the other says someone decided against it.
         verdict: (!v || typeof v.real !== 'boolean') ? 'unresolved' : (v.real ? 'confirmed' : 'dismissed'),
+        // WHICH instrument answered — the cheap citation check or a full judge. It rides into the
+        // findings table's `category`, so precision can be read per lane. Averaged together the two
+        // are one number that describes neither, and the lane split would be unmeasurable.
+        by: laneUsed.get(f) || 'judge',
       })
     })
-    log(`run-task-implement: plan review pass ${pass} — ${review.findings.length} finding(s): ${accepted.length} real, ${rejected.length} dismissed${unjudged.length ? `, ${unjudged.length} UNJUDGED (judge died)` : ''}`)
+    log(`run-task-implement: plan review pass ${pass} — ${review.findings.length} finding(s): ${accepted.length} real, ${rejected.length} dismissed${unjudged.length ? `, ${unjudged.length} UNJUDGED (the reader died)` : ''}`)
     if (rejected.length) log(`  dismissed as not-real: ${rejected.join(' | ')}`)
 
     let applied = []

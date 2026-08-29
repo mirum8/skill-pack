@@ -333,6 +333,62 @@ has "fix: and named"                     "$(read_cfg "$HASCODEX" "$FIXPACK" "$FI
 ok  "fix: a bad effort falls back"       "$(read_cfg "$HASCODEX" "$FIXPACK" "$FIXTYPO" effort fix)" medium
 has "fix: and the key is named"          "$(read_cfg "$HASCODEX" "$FIXPACK" "$FIXTYPO" notes fix)"  "steps.fix.effort"
 
+# --- steps.plan, the /r:task-run planning half -------------------------------
+# Three tiers under one row — the planner, its explorers, and the judges that triage the plan
+# review — so the case that matters is that they stay INDEPENDENT: a project raising the planner
+# must not drag the judges up with it, which is the one thing the row's standing rule forbids.
+PLANPACK="$TMP/planpack"
+mkcfg "$PLANPACK/.config/defaults.yaml" <<'YAML'
+steps:
+  plan:
+    model: opus
+    effort: high
+    exploreModel: sonnet
+    exploreEffort: medium
+    judgeModel: sonnet
+    judgeEffort: high
+  implement:
+    provider: claude
+    model: opus
+    effort: medium
+YAML
+ok "plan: the planner row is read"       "$(read_cfg "$NOCODEX" "$PLANPACK" "$EMPTY" model plan)"         opus
+ok "plan: and its effort"                "$(read_cfg "$NOCODEX" "$PLANPACK" "$EMPTY" effort plan)"        high
+ok "plan: the explorers are their own"   "$(read_cfg "$NOCODEX" "$PLANPACK" "$EMPTY" exploreModel plan)"  sonnet
+ok "plan: the judges are their own"      "$(read_cfg "$NOCODEX" "$PLANPACK" "$EMPTY" judgeEffort plan)"   high
+ok "plan: no notes on a clean read"      "$(read_cfg "$NOCODEX" "$PLANPACK" "$EMPTY" notes plan)"         '[]'
+ok "plan and implement do not bleed"     "$(read_cfg "$NOCODEX" "$PLANPACK" "$EMPTY" effort implement)"   medium
+
+PLANREPO="$TMP/planrepo"
+mkcfg "$PLANREPO/.config/skill-pack.yaml" <<'YAML'
+steps:
+  plan:
+    effort: xhigh
+YAML
+ok "plan: a project deepens the planner" "$(read_cfg "$NOCODEX" "$PLANPACK" "$PLANREPO" effort plan)"      xhigh
+ok "and the judges stay where they were" "$(read_cfg "$NOCODEX" "$PLANPACK" "$PLANREPO" judgeEffort plan)" high
+ok "and the explorers too"               "$(read_cfg "$NOCODEX" "$PLANPACK" "$PLANREPO" exploreEffort plan)" medium
+
+# The row carries no `provider`, so the codex branch must not fire on it — and the model is still
+# enum-checked, by the rule's own enum rather than by the provider-gated path the other rows use.
+# A codex model name reaching a planner would break the dispatch outright.
+PLANBAD="$TMP/planbad"
+mkcfg "$PLANBAD/.config/skill-pack.yaml" <<'YAML'
+steps:
+  plan:
+    model: gpt5.6-sol
+    judgeModel: haiku
+    judgeEffort: turbo
+    provider: codex
+YAML
+ok  "plan: a codex model falls back"     "$(read_cfg "$NOCODEX" "$PLANPACK" "$PLANBAD" model plan)"       opus
+has "plan: and the substitution is named" "$(read_cfg "$NOCODEX" "$PLANPACK" "$PLANBAD" notes plan)"      "steps.plan.model"
+ok  "plan: a bad judge effort falls back" "$(read_cfg "$NOCODEX" "$PLANPACK" "$PLANBAD" judgeEffort plan)" high
+ok  "plan: a good judge model is kept"   "$(read_cfg "$NOCODEX" "$PLANPACK" "$PLANBAD" judgeModel plan)"  haiku
+has "plan: a provider key is not read here" "$(read_cfg "$NOCODEX" "$PLANPACK" "$PLANBAD" notes plan)"   "steps.plan.provider"
+# Having the plugin present must change nothing, since there is no provider to honour.
+ok  "plan: the codex plugin changes nothing" "$(read_cfg "$HASCODEX" "$PLANPACK" "$PLANBAD" model plan)"  opus
+
 # --- the exit-0 promise -----------------------------------------------------
 for dir in "$EMPTY" "$BROKEN" "$BADENUM" "$UNKNOWN" "$CODEX"; do
   HOME="$NOCODEX" python3 "$READER" --pack "$PACK" --repo "$dir" >/dev/null 2>&1
@@ -370,6 +426,25 @@ steps:
 YAML
 python3 "$READER" --check "$TMP/badfix/.config/defaults.yaml" >/dev/null 2>&1
 ok "--check rejects a codex model under a claude fix row" "$?" 1
+mkcfg "$TMP/badplan/.config/defaults.yaml" <<'YAML'
+steps:
+  implement:
+    provider: claude
+  plan:
+    model: gpt5.6-sol
+YAML
+python3 "$READER" --check "$TMP/badplan/.config/defaults.yaml" >/dev/null 2>&1
+ok "--check rejects a codex model on the plan row" "$?" 1
+# The plan row has no `provider`, so the provider-gated model check cannot run for it — reaching
+# that branch at all would be a KeyError, which --check would report as a pass by crashing.
+mkcfg "$TMP/okplan/.config/defaults.yaml" <<'YAML'
+steps:
+  plan:
+    model: sonnet
+    judgeEffort: low
+YAML
+python3 "$READER" --check "$TMP/okplan/.config/defaults.yaml" >/dev/null 2>&1
+ok "--check accepts a valid provider-less plan row" "$?" 0
 python3 "$READER" --check "$TMP/no-such-file.yaml" >/dev/null 2>&1
 ok "--check rejects a missing file" "$?" 1
 # The gate that matters: the file this pack actually ships.

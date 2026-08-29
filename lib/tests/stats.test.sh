@@ -408,6 +408,59 @@ sqlite3 "$P" "INSERT INTO items(wf_run_id,agent_id,label,effort,run_id,tokens_in
 rep=$(python3 "$REPORT" --db "$P" --review 2>&1)
 ok "a review outside the window is not paired" "$(grep -cE '^  high +0 ' <<<"$rep")" 1
 
+# --- plan depth and the two triage lanes ------------------------------------
+# The planning half costs more per run than the implementation it feeds, and it is triaged by two
+# instruments two orders of magnitude apart in cost. Both facts are only readable if the reporter
+# buckets on the row the run RECORDED — the items report the tier a subagent resolved to, which is
+# not the tier it was dispatched with.
+Q="$TMP/plan.db"
+mkq() { python3 "$SINK" --db "$Q" >/dev/null 2>&1; }
+echo '{"kind":"implement","run_id":"p-hi","ts":"2026-08-10T10:00:00+00:00","repo":"acme","profile":"full",
+       "planModel":"opus","planEffort":"high","judgeModel":"opus","judgeEffort":"high","findings":[
+       {"track":"grounding","category":"citation","verdict":"confirmed"},
+       {"track":"grounding","category":"citation","verdict":"dismissed"},
+       {"track":"coverage","category":"judge","verdict":"confirmed"},
+       {"track":"risk","verdict":"confirmed"}]}' | mkq
+echo '{"kind":"review","run_id":"p-rev","ts":"2026-08-10T11:00:00+00:00","repo":"acme","invokedBy":"r:task-run",
+       "fixedCorrectness":2,"fixedReadability":3,"endVerify":"passed"}' | mkq
+# A second run with no recorded row at all — the shape every run made before the field existed.
+echo '{"kind":"implement","run_id":"p-old","ts":"2026-08-11T10:00:00+00:00","repo":"acme","profile":"full"}' | mkq
+sqlite3 "$Q" "INSERT INTO items(wf_run_id,agent_id,label,effort,run_id,tokens_in,tokens_out,tokens_cache,duration_ms) VALUES
+  ('wf_p','p1','planner','xhigh','p-hi',10,10,1000000,100000),
+  ('wf_p','p2','explore#1:x','medium','p-hi',10,10,500000,50000),
+  ('wf_p','p3','cite#1.1:src/A.java','low','p-hi',10,10,100,1000),
+  ('wf_p','p4','judge#1.2:src/A.java','high','p-hi',10,10,100,1000),
+  ('wf_p','p5','implement','high','p-hi',10,10,100,1000),
+  ('wf_q','q1','planner','xhigh','p-old',10,10,10,1000);"
+rep=$(python3 "$REPORT" --db "$Q" --review 2>&1)
+ok "the plan depth table is printed"       "$(grep -c 'plan depth' <<<"$rep")" 1
+# Bucketed on the RECORDED row, never on the item — the planner item above says xhigh and the row
+# says high. Bucketing on the item would report a tier nobody chose.
+ok "it buckets on the recorded row"        "$(grep -cE '^  opus/high +1 +1\.5 ' <<<"$rep")" 1
+ok "and not on the item's own effort"      "$(grep -cE '^  opus/xhigh ' <<<"$rep")" 0
+ok "a run with no recorded row is apart"   "$(grep -cE '^  unrecorded +1 ' <<<"$rep")" 1
+# implement is NOT a planning label: folding it in would price the planning half at the whole run.
+# 1.5M is the planning labels alone. The implement item in the same workflow run carries its
+# own tokens and must not be in it: folding it in would price planning at the whole run.
+ok "only planning labels are costed"       "$(grep -cE '^  opus/high +1 +1\.5 +152 ' <<<"$rep")" 1
+ok "both triage lanes count as batches"    "$(grep -cE '^  opus/high +1 +[0-9.]+ +[0-9]+ +2\.0 +50%' <<<"$rep")" 1
+ok "the paired review is carried across"   "$(grep -cE '^  opus/high +1 +2\.00 +3\.00' <<<"$rep")" 1
+ok "the judges are named beside the plan"  "$(grep -cE '^  opus/high .*opus/high 1$' <<<"$rep")" 1
+
+# The lane split. One precision number over two instruments describes neither.
+rep=$(python3 "$REPORT" --db "$Q" 2>&1)
+ok "the lane table is printed"             "$(grep -c 'plan triage by lane' <<<"$rep")" 1
+ok "the citation lane is read apart"       "$(grep -cE '^  grounding +citation +1 +1 +50%' <<<"$rep")" 1
+ok "so is the judge lane"                  "$(grep -cE '^  coverage +judge +1 +0 +100%' <<<"$rep")" 1
+# A finding written before the lanes existed was judged, but counting it as such would make the
+# judge lane look larger than it has been measured.
+ok "a pre-lane finding joins neither"      "$(grep -cE '^  risk +<pre-lane> ' <<<"$rep")" 1
+# And with nothing but pre-lane rows there is no split to show — a table of one column is noise.
+N="$TMP/nolane.db"
+echo '{"kind":"implement","run_id":"n1","repo":"acme","findings":[{"track":"coverage","verdict":"confirmed"}]}' \
+  | python3 "$SINK" --db "$N" >/dev/null 2>&1
+ok "no lanes recorded, no lane table"      "$(python3 "$REPORT" --db "$N" 2>&1 | grep -c 'plan triage by lane')" 0
+
 # --- importing the pre-SQLite archive ---------------------------------------
 A="$TMP/archive.jsonl"; I="$TMP/imported.db"
 printf '%s\n' \
