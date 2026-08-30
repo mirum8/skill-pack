@@ -242,3 +242,18 @@ When two phases sit close enough that the regions overlap, the resolution is alw
 ticks**: each branch ticked what it genuinely built and verified, and neither tick makes the other
 untrue. Never resolve by taking one side wholesale — that silently un-ticks finished work, and the
 next run offers that phase again.
+
+## The reuse index is refreshed after the wave, never inside it
+
+The other always-shared file, and the one the plan file's rule does **not** extend to. No unit writes
+it: `/r:task-review` skips its refresh in a linked worktree, and this is where it is made good — one
+`/r:reuse-index` from the primary tree after the last merge, as its own commit, skipped silently when
+the project has no index.
+
+The difference from the plan file is what makes both-sides wrong here. A tick is a fact the branch
+owns, so a union of ticks is exactly true. The index is **derived** from the whole `.task-plans/`
+corpus, so a unit regenerating it from a base without its wave-mates' plans rewrites the same rows
+every other unit rewrites — the branches conflict on that one file every time, with no code conflict
+beneath it, and unioning two derivations each computed against a partial corpus is only correct by
+accident. The count column is not even defined under such a union. Only a pass over the landed corpus
+entire can be right, which is why there is exactly one and it runs here.

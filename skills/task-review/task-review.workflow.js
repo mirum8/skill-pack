@@ -2519,6 +2519,18 @@ PTR_STATS_JSON
 // review with no new plan it still earns its slot: it re-verifies every anchor against the tree
 // the fix phase just changed.
 //
+// And it does NOT run in a linked worktree. The index is derived from the WHOLE plan corpus, so a
+// unit in a fan-out regenerates it from a base that has none of its wave-mates' plans — every unit
+// rewrites the same rows of the same file, and the branches conflict on it at landing every time,
+// with zero code conflict under them. Resolving that merge is not the fix: the backlog file's ticks
+// are facts each branch owns, so both-sides is exactly right there, but "cited by" lists and Cited
+// counts are DERIVED, and a union of two derivations each computed against a partial corpus is only
+// correct by accident. So the unit skips it and the orchestrator refreshes once from the primary
+// tree after the wave lands — one pass over the whole corpus, which is the only place a correct one
+// can be made. The test is the tree itself rather than a flag the caller passes, so every driver
+// gets it and none can forget it; the cost of skipping is a deferral, since the step is bookkeeping
+// that the next review on the primary tree redoes anyway.
+//
 // Sonnet/low rather than the stats sink's haiku, because merging a newly-qualifying entry is a
 // judgement; far below the hunters, because on most runs there is nothing new to merge.
 // try/catch, not reliable(): reliable() RETRIES, and this step must not. It is the last thing
@@ -2531,6 +2543,11 @@ await agent(
 
    Keep this project's reuse index current, if it HAS one. From the repo root:
 
+   0. **Are you in a linked worktree?** \`git rev-parse --git-dir\` and \`--git-common-dir\`: if
+      they differ, this tree is one unit of a fan-out and its plan corpus is missing every
+      wave-mate's plan. **You are done — write NOTHING, return "skipped: linked worktree".**
+      The index is refreshed once from the primary tree after the wave lands; a version written
+      here would conflict at landing and be wrong under the conflict.
    1. Find the index: a tracked reference doc named like \`reuse-index.md\` that this project's
       root CLAUDE.md points at, else under docs/. **No index file, or no .task-plans/ corpus =>
       you are done. Say which and return.** Do not create one; the first build is a deliberate

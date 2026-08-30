@@ -1029,6 +1029,23 @@ test('the refresh is told to MERGE and to no-op without an index — never to cr
   assert.match(p, /Never edit code here/)
 })
 
+// The index is derived from the WHOLE plan corpus, so a fan-out unit would compute it from a base
+// holding none of its wave-mates' plans: every unit rewrites the same rows and the branches conflict
+// on it at landing, every time, with no code conflict underneath. Both-sides resolution is right for
+// the backlog file, whose ticks each branch genuinely owns, and wrong here, where the lists and
+// counts are derived — so the unit must write nothing and the orchestrator refresh once after.
+test('the refresh writes nothing in a linked worktree, and says so rather than failing', async () => {
+  const { prompts } = await run()
+  const p = prompts['reuse-index']
+  assert.match(p, /--git-common-dir/,
+    'the unit must decide this from the tree itself, not from a flag a caller can forget to pass')
+  assert.match(p, /write NOTHING/)
+  assert.match(p, /skipped: linked worktree/)
+  // The skip has to come before the step does any corpus work, or it has already read the wrong one.
+  assert.ok(p.indexOf('--git-common-dir') < p.indexOf('reuse-index.py'),
+    'the worktree check must precede the corpus run, not follow it')
+})
+
 test('a dead refresh (null) never fails the review', async () => {
   const { out } = await run({ overrides: { 'reuse-index': null } })
   assert.equal(out.reviewed, true)
