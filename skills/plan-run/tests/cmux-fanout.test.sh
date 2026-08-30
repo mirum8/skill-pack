@@ -301,6 +301,39 @@ out=$("$FAN" wait --id p2 --timeout 5 2>&1); rc=$?
                || bad "a success sentinel naming no branch is failed, not assumed" "exit $rc: $out"
 
 echo
+echo "== a marker git cannot read is dropped at spawn, not failed at wait =="
+# The repro: a repo that gitignores its backlog directory. `unit_verdict` reads the
+# marker with `git show "<branch>:<file>"`, which for an untracked path fails on every
+# branch -- so without the guard a unit that fixed, reviewed and committed its group
+# cleanly comes back `no-marker`, reading as a broken fix rather than a missing file.
+( cd "$REPO" && printf '/issues/\n' > .gitignore && mkdir -p issues \
+  && printf -- '- [ ] a\n' > issues/backlog.md \
+  && git add .gitignore && git commit -qm ignore-issues ) >/dev/null 2>&1
+cd "$REPO"
+git cat-file -e "main:issues/backlog.md" 2>/dev/null \
+  && bad "the fixture's backlog really is untracked" "git can read it" \
+  || ok "the fixture's backlog really is untracked"
+
+out=$("$FAN" spawn --id pu --dir "$TMP/wt-pu" --base main --prompt x \
+        --marker-file issues/backlog.md --marker-prefix 'built: ' 2>&1); rc=$?
+[[ $rc == 0 ]] && ok "spawn still exits 0 — an untracked backlog is not a stop" \
+               || bad "spawn still exits 0 — an untracked backlog is not a stop" "exit $rc: $out"
+grep -q "not tracked" <<<"$out" \
+  && ok "and names the weakened gate rather than dropping it silently" \
+  || bad "and names the weakened gate rather than dropping it silently" "$out"
+grep -q "^marker_file=$" "$TMP"/cmux-fanout-*/pu.rec \
+  && ok "and records no marker file for the unit" \
+  || bad "and records no marker file for the unit" "$(cat "$TMP"/cmux-fanout-*/pu.rec)"
+
+finish_unit pu "$TMP/wt-pu" untracked-backlog ok no-marker
+out=$("$FAN" wait --id pu --timeout 5 2>&1); rc=$?
+[[ $rc == 0 ]] && ok "a clean unit under an untracked backlog lands on its sentinel and branch" \
+               || bad "a clean unit under an untracked backlog lands on its sentinel and branch" "exit $rc: $out"
+grep -q "^pu ok untracked-backlog" <<<"$out" && ok "and names the branch to land" \
+                                             || bad "and names the branch to land" "$out"
+"$FAN" cleanup --id pu >/dev/null 2>&1
+
+echo
 echo "== a missing sentinel times out; it never reads as done =="
 "$FAN" cleanup --id p2 >/dev/null 2>&1
 "$FAN" spawn --id p6 --dir "$TMP/wt-p6" --base main --prompt x \

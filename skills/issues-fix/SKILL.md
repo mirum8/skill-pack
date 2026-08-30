@@ -222,6 +222,8 @@ Two groups may share a wave only when the union of their members' `touches` is *
 
 **The backlog file is excluded from that test.** Every group ticks it, so it is shared by construction; git merges ticks in separate regions cleanly, and where two regions do overlap the resolution is always **both sides' ticks** — each branch ticked what it genuinely fixed. Never resolve by taking one side wholesale; that un-ticks finished work and the next run offers it again.
 
+That reasoning holds only while the file is **tracked**, and it is worth checking rather than assuming — a repo that gitignores its issues directory is ordinary. Untracked, there is no per-worktree copy and no merge at all: one file, N writers, last one wins, and the lost tick is silent. There the ticking moves to the orchestrator ([an untracked backlog](#--cmux--the-driven-form)), which keeps the exclusion correct for a different reason — the units never touch the file.
+
 Two groups are held out of any shared wave regardless of what their files say:
 
 - **A `deep` group always runs alone**, serially, in the primary tree. `touches` is a verifier's *estimate* of where a fix would land, not an edge in a graph somebody drew — and a `deep` change's blast radius is by definition wider than the file list anyone predicted for it. `/r:plan-run` doesn't need this margin, because there the file list is a written `Files:` line the plan checker already validated against its neighbours; here it is a guess, so the guess gets a margin. Do not trim this as over-caution: it is the difference between a wave that is safe and one that merely looks it.
@@ -377,12 +379,37 @@ For each wave, in order:
    "$FAN" spawn --id "g<n>" --dir "../<repo>-g<n>" --base "<base>" \
           --marker-file "<the backlog file>" --marker-prefix 'fixed: ' \
           --orchestrator "<your own session name, from ListAgents>" \
-          --prompt "/r:issues-fix <source> --only <the group's refs> --group <the group's refs> --yes --no-merge [--ask <session>]"
+          --prompt "/r:issues-fix <source, as an ABSOLUTE path for a file source> --only <the group's refs> --group <the group's refs> --yes --no-merge [--ask <session>]"
    "$FAN" wait                  # blocks; 0 = all ok · 1 = a unit failed · 3 = a unit stalled
    "$FAN" cleanup --id "g<n>"   # per unit, as soon as IT comes back ok
    ```
 
    **Every subcommand except `preflight`, `wait` and `status` takes its unit as `--id <u>`** — a bare `cleanup g1` is a usage error, not a cleanup, and the worktree survives it. `--only` is what makes the child's scope exact — it fixes this group and re-discovers nothing, and `--group` carries the same refs a second time to force them into the one cluster this orchestrator chose. The two answer different questions: `--only` bounds *which* items the unit sees, `--group` decides how many changes they become. **Never `--no-group` here** — it means *every item is its own fix*, so a group of two or more un-folds into a branch, a commit and a full review per item, throwing away exactly the fold Step 2.5 and the Step 3 gate bought. Worse, the unit's sentinel names one `branch=` and `wait` verifies one marker against it, so the extra branches are gated by nothing and `--land` still merges them by glob. Forcing a cluster on a single-item group is a no-op, which is why there is one recipe here and not two. The `--marker-*` pair lets `wait` check the branch itself rather than trusting the session's own account of how it went. On a GitHub source there is no backlog file to read a marker from, so omit the pair there and let the branch's own `git merge-base` check stand in — the gate that matters ran inside the child either way. `[--ask <session>]` is there only when this run was given one, and it is passed through **verbatim to every unit** ([`--ask <session>`](#--ask-session--reporting-a-defect-in-the-pack)).
+**A file source is passed as an absolute path, always.** `spawn` builds each unit's tree with
+`git worktree add --detach`, which materialises **tracked content only** — so a backlog on an
+ignored or merely untracked path is not in the unit's tree at all, and a relative `<source>`
+resolves there to nothing. Step 1 makes an unresolvable `--only` ref a hard stop, so the unit halts
+with an error that reads like a bad ref rather than a missing file. An absolute path points every
+unit at the one copy that exists, in the primary tree. A tracked backlog is unharmed by the same
+absolute path, which is why there is one rule rather than a condition to get wrong.
+
+**An untracked backlog changes two more things, and both are silent if you miss them.**
+
+- **Its ticks are yours, not the units'.** There is one physical file and every unit would
+  read-modify-write it, so the loser's ticks vanish with no conflict to notice — the file is outside
+  git, so nothing mediates. Under `--cmux` on an untracked backlog the units **tick nothing**: each
+  reports its fixed items in its final report, and you tick them serially from the primary tree at
+  `--land`, which is the only place the writes can be ordered. Say in the report that those ticks
+  ride in no commit, exactly as the serial finish already does for a list file outside the repo.
+- **It carries no marker, and that is expected rather than a failure.** `spawn` checks the
+  `--marker-file` against `<base>` and drops the pair when git cannot read it, naming what it did:
+  the branch check reads a marker with `git show "<branch>":"<file>"`, which for an untracked path
+  fails on every branch, so a group that was fixed, reviewed and committed cleanly would come back
+  `no-marker` — a broken fix, to anyone reading the run. The sentinel and the branch are then the
+  whole signal, as they already are for a GitHub source with no backlog file at all. Pass the
+  `--marker-*` pair anyway; letting the script decide keeps the judgement in the one place that can
+  make it deterministically.
+
 4. **`wait`**, then `cleanup` each unit **the moment it comes back ok** — its workspace closes and its worktree is removed on the spot. That is not tidiness: a stale worktree is what the next run's `spawn` collides with, an open workspace that finished twenty minutes ago is indistinguishable in the sidebar from one still working, and the freed slot is what admits the next queued group. A wave wider than three is therefore a **rolling window**, not batches waiting on the slowest.
 5. **A unit that failed or stalled is left standing** — workspace open, worktree in place, both named in the report. A stall is usually a question waiting for a human, and that state is the only thing that has anything to say about the failure. Tearing it down would throw the evidence away.
 6. **Land the wave** with `--land` below, once every group is in.
@@ -432,7 +459,7 @@ Five rules, and the first is what makes this safe to switch on:
 Runs **from the primary working tree only** (refuse from a linked worktree, where `<base>` cannot be checked out at all). It fixes nothing.
 
 1. **Find the finished branches** — `issues-*` / `items-*` branches not yet ancestors of base.
-2. **Check each carries its `<!-- fixed: <branch> -->` marker**, read off the branch without checking anything out (`git show "<branch>":"<backlog file>"`). **A branch with no marker is not a finished group — skip it and say so.** It is a run that halted before the gate, or someone else's branch matching the glob, and merging it would land work whose review never finished. On a GitHub source the marker lives nowhere, so the branch's own gate result — recorded when the unit reported — is what stands in.
+2. **Check each carries its `<!-- fixed: <branch> -->` marker**, read off the branch without checking anything out (`git show "<branch>":"<backlog file>"`). **A branch with no marker is not a finished group — skip it and say so.** It is a run that halted before the gate, or someone else's branch matching the glob, and merging it would land work whose review never finished. On a GitHub source the marker lives nowhere, so the branch's own gate result — recorded when the unit reported — is what stands in. **An untracked backlog is the same case**: `git show` cannot read a marker that no commit can carry, so every branch would be skipped and a whole wave's reviewed work discarded. `spawn` has already dropped the marker for those units and said so; land them on their sentinel and branch, then tick the file here (["An untracked backlog"](#--cmux--the-driven-form)) before the closing step.
 3. **Merge one at a time**, `git checkout <base> && git merge --no-ff <gb>`, then delete the branch. **On a conflict, stop and surface it — never force it**; leave that branch in place and record its group as failed.
 4. **Refresh the reuse index once, here, if the project has one** — `/r:reuse-index` from the primary tree, after the last merge and before the closing below, as its own commit. The units did not write it: it is derived from the whole `.task-plans/` corpus, so a unit computing it from a base without its wave-mates' plans would rewrite the same rows every other unit rewrote, and every branch would conflict on that one file with no code conflict beneath it. This pass is the only one that sees the landed corpus entire, which is why it is also the only correct one — resolving those conflicts by hand would union two derivations that were each computed against a partial corpus. Skip it silently when the project has no index; the first build is a deliberate `/r:reuse-index`, never something a landing invents.
 5. **Then close every GitHub issue the landed groups fixed**, one `gh issue close <n>` per issue. Closing comes last for the same reason it does in the serial finish: it is the one step outside the repo, and a closed issue cannot be un-closed by `git reset`.

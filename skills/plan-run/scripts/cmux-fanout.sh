@@ -216,6 +216,20 @@ do_spawn() {
   local n; n=$(live_count)
   [ "$n" -ge "$MAX_UNITS" ] && die "spawn: $n units already live, the cap is $MAX_UNITS — wait for one to finish, then cleanup it" 4
 
+  # A marker file git cannot read is a gate that can never pass. `unit_verdict`
+  # reads the marker with `git show "<branch>:<file>"`, so a backlog on an ignored
+  # or simply untracked path -- a repo that gitignores its issues directory is the
+  # ordinary case -- returns `no-marker` for a unit that fixed, reviewed and
+  # committed its group cleanly, and that reads as a broken fix rather than as a
+  # missing file. Drop the marker here instead: the sentinel and the branch are then
+  # the whole signal, exactly as they already are for a GitHub source that has no
+  # backlog file at all. Say it out loud, because a gate that quietly weakened
+  # itself is indistinguishable from one that held.
+  if [ -n "$mfile" ] && ! git cat-file -e "$base:$mfile" 2>/dev/null; then
+    say "spawn: '$mfile' is not tracked at $base — no branch can carry a marker in it, so unit '$id' is verified by its sentinel and branch alone"
+    mfile=; mprefix=
+  fi
+
   require_bin cmux
   [ -e "$dir" ] && die "spawn: $dir already exists — remove the stale worktree first"
 
