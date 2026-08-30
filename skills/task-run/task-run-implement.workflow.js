@@ -2335,7 +2335,23 @@ const implBrief = (a) => `${implProvider === 'codex' ? codexPreamble(a) : ''}Imp
    rather than your own reinterpretation.
 
    YOUR SLICE: ${a.slice}
-   ${areas.length > 1 ? `ANOTHER subagent owns ${areas.filter((o) => o.label !== a.label).map((o) => o.slice).join(' and ')} — stay out of it; do not duplicate or collide.` : ''}
+   ${areas.length > 1 ? `ANOTHER subagent owns ${areas.filter((o) => o.label !== a.label).map((o) => o.slice).join(' and ')} — stay out of it; do not duplicate or collide.
+
+   OWNERSHIP IS BY FILE TYPE, NEVER BY PLAN ITEM. The plan divides the work by ITEM; this run
+   divides it by FILE, and where the two cross the FILE decides. A *.java or *.kt test that asserts
+   on rendered template output is a Java file and belongs to the backend slice, whichever item it
+   serves — the frontend slice owns the template, not the test that reads it. Never hand a file to
+   the other slice because another ITEM owns it: a file both slices believe is the other's gets
+   written by neither, and neither agent is doing anything wrong when that happens. Take the
+   expected values from the PLAN's acceptance criteria rather than from what the other slice has
+   produced so far — the plan states what the template will render, and that is exactly what lets
+   the two slices run at the same time.
+
+   THE PLAN'S COVERAGE CONTRACT IS A DELIVERABLE, not a description of one. Every row whose test
+   file falls in your slice must EXIST when you return, including a test class the plan names that
+   is not on disk yet. Get this wrong in the two directions it fails in and only one is ever
+   caught: a stale assertion turns the build red and the build phase fixes it, while a test nobody
+   wrote fails nothing, so no later phase in this pipeline can notice it is missing.` : ''}
    INTENT: ${src.taskIntent}
    ACCEPTANCE CRITERIA your slice must satisfy:
    ${criteriaText}

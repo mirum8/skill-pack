@@ -603,6 +603,47 @@ test('a gradle project gets gradle self-check commands, and no build tool gets n
   assert.doesNotMatch(p, /Do NOT run the full build/, 'there is no build to forbid')
 })
 
+test('a split run tells each slice that FILE TYPE decides ownership, not the plan item', async () => {
+  // wf_9c4f981b-d68: the plan divides work by item, the run divides it by file, and where they
+  // crossed both prompts named the same four Java test classes as the OTHER agent's — so
+  // LandingPickupCaptionTest and three siblings were written by nobody and the build went red with
+  // six stale expectations. Neither agent misbehaved: "stay out of the other's slice" was the only
+  // rule either had, and it does not say which axis wins.
+  const { prompts } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    source: baseSource({ hasBackend: true, hasFrontend: true }),
+  })
+  for (const l of ['implement:backend', 'implement:frontend']) {
+    assert.match(prompts[l], /OWNERSHIP IS BY FILE TYPE, NEVER BY PLAN ITEM/)
+    assert.match(prompts[l], /the FILE decides/)
+    assert.match(prompts[l], /written by neither/)
+    // The expected values come from the plan, which is what keeps the two slices independent —
+    // a backend agent waiting to read the frontend agent's template would serialise them.
+    assert.match(prompts[l], /expected values from the PLAN/)
+  }
+})
+
+test('a split run tells each slice the coverage contract is a deliverable', async () => {
+  // The other half of the same failure: a planned test class (T14-T18) was never written. A stale
+  // assertion goes red and the build phase repairs it; a test nobody wrote fails nothing, so no
+  // phase downstream can see the gap.
+  const { prompts } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    source: baseSource({ hasBackend: true, hasFrontend: true }),
+  })
+  assert.match(prompts['implement:backend'], /COVERAGE CONTRACT IS A DELIVERABLE/)
+  assert.match(prompts['implement:backend'], /must EXIST when you return/)
+  assert.match(prompts['implement:backend'], /fails nothing/)
+})
+
+test('a single-slice run carries no ownership tie-breaker — there is no other slice', async () => {
+  const { prompts } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    source: baseSource({ hasBackend: true, hasFrontend: false }),
+  })
+  assert.doesNotMatch(prompts['implement:backend'], /OWNERSHIP IS BY FILE TYPE/)
+})
+
 test('REGRESSION: no JVM build routes to ONE general implementer, whatever the flags say', async () => {
   // The two bundled implementers are a Spring/JPA persona and a Thymeleaf/HTMX persona, and their
   // slice strings name *.java/*.kt and templates literally. hasFrontend is true for any change
