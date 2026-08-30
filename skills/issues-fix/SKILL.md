@@ -297,10 +297,12 @@ This is the whole of Step 4 unless `--cmux` was passed. With it, a wave's groups
    { branch, base, profile: "light" | "standard" | "full", profileReason, profileForced, uiTouched: <bool>,
      taskIntent: "<what the fix set out to do>", criteria: [...],
      planPath, buildGreen: true | "n/a",   // "n/a" = no build tool ran, NOT a pass
-     planReview: { ran, passes, raised, applied, dropped } }
+     planReview: { ran, reason, passes, raised, applied, dropped } }   // reason: why, when ran is false
    ```
 
    `planReview` records what Codex raised about the plan and what the triage kept. Carry it into the resolution of **every item in the group** — the close comment on an issue, the report line for a file item. If it dismissed **every** finding, say so there — that's a plan the review left untouched, which is often fine but shouldn't be silent.
+
+   **Read `ran` before you read the counts.** `ran: false` is not a clean review, it is *no* review: the Codex plan challenge is full-tier only, so a `light` or `standard` group's plan was never challenged at all. Report that in those words, carrying the `reason` string the handoff gives you, rather than the empty `applied`/`dropped` lists — which are identical to a review that ran and raised nothing. It is not a fault and never a reason to hold the merge: the gate on this diff is the mandatory Codex end-verify in `/r:task-review`, not this step. But "nothing was raised" and "nothing looked" are different sentences and the report owes the reader the right one. What `ran: false` can **never** mean on a run that finished is that Codex failed quietly — at full tier a blocked plan review stops the run outright, so a completed run reporting it was below full tier or resuming, and nothing else.
 
    or `{ stopped: <reason>, … }` when it can't honestly continue.
 

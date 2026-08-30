@@ -1369,7 +1369,7 @@ if (designWanted) {
 // guess about. The plan review runs before the branch, the implementers and the build, so a run
 // that stops in any of those WAS reviewed, and a stop that omits the block reads as "Codex never
 // challenged this plan" — a different and much worse claim.
-const planReview = { ran: false, passes: 0, raised: 0, applied: [], dropped: [], judged: [] }
+const planReview = { ran: false, reason: 'stopped before the plan review', passes: 0, raised: 0, applied: [], dropped: [], judged: [] }
 
 // One row per run, recorded whether the run FINISHES or STOPS. A stop is the outcome most worth
 // measuring — it spent explorers, a planner and (at full tier) a Codex plan review and produced no
@@ -1716,6 +1716,18 @@ ${uiDesignNote}
 // severity, and whether the judges bought it. `dropped` stays a flat string list because the PR
 // body prints it; the objects are what the stats row records, and they are the only place the
 // rubric and severity survive the loop below.
+// Why it did not run, carried in the handoff itself. `ran:false` and a review that ran and raised
+// nothing both render to a caller as "no findings", and /r:issues-fix is told to report what the
+// review decided for every item in a group — so a caller that cannot tell those apart reports an
+// unchallenged plan as a clean one. A BLOCKED Codex never reaches here: at full tier that stops
+// the run outright above, so on a run that completed these two causes are the whole list, and the
+// field says which rather than leaving the caller to infer it from the tier.
+if (resuming || profile !== 'full') {
+  planReview.reason = resuming
+    ? 'resume — the plan was reviewed in the original run'
+    : `not run at the ${profile} tier — the Codex plan review is full-tier only`
+}
+
 if (!resuming && profile === 'full') {
   phase('Plan-review')
   const rubric = `Work through this fixed rubric. Tag every finding major or minor, and tag it
@@ -1850,6 +1862,9 @@ ${checks.map((c, i) => `     ${i + 1}. ${c}`).join('\n')}
     return await stop('codex-plan-review-unavailable', { detail: (review && review.note) || '' })
   }
   planReview.ran = true
+  // The initializer's reason described a run that stopped before this point; a reason surviving
+  // beside ran:true would read as a caveat on a review that actually happened.
+  delete planReview.reason
 
   // Triage + apply, then ONE re-review — and only if the approach actually changed. The cap is
   // the point: this catches a rewrite that opened a fresh hole, it does not loop until the plan
@@ -2442,7 +2457,9 @@ return {
   criteria: src.criteria || [],
   buildGreen,
   // What the plan review actually decided. `ran:false` means the tier was below full (or this was a
-  // resume), NOT that Codex came back clean — a blocked Codex stops the run outright above.
+  // resume), NOT that Codex came back clean — a blocked Codex stops the run outright above. It
+  // carries `reason` saying which, because to a caller an unchallenged plan and a plan the review
+  // passed both read as "no findings", and the first is the one worth saying out loud.
   // The caller carries `applied` into the PR body; `dropped` is there so a dismissal can be
   // questioned instead of disappearing.
   planReview,

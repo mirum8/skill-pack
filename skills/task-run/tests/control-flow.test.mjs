@@ -942,6 +942,11 @@ test('light tier runs no Codex plan review at all', async () => {
   })
   assert.equal(out.profile, 'light')
   assert.equal(out.planReview.ran, false)
+  // ran:false and a review that raised nothing both hand the caller empty lists, so the handoff
+  // has to say WHICH — /r:issues-fix reports this on every item it closes, and "nothing was
+  // raised" is a different sentence from "nothing looked".
+  assert.match(out.planReview.reason, /light tier/)
+  assert.match(out.planReview.reason, /full-tier only/)
   assert.equal(counts['codex-plan-review#1'], undefined)
   assert.equal(counts['plan-light'], 1)
   // What this locks: riskFlags must report what the CHANGE touches, not every risk surface
@@ -960,6 +965,17 @@ test('standard tier: full planner, but no Codex plan review', async () => {
   assert.equal(counts['plan-light'], undefined)
   assert.equal(counts['codex-plan-review#1'], undefined)
   assert.equal(out.planReview.ran, false)
+  assert.match(out.planReview.reason, /standard tier/)
+})
+
+// A run that finished with ran:false has exactly two causes, because the third — Codex could not
+// run — stops the run outright at full tier rather than handing back a quiet false. The reason
+// string is what keeps a caller from having to know that to read the field.
+test('a full-tier run that reviews the plan carries no reason to explain itself', async () => {
+  const { out } = await run({ review: OK_REVIEW, planfix: OK_FIX })
+  assert.equal(out.planReview.ran, true)
+  assert.equal(out.planReview.reason, undefined,
+    'a reason alongside ran:true would read as a caveat on a review that actually happened')
 })
 
 test('a UI task gets its own design phase, and the plan is built around the section', async () => {
