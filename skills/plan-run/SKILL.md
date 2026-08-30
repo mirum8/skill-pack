@@ -329,8 +329,10 @@ form](#--cmux--the-driven-form) — but every phase still runs exactly the loop 
 6. **Finish.** With the review's fixes folded into the working tree, still uncommitted on the phase
    branch `<pb>`:
    - **Confirm you are on `<pb>`**: `git rev-parse --abbrev-ref HEAD`. It should never be `<base>`
-     (the implement Workflow halts rather than hand back a run that stayed on base); this check
-     stops a whole phase landing on `main`.
+     (the implement Workflow halts if it never *left* base, and re-reads HEAD at its handoff, so a
+     HEAD that moved afterwards arrives as `branchDrifted: true` with the real branch — but this
+     check is the one that runs after the review, and a review that halted never reached it);
+     this check stops a whole phase landing on `main`.
    - **Confirm nobody else is holding the repo**, before the merge into base: `.git/MERGE_HEAD`
      present is an unfinished merge, and `<base>` at a different commit than Step 0 read is a session
      that landed something meanwhile. Either is a **halt** — merging over it sweeps another run's

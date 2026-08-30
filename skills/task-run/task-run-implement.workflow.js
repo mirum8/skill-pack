@@ -1371,6 +1371,15 @@ if (designWanted) {
 // challenged this plan" — a different and much worse claim.
 const planReview = { ran: false, reason: 'stopped before the plan review', passes: 0, raised: 0, applied: [], dropped: [], judged: [] }
 
+// The branch, as two facts rather than one. `branchOn` is what the repo was really on the last
+// time anything asked git; `branchDrifted` says the answer changed under the run. They are plain
+// `let`s declared HERE, above the sink, rather than read off the Phase 4 const below: recordRun is
+// called by every stop above that line, and a const in its temporal dead zone would throw inside
+// the try/catch that exists to keep bookkeeping from costing a run its result — silently losing
+// the whole row, which is the one thing that recorder may not do.
+let branchOn = ''
+let branchDrifted = false
+
 // One row per run, recorded whether the run FINISHES or STOPS. A stop is the outcome most worth
 // measuring — it spent explorers, a planner and (at full tier) a Codex plan review and produced no
 // diff — and while the sink sat below the handoff every one of them was invisible: one Go project
@@ -1389,6 +1398,13 @@ const recordRun = async ({ stopped = '', buildGreen = 'n/a' } = {}) => {
       // `payload` verbatim, so this is queryable without a column of its own.
       stopped,
       source: src.kind,
+      // The branch the run finished on, and whether it moved under the run. Recorded because
+      // nothing else could see it: `branch` sat in the return value only, so 0 of 68 implement
+      // rows carried one, and "how often did a run hand back a branch it was not on" was a
+      // question the store could not answer. '' before Phase 4 has claimed a branch at all.
+      branch: branchOn,
+      base: src.base,
+      branchDrifted,
       profile,
       profileForced: !!forcedProfile,
       profileEscalated,
@@ -2199,6 +2215,7 @@ if (!branchP) {
 const br = await branchP
 if (blocked(br) || !br.onBranch) return await stop('branch-failed')
 const onBranch = String(br.onBranch).trim()
+branchOn = onBranch
 if (onBranch === src.base) {
   log(`run-task-implement: still on ${src.base} after 2 attempts — stopping. Implementing here would put the whole task on ${src.base} and leave the caller merging ${src.base} into itself.`)
   return await stop('branch-not-created', { base: src.base, wanted: wantBranch, detail: br.note || '' })
@@ -2428,14 +2445,48 @@ if (src.buildTool !== 'none') {
 // Steps 5 (post-task-review) and 6 (finish) belong to the CALLER, which runs them in its own
 // main thread — post-task-review's canonical engine is a Workflow, and a Workflow call nested
 // inside this script's agents would not be reachable.
-log(`run-task-implement: done — green build on ${onBranch}, diff left uncommitted for review`)
+// THE BRANCH IS RE-READ, never remembered. `onBranch` was settled at the top of Phase 4 and is
+// hundreds of agent-minutes old by now, and the run's diff is UNCOMMITTED the whole way — so the
+// feature branch and its base hold identical trees, and any `git checkout <base>` in between
+// succeeds and carries the working tree across with it. A handoff naming a branch the repo left
+// is the expensive kind of wrong, because both callers act on the name: /r:plan-run Step 3.6
+// merges it into base, and this skill's own `--skip-pr` finish runs
+// `git checkout <base> && git merge --no-ff <branch>` — which, on a stale name, is base merged
+// into itself. That is the failure the Phase 4 halt exists to prevent, arriving after it.
+//
+// So report the TRUTH rather than the intent, and do not halt on it: the work exists and is
+// uncommitted, and `stop()` drops `implemented` and `testEvidence`, so halting here would throw
+// away the run's only record of what it did. The callers already refuse to merge from base —
+// plan-run Step 3.6 re-reads HEAD itself — and `branchDrifted` names it for them rather than
+// leaving it to be discovered. A re-read that cannot run leaves the remembered value and says so:
+// a guess about which branch to merge is worse than an admitted gap.
+const finalBr = await agent(
+  `Run \`git rev-parse --abbrev-ref HEAD\` in the repo and return its EXACT output as onBranch.
+   Read only — change nothing, check nothing out, commit nothing. The working tree has uncommitted
+   work in it and must stay exactly as it is.`,
+  { label: 'head-check', phase: 'Build', schema: BRANCH, ...GP, ...ECHO }).catch(() => null)
+const realBranch = (finalBr && String(finalBr.onBranch || '').trim()) || ''
+if (!realBranch) {
+  log(`run-task-implement: could not re-read HEAD at the handoff — reporting the branch this run claimed (${onBranch}); the caller re-checks before it merges`)
+} else if (realBranch !== onBranch) {
+  branchDrifted = true
+  branchOn = realBranch
+  log(`run-task-implement: HEAD MOVED under the run — claimed "${onBranch}", really on "${realBranch}"${realBranch === src.base ? ` (that is the base branch: the diff is sitting on ${src.base}, uncommitted)` : ''}. Reporting the branch the repo is really on; do NOT merge on the claimed name.`)
+}
+const handoffBranch = realBranch || onBranch
+
+log(`run-task-implement: done — green build on ${handoffBranch}, diff left uncommitted for review`)
 
 // The run's own row — the same recorder every stop above uses, so a completed run and a halt are
 // recorded the same way and can be compared in the store.
 await recordRun({ buildGreen })
 
 return {
-  branch: onBranch,
+  // What the repo is REALLY on, re-read above — never the name Phase 4 asked for. `branchDrifted`
+  // says the two disagreed, so a caller can tell a moved HEAD from an ordinary run rather than
+  // inferring it from a name that looks fine.
+  branch: handoffBranch,
+  branchDrifted,
   base: src.base,
   profile,
   profileReason: src.profileReason || '',

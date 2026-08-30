@@ -92,7 +92,7 @@ function baseSource(over = {}) {
 // `overrides` maps a label PREFIX to the value that label should return — or THROW, or a
 // function of the call count. Anything not overridden takes the happy-path default.
 async function run({ source = baseSource(), riskFlags = [], uiFiles = [], design = designText(),
-                     review, planfix, verdict, config, planConfig, citation,
+                     review, planfix, verdict, config, planConfig, citation, head,
                      args = { source: '#81' }, overrides = {}, build } = {}) {
   const logs = []
   const prompts = {}
@@ -150,6 +150,10 @@ async function run({ source = baseSource(), riskFlags = [], uiFiles = [], design
     // differently on the re-review without the harness holding extra state.
     if (l.startsWith('plan-fix')) return typeof planfix === 'function' ? planfix(Number(l.split('#')[1]) || 1) : planfix
     if (l === 'branch') return { onBranch: source.branch }
+    // The handoff RE-READS HEAD rather than trusting the value Phase 4 settled. Unstubbed it
+    // agrees with the branch the run claimed, which is the ordinary case; `head` is how a test
+    // moves HEAD under the run.
+    if (l === 'head-check') return head === undefined ? { onBranch: source.branch } : head
     if (l.startsWith('implement')) return { done: true, summary: 'returned VERSIONS_VIEW on error paths', filesChanged: ['AdminRatesController.java'] }
     if (l.startsWith('build#')) return build ? build(counts[l]) : { green: true }
     return {}
@@ -1761,6 +1765,82 @@ test('a branch attempt that lands on base is retried once, and the retry can sav
   assert.equal(out.stopped, undefined)
   assert.equal(out.branch, 'issue-81-import')
   assert.equal(counts['branch-retry'], 1)
+})
+
+// --------------------------------------- the branch is RE-READ at the handoff ---
+// Phase 4's check settles the branch before a line of code is written, and the handoff is
+// hundreds of agent-minutes later. The diff is uncommitted the whole way, so the feature branch
+// and its base hold identical trees and any `git checkout <base>` in between carries the working
+// tree across. Both callers act on the reported name — plan-run Step 3.6 merges it into base, and
+// this skill's own --skip-pr finish runs `git checkout <base> && git merge --no-ff <branch>` —
+// so a remembered name is base merged into itself.
+
+test('the handoff reports the branch git says, not the one Phase 4 claimed', async () => {
+  const { out, logText } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    head: { onBranch: 'main' },
+  })
+  assert.equal(out.stopped, undefined, 'the work exists and is uncommitted — halting would discard it')
+  assert.equal(out.branch, 'main', 'the truth, never the intent')
+  assert.equal(out.branchDrifted, true)
+  assert.match(logText, /HEAD MOVED under the run/)
+  assert.match(logText, /that is the base branch/, 'landing on base is the case worth naming')
+  // The handoff still carries what the run did — that is why this reports rather than stops.
+  assert.ok(out.implemented.length)
+})
+
+test('a drifted branch is recorded, so the next one is visible instead of anecdotal', async () => {
+  const { prompts } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    head: { onBranch: 'main' },
+  })
+  const row = JSON.parse(prompts['stats'].match(/\{"kind":"implement".*\}/)[0])
+  assert.equal(row.branch, 'main')
+  assert.equal(row.base, 'main')
+  assert.equal(row.branchDrifted, true)
+})
+
+test('an undrifted run records the branch too, and says so', async () => {
+  const { out, prompts, logText } = await run({ review: OK_REVIEW, planfix: OK_FIX })
+  assert.equal(out.branch, 'issue-81-import')
+  assert.equal(out.branchDrifted, false)
+  const row = JSON.parse(prompts['stats'].match(/\{"kind":"implement".*\}/)[0])
+  assert.equal(row.branch, 'issue-81-import')
+  assert.doesNotMatch(logText, /HEAD MOVED/)
+})
+
+test('a re-read that cannot run keeps the claimed branch and ADMITS the gap', async () => {
+  // A guess about which branch to merge is worse than an admitted gap: the callers re-check
+  // before they merge, and this is what tells them to.
+  const { out, logText } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    overrides: { 'head-check': null },
+  })
+  assert.equal(out.stopped, undefined)
+  assert.equal(out.branch, 'issue-81-import')
+  assert.equal(out.branchDrifted, false, 'unknown is not drifted — nobody measured it')
+  assert.match(logText, /could not re-read HEAD at the handoff/)
+})
+
+test('the re-read is an echo agent and touches nothing', async () => {
+  const { optsBy, prompts } = await run({ review: OK_REVIEW, planfix: OK_FIX })
+  assert.equal(optsBy['head-check'].model, 'haiku')
+  assert.equal(optsBy['head-check'].effort, 'low')
+  assert.match(prompts['head-check'], /rev-parse --abbrev-ref HEAD/)
+  assert.match(prompts['head-check'], /Read only/)
+  assert.match(prompts['head-check'], /uncommitted/, 'the tree must be left exactly as it is')
+})
+
+test('a run that halts before Phase 4 records no branch rather than a wrong one', async () => {
+  // recordRun is called by every stop above the Phase 4 const, which is why the two branch facts
+  // are plain `let`s declared above the sink: a const in its dead zone would throw inside the
+  // try/catch that keeps bookkeeping from costing a run its result, losing the whole row.
+  const { out, prompts } = await run({ overrides: { planner: null } })
+  assert.equal(out.stopped, 'planner-blocked')
+  const row = JSON.parse(prompts['stats'].match(/\{"kind":"implement".*\}/)[0])
+  assert.equal(row.branch, '')
+  assert.equal(row.branchDrifted, false)
+  assert.equal(row.stopped, 'planner-blocked')
 })
 
 test('an unusable branch name from Phase 0 is replaced, never silently resolved to base', async () => {
