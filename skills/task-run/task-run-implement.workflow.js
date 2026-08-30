@@ -373,6 +373,11 @@ const BRANCH = {
   required: ['onBranch'],
   properties: { onBranch: { type: 'string' }, note: { type: 'string' } },
 }
+const TREE = {
+  type: 'object', additionalProperties: false,
+  required: ['filesPresent'],
+  properties: { filesPresent: { type: 'array', items: { type: 'string' } } },
+}
 const BUILD = {
   type: 'object', additionalProperties: false,
   required: ['green'],
@@ -560,8 +565,12 @@ const IMPL_RUN = { model: 'opus', effort: 'medium' }
 // than `low` for the reason CODEX_RUN gives: this agent owns the background-collect protocol that
 // produced false blocks on #82/#55, and then reads the working tree to decide filesChanged,
 // testEvidence and blockedOn. A wrapper that gives up early does not save 20s — it halts the run
-// over work Codex actually finished. It is a bet with no measurement behind it: no Codex
-// implementer has run yet, so read the paired review before defending either value.
+// over work Codex actually finished — which is what wf_9c4f981b-d68 did: every slice set blockedOn
+// while both codex-companion PIDs were still alive, and one of them owned the plan's whole backend
+// half. That is why the preamble states the collect rule as an obligation (a live PID is never a
+// block) rather than as advice: the tier alone did not carry it. Whether `medium` is the right
+// wrapper tier is still a bet with one run behind it — read the paired review before defending
+// either value.
 const IMPL_CODEX_RUN = { model: 'sonnet', effort: 'medium' }
 // Triage is SPLIT, not one agent, and the two halves want different depths. Collapsed into one
 // agent at the inherited tier that judges every finding and rewrites the plan, it measures 11
@@ -2290,11 +2299,20 @@ const codexPreamble = (a) => `YOU ARE NOT WRITING THIS CODE YOURSELF. Drive the 
    ~/.claude/plugins/data/codex-openai-codex/state/*/jobs/*.json. Never poll for output-size
    stability — the log goes quiet for minutes mid-reasoning.
 
+   A LIVE WORKER PID IS NEVER A BLOCK. While \`ps -p <pid>\` still answers, that run is working and
+   your job is to keep waiting — implementers average 963s and the long ones pass 40 minutes.
+   \`blockedOn\` is the field this pipeline HALTS on, and the halt is not free: it stops the run for
+   every other slice too, and what it reports about the tree is read at that moment. Writing "still
+   running" into it and explaining in prose that it is not a real block does not work — nothing
+   downstream reads the prose, the structured field is what acts, and the caller's own rules tell it
+   to record a failure and restore a clean base over a diff Codex had nearly finished.
+
    When Codex finishes, VERIFY against the working tree rather than trusting its summary: read
    \`git status --porcelain\` and \`git diff\` for the files in your slice, and fill filesChanged and
    testEvidence from what you can SEE there. If Codex never ran, the CLI is missing, or you could
-   not collect the finished run, set blockedOn saying so — a fabricated success here is worse than
-   an honest halt, because the review that follows would certify code nobody wrote.
+   not collect a run whose worker PID is GONE, set blockedOn saying so — a fabricated success here is
+   worse than an honest halt, because the review that follows would certify code nobody wrote.
+   Those three are the whole list. A run still in flight is not one of them.
 
    `
 // The build fixer runs on the same provider as the implementers — a codex run whose red build is
@@ -2362,22 +2380,59 @@ const impls = await parallel(areas.map((a) => () =>
 // have left a real diff UNCOMMITTED on the feature branch — a stop reporting only the blockage
 // reads as "nothing happened" over that diff, and the next run then plans against a tree it
 // believes is clean. So the halt carries what landed, and the caller reports both halves.
-const stuck = impls.filter((r) => r && r.blockedOn).map((r) => r.blockedOn)
-if (stuck.length) {
-  const landed = impls.filter((r) => r && !r.blockedOn && r.summary)
+// What a halt says about the tree is read FROM THE TREE, never assembled from the agents that
+// halted. `landed` can only ever carry slices that returned clean, so a run where every slice sets
+// blockedOn hands back `filesChanged: []` over a working tree that already holds most of the
+// change — the same "reads as nothing happened" failure the comment above exists to prevent,
+// arriving through the other door. Observed on wf_9c4f981b-d68: every implementer reported blocked
+// while its Codex was still writing, the handoff said `implemented: []` and `filesChanged: []`, and
+// `git diff --stat <base>` in that same tree at that same moment showed 8 files. A caller cannot
+// act on a field its own repo contradicts, and this one is acted on hard — /r:issues-fix restores a
+// clean base over it.
+//
+// MECHANICAL, not the echo tier, for the reason the branch re-read gives: this answer decides
+// whether the caller believes any work exists. It fails OPEN and says so — an unread tree is
+// reported as unread, never as empty, because "nothing was written" and "nobody looked" are the
+// two readings this whole field exists to keep apart.
+const treeAtHalt = async () => {
+  const t = await agent(
+    `Run \`git status --porcelain\` and \`git diff --name-only ${src.base}\` in the repo, and return
+     every path either one names, deduplicated, as filesPresent. Read only — change nothing, check
+     nothing out, commit nothing, stage nothing, stash nothing. The working tree holds uncommitted
+     work and must stay exactly as it is. Return an empty array ONLY if both commands genuinely
+     printed no paths.`,
+    { label: 'halt-tree', phase: 'Implement', schema: TREE, ...GP, ...MECHANICAL }).catch(() => null)
+  return t && Array.isArray(t.filesPresent) ? t.filesPresent : null
+}
+
+const haltingStop = async (detail, landed) => {
   const landedFiles = landed.flatMap((r) => r.filesChanged || [])
-  log(`run-task-implement: an implementer says the plan is wrong or blocked — surfacing instead of working around it`)
-  if (landed.length) log(`run-task-implement: ${landed.length} of ${areas.length} implementer(s) finished first — their work is UNCOMMITTED on ${onBranch}${landedFiles.length ? ` (${landedFiles.slice(0, 8).join(', ')})` : ''}; the halt reports it rather than discarding it`)
+  const probed = await treeAtHalt()
+  if (probed) {
+    const unclaimed = probed.filter((f) => !landedFiles.includes(f)).length
+    log(`run-task-implement: the tree at the halt holds ${probed.length} changed file(s) on ${onBranch}${unclaimed ? `, ${unclaimed} of them claimed by no implementer that returned — a slice that halted had already written code` : ''}; reporting what is THERE, uncommitted`)
+  } else {
+    log(`run-task-implement: could not read the working tree at the halt — reporting only what the implementers that returned claimed (${landedFiles.length} file(s)). The tree may hold more; treeRead is false so the caller does not read this as an empty diff.`)
+  }
   return await stop('implement-blocked', {
-    detail: stuck.join(' | '),
+    detail,
     branch: onBranch,
     base: src.base,
     implemented: landed.map((r) => r.summary),
-    filesChanged: landedFiles,
+    filesChanged: probed || landedFiles,
+    treeRead: !!probed,
     testEvidence: landed.flatMap((r) => r.testEvidence || []),
   })
 }
-if (impls.every((r) => blocked(r))) return await stop('implement-blocked', { branch: onBranch, base: src.base })
+
+const stuck = impls.filter((r) => r && r.blockedOn).map((r) => r.blockedOn)
+if (stuck.length) {
+  const landed = impls.filter((r) => r && !r.blockedOn && r.summary)
+  log(`run-task-implement: an implementer says the plan is wrong or blocked — surfacing instead of working around it`)
+  if (landed.length) log(`run-task-implement: ${landed.length} of ${areas.length} implementer(s) finished first — their work is UNCOMMITTED on ${onBranch}; the halt reports it rather than discarding it`)
+  return await haltingStop(stuck.join(' | '), landed)
+}
+if (impls.every((r) => blocked(r))) return await haltingStop('every implementer returned blocked or died', [])
 
 // --- Phase 5: drive the build green -----------------------------------------
 // Bounded: "loop until green" is unbounded, and an unfixable build would grind forever.

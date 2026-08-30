@@ -92,7 +92,7 @@ function baseSource(over = {}) {
 // `overrides` maps a label PREFIX to the value that label should return — or THROW, or a
 // function of the call count. Anything not overridden takes the happy-path default.
 async function run({ source = baseSource(), riskFlags = [], uiFiles = [], design = designText(),
-                     review, planfix, verdict, config, planConfig, citation, head,
+                     review, planfix, verdict, config, planConfig, citation, head, haltTree,
                      args = { source: '#81' }, overrides = {}, build } = {}) {
   const logs = []
   const prompts = {}
@@ -154,6 +154,9 @@ async function run({ source = baseSource(), riskFlags = [], uiFiles = [], design
     // agrees with the branch the run claimed, which is the ordinary case; `head` is how a test
     // moves HEAD under the run.
     if (l === 'head-check') return head === undefined ? { onBranch: source.branch } : head
+    // A halt reads the TREE rather than believing the agents that halted. Unstubbed it finds the
+    // uncommitted work a blocked slice had already written; `haltTree` is how a test kills the probe.
+    if (l === 'halt-tree') return haltTree === undefined ? { filesPresent: ['OfferProvider.java', 'inquiry-card.html'] } : haltTree
     if (l.startsWith('implement')) return { done: true, summary: 'returned VERSIONS_VIEW on error paths', filesChanged: ['AdminRatesController.java'] }
     if (l.startsWith('build#')) return build ? build(counts[l]) : { green: true }
     return {}
@@ -1589,6 +1592,69 @@ test('an implementer that says the plan is wrong is surfaced, not worked around'
   assert.match(out.detail, /deleted class/)
 })
 
+test('a halt reports the files the TREE holds, not what the halted implementers claimed', async () => {
+  // wf_9c4f981b-d68: every implementer set blockedOn while its Codex was still writing, so `landed`
+  // was empty and the handoff said `filesChanged: []` — over a tree that `git diff --stat` showed
+  // holding 8 files at that same moment. The caller acts on that field: /r:issues-fix records a
+  // failure and restores a clean base, throwing the work away.
+  const { out } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    overrides: { implement: { done: false, summary: '', blockedOn: 'codex still running' } },
+  })
+  assert.equal(out.stopped, 'implement-blocked')
+  assert.deepEqual(out.filesChanged, ['OfferProvider.java', 'inquiry-card.html'])
+  assert.equal(out.treeRead, true)
+})
+
+test('a halt whose tree probe dies says the tree is UNREAD, never that it is empty', async () => {
+  // "nothing was written" and "nobody looked" are the two readings this field exists to separate.
+  // Reporting [] with no treeRead flag makes them indistinguishable to the caller.
+  const { out, logText } = await run({
+    review: OK_REVIEW, planfix: OK_FIX, haltTree: null,
+    overrides: { implement: { done: false, summary: '', blockedOn: 'codex still running' } },
+  })
+  assert.equal(out.stopped, 'implement-blocked')
+  assert.equal(out.treeRead, false)
+  assert.match(logText, /could not read the working tree at the halt/)
+})
+
+test('the every-implementer-dead halt probes the tree too', async () => {
+  // This path returned a bare {branch, base} — no implemented, no filesChanged, no treeRead — so a
+  // caller could not tell it apart from a run that genuinely wrote nothing.
+  const { out } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    overrides: { implement: null },
+  })
+  assert.equal(out.stopped, 'implement-blocked')
+  assert.deepEqual(out.filesChanged, ['OfferProvider.java', 'inquiry-card.html'])
+  assert.equal(out.treeRead, true)
+})
+
+test('the halt probe is read-only and runs at the mechanical tier', async () => {
+  const { prompts, optsBy } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    overrides: { implement: { done: false, summary: '', blockedOn: 'x' } },
+  })
+  assert.equal(optsBy['halt-tree'].model, 'sonnet')
+  assert.match(prompts['halt-tree'], /git status --porcelain/)
+  assert.match(prompts['halt-tree'], /git diff --name-only/)
+  assert.match(prompts['halt-tree'], /Read only/)
+  assert.match(prompts['halt-tree'], /stash nothing/)
+})
+
+test("the codex wrapper is told a live worker PID is never a block", async () => {
+  // The wrapper wrote "still running" into blockedOn and explained in prose that it was not a real
+  // block. Nothing downstream reads the prose; the field is what halts the run.
+  const { prompts } = await run({
+    review: OK_REVIEW, planfix: OK_FIX, config: CODEX_CONFIG,
+  })
+  const impl = prompts['implement:backend'] || prompts['implement']
+  assert.match(impl, /A LIVE WORKER PID IS NEVER A BLOCK/)
+  assert.match(impl, /keep waiting/)
+  assert.match(impl, /worker PID is GONE/)
+  assert.match(impl, /still in flight is not one of them/)
+})
+
 // ------------------------------------- a stop still says whether the plan was reviewed --
 
 test('REGRESSION: every stop after the plan review carries planReview out with it', async () => {
@@ -1632,22 +1698,30 @@ test('REGRESSION: a blocked slice halts the run but no longer discards the work 
   assert.equal(out.stopped, 'implement-blocked')
   assert.match(out.detail, /deleted fragment/)
   assert.deepEqual(out.implemented, ['the controller returns VERSIONS_VIEW on error paths'])
-  assert.deepEqual(out.filesChanged, ['AdminRatesController.java'])
+  // `implemented` and `testEvidence` are what the implementers REPORTED, and only the one that
+  // returned can report. `filesChanged` is different in kind — it is what the repo HOLDS — so it
+  // comes off the tree probe and covers the blocked slice's writes too.
+  assert.deepEqual(out.filesChanged, ['OfferProvider.java', 'inquiry-card.html'])
+  assert.equal(out.treeRead, true)
   assert.equal(out.testEvidence.length, 1)
   assert.match(logText, /UNCOMMITTED on issue-81-import/)
-  // The blocked implementer contributes nothing to any of the three — a slice that did not run is
-  // not evidence of work, and a summary-less return must not become an empty "landed" entry.
+  // The blocked implementer contributes nothing to the two REPORTED lists — a slice that did not
+  // return is not evidence of work, and a summary-less return must not become an empty "landed" entry.
   assert.equal(out.implemented.length, 1)
 })
 
-test('a blocked run where NOTHING landed reports empty lists, not a missing field', async () => {
+test('a blocked run over a genuinely empty tree reports empty lists, not a missing field', async () => {
+  // An empty `filesChanged` is only believable when something looked and found nothing — which is
+  // what `treeRead: true` beside it asserts. The same shape without that flag is the one the
+  // caller must not act on, and the test above covers it.
   const { out } = await run({
-    review: OK_REVIEW, planfix: OK_FIX,
+    review: OK_REVIEW, planfix: OK_FIX, haltTree: { filesPresent: [] },
     overrides: { implement: { done: false, summary: '', blockedOn: 'the plan targets a deleted class' } },
   })
   assert.equal(out.stopped, 'implement-blocked')
   assert.deepEqual(out.implemented, [])
   assert.deepEqual(out.filesChanged, [])
+  assert.equal(out.treeRead, true)
 })
 
 // ------------------------------------------------- a stop is a run, and is recorded --
