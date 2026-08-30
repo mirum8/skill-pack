@@ -127,7 +127,7 @@ Its findings are recorded under their own `quick-codex` track: same tool as `tas
 different mode and a much smaller change under it, so merging them would make neither readable.
 
 **Every bundled executable has a test, and it is the only one it gets.** The two workflows have
-their control-flow tests below; all eight scripts under `skills/*/scripts/` have suites beside them.
+their control-flow tests below; all eleven scripts under `skills/*/scripts/` have suites beside them.
 They all guard the same failure shape, which is why none of them is optional: each script either
 *decides a scope*, *decides whether a tool ran*, or *decides whether the app is on the screen at
 all*, and every one of those fails by returning a confident wrong answer. A scan that resolved to

@@ -48,7 +48,7 @@ Four things shape the design:
 
 ## Invocation
 
-`/r:plan-run [<plan>] [--from <n>] [--to <n>] [--phases <n,n>] [--cmux] [--no-merge] [--land] [--auto-resolve] [--unattended] [--yes] [--dry-run]`
+`/r:plan-run [<plan>] [--from <n>] [--to <n>] [--phases <n,n>] [--cmux] [--no-merge] [--land] [--auto-resolve] [--unattended] [--ask <session>] [--yes] [--dry-run]`
 
 **`<plan>`** is the path to the plan file. Strip a leading `@` and any trailing `/` (Claude Code's
 `@todo.md` arrives verbatim). With no argument, look for one and **name what you found before using
@@ -82,6 +82,11 @@ between them: **ask** — the one place the run stops for input that isn't the g
 - **`--unattended`** → run without a person watching: work around everything that can be worked
   around, notify only when the run cannot continue. Implies `--yes` and `--auto-resolve`. It does
   **not** loosen what counts as a real failure — see [Running unattended](#running-unattended).
+- **`--ask <session>`** → the address of a pack maintainer session watching the tooling: report
+  defects **in the pack** there and keep going ([`--ask <session>`](#--ask-session--reporting-a-defect-in-the-pack)).
+  It changes nothing about the run — a report is never a halt and never a question. **Pair it with
+  `--unattended`**, which otherwise works around a pack defect and leaves nobody able to fix it any
+  the wiser.
 - **`--yes`** → skip the approval gate and run every phase in the list. It does **not** disable the
   halt: a failed phase still stops the run.
 - **`--dry-run`** → read the plan, run the plan check, print the run list **and the wave table with
@@ -519,11 +524,12 @@ For each wave, in wave order:
    FAN="${CLAUDE_PLUGIN_ROOT}/skills/plan-run/scripts/cmux-fanout.sh"
    "$FAN" spawn --id "phase-<n>" --dir "../<repo>-p<n>" --base "<base>" \
           --marker-file "<plan>" --marker-prefix 'built: ' \
-          --prompt "/r:plan-run <plan> --phases <n> --no-merge --yes"
+          --prompt "/r:plan-run <plan> --phases <n> --no-merge --yes [--ask <session>]"
    ```
 
    The `--marker-*` pair lets `wait` check the branch itself rather than trusting the session's own
-   account.
+   account. `[--ask <session>]` is there only when this run was given one, and it is passed through
+   **verbatim to every unit** ([`--ask <session>`](#--ask-session--reporting-a-defect-in-the-pack)).
 5. **`wait`**, then `cleanup` each unit **the moment it comes back ok** — its workspace closes and
    its worktree is removed on the spot: a stale worktree is what the next `spawn` collides with, a
    finished workspace looks like a working one in the sidebar, and the freed slot admits the next
@@ -759,6 +765,55 @@ wrong.
 
 **Unattended never softens these**: a blocked review is not a pass, an auto-resolved merge still runs
 the full test suite and is discarded on red, and a halted phase is never ticked and never merged.
+
+## `--ask <session>` — reporting a defect in the pack
+
+`--ask <session>` means a pack maintainer session is watching the **tooling** at that address:
+report defects in the pack there and keep working. It works with or without `--cmux` — a serial run
+hits pack defects too — and it changes nothing else about the run.
+
+**What belongs there is a defect in the TOOLING, never in the project being built.** Three
+addresses, three different things, and mixing them is what makes each of them useless:
+
+- a bug in the code this plan is producing → the plan, or the project's own backlog;
+- a question about the *work* — a contradictory `Done when:`, a phase that reads as already built →
+  the **orchestrator** ([The alarm channel](#the-alarm-channel));
+- a step of the *pipeline* that is wrong → **here**. A step that cannot run, a bundled script
+  returning a confident wrong answer, a handoff field a caller cannot read, an instruction in a
+  skill that contradicts what the tool actually does.
+
+Five rules, and the first is what makes this safe to switch on:
+
+- **A report is never a halt, and never a question.** Send it and carry on with the same run you
+  would have had. Never wait for a reply, never poll for one, and never let a maintainer's answer
+  change what this run does — a pack fixed mid-run does not retroactively change the run that
+  reported it. If the defect genuinely stops the work, that is a halt on its own terms and the halt
+  rules above apply unchanged; the report is extra, not instead.
+- **Never work around a pack defect silently.** Working around it is usually right — report it *and*
+  keep going — but the workaround goes in this run's own report to the user as well, in the words of
+  what was done instead ([Every workaround is named](#every-workaround-is-named)). A workaround
+  nobody hears about is how a defect survives twenty runs.
+- **Send evidence, not a conclusion.** The exact error string, the run id, `file:line`, what you
+  already ruled out, and what you did instead. The maintainer verifies every claim against the pack
+  before changing anything, so a report that hands over a verdict with nothing under it costs more
+  to check than the defect costs to find — and a confident wrong diagnosis is worse than a raw
+  observation. Say plainly which parts you observed and which you inferred.
+- **An expectation the pack contradicts is a report too.** Some of what looks broken is designed — a
+  field empty because a tier does not fill it, a step that runs only at one profile. Report it in the
+  same shape and let the maintainer say which it is: "this looked like a malfunction and was not" is
+  a real finding about the tooling's legibility, and it is cheap to answer.
+- **The maintainer does not touch this repo.** It fixes the pack, in the pack's repo, and replies.
+  Nothing it does lands in this working tree, so nothing about `--ask` can change this run's diff.
+
+**Under `--cmux`, pass `--ask <session>` through to every unit's own command line**, exactly as the
+spawn prompt already carries `--phases` and `--no-merge`. The unit is the first thing that touches
+the pipeline, so it is where a pack defect is seen first, and a report relayed through the
+orchestrator loses the detail that made it actionable.
+
+`cmux-fanout.sh` needs no change and no new environment variable: the address rides in the child's
+own command line, which is also why it works on serial runs. `CMUX_FANOUT_ORCHESTRATOR` stays what
+it is — a different address for a different kind of message.
+
 
 ## Step 4 — Report
 

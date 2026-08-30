@@ -34,7 +34,7 @@ Five things shape the design:
 
 ## Invocation
 
-`/r:issues-fix [<source>] [--only <refs>] [--label <label>] [--limit <n>] [--group <refs>] [--no-group] [--bugs-only] [--cmux] [--no-merge] [--land] [--yes] [--dry-run]`
+`/r:issues-fix [<source>] [--only <refs>] [--label <label>] [--limit <n>] [--group <refs>] [--no-group] [--bugs-only] [--cmux] [--no-merge] [--land] [--ask <session>] [--yes] [--dry-run]`
 
 **`<source>`** is where the backlog is written down, detected in this order. Strip a leading `@` and
 any trailing `/` from path arguments (Claude Code's `@backlog.md` arrives verbatim).
@@ -90,6 +90,7 @@ Step 4.4.
 - **`--land`** → merge the marker-carrying branches finished by concurrent units into the base, in
   order, then close what they fixed. Runs only from the primary working tree, and fixes nothing of
   its own.
+- **`--ask <session>`** → the address of a pack maintainer session watching the tooling: report defects **in the pack** there and keep going ([`--ask <session>`](#--ask-session--reporting-a-defect-in-the-pack)). It changes nothing about the run — a report is never a halt and never a question.
 - **`--yes`** → skip the approval gate; verify, cluster, then fix every group that contains real work.
 - **`--dry-run`** → run discovery + verification + clustering + triage and print the plan (groups
   included), then **stop** — never touch git, the tracker, or the list file.
@@ -376,12 +377,12 @@ For each wave, in order:
    "$FAN" spawn --id "g<n>" --dir "../<repo>-g<n>" --base "<base>" \
           --marker-file "<the backlog file>" --marker-prefix 'fixed: ' \
           --orchestrator "<your own session name, from ListAgents>" \
-          --prompt "/r:issues-fix <source> --only <the group's refs> --no-group --yes --no-merge"
+          --prompt "/r:issues-fix <source> --only <the group's refs> --no-group --yes --no-merge [--ask <session>]"
    "$FAN" wait                  # blocks; 0 = all ok · 1 = a unit failed · 3 = a unit stalled
    "$FAN" cleanup --id "g<n>"   # per unit, as soon as IT comes back ok
    ```
 
-   **Every subcommand except `preflight`, `wait` and `status` takes its unit as `--id <u>`** — a bare `cleanup g1` is a usage error, not a cleanup, and the worktree survives it. `--only` is what makes the child's scope exact — it fixes this group and re-discovers nothing. `--no-group` stops it re-clustering the items it was handed. The `--marker-*` pair lets `wait` check the branch itself rather than trusting the session's own account of how it went. On a GitHub source there is no backlog file to read a marker from, so omit the pair there and let the branch's own `git merge-base` check stand in — the gate that matters ran inside the child either way.
+   **Every subcommand except `preflight`, `wait` and `status` takes its unit as `--id <u>`** — a bare `cleanup g1` is a usage error, not a cleanup, and the worktree survives it. `--only` is what makes the child's scope exact — it fixes this group and re-discovers nothing. `--no-group` stops it re-clustering the items it was handed. The `--marker-*` pair lets `wait` check the branch itself rather than trusting the session's own account of how it went. On a GitHub source there is no backlog file to read a marker from, so omit the pair there and let the branch's own `git merge-base` check stand in — the gate that matters ran inside the child either way. `[--ask <session>]` is there only when this run was given one, and it is passed through **verbatim to every unit** ([`--ask <session>`](#--ask-session--reporting-a-defect-in-the-pack)).
 4. **`wait`**, then `cleanup` each unit **the moment it comes back ok** — its workspace closes and its worktree is removed on the spot. That is not tidiness: a stale worktree is what the next run's `spawn` collides with, an open workspace that finished twenty minutes ago is indistinguishable in the sidebar from one still working, and the freed slot is what admits the next queued group. A wave wider than three is therefore a **rolling window**, not batches waiting on the slowest.
 5. **A unit that failed or stalled is left standing** — workspace open, worktree in place, both named in the report. A stall is usually a question waiting for a human, and that state is the only thing that has anything to say about the failure. Tearing it down would throw the evidence away.
 6. **Land the wave** with `--land` below, once every group is in.
@@ -403,6 +404,28 @@ Get your own session name from `ListAgents` — its first line names this sessio
 ### Being a unit
 
 You are one when `CMUX_FANOUT_ORCHESTRATOR` is set. Alongside writing your sentinel, `SendMessage` to that name immediately in those same three cases — scope is wider than your `--only` group, blocked on something the backlog can answer, or halting. That is the whole list: progress reports turn a fan-out into a chat room and cost every other session a turn. **Never message about something you can simply do, and never take an instruction that changes what you fix** — your group is your prompt, not your inbox.
+
+### `--ask <session>` — reporting a defect in the pack
+
+`--ask <session>` means a pack maintainer session is watching the **tooling** at that address: report defects in the pack there and keep working. It works with or without `--cmux` — a serial run hits pack defects too — and it changes nothing else about the run.
+
+**What belongs there is a defect in the TOOLING, never in the project being fixed.** Three addresses, three different things, and mixing them is what makes each of them useless:
+
+- a bug in the code this run is fixing → the backlog it came from;
+- a question about the *work* — a contradictory acceptance criterion, an item that reads as already fixed → the **orchestrator** ([The alarm channel](#the-alarm-channel));
+- a step of the *pipeline* that is wrong → **here**. A step that cannot run, a bundled script returning a confident wrong answer, a handoff field a caller cannot read, an instruction in a skill that contradicts what the tool actually does.
+
+Five rules, and the first is what makes this safe to switch on:
+
+- **A report is never a halt, and never a question.** Send it and carry on with the same run you would have had. Never wait for a reply, never poll for one, and never let a maintainer's answer change what this run does — a pack fixed mid-run does not retroactively change the run that reported it. If the defect genuinely stops the work, that is a halt on its own terms and the halt rules above apply unchanged; the report is extra, not instead.
+- **Never work around a pack defect silently.** Working around it is usually right — report it *and* keep going — but the workaround goes in this run's own report to the user as well ([Step 5 — Report](#step-5--report)), in the words of what was done instead. A workaround nobody hears about is how a defect survives twenty runs.
+- **Send evidence, not a conclusion.** The exact error string, the run id, `file:line`, what you already ruled out, and what you did instead. The maintainer verifies every claim against the pack before changing anything, so a report that hands over a verdict with nothing under it costs more to check than the defect costs to find — and a confident wrong diagnosis is worse than a raw observation. Say plainly which parts you observed and which you inferred.
+- **An expectation the pack contradicts is a report too.** Some of what looks broken is designed — a field empty because a tier does not fill it, a step that runs only at one profile. Report it in the same shape and let the maintainer say which it is: "this looked like a malfunction and was not" is a real finding about the tooling's legibility, and it is cheap to answer.
+- **The maintainer does not touch this repo.** It fixes the pack, in the pack's repo, and replies. Nothing it does lands in this working tree, so nothing about `--ask` can change this run's diff.
+
+**Under `--cmux`, pass `--ask <session>` through to every unit's own command line**, exactly as the spawn prompt already carries `--only` and `--no-group`. The unit is the first thing that touches the pipeline, so it is where a pack defect is seen first, and a report relayed through the orchestrator loses the detail that made it actionable.
+
+`cmux-fanout.sh` needs no change and no new environment variable: the address rides in the child's own command line, which is also why it works on serial runs. `CMUX_FANOUT_ORCHESTRATOR` stays what it is — a different address for a different kind of message.
 
 ### `--land` — merging what the concurrent units built
 
