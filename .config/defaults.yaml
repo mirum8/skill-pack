@@ -13,14 +13,14 @@
 # back to claude/opus/medium and names every substitution — a codex model string means
 # nothing to a Claude subagent, and carrying `low` across would silently re-tier it.
 #
-# The `implement` and `fix` rows below deliberately sit on different providers: Claude writes the change,
-# Codex patches it. That means two writers on one change by default, which is exactly what
-# the one-writer rule in task-run-implement.workflow.js argues against for a build fix — so
-# treat it as a trial with a reason rather than a settled shape. The reason is that a fixer's
-# brief is bounded (one named finding, one file, one line) where an implementer's is
-# open-ended, and a bad patch is the most VISIBLE failure in the pipeline: it fails the build,
-# then end-verify, then the next review. Every fix a run applies is recorded with the resolved
-# row, so `python3 lib/skill-stats.py` can bucket by provider once there are rows under it.
+# The `implement` and `fix` rows below sit on the SAME provider, which is what the one-writer
+# rule in task-run-implement.workflow.js asks for: the model that wrote the change is the model
+# that patches it. They are still costed apart — a fixer's brief is bounded (one named finding,
+# one file, one line) where an implementer's is open-ended, so the fixer runs shallower. The
+# constraint that matters is the direction: a fixer must never run DEEPER than the implementer
+# whose code it patches. Every run records the resolved row for both, so
+# `python3 lib/skill-stats.py` can bucket by provider once there are rows under it — and there
+# are none yet on either side, so this whole pair is a measurement in progress, not a result.
 
 steps:
   # The planning half of /r:task-run: the planner, the explorers that map the code for it, and the
@@ -62,23 +62,29 @@ steps:
     judgeEffort: high
 
   implement:
-    provider: claude      # claude | codex
-    model: opus           # claude: fable|opus|sonnet|haiku; codex: passed through to the CLI
+    provider: codex       # claude | codex
+    model: gpt5.6-sol     # codex: passed through to the CLI; claude: fable|opus|sonnet|haiku
     effort: medium        # low | medium | high | xhigh | max
 
-    # This row is also IMPL_RUN in task-run-implement.workflow.js — the value a run uses when it
-    # cannot reach this file at all. File and fallback agreeing is the point: a config the reader
-    # never got to is then indistinguishable from one it read, instead of quietly changing tiers.
+    # IMPL_RUN in task-run-implement.workflow.js is what a run uses when it cannot reach this file
+    # at all, and it is claude/opus/medium — a CLAUDE-SHAPED fallback by construction, because the
+    # fallback path has no provider to set. So a codex row here cannot be mirrored into it, and the
+    # two deliberately disagree. What keeps that honest is the log: a run that could not read this
+    # file says so by name ("the config could not be read — implementers fall back to …"), so the
+    # divergence is visible in the run rather than inferred from a tier.
     #
-    # `medium` is UNDER MEASUREMENT, not settled. Read `implement depth` in lib/skill-stats.py
-    # before moving it: `high` is the baseline at 2.04 correctness and 3.36 readability fixes per
-    # paired review over 42 runs, against 4 runs at `medium`, which the table itself labels a thin
-    # sample. And read both halves — a cheaper implementer that pushes work into fix-correctness
-    # and end-verify-fix has moved cost, not saved it.
+    # `medium` is the depth handed to the Codex CLI as --effort. UNDER MEASUREMENT on both axes:
+    # `implement depth` in lib/skill-stats.py has 42 runs at `high` (2.04 correctness and 3.36
+    # readability fixes per paired review) against 4 at `medium`, and NO codex implementer run at
+    # all — and that table cannot compare providers anyway, since the effort it mines off the items
+    # is the wrapper's rather than the writer's. implProvider/implModel/implEffort in the run
+    # payload is what will answer it. Read both halves when it does: a cheaper implementer that
+    # pushes work into fix-correctness and end-verify-fix has moved cost, not saved it.
 
-    # Read only under `provider: codex` — the Claude subagent that DRIVES the CLI. Inert here, and
-    # kept anyway: the reader still enum-checks these and deliberately does NOT reset them when a
-    # codex row falls back, so the file keeps describing what flipping the provider would do.
+    # LIVE under this row — the Claude subagent that DRIVES the CLI, not the writer. It passes the
+    # brief through, collects a run that outlives the ~600s Bash cap, then reads the working tree to
+    # report filesChanged, testEvidence and blockedOn. `low` is the tempting mistake: a wrapper that
+    # gives up on the collect halts the run over work Codex actually finished.
     wrapperModel: sonnet  # fable | opus | sonnet | haiku
     wrapperEffort: medium # low | medium | high | xhigh | max
 
@@ -87,7 +93,7 @@ steps:
   #
   # The pack's second-largest write-side block after the implementers themselves — ui-fix-minor
   # 595M tokens over 64 runs, fix-correctness 493M over 53, end-verify-fix 238M over 42 — and the
-  # step where Codex is cheapest to try, for the reasons in the header above.
+  # cheaper half of the codex pair the header describes, since a fixer's brief is one finding.
   #
   # A fixer must never run DEEPER than the implementer whose code it patches: the hard thinking
   # (is this finding real, what should change) already happened in triage. Nothing enforces that

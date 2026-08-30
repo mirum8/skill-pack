@@ -245,11 +245,13 @@ stays that skill's store. Rules that are load-bearing:
   recorded fact. The table cannot yet compare **providers** — the mined effort is the *subagent's*,
   and on codex that is the driver's rather than the writer's — which is why the resolved row is
   written into the run payload as `implProvider`/`implModel`/`implEffort`. The shipped default is
-  claude/`opus`/`medium`, which is also `IMPL_RUN`: file and fallback agreeing means a run that
-  could not reach the config is indistinguishable from one that read it, rather than quietly
-  changing tiers. `medium` itself is the thin half of that table — 4 runs against `high`'s 42 —
-  so it is a direction under measurement, not a settled answer.
-- **The fixers are configured the same way, and deliberately not on the same provider.**
+  codex/`gpt5.6-sol`/`medium`, driven by a sonnet/medium wrapper, and it cannot agree with
+  `IMPL_RUN`: that fallback is claude/`opus`/`medium` and has no provider to set, so a codex row is
+  unmirrorable there by construction. The workflow names the substitution in its log instead, which
+  is what keeps an unreachable config visible rather than a silent tier change. `medium` is the
+  thin half of that table — 4 runs against `high`'s 42, and none of them codex — so it is a
+  direction under measurement, not a settled answer.
+- **The fixers are configured the same way, on the same provider as the implementers.**
   `steps.fix` governs the three fixers in `task-review` — `fix-correctness`, `end-verify-fix`,
   `ui-fix-minor` — with the same five keys; `FIX_RUN` is their fallback. Not the readability
   refactor, which invokes `/r:code-refactor` and would have nothing to hand a CLI. They are the
@@ -258,10 +260,9 @@ stays that skill's store. Rules that are load-bearing:
   Two consequences to hold onto. A fixer must never run **deeper** than the implementer whose code
   it patches, and nothing enforces that across two independent rows — `task-review` does not read
   `steps.implement`, and a silent clamp would override a value the user can see in their own file.
-  And the shipped pair means Claude writes the change while Codex patches it, which **inverts**
-  the one-writer rule rather than satisfying it; it is a trial with a reason (a fixer's brief is
-  one finding at one line, and a bad patch fails the build, then end-verify, then the next review),
-  not the rule being met. `fixProvider`/`fixModel`/`fixEffort` go into the review's payload so the
+  And the shipped pair puts writer and fixer on the same provider, which is the one-writer rule
+  met rather than worked around — Codex writes the change and Codex patches it, shallower, because
+  a fixer's brief is one finding at one line. `fixProvider`/`fixModel`/`fixEffort` go into the review's payload so the
   question can eventually be answered from rows rather than argued.
 - **On codex the writer and the wrapper are separate settings, because they fail differently.**
   `model`/`effort` reach the Codex CLI; `wrapperModel`/`wrapperEffort` (`sonnet`/`medium`, fallback
