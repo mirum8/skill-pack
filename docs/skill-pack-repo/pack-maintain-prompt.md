@@ -89,6 +89,65 @@ next editor.
 - Where things live: `skills/<name>/SKILL.md`, the two workflow scripts, `lib/`, `hooks/`,
   `tools/validate.py`, and the per-script suites CLAUDE.md lists under "Commands".
 
+## Also add the `--ask <session>` flag to `/r:plan-run` and `/r:issues-fix`
+
+The skill is the receiver; this is the sender. Both skills get the same flag, the same wording and
+the same section, because both drive the same two pipelines and a rule that differs between them is
+a rule that will drift.
+
+In each `SKILL.md`: add `[--ask <session>]` to the `## Invocation` synopsis line, a bullet in the
+flag list pointing at the section, and the section itself.
+
+- In `/r:issues-fix` put the bullet before `--yes`, and the section between "The alarm channel" and
+  "`--land` — merging what the concurrent units built".
+- In `/r:plan-run` put the bullet before `--yes`, and the section between "Every workaround is
+  named" and "Step 4 — Report". Its bullet should also say it pairs with `--unattended`, which
+  otherwise works around a pack defect and leaves nobody able to fix it any the wiser.
+
+**What the section says.** `--ask <session>` means a pack maintainer session is watching the tooling
+at that address: report defects in the pack there and keep working. It works with or without
+`--cmux` — a serial run hits pack defects too.
+
+**What belongs there is a defect in the TOOLING, never in the caller's project.** Three addresses,
+three different things, and mixing them is what makes each useless: a bug in the code being fixed
+goes in the backlog or the plan; a question about the work — a contradictory acceptance criterion, a
+phase that reads as already built — goes to the **orchestrator**; a step of the pipeline that is
+wrong goes **here**. A pipeline step that cannot run, a bundled script that returns a confident
+wrong answer, a handoff field a caller cannot read, an instruction in a skill that contradicts what
+the tool does.
+
+Five rules, and the first is what makes this safe to switch on:
+
+- **A report is never a halt, and never a question.** Send it and carry on with the same run you
+  would have had. Never wait for a reply, never poll for one, and never let a maintainer's answer
+  change what this run does — a pack fixed mid-run does not retroactively change the run that
+  reported it. If the defect genuinely stops the work, that is a halt on its own terms and the
+  existing halt rules apply; the report is extra, not instead.
+- **Never work around a pack defect silently.** Working around it is usually right — report it *and*
+  keep going — but the workaround goes in the run's own report to the user as well, in the words of
+  what was done instead. A workaround nobody hears about is how a defect survives twenty runs.
+- **Send evidence, not a conclusion.** The exact error string, the run id, `file:line`, what was
+  already ruled out, and what was done instead. The maintainer must verify every claim against the
+  pack before changing it, so a report that hands over a verdict with nothing under it costs more to
+  check than the defect costs to find — and a confident wrong diagnosis is worse than a raw
+  observation. Say plainly which parts were observed and which were inferred.
+- **An expectation the pack contradicts is a report too.** Some of what looks broken is designed — a
+  field empty because a tier does not fill it, a step that runs only at one profile. Report it in
+  the same shape and let the maintainer say which; "this looked like a malfunction and was not" is a
+  real finding about the tooling's legibility, and it is cheap to answer.
+- **The maintainer does not touch the caller's repo.** It fixes the pack, in the pack's repo, and
+  replies. Nothing it does lands in the caller's working tree, so nothing about `--ask` can change
+  that run's diff.
+
+**Under `--cmux`, pass `--ask <session>` through to every unit's own command line**, exactly as the
+spawn prompt already carries `--only`/`--no-group` (issues-fix) and `--phases`/`--no-merge`
+(plan-run). The unit is the first thing that touches the pipeline, so it is where a pack defect is
+seen first, and a report relayed through the orchestrator loses the detail that made it actionable.
+
+No change to `cmux-fanout.sh`: the address rides in the child's own command line, so it needs no new
+env var and works on serial runs too. `CMUX_FANOUT_ORCHESTRATOR` stays what it is — a different
+address for a different kind of message.
+
 ## Pack constraints — get these wrong and the gate fails silently
 
 - **`disable-model-invocation: true`.** This skill edits the pack and commits; nobody wants that
@@ -115,7 +174,9 @@ the `--ask` sections of `/r:plan-run` and `/r:issues-fix`, which name the skill 
 
 ## Done when
 
-`./validate.sh` is green, `./install.sh` has published it, `python3 tools/run-evals.py --skill
-pack-maintain --dry-run` shows the behaviour case is present, and the case count `run-evals.py`
-prints is the one you expect — a suite that is entirely skipped is a green gate over nothing
-measured. Then commit, and tell me the name so I can pass it as `--ask`.
+The skill exists, `--ask` is in both `/r:plan-run` and `/r:issues-fix` — synopsis line, flag bullet
+and section in each — `./validate.sh` is green, `./install.sh` has published it, and `python3
+tools/run-evals.py --skill pack-maintain --dry-run` shows the behaviour case is present. Read the
+case count `run-evals.py` prints rather than the one in `evals.json`: a suite that is entirely
+skipped is a green gate over nothing measured. Then commit, and tell me the name so I can pass it
+as `--ask`.
