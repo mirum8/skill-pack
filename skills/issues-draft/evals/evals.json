@@ -6,7 +6,7 @@
       "name": "routing-triggers",
       "kind": "trigger",
       "prompt": "the client sent this list of 16 changes for the portal — turn it into issues we can work through, and tell me which ones are already done",
-      "expected_output": "issues-draft loads, splits the message into one item per ask keeping the sender's numbering, verifies each against the codebase read-only, and writes issues-<slug>.md with the actionable work plus issues-<slug>-notes.md with the questions, the already-built findings and anything touching architecture or the estimate.",
+      "expected_output": "issues-draft loads, splits the message into one item per ask keeping the sender's numbering, verifies each against the codebase read-only, and writes issues-<slug>-<yyyy-MM-dd>.md (today's date, read from the shell) with the actionable work plus issues-<slug>-<yyyy-MM-dd>-notes.md with the questions, the already-built findings and anything touching architecture or the estimate.",
       "files": [],
       "fixture": null,
       "assertions": []
@@ -27,7 +27,7 @@
       "name": "routing-triggers-russian-paste",
       "kind": "trigger",
       "prompt": "Приветствую еще раз,\n1. Везде заменить рабочее название Auto Import на «Карнетъ».\n2. Добавить возможность переименовывать созданную сделку.\n3. Уточните, пожалуйста, что означает пункт «Коммерческий транспорт» в профиле брокера.\nЕсли по каким-то пунктам текущая реализация уже отличается или изменение затрагивает архитектуру/смету, отметьте отдельно.\n\nразбери это по задачам",
-      "expected_output": "issues-draft loads on a non-English message with no explicit skill name. Items 1 and 2 are work and reach issues-<slug>.md with their Russian titles verbatim and English acceptance criteria; item 3 is a question and goes to the notes file answered from the code; the closing paragraph is a meta-instruction, not a backlog item, and shapes the notes file's architecture/estimate section instead.",
+      "expected_output": "issues-draft loads on a non-English message with no explicit skill name. Items 1 and 2 are work and reach issues-<slug>-<yyyy-MM-dd>.md with their Russian titles verbatim and English acceptance criteria; item 3 is a question and goes to the notes file answered from the code; the closing paragraph is a meta-instruction, not a backlog item, and shapes the notes file's architecture/estimate section instead.",
       "files": [],
       "fixture": null,
       "assertions": []

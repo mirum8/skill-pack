@@ -3,8 +3,8 @@ description: >-
   Turn a free-text message — a client email, a chat dump, meeting notes, a numbered wishlist — into
   a verified backlog: split it into discrete asks, check each against the actual codebase (already
   built? built differently from what the sender assumes? which files does it touch?), separate the
-  real work from the questions, and write `issues-<slug>.md`, an unticked checklist `/r:issues-fix`
-  consumes directly, plus `issues-<slug>-notes.md` carrying the questions, the already-built
+  real work from the questions, and write `issues-<slug>-<yyyy-MM-dd>.md`, an unticked checklist
+  `/r:issues-fix` consumes directly, plus `issues-<slug>-<yyyy-MM-dd>-notes.md` carrying the questions, the already-built
   findings and anything that moves architecture or the estimate. Titles keep the sender's own
   wording and numbering, in any language, so every line maps back to the message it came from. Use
   when the user pastes or points at a message full of asks — "turn this into issues", "make a
@@ -20,8 +20,8 @@ Take a message written by a human — a client email, a chat thread, a meeting n
 
 The two files have two readers, which is why there are two:
 
-- **`issues-<slug>.md` is machine input.** `/r:issues-fix` reads it, so it holds only real work, in exactly the shape that parser expects. A question sitting in it costs a read-only verifier on every future run and never becomes anything.
-- **`issues-<slug>-notes.md` is the reply.** Questions the sender must answer, asks the code has already overtaken, places where the sender's description of current behaviour is not what the code does, and anything that moves architecture or the estimate. Nobody hands a client a checklist of internal risk ratings, and nobody implements from a discussion document.
+- **`issues-<slug>-<yyyy-MM-dd>.md` is machine input.** `/r:issues-fix` reads it, so it holds only real work, in exactly the shape that parser expects. A question sitting in it costs a read-only verifier on every future run and never becomes anything.
+- **`issues-<slug>-<yyyy-MM-dd>-notes.md` is the reply.** Questions the sender must answer, asks the code has already overtaken, places where the sender's description of current behaviour is not what the code does, and anything that moves architecture or the estimate. Nobody hands a client a checklist of internal risk ratings, and nobody implements from a discussion document.
 
 Four things shape the design:
 
@@ -36,7 +36,7 @@ Four things shape the design:
 
 **The message** is the text itself, pasted into the prompt, or `@notes.md` / a path to a file holding it (strip a leading `@` and any trailing `/`). With no argument, use the message already in this conversation — the common case. If there is no message in reach, ask for one; that is the only place this run stops for input.
 
-- **`--out <slug|path>`** → name the output. A bare slug becomes `issues-<slug>.md` and `issues-<slug>-notes.md`; a path is used as given, with `-notes` inserted before the extension for the second file. Default: a slug from the project or the subject of the message, written into an existing `issues/` directory if the repo has one and at the repo root otherwise — a project that keeps a folder for these has decided where they go, and it is usually git-ignored on purpose.
+- **`--out <slug|path>`** → name the output. A bare slug becomes `issues-<slug>-<yyyy-MM-dd>.md` and `issues-<slug>-<yyyy-MM-dd>-notes.md`, dated with today (Step 0); a path is used as given, undated, with `-notes` inserted before the extension for the second file — a name the user typed in full is the name they want. Default: a slug from the project or the subject of the message, written into an existing `issues/` directory if the repo has one and at the repo root otherwise — a project that keeps a folder for these has decided where they go, and it is usually git-ignored on purpose.
 - **`--no-verify`** → split and classify without reading any code, for a message that arrives before the repo does or one about a codebase you do not have here. The backlog is still written; every item is marked `unverified` in the notes and the report says so, because an unverified backlog looks exactly like a verified one on disk.
 
 ## Step 0 — Resolve the message and the codebase
@@ -44,8 +44,9 @@ Four things shape the design:
 Establish both first, and say what you resolved:
 
 1. **The message.** Argument, file, or the conversation. Record how many discrete asks you expect to find (a numbered list announces its own count — a check on Step 1, not an instruction).
-2. **The codebase to verify against.** The current repo by default. Note the branch and the short commit, and put both in the backlog file's header: verification is a statement about one revision, and a month later that header is the only thing that says which.
-3. **No repo, or no code that relates to the message** → say so and continue as `--no-verify`. Never quietly skip verification and present the result as if the code had been read; the whole value of the notes file is that somebody looked.
+2. **Today's date**, from `date +%F`, for the filename suffix and the header. Read it from the shell, never from memory: a model's idea of today is its training cutoff, and a backlog filed under the wrong day sorts into the wrong place forever.
+3. **The codebase to verify against.** The current repo by default. Note the branch and the short commit, and put both in the backlog file's header: verification is a statement about one revision, and a month later that header is the only thing that says which.
+4. **No repo, or no code that relates to the message** → say so and continue as `--no-verify`. Never quietly skip verification and present the result as if the code had been read; the whole value of the notes file is that somebody looked.
 
 ## Step 1 — Split into asks
 
@@ -110,14 +111,15 @@ Write both, always, even when one has a single entry — a missing notes file re
 
 The **backlog file** holds title plus acceptance criteria and nothing else — no `touches`, no `risk`: `/r:issues-fix` re-derives both against the code as it stands when the fix happens, and a hint that has aged into a lie is worse than none. The exact format both files use — and the parser contract the backlog side has to satisfy — is [references/output-format.md](references/output-format.md). Read it before writing anything.
 
-If either file already exists, do not silently overwrite it: say so, and either write beside it under a new slug or merge into it, keeping every existing ticked item exactly as it is. A ticked item is done — never re-offer it and never un-tick it.
+Before writing, look for an existing pair under this slug on **any** date — `issues-<slug>-*.md`. A follow-up message about the same subject merges into the pair it finds, name and date unchanged: the suffix records the day the backlog was opened, and a second file would split the backlog `/r:issues-fix` reads in half. Never silently overwrite either file — say what you found, and either merge into it, keeping every existing ticked item exactly as it is, or write beside it under a new slug. A ticked item is done — never re-offer it and never un-tick it.
 
 ## Step 5 — Report
 
 Say what happened, in the shape the sender's own message can be checked against:
 
 ```
-Message: 16 numbered asks → issues-carnet.md (12 items) + issues-carnet-notes.md (6 entries)
+Message: 16 numbered asks → issues-carnet-2026-08-18.md (12 items)
+                          + issues-carnet-2026-08-18-notes.md (6 entries)
 Verified against avtoportal @ main 4c953b5.
 
 Backlog (12):

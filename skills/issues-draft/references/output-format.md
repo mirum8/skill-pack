@@ -4,13 +4,16 @@ One message in, two documents out. They share a slug and nothing else: the backl
 machine, the notes are read by the person who sent the message.
 
 ```
-issues-<slug>.md        the backlog  — /r:issues-fix reads this
-issues-<slug>-notes.md  the reply    — nothing parses this
+issues-<slug>-<yyyy-MM-dd>.md        the backlog  — /r:issues-fix reads this
+issues-<slug>-<yyyy-MM-dd>-notes.md  the reply    — nothing parses this
 ```
 
-`<slug>` names the subject, not the date: `issues-carnet.md`, not `issues-2026-08-18.md`. A second
-message about the same subject should merge into the same backlog, and a date in the name
-guarantees it never will.
+`<slug>` names the subject and the suffix the day the backlog was opened, read from `date +%F`
+and never from memory: `issues-carnet-2026-08-18.md`, not `issues-2026-08-18.md` — the subject is
+what a reader searches for, the date only orders the folder. The date is *not* a new-file trigger:
+a second message about the same subject merges into the pair already on disk under that slug,
+whatever date it carries, because a backlog split across two files is a backlog `/r:issues-fix`
+reads half of.
 
 ## The backlog file
 
@@ -23,7 +26,7 @@ item's body. Write to that shape and the handoff works; improvise and items sile
 # Карнетъ — backlog from the message of 18 Aug 2026
 
 16 asks in the message; 12 are work and are below. The other 4 — a question, two already
-built, one that needs more detail — are in `issues-carnet-notes.md`, with what the code
+built, one that needs more detail — are in `issues-carnet-2026-08-18-notes.md`, with what the code
 says about each. `[#n]` is the sender's own numbering.
 
 Verified against `avtoportal` @ `main` `4c953b5`.
@@ -73,7 +76,7 @@ sections, each of which can be empty *and must then say so*, because an absent s
 # Карнетъ — notes on the message of 18 Aug 2026
 
 Read against `avtoportal` @ `main` `4c953b5`. The 12 buildable asks are in
-`issues-carnet.md`; this file covers what did not become work, plus three asks that did
+`issues-carnet-2026-08-18.md`; this file covers what did not become work, plus three asks that did
 but that touch architecture or the estimate.
 
 ## Questions — need an answer before they can become work
@@ -121,7 +124,8 @@ rather than working inside one.
 
 ## Merging into an existing pair
 
-A follow-up message about the same subject appends to both files rather than starting new ones:
+A follow-up message about the same subject appends to both files rather than starting new ones, and
+the filenames keep the date they were opened under — the suffix dates the backlog, not the last edit:
 
 - Existing items — ticked or not — are left byte-identical. A ticked item is finished work, and
   nothing in a new message un-finishes it.
