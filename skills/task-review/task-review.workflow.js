@@ -271,12 +271,39 @@ const UIRES = {
 // The deploy is its own step now (Phase 7a), so it needs its own contract. `ok` is the gate the
 // two verifier halves hang off: a deploy that didn't come up must never let them test stale code
 // or, worse, whatever the previous run left running.
+// One lookup per merge-blocking end-verify finding: is the code it describes still in the file it
+// cites? A LOOKUP, never a judgement — the question is what the file holds, not whether the finding
+// would be right if it did.
+const STALE = {
+  type: 'object', additionalProperties: false,
+  required: ['verdicts'],
+  properties: {
+    verdicts: {
+      type: 'array',
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['finding', 'present'],
+        properties: {
+          finding: { type: 'string' },  // echoed back verbatim, so a verdict can be matched to its finding
+          present: { type: 'boolean' }, // false ONLY when the cited code is definitely not there
+          note: { type: 'string' },
+        },
+      },
+    },
+  },
+}
 const DEPLOY = {
   type: 'object', additionalProperties: false,
   required: ['ok'],
   properties: {
     ok: { type: 'boolean' },
     url: { type: 'string' },     // the helper-resolved BASE_URL — ephemeral in a worktree
+    // Did this step actually rebuild, or did it find something already answering? Liveness is not
+    // freshness: a container that predates the diff passes every health check there is, and the
+    // halves are then told the orchestrator owns a stack it never built. Observed — both halves
+    // blocked on a 2-hour-old build and had to prove it stale from container start times and a
+    // `unzip -l` of the packaged jar, which is forensics a verification step should never need.
+    redeployed: { type: 'boolean' },
     reason: { type: 'string' },  // one line, only when ok=false
     // /test-app is not on disk after all. Distinct from every other ok=false because it is an
     // absent PREREQUISITE, not a failure: the UI track is then SKIPPED, not blocked, and nobody
@@ -2045,9 +2072,22 @@ const uiTrack = async () => {
             "$WTD" base-url '<the default BASE_URL>'
           If the test-app skill names a non-default compose file or app service, export
           COMPOSE_FILE / APP_SERVICE / APP_CONTAINER_PORT first so the helper isolates the right one.
+          RUN THE DEPLOY EVEN IF SOMETHING ALREADY ANSWERS AT THAT URL, and set redeployed=true only
+          because you ran it. A live URL proves a stack exists; it says nothing about WHICH BUILD is
+          in it, and the stack you find may be hours old and predate every line of this diff. That
+          is not a corner case — it is what a developer's own running app looks like from here. An
+          agent that curls the URL, sees a 200 and reports ok=true has satisfied step 3 without
+          doing step 2, and both UI halves are then told "already deployed and healthy, do not
+          redeploy" and sent to read yesterday's app.
        3. Run the health check against the resolved URL. Return ok=true with that url ONLY if the
-          app actually answers. Otherwise return ok=false and a one-line reason — never report a
-          deploy you did not observe come up.
+          app actually answers AND you redeployed it in step 2. Otherwise return ok=false and a
+          one-line reason — never report a deploy you did not observe come up.
+       3b. Set \`redeployed\`: true when step 2's deploy command ran and succeeded, false otherwise.
+          If you could not redeploy but something is answering, that is ok=false with
+          redeployed=false and the reason — NOT a usable stack. Handing on a URL you did not
+          rebuild is the one outcome this step must never produce: the halves cannot tell a stale
+          build from a current one without doing forensics on container ages, and a run that makes
+          them do that has already lost its UI gate.
        On the WEB path only: if you are in a linked git worktree and the helper is missing or not
        executable, return ok=false with that reason — deploying on the project's default port from
        a worktree would collide with the main stack, which is the whole failure this helper exists
@@ -2113,10 +2153,19 @@ const uiTrack = async () => {
       log(`post-task-review: UI verification SKIPPED — ${uiMissing}. Nothing was verified in a ` +
           `browser; this is a skip, not a clean bill.`)
       ui = { ran: false, findings: [], coverage: `SKIPPED — ${uiMissing}` }
-    } else if (!dep || !dep.ok || !depHandle) {
+    } else if (!dep || !dep.ok || !depHandle || (depSurface === 'web' && dep.redeployed === false)) {
       // A failed deploy is a blocked TRACK, not a clean UI pass. ran=false makes blocked() true,
       // so tracksBlocked names it and nothing downstream reads this as "the UI was verified".
-      const why = (dep && dep.reason) || 'no usable result'
+      //
+      // An explicit `redeployed: false` on the web path belongs here too, and it is the case that
+      // looks least like a failure: the app answers, the URL resolves, and everything downstream
+      // would proceed against a build made before this diff existed. Blocking here costs one run;
+      // the alternative costs both halves, which then report a blockage the gate cannot close. Only
+      // an EXPLICIT false blocks — an absent field is a deploy that predates the flag, and treating
+      // silence as a stale stack would block every run that never had one.
+      const why = (dep && dep.reason)
+        || (dep && dep.redeployed === false ? 'the app answers but this step did not rebuild it — the running build may predate this diff' : '')
+        || 'no usable result'
       log(`post-task-review: UI verification NOT run — deploy failed (${why}).`)
       ui = { ran: false, findings: [] }
       // The reason has to go somewhere a reader can find without the transcript. blockedReasons is
@@ -2517,7 +2566,56 @@ const tracksSkipped = TRACKS.filter(([, r, ran]) => ran && skipped(r)).map(([n])
 // every major finding the size gate withheld from the fixer. Both are outstanding defects — a
 // caller merges on 'passed', so a finding nobody applied must be able to stop that word exactly
 // like a finding nobody fixed successfully.
-const endVerifyOutstanding = endVerifyUnresolved.concat(endVerifyMajor.filter(m => !endVerifyUnresolved.includes(m)))
+let endVerifyOutstanding = endVerifyUnresolved.concat(endVerifyMajor.filter(m => !endVerifyUnresolved.includes(m)))
+// A finding that blocks the merge is checked against the file it cites before it is reported.
+//
+// The failure this exists for: end-verify raised a CONFIRMED correctness finding against an echo
+// block that an earlier fix IN THE SAME RUN had already deleted — a `r:code-quality` extraction the
+// caller could see in its own `appliedFindings`, marked fixed:true. `findings-unresolved` is a
+// merge gate, so a dead finding blocks a correct diff, and the caller cannot date a finding
+// against the fix phase that preceded it without redoing the whole analysis. That one cost a
+// reporter an investigation, a regression test, a redeploy and a second full review. Its suggested
+// fix would also have caused a regression, which is the part that makes reporting one unchecked
+// worse than reporting none.
+//
+// A lookup, at the cheap tier, for the same reason the plan review's citation lane is: "does this
+// file still contain what the finding describes" needs a reader, not a judge. And it FAILS OPEN in
+// every direction — a dead agent, a missing verdict, an unreadable file or any answer short of an
+// explicit `present: false` leaves the finding standing. Silence must never read as agreement:
+// dropping a live finding here would merge an unreviewed defect, which is worse than the stale
+// finding this removes.
+const endVerifyStale = []
+if (endVerifyOutstanding.length) {
+  const cite = await agent(
+    `For each finding below, answer ONE question by READING THE FILE IT CITES: is the code the
+     finding describes still there?
+
+     This is a LOOKUP, not a review. Do not judge whether the finding would be correct, whether the
+     fix is a good idea, or whether the code has a bug. Read the cited file around the cited line
+     and answer what is in it. A finding is written as \`<file>:<line> [<category>] <claim>\`; the
+     line number may have moved, so read the file, not only that line.
+
+     present=false ONLY when the code the finding describes is definitely NOT in that file any
+     more — it was deleted, extracted elsewhere, or replaced by something the finding does not
+     describe. Everything else is present=true, and that includes: the file will not open, the
+     claim is too vague to match against, the code is there but the finding may be wrong about it,
+     or you are unsure. Being unsure is present=true. A finding you drop here is never reported to
+     anyone, so guessing costs a real defect.
+
+     Echo each finding back verbatim in 'finding' so the answers can be matched up.
+${endVerifyOutstanding.map((f) => `       - ${f}`).join('\n')}`,
+    { label: 'end-verify-cite', phase: 'End-verify', schema: STALE, ...GP, ...ECHO }).catch(() => null)
+  const gone = new Set(((cite && cite.verdicts) || []).filter(v => v && v.present === false)
+    .map(v => String(v.finding || '').trim()))
+  if (!cite) {
+    log('post-task-review: the end-verify citation check did not run — every outstanding finding stands as reported')
+  } else if (gone.size) {
+    for (const f of endVerifyOutstanding) if (gone.has(f.trim())) endVerifyStale.push(f)
+    endVerifyOutstanding = endVerifyOutstanding.filter((f) => !gone.has(f.trim()))
+    endVerifyUnresolved = endVerifyUnresolved.filter((f) => !gone.has(f.trim()))
+    log(`post-task-review: ${endVerifyStale.length} end-verify finding(s) cite code that is no longer in the file — an earlier fix in this run removed it. Dropped from the gate and reported separately: ${endVerifyStale.join(' | ')}`)
+  }
+}
 const endVerifyVerdict = !endVerifyWanted ? 'skipped'
   : endVerifyBlocked ? 'blocked'
   : (endVerifyOutstanding.length ? 'findings-unresolved' : 'passed')
@@ -2789,6 +2887,10 @@ return {
   // from the fixer. Empty on 'passed'/'skipped'. This is the difference between surfacing a defect
   // to the caller and swallowing it.
   endVerifyFindings: endVerifyOutstanding,
+  // Findings a pass raised whose cited code an earlier fix in THIS SAME RUN had already removed.
+  // Reported, never gated on: they describe a tree that no longer exists, and a caller acting on
+  // one would re-introduce what the fix deleted. Empty is the normal case.
+  endVerifyStale,
   // The subset of the above that was NEVER APPLIED because its fix was large or risky. The caller
   // decides these: they are the findings that would have let the last agent to touch the diff
   // reshape what the change was for, and no pass re-reads this code.

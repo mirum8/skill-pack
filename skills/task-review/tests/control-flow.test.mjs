@@ -591,6 +591,38 @@ test('the runtime gate is a full-tier decision — standard never dispatched tha
   assert.doesNotMatch(logText, /runtime-and-failures hunter SKIPPED/)
 })
 
+test('a deploy that did NOT rebuild blocks the UI track, however healthy the app is', async () => {
+  // The app answered, the URL resolved, and the container was two hours old — so both halves were
+  // told "already deployed and healthy, do not redeploy" and sent to read a pre-change build. They
+  // caught it, from container start times and an `unzip -l` of the jar, and blocked; the gate could
+  // not close. Liveness is not freshness, and proving that should not be a verifier's job.
+  const { out, counts, logText } = await run({
+    triage: baseTriage({ hasTestApp: true, uiTouched: true }),
+    overrides: { 'ui-deploy': { ok: true, url: 'http://localhost:8088', redeployed: false } },
+  })
+  assert.equal(counts['ui-functional'], undefined)
+  assert.equal(counts['ui-visual'], undefined)
+  assert.equal(out.ui.ran, false)
+  assert.equal(out.ui.blocked, true)
+  assert.match(logText, /did not rebuild it/)
+})
+
+test('a deploy that reports no redeployed flag at all still runs — absence is not staleness', async () => {
+  const { out, counts } = await run({
+    triage: baseTriage({ hasTestApp: true, uiTouched: true }),
+    overrides: { 'ui-deploy': { ok: true, url: 'http://localhost:18080' } },
+  })
+  assert.equal(counts['ui-functional'], 1)
+  assert.equal(out.ui.ran, true)
+})
+
+test('the deploy step is told a live URL is not evidence of this build', async () => {
+  const { prompts } = await run({ triage: baseTriage({ hasTestApp: true, uiTouched: true }) })
+  assert.match(prompts['ui-deploy'], /RUN THE DEPLOY EVEN IF SOMETHING ALREADY ANSWERS/)
+  assert.match(prompts['ui-deploy'], /says nothing about WHICH BUILD is/)
+  assert.match(prompts['ui-deploy'], /satisfied step 3 without/)
+})
+
 test('a failed deploy blocks the UI track — it never tests whatever is already running', async () => {
   const { out, counts, logText } = await run({
     triage: baseTriage({ hasTestApp: true, uiTouched: true }),
@@ -1355,6 +1387,63 @@ test('REGRESSION: end-verify findings that survive 2 passes are surfaced, never 
   assert.equal(out.endVerifyFindings.length, 1)
   assert.match(out.endVerifyFindings[0], /still races/)
   assert.match(logText, /reported, NOT fixed/)
+})
+
+test('a finding whose cited code an earlier fix DELETED is dropped from the merge gate', async () => {
+  // wf_25f358af-bd0: end-verify raised a CONFIRMED correctness finding against an echo block that
+  // a `r:code-quality` extraction earlier in the SAME run had already removed — visible to the caller
+  // in its own appliedFindings, fixed:true. `findings-unresolved` is a merge gate, so a dead
+  // finding blocks a correct diff and the caller cannot date it against the fix phase without
+  // redoing the analysis. The suggested fix was also wrong for the codebase, so applying it blind
+  // would have caused a regression.
+  const dead = { file: CHANGED, line: 45, category: 'correctness', what: 'retired-type echo block reintroduces the filter', real: true, fixSize: 'major' }
+  const { out, logText } = await run({
+    overrides: {
+      'fix-triage': { correctness: [`${CHANGED}:42 guard the empty batch`], readability: [] },
+      'end-verify#': { ran: true, findings: [dead] },
+      'end-verify-cite': { verdicts: [{ finding: `${CHANGED}:45 [correctness] retired-type echo block reintroduces the filter`, present: false, note: 'extracted into a fragment' }] },
+    },
+  })
+  assert.equal(out.endVerify, 'passed')
+  assert.equal(out.endVerifyFindings.length, 0)
+  assert.equal(out.endVerifyStale.length, 1)
+  assert.match(out.endVerifyStale[0], /echo block/)
+  assert.match(logText, /no longer in the file/)
+})
+
+test('the citation check FAILS OPEN — a dead reader leaves every finding standing', async () => {
+  // Dropping a live finding merges an unreviewed defect, which is strictly worse than the stale
+  // finding this check exists to remove. Silence is never agreement.
+  const live = { file: CHANGED, line: 7, category: 'correctness', what: 'still races on the badge swap', real: true, fixSize: 'major' }
+  const { out, logText } = await run({
+    overrides: { 'fix-triage': { correctness: [`${CHANGED}:42 guard the empty batch`], readability: [] },
+      'end-verify#': { ran: true, findings: [live] }, 'end-verify-cite': null },
+  })
+  assert.equal(out.endVerify, 'findings-unresolved')
+  assert.equal(out.endVerifyFindings.length, 1)
+  assert.deepEqual(out.endVerifyStale, [])
+  assert.match(logText, /citation check did not run/)
+})
+
+test('"unsure" keeps a finding — only an explicit present:false drops one', async () => {
+  const live = { file: CHANGED, line: 7, category: 'correctness', what: 'still races on the badge swap', real: true, fixSize: 'major' }
+  for (const verdicts of [[], [{ finding: 'something else entirely', present: false }],
+                          [{ finding: `${CHANGED}:7 [correctness] still races on the badge swap`, present: true }]]) {
+    const { out } = await run({
+      overrides: { 'fix-triage': { correctness: [`${CHANGED}:42 guard the empty batch`], readability: [] },
+      'end-verify#': { ran: true, findings: [live] }, 'end-verify-cite': { verdicts } },
+    })
+    assert.equal(out.endVerify, 'findings-unresolved', JSON.stringify(verdicts))
+    assert.equal(out.endVerifyFindings.length, 1, JSON.stringify(verdicts))
+  }
+})
+
+test('a clean end-verify pays nothing for the citation check', async () => {
+  const { counts, out } = await run({
+    overrides: { 'fix-triage': { correctness: [`${CHANGED}:42 guard the empty batch`], readability: [] } },
+  })
+  assert.equal(out.endVerify, 'passed')
+  assert.equal(counts['end-verify-cite'], undefined)
 })
 
 // ------------------------------------------- the end-verify size gate ---
