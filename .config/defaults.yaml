@@ -83,9 +83,21 @@ steps:
 
     # LIVE under this row — the Claude subagent that DRIVES the CLI, not the writer. It passes the
     # brief through, collects a run that outlives the ~600s Bash cap, then reads the working tree to
-    # report filesChanged, testEvidence and blockedOn. `low` is the tempting mistake: a wrapper that
-    # gives up on the collect halts the run over work Codex actually finished.
-    wrapperModel: sonnet  # fable | opus | sonnet | haiku
+    # report filesChanged, testEvidence and blockedOn.
+    #
+    # `haiku` is AN EXPERIMENT UNDER MEASUREMENT here, not a settled value, and it is the direction
+    # this row was warned against: a wrapper that gives up on the collect halts the run over work
+    # Codex actually finished, and that is invisible to every reviewer downstream. Two things make
+    # it worth trying anyway. The wait is now ONE blocking shell loop rather than a poll per turn,
+    # so whether a live PID "looks stuck" is no longer a judgement the model makes — which was the
+    # actual failure, not depth. And the evidence this agent reports is the working tree, not its
+    # own reading: `git status --porcelain` and `git diff` decide filesChanged, so a shallower
+    # model has less room to be wrong about what landed.
+    #
+    # `wrapperEffort` does NOT follow it down. The collect needs no depth, but the tree read at the
+    # end is a real one. If this experiment fails it will look like blocked slices over a working
+    # tree that already holds the change — put it back to sonnet and say so here.
+    wrapperModel: haiku   # fable | opus | sonnet | haiku
     wrapperEffort: medium # low | medium | high | xhigh | max
 
   # The three fixers in /r:task-review: fix-correctness, end-verify-fix, ui-fix-minor. Not the
@@ -106,10 +118,14 @@ steps:
 
     # Under `provider: codex` only: the Claude subagent that DRIVES the CLI — it passes the finding
     # through, collects a run that outlives the ~600s Bash cap, then reads the working tree to
-    # report what landed. Not the writer, and not free to be the cheapest thing available: a
-    # wrapper that gives up on the collect halts the run over work Codex actually finished, and
-    # the finding is then reported unfixed.
-    wrapperModel: sonnet  # fable | opus | sonnet | haiku
+    # report what landed. Not the writer.
+    #
+    # `haiku` for the same reason as the implement row above, and it is the same experiment: the
+    # collect is now one blocking shell loop rather than a poll per turn, and what this agent
+    # reports comes from `git diff` rather than from its own reading of Codex's summary. The
+    # failure to watch for is a fix Codex applied being reported as unfixed. `wrapperEffort` stays
+    # at medium — beyond the edits, the rebuild/redeploy/re-verify loop is this agent's own work.
+    wrapperModel: haiku   # fable | opus | sonnet | haiku
     wrapperEffort: medium # low | medium | high | xhigh | max
 
   # How many units /r:plan-run and /r:issues-fix keep live at once under --cmux. One setting, not

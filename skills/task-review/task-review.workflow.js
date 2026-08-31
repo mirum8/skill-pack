@@ -365,6 +365,26 @@ const BATCH_CLAUSE = `
      Batch independent tool calls: when the next calls do not depend on each other's results —
      several greps, several reads, a \`git diff\` beside a \`git status\` — issue them in ONE
      block rather than one per turn. Calls that genuinely need a previous result stay serial.`
+// The background-collect protocol for the codex fixers, worded exactly as task-run words it for
+// the implementers — it is one protocol, and a step that collects differently is a step that
+// reports a different kind of false block.
+//
+// A single BLOCKING call, never a poll per turn, for two reasons that point the same way. Cost: a
+// subagent pays turns x context, every turn re-reading everything accumulated so far, so a wait
+// spent one `ps` at a time pays a full re-read per check and buys nothing. Correctness: every poll
+// is another moment at which the model gets to decide the run looks stuck, and deciding that over
+// a live PID is precisely the failure the preamble below spends paragraphs forbidding — a fix
+// Codex applied, reported as unfixed. A shell loop has no opinion. The bound sits INSIDE the loop
+// and below the cap on purpose: a call the harness kills comes back as a tool ERROR, and a tool
+// error is what talks a wrapper into giving up on a run that was still working.
+const collect = (pad) => `Collect it by WAITING ON THE WORKER PID IN ONE BASH CALL rather than
+${pad}checking it once per turn:
+${pad}  for i in $(seq 1 57); do ps -p <pid> >/dev/null 2>&1 || break; sleep 10; done
+${pad}dispatched with the Bash tool's own timeout set to 590000. It returns the moment the PID is
+${pad}gone; if it returns while the PID is still alive, run it again — that is the wait continuing,
+${pad}never a signal that anything is wrong. Then read the job record's "rendered" field under
+${pad}~/.claude/plugins/data/codex-openai-codex/state/*/jobs/*.json. Never wait on output-size
+${pad}stability — the log goes quiet for minutes mid-reasoning.`
 
 // ------------------------------------------------------- find-bugs hunters ---
 // The pattern hunters of /r:code-bugs Phase 2, spawned by THIS SCRIPT instead of beneath a single
@@ -683,11 +703,22 @@ const REBUILD_RUN = { model: 'sonnet', effort: 'medium' }
 const DEPLOY_RUN = { model: 'sonnet', effort: 'medium' }
 // The Codex tracks (`codex`, every `end-verify` pass) shell out to the real Codex CLI, wait, and
 // parse the report it produces. CODEX does the reviewing; the wrapper's own reasoning adds nothing
-// to the critique, and it was paying the top tier on every standard and full run plus up to two
-// end-verify passes. run-task pins its own Codex agent at exactly this tier for exactly this
-// reason. Not `low`: this agent owns the background-collection protocol whose failures show up as
-// false "the review could not run" blocks, and that is the wrong place to save 20 seconds.
-const CODEX_RUN = { effort: 'medium' }
+// to the critique, so the model is PINNED rather than inherited: unnamed, the tier is whatever the
+// caller happens to be running, which is not a tier anyone chose — 188 end-verify and 143 codex
+// dispatches and 247M tokens sit under these two, mostly opus, for agents that review nothing.
+// run-task pins its own Codex agent at exactly this pair for exactly this reason.
+//
+// Haiku, the same as every other Codex wrapper in the pack: one job, one tier — shell out, wait,
+// hand back what the CLI produced. THE RISK THAT IS SPECIFIC TO THESE TWO, and the reason to read
+// the store rather than argue from here: a fixer has a working tree to check its answer against
+// and reports what `git diff` shows, where these have no tree at all. The report IS the artifact,
+// and the job is marshalling a long free-text critique into FINDINGS without dropping or merging
+// any of it — and `end-verify` is the LAST read of this diff, so nothing downstream catches a
+// finding that never made it across. It shows up in `fixes by source track` as the codex and
+// end-verify rows falling below 0.70 and 0.88 fixes/run while both still report ran:true, never
+// as an error. `medium` is not negotiable alongside it: this agent owns the background-collection
+// protocol whose failures show up as false "the review could not run" blocks.
+const CODEX_RUN = { model: 'haiku', effort: 'medium' }
 // Phase 0 reads the diff into a schema — changed files, build tool, reviewNeeded — plus ONE real
 // judgement: the tier. Same shape as run-task's `source` step, which is pinned here too. The tier
 // is also the most recoverable decision in the pipeline: an under-rated diff still gets the build,
@@ -718,11 +749,20 @@ const TRIAGE_RUN = { effort: 'medium' }
 const FIX_RUN = { model: 'opus', effort: 'medium' }
 // The WRAPPER under `provider: codex` — the Claude subagent that shells out to the Codex CLI, not
 // the writer. `steps.fix.wrapperModel`/`wrapperEffort` decide it; this is the fallback. Separate
-// from CODEX_RUN, which the review tracks carry, so tuning one cannot re-tier the other. Sonnet
-// because the brief is passed through verbatim rather than composed, and `medium` rather than
-// `low` for the reason CODEX_RUN gives: this agent owns the background-collect protocol, and one
-// that gives up early does not save 20s — it reports a fix Codex applied as unfixed.
-const FIX_CODEX_RUN = { model: 'sonnet', effort: 'medium' }
+// from CODEX_RUN, which the review tracks carry, so tuning one cannot re-tier the other even while
+// the two agree: those marshal a free-text critique into FINDINGS with no working tree to check it
+// against, where this one passes a brief through verbatim and then reads `git status --porcelain`
+// and `git diff` to report what landed. The evidence here is the tree, not the agent's reading —
+// which is why the cheap tier has less room to be wrong on this step than on those.
+//
+// HAIKU IS AN EXPERIMENT UNDER MEASUREMENT, not a settled tier. The failure it invites is this
+// agent owning the background-collect protocol and giving up early — which does not save 20s, it
+// reports a fix Codex applied as unfixed. What makes the cheaper tier defensible is that
+// `collect()` above no longer leaves that judgement to the model: the wait is one blocking shell
+// loop with no opinion about whether a live PID looks stuck. `medium` stays — depth is not what
+// the collect needs, but the tree read at the end is a real one, and the loop around the edits
+// (rebuild, redeploy, re-verify) is still this agent's own work.
+const FIX_CODEX_RUN = { model: 'haiku', effort: 'medium' }
 // The UI verifiers are a JUDGING track that must not be pushed any deeper. Measured over 59 stored
 // r:bug-hunter-ui transcripts: 66% of their wall time was model time, spread over a median of 86
 // turns (p90 144) at ~4.2s of thinking each — and the large majority of those turns drive a browser
@@ -1014,9 +1054,7 @@ const codexFixPreamble = `YOU ARE NOT WRITING THIS PATCH YOURSELF. Drive the Cod
 
    If it outlives the ~600s Bash cap it moves to the background. That is expected, not a failure,
    and giving up there is the most common way this step reports work as unfixed that was fixed.
-   Collect it: poll the worker PID, then read the job record's "rendered" field under
-   ~/.claude/plugins/data/codex-openai-codex/state/*/jobs/*.json. Never poll for output-size
-   stability — the log goes quiet for minutes mid-reasoning.
+   ${collect('   ')}
 
    When Codex finishes, VERIFY against the working tree rather than trusting its summary: read
    \`git status --porcelain\` and \`git diff\` for the files it touched, and report from what you
@@ -1024,7 +1062,7 @@ const codexFixPreamble = `YOU ARE NOT WRITING THIS PATCH YOURSELF. Drive the Cod
    run, SAY SO plainly and return — do NOT quietly apply the fixes yourself. A silent substitution
    hides which writer produced the code this review is about to certify, and an honest "not fixed"
    is already handled: the items stay visible and the run reports them unresolved.
-
+${BATCH_CLAUSE}
    `
 // On codex the domain personas do not apply: they carry their own model and their prompts describe
 // an agent that edits directly, where here the subagent only drives the CLI.

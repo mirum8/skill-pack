@@ -186,7 +186,7 @@ steps:
     provider: claude      # claude | codex
     model: opus           # codex: passed to the CLI; claude: fable|opus|sonnet|haiku
     effort: high          # low | medium | high | xhigh | max
-    wrapperModel: sonnet  # codex only — the Claude subagent that DRIVES the CLI
+    wrapperModel: haiku   # codex only — the Claude subagent that DRIVES the CLI
     wrapperEffort: medium #   (not the writer; see below)
   fix:                    # the three fixers in /r:task-review — same five keys
     provider: codex
@@ -199,9 +199,16 @@ steps:
 Under `provider: codex` two agents run and they are tuned apart: Codex writes the code at
 `model`/`effort`, and a Claude subagent at `wrapperModel`/`wrapperEffort` drives the CLI, collects a
 run that outlives the ~600s Bash cap, and reads the working tree to report what landed. They fail
-differently — a cheap writer writes worse code, a cheap wrapper halts the run over work Codex
-actually finished — which is why `wrapperEffort` is not the cheapest thing available. On
-`provider: claude` there is no wrapper and both keys are ignored.
+differently — a cheap writer writes worse code, which the review catches; a cheap wrapper halts the
+run over work Codex actually finished, which nothing catches. On `provider: claude` there is no
+wrapper and both keys are ignored.
+
+The shipped `wrapperModel: haiku` is an experiment under measurement. The wrapper's failure was
+never depth — it was the agent deciding a live worker PID looked stuck — and the collect is now one
+blocking shell loop bounded below the ~600s cap, so that call is no longer the model's to make.
+What it reports comes from `git status --porcelain`/`git diff`, not from Codex's summary.
+`wrapperEffort` deliberately stays at `medium`: the tree read at the end is real work. If runs start
+reporting blocked slices over a working tree that already holds the change, set it back to `sonnet`.
 
 `fanout.maxUnits` is one setting for both skills, because both drive the same fan-out script.
 Three full implement+review pipelines is already the machine's limit, so raise it as a measurement

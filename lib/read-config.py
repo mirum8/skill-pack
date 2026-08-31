@@ -65,7 +65,7 @@ SPEC = {
         # and #55, and then reads the working tree to decide filesChanged, testEvidence and
         # blockedOn. `low` is the tempting mistake — a wrapper that gives up early does not save
         # 20s, it halts the run over work Codex actually finished.
-        "wrapperModel": {"default": "sonnet", "enum": CLAUDE_MODELS},
+        "wrapperModel": {"default": "haiku", "enum": CLAUDE_MODELS},
         "wrapperEffort": {"default": "medium", "enum": EFFORTS},
     },
     # The three fixers in /r:task-review — fix-correctness, end-verify-fix, ui-fix-minor — which
@@ -86,7 +86,7 @@ SPEC = {
         "effort": {"default": "medium", "enum": EFFORTS},
         # The wrapper, exactly as above: a Claude subagent driving the CLI, tuned apart from the
         # writer because a cheap wrapper fails by halting the run over work Codex finished.
-        "wrapperModel": {"default": "sonnet", "enum": CLAUDE_MODELS},
+        "wrapperModel": {"default": "haiku", "enum": CLAUDE_MODELS},
         "wrapperEffort": {"default": "medium", "enum": EFFORTS},
     },
     # The planning half of /r:task-run: the planner itself, the explorers that map the code for it,

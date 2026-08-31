@@ -465,6 +465,26 @@ const BATCH_CLAUSE = `
      Batch independent tool calls: when the next calls do not depend on each other's results —
      several greps, several reads, a \`git diff\` beside a \`git status\` — issue them in ONE
      block rather than one per turn. Calls that genuinely need a previous result stay serial.`
+// The background-collect protocol, in ONE place because it is one protocol: the plan review, the
+// implementers and the build fixer all drive the Codex CLI and all outlive the ~600s Bash cap.
+//
+// It is a single BLOCKING call rather than a poll per turn, for two reasons that point the same
+// way. Cost: a subagent pays turns x context, every turn re-reading everything accumulated so far,
+// so a 20-minute wait spent one `ps` at a time pays a full re-read per check and buys nothing —
+// read off two implementers on one run, 14 extra minutes of waiting cost ~40k tokens. Correctness:
+// every poll is another moment at which the model gets to decide the run looks stuck, and deciding
+// that over a live PID is precisely the false block the preambles below spend paragraphs
+// forbidding. A shell loop has no opinion. The bound sits INSIDE the loop and below the cap on
+// purpose: a call the harness kills comes back as a tool ERROR, and a tool error is exactly what
+// talks a wrapper into halting over work Codex had nearly finished.
+const collect = (pad) => `Collect it by WAITING ON THE WORKER PID IN ONE BASH CALL rather than
+${pad}checking it once per turn:
+${pad}  for i in $(seq 1 57); do ps -p <pid> >/dev/null 2>&1 || break; sleep 10; done
+${pad}dispatched with the Bash tool's own timeout set to 590000. It returns the moment the PID is
+${pad}gone; if it returns while the PID is still alive, run it again — that is the wait continuing,
+${pad}never a signal that anything is wrong. Then read the job record's "rendered" field under
+${pad}~/.claude/plugins/data/codex-openai-codex/state/*/jobs/*.json. Never wait on output-size
+${pad}stability — the log goes quiet for minutes mid-reasoning.`
 // Run one fixed command and report what it printed. There is no branch, no classification and no
 // prose in the output — the comparison that uses it happens in THIS script, not in the agent — so
 // the cheapest model is the right one. Effort is moot at this tier and stays low for clarity.
@@ -498,9 +518,20 @@ const BUILD_RUN = { model: 'sonnet', effort: 'medium' }
 // inherited depth though — it buys nothing on what is otherwise transcription.
 const SOURCE_RUN = { effort: 'medium' }
 // The Codex agent shells out and collects the run; Codex does the reviewing. Its own reasoning
-// adds nothing to the critique. Not `low`, though: this agent owns the background-collection
-// protocol that produced false blocks on #82/#55, and that is the wrong place to save 20s.
-const CODEX_RUN = { effort: 'medium' }
+// adds nothing to the critique, so the model is PINNED rather than inherited: unnamed, the tier is
+// whatever the caller happens to be running, which is not a tier anyone chose — 119 dispatches and
+// 112M tokens sit under this step, mostly opus, for an agent that reviews nothing.
+//
+// Haiku, the same as every other Codex wrapper in the pack: one job, one tier — shell out, wait,
+// hand back what the CLI produced. THE RISK THAT IS SPECIFIC TO THIS ONE, and the reason to read
+// the store rather than argue from here: the implement and fix wrappers have a working tree to
+// check their answer against, where this one has none. The critique IS the artifact, and the job
+// is marshalling a long free-text report into REVIEW without dropping or merging findings —
+// which nothing downstream catches, since there is no second reviewer and the run stops outright
+// if Codex could not run. It shows up as findings-per-plan-review falling while Codex still
+// reports fine, never as an error. `medium` is not negotiable alongside it: this agent owns the
+// background-collection protocol that produced false blocks on #82/#55.
+const CODEX_RUN = { model: 'haiku', effort: 'medium' }
 // Exploration is read-and-map work — extract files/conventions/tests, not judgement — so it
 // runs on a cheaper/faster tier than the inherited main-loop model. medium (not low) because
 // the one consequential call an explorer makes is riskFlags, which gates the light->FULL
@@ -569,18 +600,26 @@ const DESIGN_RUN = { model: 'opus', effort: 'high' }
 const IMPL_RUN = { model: 'opus', effort: 'medium' }
 // The WRAPPER under `provider: codex` — the Claude subagent that shells out to the Codex CLI, not
 // the writer. `steps.implement.wrapperModel`/`wrapperEffort` decide it; this is the fallback.
-// Separate from CODEX_RUN, which the plan reviewer carries, so tuning one cannot re-tier the other.
-// Sonnet because the brief is passed through verbatim rather than composed, and `medium` rather
-// than `low` for the reason CODEX_RUN gives: this agent owns the background-collect protocol that
-// produced false blocks on #82/#55, and then reads the working tree to decide filesChanged,
-// testEvidence and blockedOn. A wrapper that gives up early does not save 20s — it halts the run
-// over work Codex actually finished — which is what wf_9c4f981b-d68 did: every slice set blockedOn
-// while both codex-companion PIDs were still alive, and one of them owned the plan's whole backend
-// half. That is why the preamble states the collect rule as an obligation (a live PID is never a
-// block) rather than as advice: the tier alone did not carry it. Whether `medium` is the right
-// wrapper tier is still a bet with one run behind it — read the paired review before defending
-// either value.
-const IMPL_CODEX_RUN = { model: 'sonnet', effort: 'medium' }
+// Separate from CODEX_RUN, which the plan reviewer carries, so tuning one cannot re-tier the other
+// even while the two agree: that one marshals a free-text critique into a schema with no working
+// tree to check it against, where this one passes a brief through verbatim and then reads
+// `git status --porcelain` and `git diff` to fill filesChanged, testEvidence and blockedOn. The
+// evidence here is the tree, not the agent's reading — which is why the cheap tier has less room
+// to be wrong on this step than on that one.
+//
+// HAIKU IS AN EXPERIMENT UNDER MEASUREMENT, not a settled tier, and the failure it invites is
+// specific: this agent owns the background-collect protocol that produced false blocks on #82/#55,
+// and one that gives up early does not save 20s — it halts the run over work Codex actually
+// finished. wf_9c4f981b-d68 did exactly that: every slice set blockedOn while both codex-companion
+// PIDs were still alive, and one of them owned the plan's whole backend half. What makes the
+// cheaper tier defensible is that `collect()` above no longer leaves that judgement to the model —
+// the wait is one blocking shell loop with no opinion about whether a live PID looks stuck, so the
+// decision the tier used to have to get right is not a decision any more. `medium` stays: depth is
+// not what the collect needs, but the tree read at the end is a real one.
+//
+// Read it off the store rather than defending it from here: the wrapper's tier is the `model` on
+// the mined `implement` items, and a regression shows up as blocked slices over a non-empty tree.
+const IMPL_CODEX_RUN = { model: 'haiku', effort: 'medium' }
 // Triage is SPLIT, not one agent, and the two halves want different depths. Collapsed into one
 // agent at the inherited tier that judges every finding and rewrites the plan, it measures 11
 // minutes and 122k tokens on a real run, most of it re-deriving a code map the explorers already
@@ -1884,9 +1923,7 @@ ${checks.map((c, i) => `     ${i + 1}. ${c}`).join('\n')}
      acceptable, so a false "clean" is worse than an honest failure. A review longer than the
      ~600s Bash cap WILL be moved to the background — that is expected, not a failure, and giving
      up there is the single most common way this step reports a false block. You ARE permitted to
-     poll here: collect the run by polling the worker PID, then read the job record's "rendered"
-     field under ~/.claude/plugins/data/codex-openai-codex/state/*/jobs/*.json. Never poll for
-     output-size stability, because the log goes quiet for minutes mid-reasoning.`,
+     wait here. ${collect('     ')}`,
     { label: `codex-plan-review#${pass}`, phase: 'Plan-review', schema: REVIEW, ...GP, ...CODEX_RUN }))
 
   let review = await askCodex(1)
@@ -2304,9 +2341,7 @@ const codexPreamble = (a) => `YOU ARE NOT WRITING THIS CODE YOURSELF. Drive the 
 
    THIS RUN WILL ALMOST CERTAINLY OUTLIVE THE ~600s Bash CAP AND MOVE TO THE BACKGROUND. That is
    expected, not a failure, and giving up there is the single most common way this step reports a
-   false block. Collect it: poll the worker PID, then read the job record's "rendered" field under
-   ~/.claude/plugins/data/codex-openai-codex/state/*/jobs/*.json. Never poll for output-size
-   stability — the log goes quiet for minutes mid-reasoning.
+   false block. ${collect('   ')}
 
    A LIVE WORKER PID IS NEVER A BLOCK. While \`ps -p <pid>\` still answers, that run is working and
    your job is to keep waiting — implementers average 963s and the long ones pass 40 minutes.
@@ -2332,8 +2367,8 @@ const codexFixClause = `Drive the Codex CLI for this fix rather than editing you
      C="$HOME/.claude/plugins/marketplaces/openai-codex/plugins/codex/scripts/codex-companion.mjs"
      [ -f "$C" ] || C="$(ls -1d "$HOME"/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs | sort -V | tail -n1)"
      node "$C" task --model ${implCfg ? implCfg.model : ''} --effort ${implCfg ? implCfg.effort : ''} --write "<everything below, verbatim>"
-   If it outlives the ~600s Bash cap, collect it the same way: poll the worker PID, then read
-   "rendered" from ~/.claude/plugins/data/codex-openai-codex/state/*/jobs/*.json. If Codex cannot
+   If it outlives the ~600s Bash cap it moves to the background, the same as the implementers.
+   ${collect('   ')} If Codex cannot
    be reached at all, say so plainly — do NOT quietly fix the build yourself, because the next
    build is what decides whether this loop stops and a silent substitution hides which writer
    produced the code the review is about to certify.
@@ -2393,7 +2428,7 @@ const implBrief = (a) => `${implProvider === 'codex' ? codexPreamble(a) : ''}Imp
    - Leave EVERYTHING UNCOMMITTED in the working tree. The whole task lands as ONE commit at the
      very end, after the review — so the reviewer reads the work before any of it is committed.
    - If the plan looks WRONG or blocked, stop and set blockedOn instead of silently deviating. A
-     subagent quietly "improving" on the plan is how a run ends up contradicting its own intent.`
+     subagent quietly "improving" on the plan is how a run ends up contradicting its own intent.${implProvider === 'codex' ? BATCH_CLAUSE : ''}`
 
 const impls = await parallel(areas.map((a) => () =>
   reliable(`implement:${a.label}`, 'Implement', () => agent(

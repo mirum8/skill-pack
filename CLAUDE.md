@@ -223,12 +223,21 @@ stays that skill's store. Rules that are load-bearing:
   is not, and one type covers many steps. Read from the scripts, never a table here, so a reworded
   prompt updates the mapping with the wording; an unmatched prompt stays **unlabelled** and is
   counted as such, because a wrong step name is averaged in silently while a gap is visible.
-  All three shapes a prompt is dispatched in are read — the literal passed to the call, the
-  `prompt:` beside its `label:` in a table of tracks, and the literal under a builder the call
-  passes by name — and a shape that goes unread costs its step every run it ever made: 995 of the
-  1,646 unlabelled items were `implement`, `find-bugs`, `build`, `source` and `judge`, and
-  `implement` alone turned out to be the most expensive step in the pipeline at 1.49B tokens.
-  A chunk two steps share names neither. A stored label is corrected only when it is a step these
+  All four shapes a prompt is dispatched in are read — the literal passed to the call, the
+  `prompt:` beside its `label:` in a table of tracks, the literal under a builder the call passes
+  by name, and a builder chosen by a ternary (`agent(cond ? citePrompt(b) : judgePrompt(b),
+  { label })`, where `label` is that same condition picking between two step names). The ternary's
+  branches are paired by the CONDITION TEXT, never by position: two ternaries that merely sit near
+  each other say nothing about each other. A shape that goes unread costs its step every run it
+  ever made — the plan review's two triage lanes recorded nothing at all under the ternary shape,
+  and the report read `cited% 0%` as though the cheap lane never fired.
+  **Reading the scripts means tokenising them**, which is the same failure one level down: a regex
+  literal carries quotes and backticks as ordinary characters, so a scanner with no notion of one
+  reads `/([^\s:()[\]<>"'`,]+)/` as an opening quote and swallows every prompt up to the next —
+  8.5KB of `task-run-implement.workflow.js`, taking `cite` and `judge` with it. Division must still
+  divide; the `/` is decided by the token before it. `implement` is the most expensive step in the
+  pipeline at 2.13B tokens and `judge` the third at 607M, and neither number was readable while
+  those two shapes went unread. A chunk two steps share names neither. A stored label is corrected only when it is a step these
   same scripts can write — that one is this classifier's own earlier answer, so a disagreement is
   it having improved; a label outside their vocabulary came from a `--label-source` run over older
   scripts and is left alone.
@@ -245,7 +254,7 @@ stays that skill's store. Rules that are load-bearing:
   recorded fact. The table cannot yet compare **providers** — the mined effort is the *subagent's*,
   and on codex that is the driver's rather than the writer's — which is why the resolved row is
   written into the run payload as `implProvider`/`implModel`/`implEffort`. The shipped default is
-  codex/`gpt5.6-sol`/`medium`, driven by a sonnet/medium wrapper, and it cannot agree with
+  codex/`gpt5.6-sol`/`medium`, driven by a haiku/medium wrapper, and it cannot agree with
   `IMPL_RUN`: that fallback is claude/`opus`/`medium` and has no provider to set, so a codex row is
   unmirrorable there by construction. The workflow names the substitution in its log instead, which
   is what keeps an unreachable config visible rather than a silent tier change. `medium` is the
@@ -265,16 +274,42 @@ stays that skill's store. Rules that are load-bearing:
   a fixer's brief is one finding at one line. `fixProvider`/`fixModel`/`fixEffort` go into the review's payload so the
   question can eventually be answered from rows rather than argued.
 - **On codex the writer and the wrapper are separate settings, because they fail differently.**
-  `model`/`effort` reach the Codex CLI; `wrapperModel`/`wrapperEffort` (`sonnet`/`medium`, fallback
+  `model`/`effort` reach the Codex CLI; `wrapperModel`/`wrapperEffort` (`haiku`/`medium`, fallback
   `IMPL_CODEX_RUN` in `task-run`, `FIX_CODEX_RUN` in `task-review`) are the Claude subagent that
   drives it, collects a run past the ~600s Bash cap and reads the working tree to report what
   landed. A cheap *writer* writes worse code, which the review catches; a cheap *wrapper* gives up
   on the collect and halts the run — or reports a fix Codex applied as unfixed — over work that was
-  actually finished, which nothing catches. `low` is therefore the tempting mistake, and each
-  wrapper carries its own constant rather than the pipeline's `CODEX_RUN` so tuning it cannot
-  re-tier the plan reviewer or the review tracks that share the same shape. On a fixer the wrapper
-  owns one more thing: the edits are Codex's, but a rebuild, a redeploy or a re-verify in the brief
-  dispatches other agents, so those stay the wrapper's own work.
+  actually finished, which nothing catches. Each wrapper carries its own constant rather than the
+  pipeline's `CODEX_RUN` so tuning it cannot re-tier the plan reviewer or the review tracks that
+  share the same shape. On a fixer the wrapper owns one more thing: the edits are Codex's, but a
+  rebuild, a redeploy or a re-verify in the brief dispatches other agents, so those stay the
+  wrapper's own work.
+
+  **The shipped `haiku` is an experiment under measurement, and it is the direction this row was
+  written to warn against.** What makes it worth running is that the failure was never depth: it
+  was the wrapper *deciding* a live PID looked stuck. The collect is now ONE blocking shell loop
+  (`collect()` in both scripts) bounded below the ~600s cap, so that judgement is not the model's
+  any more, and what the wrapper reports comes from `git status --porcelain`/`git diff` rather than
+  from Codex's summary. `wrapperEffort` deliberately does NOT follow it down — the tree read at the
+  end is real work. A regression looks like blocked slices over a working tree that already holds
+  the change (`wf_9c4f981b-d68` is the recorded instance); put it back to `sonnet` if it appears.
+- **The Codex REVIEW wrappers are `haiku` too, and they are pinned rather than inherited.**
+  `CODEX_RUN` in both scripts — the plan reviewer, the `codex` track, every `end-verify` pass —
+  names `haiku`/`medium`. Unnamed, the tier is whatever the caller happens to be running, which is
+  not a tier anyone chose: 119 + 143 + 188 dispatches and ~359M tokens, mostly opus, for agents
+  that review nothing. Every Codex wrapper in the pack is one tier because they do one job — shell
+  out, wait, hand back what the CLI produced.
+
+  **The risk that is specific to these three is worth naming, because it is the one that does not
+  announce itself.** The implement and fix wrappers have a working tree to check their answer
+  against; a review wrapper has none. The critique *is* the artifact, and the job is marshalling a
+  long free-text report into `REVIEW`/`FINDINGS` without dropping or merging findings — which
+  nothing downstream catches, since the plan review stops the run outright if Codex cannot run and
+  `end-verify` is the last read of the diff. A degradation therefore reads as *fewer findings from
+  a track that still reports `ran:true`*, never as an error. Read it in `fixes by source track`:
+  `codex` 0.70 fixes/run over 77 runs and `end-verify` 0.88 over 83 are the numbers it would move.
+  `medium` stays alongside it — these agents own the background-collect protocol, whose failures
+  surface as false "the review could not run" blocks.
 - **No fallback store.** A row the db rejects is lost. That is why inserts say
   `ON CONFLICT(<key>) DO NOTHING` and never `INSERT OR IGNORE`, which also swallows a `NOT NULL`
   violation — it hid exactly that bug once.

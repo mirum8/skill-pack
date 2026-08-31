@@ -50,7 +50,7 @@ const finding = (what = 'off-by-one on the last row') =>
 // Kept in step with that file: the point of these assertions is what a run with no project config
 // actually does.
 const DEFAULT_FIX_CONFIG = { provider: 'codex', model: 'gpt5.6-sol', effort: 'low',
-                             wrapperModel: 'sonnet', wrapperEffort: 'medium',
+                             wrapperModel: 'haiku', wrapperEffort: 'medium',
                              sources: ['/pack/.config/defaults.yaml'], notes: [] }
 const CLAUDE_FIX_CONFIG = { provider: 'claude', model: 'opus', effort: 'medium',
                             sources: ['/repo/.config/skill-pack.yaml'], notes: [] }
@@ -304,6 +304,9 @@ test('the Codex tracks run at wrapper depth — Codex does the reviewing, not th
   })
   assert.equal(opts['codex'].effort, 'medium')
   assert.equal(opts['end-verify#1'].effort, 'medium')
+  // Pinned, not inherited: unnamed, these two ran at whatever tier the caller happened to be on.
+  assert.equal(opts['codex'].model, 'haiku')
+  assert.equal(opts['end-verify#1'].model, 'haiku')
 })
 
 test('Phase 0 triage reads the diff into a schema, so it runs at medium', async () => {
@@ -353,20 +356,26 @@ test('on the codex provider the fixers DRIVE the CLI and never patch the code th
   // The Claude personas carry their own model and describe an agent that edits directly; here the
   // subagent only drives the CLI and reads back what landed.
   assert.equal(opts['fix-correctness'].agentType, 'general-purpose')
-  // The WRAPPER's tier, not the writer's: gpt5.6-sol/low goes to the CLI, sonnet/medium drives it.
-  assert.equal(opts['fix-correctness'].model, 'sonnet')
+  // The WRAPPER's tier, not the writer's: gpt5.6-sol/low goes to the CLI, haiku/medium drives it.
+  assert.equal(opts['fix-correctness'].model, 'haiku')
   assert.equal(opts['fix-correctness'].effort, 'medium')
   assert.match(prompts['fix-correctness'], /codex-companion\.mjs/)
   assert.match(prompts['fix-correctness'], /--model gpt5\.6-sol --effort low --write/)
   // The collect protocol: a run that outlives the ~600s cap is the normal case, not a failure.
-  assert.match(prompts['fix-correctness'], /poll the worker PID/)
-  assert.match(prompts['fix-correctness'], /Never poll for output-size/)
+  // ONE blocking wait rather than a poll per turn — the loop is what takes "does this look stuck?"
+  // away from the model, which is the judgement a cheap wrapper gets wrong.
+  assert.match(prompts['fix-correctness'], /WAITING ON THE WORKER PID IN ONE BASH CALL/)
+  assert.match(prompts['fix-correctness'], /timeout set to 590000/)
+  assert.match(prompts['fix-correctness'], /Never wait on output-size/)
   // The one substitution that must never happen quietly — it would hide which writer produced the
   // code this review is about to certify.
   assert.match(prompts['fix-correctness'], /do NOT quietly apply the fixes yourself/)
   // The findings still reach Codex whole; a summarized brief turns a surgical fix into a rewrite.
   assert.match(prompts['fix-correctness'], /Surgical fixer, not a feature builder/)
-  assert.match(logText, /fixers — codex gpt5\.6-sol \/ low, driven by sonnet \/ medium/)
+  // On codex the persona is replaced by general-purpose, which has no agent file to carry the
+  // batching rule — so the brief has to.
+  assert.match(prompts['fix-correctness'], /Batch independent tool calls/)
+  assert.match(logText, /fixers — codex gpt5\.6-sol \/ low, driven by haiku \/ medium/)
 
   // And the claude provider must carry none of it, keeping its domain persona.
   const claude = await run(withFix({ config: CLAUDE_FIX_CONFIG }))
@@ -379,21 +388,22 @@ test('the codex wrapper is tuned apart from the writer, and never dispatched unt
   // collects a run past the ~600s cap. Tuning one must not move the other — and the wrapper's
   // failure mode is reporting a fix Codex applied as unfixed, which is why it cannot go untiered.
   const tuned = await run(withFix({
-    config: { ...DEFAULT_FIX_CONFIG, wrapperModel: 'haiku', wrapperEffort: 'high' },
+    config: { ...DEFAULT_FIX_CONFIG, wrapperModel: 'opus', wrapperEffort: 'high' },
   }))
-  assert.equal(tuned.opts['fix-correctness'].model, 'haiku')
+  assert.equal(tuned.opts['fix-correctness'].model, 'opus')
   assert.equal(tuned.opts['fix-correctness'].effort, 'high')
   assert.match(tuned.prompts['fix-correctness'], /--model gpt5\.6-sol --effort low --write/)
-  // The review tracks carry their OWN constant, so tuning the wrapper cannot re-tier them.
+  // The review tracks carry their OWN constant, so tuning the wrapper cannot re-tier them — they
+  // agree today, and this is what keeps that a coincidence rather than a coupling.
   assert.equal(tuned.opts['codex'].effort, 'medium')
-  assert.equal(tuned.opts['codex'].model, undefined)
+  assert.equal(tuned.opts['codex'].model, 'haiku')
 
   // A row with no wrapper keys — an older config, or an agent that dropped them — must land on the
   // built-in pair rather than dispatching a wrapper with no model and no depth.
   const bare = await run(withFix({
     config: { provider: 'codex', model: 'gpt5.6-sol', effort: 'low', sources: [], notes: [] },
   }))
-  assert.equal(bare.opts['fix-correctness'].model, 'sonnet')
+  assert.equal(bare.opts['fix-correctness'].model, 'haiku')
   assert.equal(bare.opts['fix-correctness'].effort, 'medium')
 })
 

@@ -34,7 +34,7 @@ const PLAN_TEXT = '## Context\nfix it\n## Coverage contract\ncriterion -> test'
 // The row lib/read-config.py resolves from the SHIPPED .config/defaults.yaml. Kept in step with
 // that file: the point of these assertions is what a run with no project config actually does.
 const DEFAULT_CONFIG = { provider: 'claude', model: 'opus', effort: 'medium',
-                         wrapperModel: 'sonnet', wrapperEffort: 'medium',
+                         wrapperModel: 'haiku', wrapperEffort: 'medium',
                          sources: ['/pack/.config/defaults.yaml'], notes: [] }
 // And what it resolves for `steps.plan` — the planner, its explorers, and the judges that triage
 // the plan review. Same rule: the default this suite asserts against is the default that ships.
@@ -42,7 +42,9 @@ const DEFAULT_PLAN_CONFIG = { model: 'opus', effort: 'high', exploreModel: 'sonn
   exploreEffort: 'medium', judgeModel: 'opus', judgeEffort: 'high', sources: [], notes: [] }
 // The codex row, which the shipped file no longer carries for THIS step — /r:task-review's fixers
 // do. Named explicitly by the tests below so the codex branch keeps its coverage whichever
-// provider the defaults happen to ship.
+// provider the defaults happen to ship. Its `wrapperModel` deliberately DIFFERS from
+// IMPL_CODEX_RUN's haiku: a fixture that repeats the fallback cannot tell "the config was read"
+// apart from "the config was ignored", which is the whole point of the assertion below.
 const CODEX_CONFIG = { provider: 'codex', model: 'gpt5.6-sol', effort: 'low',
                        wrapperModel: 'sonnet', wrapperEffort: 'medium',
                        sources: ['/repo/.config/skill-pack.yaml'], notes: [] }
@@ -767,21 +769,35 @@ test('the codex provider drives the CLI and keeps the slices, not the personas',
     assert.match(prompts[l], /codex-companion\.mjs/)
     assert.match(prompts[l], /--model gpt5\.6-sol --effort low --write/)
     // The collect protocol is the whole point: implementers average 963s against a ~600s cap.
-    assert.match(prompts[l], /poll the worker PID/)
+    // It is ONE blocking wait, not a poll per turn — the loop is what removes "does this look
+    // stuck?" from the model, which is the judgement a cheap wrapper gets wrong.
+    assert.match(prompts[l], /WAITING ON THE WORKER PID IN ONE BASH CALL/)
+    assert.match(prompts[l], /ps -p <pid>/)
+    assert.match(prompts[l], /timeout set to 590000/)
     assert.match(prompts[l], /jobs\/\*\.json/)
-    assert.match(prompts[l], /Never poll for output-size/)
+    assert.match(prompts[l], /Never wait on output-size/)
     // A fabricated success would have the review certify code nobody wrote.
     assert.match(prompts[l], /set blockedOn/)
     // The brief still reaches Codex whole — the plan, the criteria and the TDD rules.
     assert.match(prompts[l], /READ THAT FILE FIRST/)
     assert.match(prompts[l], /WRITE THE TESTS FIRST/)
+    // On codex the persona is replaced by general-purpose, which has no agent file to carry the
+    // batching rule — so the brief has to. Turns x context is what this step actually pays.
+    assert.match(prompts[l], /Batch independent tool calls/)
   }
-  // And the Claude provider must carry none of it.
+  // The plan reviewer drives the same CLI and hits the same cap, so it collects the same way —
+  // an unrendered helper there would be silent, and the plan review has no fallback reviewer.
+  assert.match(prompts['codex-plan-review#1'], /WAITING ON THE WORKER PID IN ONE BASH CALL/)
+  assert.match(prompts['codex-plan-review#1'], /timeout set to 590000/)
+
+  // And the Claude provider must carry none of it — including the batching rule, which its two
+  // personas already carry in their own agent definitions.
   const claude = await run({
     source: baseSource({ buildTool: 'maven', hasBackend: true, hasFrontend: false }),
     review: OK_REVIEW, planfix: OK_FIX, config: CLAUDE_CONFIG,
   })
   assert.doesNotMatch(claude.prompts['implement:backend'], /codex-companion/)
+  assert.doesNotMatch(claude.prompts['implement:backend'], /Batch independent tool calls/)
 })
 
 test('the codex wrapper is tuned apart from the writer, and never dispatched untiered', async () => {
@@ -791,16 +807,18 @@ test('the codex wrapper is tuned apart from the writer, and never dispatched unt
   const tuned = await run({
     source: baseSource({ buildTool: 'maven', hasBackend: true, hasFrontend: false }),
     review: OK_REVIEW, planfix: OK_FIX,
-    config: { ...CODEX_CONFIG, wrapperModel: 'haiku', wrapperEffort: 'high' },
+    config: { ...CODEX_CONFIG, wrapperModel: 'opus', wrapperEffort: 'high' },
   })
-  assert.equal(tuned.optsBy['implement:backend'].model, 'haiku')
+  assert.equal(tuned.optsBy['implement:backend'].model, 'opus')
   assert.equal(tuned.optsBy['implement:backend'].effort, 'high')
   // The writer's pair is untouched by that — it still reaches the CLI.
   assert.match(tuned.prompts['implement:backend'], /--model gpt5\.6-sol --effort low --write/)
-  // The plan reviewer carries its OWN constant, so tuning the wrapper cannot re-tier it.
+  // The plan reviewer carries its OWN constant, so tuning the wrapper cannot re-tier it — they
+  // agree today, and this is what keeps that a coincidence rather than a coupling. It is also
+  // PINNED, not inherited: unnamed, its tier is whatever the caller happens to be running.
   assert.equal(tuned.optsBy['codex-plan-review#1'].effort, 'medium')
-  assert.equal(tuned.optsBy['codex-plan-review#1'].model, undefined)
-  assert.match(tuned.logText, /codex gpt5\.6-sol \/ low, driven by haiku \/ high/)
+  assert.equal(tuned.optsBy['codex-plan-review#1'].model, 'haiku')
+  assert.match(tuned.logText, /codex gpt5\.6-sol \/ low, driven by opus \/ high/)
 
   // A row with no wrapper keys — an older config, or an agent that dropped them — must land on the
   // built-in pair rather than dispatching a wrapper with no model and no depth.
@@ -809,7 +827,7 @@ test('the codex wrapper is tuned apart from the writer, and never dispatched unt
     review: OK_REVIEW, planfix: OK_FIX,
     config: { provider: 'codex', model: 'gpt5.6-sol', effort: 'low', sources: [], notes: [] },
   })
-  assert.equal(bare.optsBy['implement:backend'].model, 'sonnet')
+  assert.equal(bare.optsBy['implement:backend'].model, 'haiku')
   assert.equal(bare.optsBy['implement:backend'].effort, 'medium')
 })
 
