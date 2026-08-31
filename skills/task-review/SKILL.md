@@ -21,6 +21,8 @@ The single entry point for the user's post-task verification. It runs over the *
 
 The shape is **find everything → fix everything → verify once.** All analysis happens up front in one parallel pass, all fixes in one phase, and a single bounded end-verify at the close re-checks the code the fixes/refactor/scan wrote — so nothing the routine itself changed ships unreviewed, without a full re-review after every step.
 
+**What the end-verify may write is fenced.** It is the only correctness track whose findings reach a fixer with no independent triage between them — it adjudicates itself — and it is at the same time the last write to the diff, which nothing downstream re-reads. So it applies **only findings sized as a small, low-risk fix**; a major or untagged one is reported to you and the code is left alone, and pass 2 reports rather than fixes, since nothing re-reads a pass-2 fix. A withheld finding keeps the verdict at `findings-unresolved` — outstanding is outstanding whether or not anyone attempted it.
+
 **What runs off the critical path.** Two things are dispatched early or in parallel because nothing waits on them: the docker image **pre-warm** starts at Triage (it builds without starting anything, so it can only ever be a warm cache); and the **end-verify and the UI verification run together**, since one reads the git diff and the other drives a browser against a deployed image. Guard on the last: if an end-verify fixer lands in a frontend file, the UI halves re-deploy and re-verify once, because what they looked at is then stale.
 
 ## How this runs — deterministic Workflow in the main thread, prose pipeline as the fallback

@@ -43,8 +43,11 @@ function baseTriage(over = {}) {
 }
 
 const CLEAN = { ran: true, findings: [] }
+// `fixSize: 'minor'` is part of the default because that is the shape the end-verify size gate
+// applies: a finding with no size is withheld from the fixer on purpose, so a test meaning "a real
+// finding that gets fixed" has to say so. The gate's own behaviour is tested explicitly below.
 const finding = (what = 'off-by-one on the last row') =>
-  ({ file: CHANGED, line: 42, category: 'logic', what, real: true })
+  ({ file: CHANGED, line: 42, category: 'logic', what, real: true, fixSize: 'minor' })
 
 // The row lib/read-config.py resolves from the SHIPPED .config/defaults.yaml for `--step fix`.
 // Kept in step with that file: the point of these assertions is what a run with no project config
@@ -1326,7 +1329,7 @@ test('REGRESSION: an end-verify finding with no `real` flag reaches a fixer, it 
   // without adjudicating it was filtered to nothing, read as "converged", and the run reported
   // endVerify:'passed' / fixed.correctness:0. Observed for real: a verified P2 race was found,
   // never handed to anyone, and shipped. An unmarked finding is a finding.
-  const unflagged = { file: CHANGED, line: 7, category: 'correctness', what: 'the swap targets a detached node' }
+  const unflagged = { file: CHANGED, line: 7, category: 'correctness', what: 'the swap targets a detached node', fixSize: 'minor' }
   const { out, counts } = await run({
     overrides: {
       'fix-triage': { correctness: [`${CHANGED}:42 guard the empty batch`], readability: [] },
@@ -1340,7 +1343,7 @@ test('REGRESSION: an end-verify finding with no `real` flag reaches a fixer, it 
 })
 
 test('REGRESSION: end-verify findings that survive 2 passes are surfaced, never "passed"', async () => {
-  const still = { file: CHANGED, line: 7, category: 'correctness', what: 'still races on the badge swap', real: true }
+  const still = { file: CHANGED, line: 7, category: 'correctness', what: 'still races on the badge swap', real: true, fixSize: 'minor' }
   const { out, logText } = await run({
     overrides: {
       'fix-triage': { correctness: [`${CHANGED}:42 guard the empty batch`], readability: [] },
@@ -1351,7 +1354,108 @@ test('REGRESSION: end-verify findings that survive 2 passes are surfaced, never 
   assert.equal(out.endVerify, 'findings-unresolved')
   assert.equal(out.endVerifyFindings.length, 1)
   assert.match(out.endVerifyFindings[0], /still races/)
-  assert.match(logText, /NOT re-verified/)
+  assert.match(logText, /reported, NOT fixed/)
+})
+
+// ------------------------------------------- the end-verify size gate ---
+// This is the only correctness track whose findings reach a fixer with nothing between them, and
+// it is also the LAST write to the diff — nothing re-reads what its fixer does. Below full tier
+// the framing invites the reviewer to challenge the whole change, so unfenced, the last agent to
+// touch the code could rewrite what the change was for. Two fences, both asserted here.
+
+test('an end-verify finding whose fix is MAJOR is surfaced, never applied', async () => {
+  const big = { file: CHANGED, line: 7, category: 'design', what: 'move batching into the repository', real: true, fixSize: 'major' }
+  const { out, counts, logText } = await run({
+    overrides: {
+      'fix-triage': { correctness: [`${CHANGED}:42 guard the empty batch`], readability: [] },
+      'end-verify#1': { ran: true, findings: [big] },
+    },
+  })
+  assert.equal(counts['end-verify-fix#1'], undefined, 'no fixer may be dispatched for a major finding')
+  assert.equal(out.endVerify, 'findings-unresolved', 'and it must not let the run report passed')
+  assert.equal(out.endVerifyMajorFindings.length, 1)
+  assert.match(out.endVerifyMajorFindings[0], /move batching into the repository/)
+  assert.ok(out.endVerifyFindings.some(f => /move batching/.test(f)), 'it is surfaced to the caller too')
+  assert.match(logText, /major/)
+})
+
+test('an UNTAGGED end-verify finding is treated as major — an unsized fix is not applied', async () => {
+  // The opposite default to `real`, deliberately: an unadjudicated finding is kept because
+  // dropping it loses a defect, and an unsized one is withheld because applying it is the change
+  // nobody measured. Both fail toward surfacing rather than toward silently acting.
+  const unsized = { file: CHANGED, line: 7, category: 'correctness', what: 'the swap targets a detached node', real: true }
+  const { out, counts } = await run({
+    overrides: {
+      'fix-triage': { correctness: [`${CHANGED}:42 guard the empty batch`], readability: [] },
+      'end-verify#1': { ran: true, findings: [unsized] },
+    },
+  })
+  assert.equal(counts['end-verify-fix#1'], undefined)
+  assert.equal(out.endVerify, 'findings-unresolved')
+  assert.equal(out.endVerifyMajorFindings.length, 1)
+})
+
+test('a major finding is NOT cleared by a later clean pass — nothing was applied to re-read', async () => {
+  const big = { file: CHANGED, line: 7, category: 'design', what: 'move batching into the repository', real: true, fixSize: 'major' }
+  const small = finding('off-by-one on the last row')
+  const { out } = await run({
+    overrides: {
+      'fix-triage': { correctness: [`${CHANGED}:42 guard the empty batch`], readability: [] },
+      'end-verify#1': { ran: true, findings: [big, small] },
+      'end-verify#2': CLEAN,
+    },
+  })
+  assert.equal(out.endVerify, 'findings-unresolved', 'pass 2 verified the minor fix, not the major finding')
+  assert.equal(out.endVerifyMajorFindings.length, 1)
+  assert.equal(out.fixed.correctness, 2, 'only the minor one was fixed: 1 triaged + 1 end-verify')
+})
+
+test('a major finding is not carried to pass 2 as something a fixer handled', async () => {
+  // Pass 2 is told "these were raised and a fixer edited the code". A major finding was never
+  // touched, so listing it there would invite pass 2 to agree that nothing is outstanding.
+  const big = { file: CHANGED, line: 7, category: 'design', what: 'move batching into the repository', real: true, fixSize: 'major' }
+  const small = finding('races on the badge swap')
+  const { prompts } = await run({
+    overrides: {
+      'fix-triage': { correctness: [`${CHANGED}:42 guard the empty batch`], readability: [] },
+      'end-verify#1': { ran: true, findings: [big, small] },
+    },
+  })
+  assert.match(prompts['end-verify#2'], /races on the badge swap/)
+  assert.doesNotMatch(prompts['end-verify#2'], /move batching into the repository/)
+})
+
+test('pass 2 REPORTS its findings — no fixer runs on the pass nothing re-reads', async () => {
+  const { out, counts, logText } = await run({
+    overrides: {
+      'fix-triage': { correctness: [`${CHANGED}:42 guard the empty batch`], readability: [] },
+      'end-verify#': { ran: true, findings: [finding('still races on the badge swap')] },
+    },
+  })
+  assert.equal(counts['end-verify-fix#1'], 1, 'pass 1 still fixes')
+  assert.equal(counts['end-verify-fix#2'], undefined, 'pass 2 does not')
+  assert.equal(out.endVerify, 'findings-unresolved')
+  assert.match(logText, /reported, NOT fixed/)
+})
+
+test('the end-verify records BOTH sides of its own adjudication in the stats row', async () => {
+  // Nothing else judges this track. Recording only the remainder is what made it read as never
+  // wrong — 18 rows, all confirmed, none ever dismissed — so the one question worth asking of an
+  // unadjudicated track could not be asked of the store at all.
+  const fp = { file: CHANGED, line: 8, category: 'correctness', what: 'false alarm', real: false }
+  const { prompts } = await run({
+    overrides: {
+      'fix-triage': { correctness: [`${CHANGED}:42 guard the empty batch`], readability: [] },
+      'end-verify#1': { ran: true, findings: [finding('a genuine off-by-one'), fp] },
+      'end-verify#2': CLEAN,
+    },
+  })
+  const row = JSON.parse(prompts['stats'].match(/\{"kind":"review".*\}/)[0])
+  const ev = row.findings.filter(f => f.track === 'end-verify')
+  assert.ok(ev.some(f => f.verdict === 'confirmed' && f.fixed && /off-by-one/.test(f.description)),
+    'what the pass kept, and that a fixer took it')
+  assert.ok(ev.some(f => f.verdict === 'dismissed' && /false alarm/.test(f.description)),
+    'and what it rejected — without this the track is 100% precise by construction')
 })
 
 // Each end-verify pass shells out to a FRESH Codex thread (run.sh -> runAppServerReview starts an
@@ -1359,7 +1463,7 @@ test('REGRESSION: end-verify findings that survive 2 passes are surfaced, never 
 // pass 2 can learn what pass 1 said. Without it pass 2 re-read the diff cold and could not tell
 // code it had never seen from code just rewritten in answer to its own finding.
 test('pass 2 is told what pass 1 raised and that a fixer edited the code', async () => {
-  const first = { file: CHANGED, line: 7, category: 'correctness', what: 'races on the badge swap', real: true }
+  const first = { file: CHANGED, line: 7, category: 'correctness', what: 'races on the badge swap', real: true, fixSize: 'minor' }
   const { prompts, counts } = await run({
     overrides: {
       'fix-triage': { correctness: [`${CHANGED}:42 guard the empty batch`], readability: [] },
@@ -1376,7 +1480,7 @@ test('pass 2 is told what pass 1 raised and that a fixer edited the code', async
 })
 
 test('pass 2 is told when the pass-1 fixer died, so re-finding the item is correct', async () => {
-  const first = { file: CHANGED, line: 7, category: 'correctness', what: 'races on the badge swap', real: true }
+  const first = { file: CHANGED, line: 7, category: 'correctness', what: 'races on the badge swap', real: true, fixSize: 'minor' }
   const { prompts } = await run({
     overrides: {
       'fix-triage': { correctness: [`${CHANGED}:42 guard the empty batch`], readability: [] },
@@ -1607,7 +1711,7 @@ const uiTriage = (over = {}) => baseTriage({
 })
 const feFinding = {
   file: 'src/main/resources/templates/rates.html', line: 10,
-  category: 'ui', what: 'the empty state renders the raw key', real: true,
+  category: 'ui', what: 'the empty state renders the raw key', real: true, fixSize: 'minor',
 }
 
 test('the UI deploy starts before the end-verify has finished fixing', async () => {

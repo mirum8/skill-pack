@@ -107,6 +107,37 @@ const FINDINGS = {
     scopeMatched: { type: 'boolean' },
   },
 }
+
+// The end-verify pass returns FINDINGS plus one field: how big the fix would be. It is the only
+// track whose findings reach a fixer with nothing between them — triage adjudicates every other
+// correctness item, and this pass adjudicates its own — while ALSO being the last write to the
+// diff, which nothing downstream re-reads. Untagged and unfenced, a finding asking for a rewrite
+// is dispatched exactly like a one-line null check, on a tier where the framing invites the
+// reviewer to challenge the whole change. The UI track already answers this: fix the small ones,
+// FILE the large ones. Same split here.
+//
+// `fixSize` is by the SIZE AND RISK of the fix, never by severity — a one-line fix for a serious
+// bug is still minor. Optional in the schema and read as `!== 'minor'`, so an untagged finding is
+// reported rather than applied: `real` fails toward keeping a finding, and this fails toward not
+// letting an unmeasured change into the diff. Required would be worse — an agent that omits it
+// would fail the whole result and cost the run its last read of the diff.
+const END_VERIFY_FINDINGS = {
+  ...FINDINGS,
+  properties: {
+    ...FINDINGS.properties,
+    findings: {
+      type: 'array',
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['file', 'line', 'category', 'what'],
+        properties: {
+          ...FINDINGS.properties.findings.items.properties,
+          fixSize: { type: 'string', enum: ['minor', 'major'] },
+        },
+      },
+    },
+  },
+}
 const TRIAGE = {
   type: 'object', additionalProperties: false,
   required: ['reviewNeeded', 'reason', 'profile', 'uiTouched', 'hasTestApp'],
@@ -1682,6 +1713,20 @@ if (triage.buildTool !== 'none') {
 // machine-written code came from the scan, which is precisely the code this gate exists to read.
 // Light and standard: no Codex has read this change yet, so this pass is its sole Codex review —
 // it ALWAYS fires and reads the whole change. Same mode, fuller framing. All bounded to 2 passes.
+//
+// WHAT THIS PHASE MAY WRITE IS FENCED, and the fence is the point of its shape. This is the only
+// correctness track whose findings reach a fixer with no triage between them — every other one is
+// adjudicated by Phase 2, this one adjudicates itself — and it is simultaneously the LAST write to
+// the diff, which nothing downstream re-reads. On light and standard the framing invites the
+// reviewer to challenge the whole change rather than only regressions, so without a fence the last
+// agent to touch the code can rewrite what the change was for. Two rules follow, and both are
+// enforced below rather than asked for in prose:
+//   * ONLY MINOR FIXES ARE APPLIED. Each finding is sized by its FIX, not its severity; a major or
+//     untagged one is reported to the caller and left alone. Same split the UI track already makes,
+//     for the same reason.
+//   * PASS 2 REPORTS, IT DOES NOT FIX. The loop caps at 2, so a pass-2 fixer writes code no pass
+//     re-reads and does not move the verdict — 'findings-unresolved' either way. It measured ~4.01M
+//     tokens and 424s over the 14 runs that reached it, for no caller-visible signal.
 const endVerifyWanted = profile !== 'full' ? true : (!nothingToFix || scanChangedCode)
 let endVerifyBlocked = false
 // What the LAST pass raised and nothing re-read clean. It needs somewhere to go, or the findings
@@ -1690,19 +1735,35 @@ let endVerifyBlocked = false
 //     WITHOUT adjudicating it. The loop then reads "no real findings" as converged and the run
 //     reports endVerify:'passed', fixed.correctness:0 — for a Codex pass that found a genuine
 //     defect and said so. Nothing downstream ever sees it.
-//   * even an explicitly real finding raised by pass 2 goes to a fixer whose work no pass ever
-//     re-reads, and the run still reports 'passed'.
+//   * a finding raised by the last pass has no later pass to clear it, so it must be carried out
+//     rather than left to a fixer whose work nothing re-reads.
 // A caller merges on the strength of that word, so it must be backed by a pass that actually came
 // back clean. Carry the remainder out instead, and let it decide the verdict below.
 let endVerifyUnresolved = []
+// Findings withheld from the fixer BY DESIGN — the ones whose fix is large or risky. They are
+// surfaced, never applied, and they keep the verdict off 'passed': a caller merges on that word,
+// and a defect nobody fixed is outstanding whether or not anyone chose to fix it. Accumulated
+// across passes rather than overwritten, because no fixer ever touched them, so a later pass
+// re-reading them clean is not evidence of anything.
+let endVerifyMajor = []
 // Correctness items fixed HERE, so `fixed.correctness` counts everything this run fixed rather
-// than only what Phase 2 triaged.
+// than only what Phase 2 triaged. Minor items only — see the size gate below.
 let endVerifyFixed = 0
+// Every finding each pass produced, with what this loop did about it, for the stats sink. The
+// track records only its remainder today: 18 rows against 73 fixes, all of them `confirmed`,
+// none ever `dismissed`. So the one question worth asking of this track — how often is an
+// UNADJUDICATED Codex finding real — cannot be asked of the store at all. The same wrapper, when
+// triage does adjudicate it, is 29 confirmed against 24 dismissed. Record both sides here, and
+// that comparison becomes a query instead of an argument.
+const endVerifyRecorded = []
 if (!endVerifyWanted) log('post-task-review: end-verify skipped — no substantive changes since review')
 // Frontend files an end-verify FIXER touched. It decides one thing after the barrier below: whether
 // the UI verification, which ran against an image built before those fixes landed, has to look
 // again. Derived from the findings the fixer was handed, so it costs no extra agent.
 const FRONTEND_FILE = /\.(html|htm|css|scss|sass|less|js|mjs|ts|tsx|jsx|vue|svelte)$|(^|\/)(templates|static|webapp|resources\/templates)\//i
+// One line per finding, used for every surfaced list and every stats row, so the same finding
+// reads identically wherever it lands and de-duplicates across passes by value.
+const evKey = (f) => `${f.file}:${f.line} [${f.category}] ${f.what}`
 // Where a domain fix goes. The two bundled fixers are Spring/JPA-shaped and Thymeleaf-shaped; on a
 // project with no JVM build there is no honest third one, so the fix goes to a general-purpose
 // agent that reads the project's own conventions instead of importing somebody else's. A terminal
@@ -1760,6 +1821,9 @@ const endVerifyTrack = async () => {
        For each one: confirm it is genuinely resolved (a partial fix, a fix that only silences the
        symptom, or a fix that broke something nearby is precisely what this pass exists to catch),
        and report anything NEW those edits introduced. Don't re-report one that is now correct.
+       This is the LAST pass: nothing you raise here is fixed, it is reported to the caller. So
+       report what is genuinely outstanding and nothing else — a speculative finding here becomes
+       a defect the caller is told about and cannot act on from your report alone.
 ${priorPass.findings.map(f => `         - ${f.file}:${f.line} [${f.category}] ${f.what}`).join('\n')}
 `
     const dispatchEndVerify = (tag) => reliable(`end-verify#${pass}${tag}`, 'End-verify', () => agent(
@@ -1772,8 +1836,14 @@ ${priorPass.findings.map(f => `         - ${f.file}:${f.line} [${f.category}] ${
        Same exit-code handling (3=CLI missing→blocked, 4/timeout→not-run, drop the "Review blocked"
        text, any other non-zero => wrapper failed, not findings). Mark each finding real:true or
        real:false EXPLICITLY — a finding you leave unmarked counts as REAL and goes to a fixer, so
-       omitting the flag is never a way to quietly drop something Codex reported.${RAN_CLAUSE}`,
-      { label: `end-verify#${pass}${tag}`, phase: 'End-verify', schema: FINDINGS, ...GP, ...CODEX_RUN }))
+       omitting the flag is never a way to quietly drop something Codex reported.
+       Tag every real finding fixSize=minor|major BY THE SIZE AND RISK OF ITS FIX, not by its
+       severity — a one-line fix for a serious bug is minor; anything that reshapes a design
+       decision this change made on purpose, moves logic between components, or touches code the
+       diff did not, is major. Only minor findings are applied: this is the LAST write to the diff
+       and nothing re-reads it, so a major finding is reported to the caller to decide on instead.
+       An untagged finding is treated as major.${RAN_CLAUSE}`,
+      { label: `end-verify#${pass}${tag}`, phase: 'End-verify', schema: END_VERIFY_FINDINGS, ...GP, ...CODEX_RUN }))
     // This was the ONE major step called bare — every other one goes through reliable(). blocked()
     // caught its ran:false, but nothing re-dispatched, so a single bad wrapper invocation left the
     // final diff unverified. Observed on a real run: the wrapper produced no report, the routine
@@ -1803,25 +1873,66 @@ ${priorPass.findings.map(f => `         - ${f.file}:${f.line} [${f.category}] ${
     // the prompt above asks for that flag on every one — so a dropped finding is always someone's
     // decision, never a missing field.
     const real = (v && v.findings || []).filter(f => f.real !== false)
+    // The pass's own rejects. They used to leave no trace at all, which is why this track reads as
+    // never wrong: nothing it dismissed was ever written down, so its precision was 100% by
+    // construction rather than by measurement.
+    for (const d of (v && v.findings || []).filter(f => f.real === false)) {
+      endVerifyRecorded.push({ verdict: 'dismissed', fixed: false, description: evKey(d) })
+    }
     // A pass that came back clean is the only thing that clears the remainder. Assigning here (not
     // just breaking) is what makes "pass 1 found X, pass 2 read the fix and was happy" resolve.
+    // It cannot clear `endVerifyMajor` — no fixer touched those, so there was nothing to re-read.
     if (!real.length) { endVerifyUnresolved = []; break }
-    endVerifyUnresolved = real.map(f => `${f.file}:${f.line} [${f.category}] ${f.what}`)
+    // The size gate. `!== 'minor'` rather than `=== 'major'`: an untagged finding is one nobody
+    // sized, and applying an unsized change as the last write to the diff is the failure this
+    // gate exists for.
+    const minor = real.filter(f => f.fixSize === 'minor')
+    for (const m of real.filter(f => f.fixSize !== 'minor')) {
+      const k = evKey(m)
+      if (!endVerifyMajor.includes(k)) {
+        endVerifyMajor.push(k)
+        endVerifyRecorded.push({ verdict: 'confirmed', fixed: false, severity: 'major', description: k })
+      }
+    }
+    // Pass 2 raises findings that NOTHING re-reads — the loop is capped here, so a fixer dispatched
+    // now writes unverified code into the final diff and does not change what this run reports:
+    // the verdict is 'findings-unresolved' whether it runs or not. Measured at ~4.01M tokens and
+    // 424s per fixer over 14 runs that reached this point, buying no caller-visible signal. So the
+    // second pass VERIFIES pass 1's fix and reports; it does not fix.
+    if (pass === 2) {
+      endVerifyUnresolved = minor.map(evKey)
+      if (minor.length) log(`post-task-review: pass 2 raised ${minor.length} finding(s) — reported, NOT fixed (a pass-2 fix is the one nothing re-reads)`)
+      break
+    }
+    if (!minor.length) {
+      // Every finding was major, so nothing was applied and a second pass has no fix to verify.
+      // They are already in endVerifyMajor and keep the verdict off 'passed'.
+      endVerifyUnresolved = []
+      log(`post-task-review: ${endVerifyMajor.length} end-verify finding(s) are major — surfaced for you to decide on, NOT applied`)
+      break
+    }
+    endVerifyUnresolved = minor.map(evKey)
     const fx = await agent(`${fixProvider === 'codex' ? codexFixPreamble : ''}Fix these end-verify findings (surgical), ${rebuildClause}
       Fix ONLY these items; do NOT touch any pre-existing / out-of-scope test or class to
-      force a pass (the green bar is never relaxed):
-      ${real.map(f => `${f.file}:${f.line} ${f.what}`).join('\n')}${intentBlock}`,
+      force a pass (the green bar is never relaxed). Every item below was sized as a SMALL, LOW-RISK
+      fix by the reviewer that raised it — if applying one turns out to need more than that, STOP
+      and report it back rather than widening the change:
+      ${minor.map(f => `${f.file}:${f.line} ${f.what}`).join('\n')}${intentBlock}`,
       { label: `end-verify-fix#${pass}`, phase: 'End-verify', ...fixAgentOpts, ...fixRun })
     // Only count what a live fixer took. A dead fixer must not inflate `fixed.correctness` — the
     // whole point of that number is that a caller can trust it. The findings stay in
     // endVerifyUnresolved either way, so a lost fix still shows up in the verdict.
-    if (blocked(fx)) log(`post-task-review: the end-verify fixer died on pass ${pass} — ${real.length} finding(s) were NOT fixed`)
+    if (blocked(fx)) {
+      log(`post-task-review: the end-verify fixer died on pass ${pass} — ${minor.length} finding(s) were NOT fixed`)
+      for (const m of minor) endVerifyRecorded.push({ verdict: 'confirmed', fixed: false, description: evKey(m) })
+    }
     else {
-      endVerifyFixed += real.length
+      endVerifyFixed += minor.length
+      for (const m of minor) endVerifyRecorded.push({ verdict: 'confirmed', fixed: true, description: evKey(m) })
       // Attributable by construction — nothing but the end-verify Codex produced these. Recorded
       // separately from the up-front tracks because it answers a different question: how often
       // does the machine-written code from the fix/refactor/scan phase need fixing itself?
-      fixedBySource['end-verify'] = (fixedBySource['end-verify'] || 0) + real.length
+      fixedBySource['end-verify'] = (fixedBySource['end-verify'] || 0) + minor.length
       // The UI track is running alongside this one, against an image built BEFORE these edits.
       // If a fix landed in a frontend file, what it verified is now stale — see the re-verify
       // guard after the barrier.
@@ -1830,15 +1941,16 @@ ${priorPass.findings.map(f => `         - ${f.file}:${f.line} [${f.category}] ${
       // Treat any end-verify fix there as render-affecting: the cost calculus that made this guard
       // narrow on the web (an 86s docker deploy) does not exist when a restart is seconds.
       if (terminalSurface(uiSurfaceResolved)) endVerifyTouchedFrontend = true
-      else if (real.some((f) => FRONTEND_FILE.test(String(f.file || '')))) endVerifyTouchedFrontend = true
+      else if (minor.some((f) => FRONTEND_FILE.test(String(f.file || '')))) endVerifyTouchedFrontend = true
     }
-    // The next pass's only link to this one. Recorded AFTER the fixer so it carries whether the
-    // edits actually happened — a dead fixer changes what re-finding these items means, and pass 2
-    // has no other way to tell the two situations apart.
-    priorPass = { findings: real, fixed: !blocked(fx) }
-    // Pass 2's fix is the one nothing re-reads — the loop is capped here. Fixed is not verified,
-    // so these stay in endVerifyUnresolved and the run reports 'findings-unresolved', not 'passed'.
-    if (pass === 2) log(`post-task-review: ${real.length} end-verify finding(s) remain after 2 passes — fixed but NOT re-verified; surfacing them in the result`)
+    // The next pass's only link to this one, and it carries the MINOR items only — those are the
+    // ones a fixer touched, so they are the ones pass 2 has a fix to verify. A major finding was
+    // never applied; re-reporting it is correct, not a duplicate, and telling pass 2 it was
+    // "raised and handled" would invite it to agree that nothing is outstanding.
+    // Recorded AFTER the fixer so it carries whether the edits actually happened — a dead fixer
+    // changes what re-finding these items means, and pass 2 has no other way to tell the two
+    // situations apart.
+    priorPass = { findings: minor, fixed: !blocked(fx) }
   }
 }
 
@@ -2401,9 +2513,14 @@ const tracksDrifted = TRACKS.filter(([, r, ran]) => ran && driftedOf(r).length)
 const tracksSkipped = TRACKS.filter(([, r, ran]) => ran && skipped(r)).map(([n]) => n)
   .concat(!securitySurface && profile !== 'light' ? ['security'] : [])
   .concat(!runtimeSurface && profile === 'full' ? ['runtime-and-failures'] : [])
+// Everything this phase leaves on the table: what a pass raised and nothing re-read clean, plus
+// every major finding the size gate withheld from the fixer. Both are outstanding defects — a
+// caller merges on 'passed', so a finding nobody applied must be able to stop that word exactly
+// like a finding nobody fixed successfully.
+const endVerifyOutstanding = endVerifyUnresolved.concat(endVerifyMajor.filter(m => !endVerifyUnresolved.includes(m)))
 const endVerifyVerdict = !endVerifyWanted ? 'skipped'
   : endVerifyBlocked ? 'blocked'
-  : (endVerifyUnresolved.length ? 'findings-unresolved' : 'passed')
+  : (endVerifyOutstanding.length ? 'findings-unresolved' : 'passed')
 
 // --- Stats sink: one append-only line per run (BEST EFFORT) ------------------
 // Every tier decision in this pipeline was argued from mechanism, never measured — which track
@@ -2456,7 +2573,13 @@ const statsRow = {
   fixedCorrectness: fixed.correctness.length + endVerifyFixed,
   fixedReadability: fixed.readability.length,
   endVerify: endVerifyVerdict,
-  endVerifyCount: endVerifyUnresolved.length,
+  endVerifyCount: endVerifyOutstanding.length,
+  // How many of those the size gate withheld from the fixer. Separate from the count above because
+  // the two need opposite readings: an unresolved item is one a fixer tried and a pass did not
+  // clear, while a major one is a deliberate hand-off — nobody attempted it, and re-running the
+  // phase will produce it again. Zero and absent are different: absent is a row written before
+  // the gate existed, when every finding went to a fixer regardless of size.
+  endVerifyMajor: endVerifyMajor.length,
   // Four outcomes that leave the same trace in the store today: a clean review, a review of a
   // DIFFERENT changeset, a tool that died, and a gate that never dispatched it. All 47 recorded
   // dispatches returned findings:[], and with the four collapsed that number cannot tell a clean
@@ -2505,10 +2628,14 @@ const statsRow = {
     ...dismissedReadability.map((r) => ({
       track: 'code-quality', verdict: 'dismissed', fixed: false, description: short(r),
     })),
-    // The end-verify pass adjudicates its own findings: what it kept is real and was handed to a
-    // fixer, and the pass-local rejects never leave the loop.
-    ...endVerifyUnresolved.map((e) => ({
-      track: 'end-verify', verdict: 'confirmed', fixed: false, description: short(e),
+    // The end-verify pass adjudicates its own findings — nothing else does — so BOTH sides of that
+    // judgement are recorded here: what it kept (confirmed, and whether a fixer took it) and what
+    // it rejected (dismissed). Recording only the remainder is what made this track read as never
+    // wrong, and left the one question worth asking of it unanswerable.
+    ...endVerifyRecorded.map((e) => ({
+      track: 'end-verify', verdict: e.verdict, fixed: !!e.fixed,
+      ...(e.severity ? { severity: e.severity } : {}),
+      description: short(e.description),
     })),
     // `fixed` comes from whether the UI fixer actually returned, never from the fixSize tag: the
     // tag is the finding's own claim about how big its fix would be, and reading it as "it was
@@ -2658,9 +2785,14 @@ return {
   // 'passed' REQUIRES a Codex pass that came back with nothing outstanding: it is the word a
   // caller merges on, so it must be unreachable with findings still on the table.
   endVerify: endVerifyVerdict,
-  // The unresolved remainder, verbatim. Empty on 'passed'/'skipped'. This is the difference
-  // between surfacing a defect to the caller and swallowing it.
-  endVerifyFindings: endVerifyUnresolved,
+  // The outstanding remainder, verbatim: what no pass read clean, plus what the size gate withheld
+  // from the fixer. Empty on 'passed'/'skipped'. This is the difference between surfacing a defect
+  // to the caller and swallowing it.
+  endVerifyFindings: endVerifyOutstanding,
+  // The subset of the above that was NEVER APPLIED because its fix was large or risky. The caller
+  // decides these: they are the findings that would have let the last agent to touch the diff
+  // reshape what the change was for, and no pass re-reads this code.
+  endVerifyMajorFindings: endVerifyMajor,
   // Every real finding this review acted on ({ track, verdict, fixed, description }), for the
   // caller to write into the plan file as a "## Post-review changes" section before the commit.
   appliedFindings,

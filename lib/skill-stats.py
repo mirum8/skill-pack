@@ -384,6 +384,13 @@ def backfill(path, known_bfids):
                         "fixedReadability": fixed.get("readability"),
                         "docDriftCount": len(d.get("docDrift") or []),
                         "endVerify": d.get("endVerify"),
+                        # How many end-verify findings the size gate withheld from the fixer.
+                        # Carried only when the run actually recorded it: absent means a row
+                        # written before the gate existed, when every finding went to a fixer
+                        # regardless of size, and writing 0 there would claim the gate ran and
+                        # found nothing to hold back.
+                        **({"endVerifyMajor": d["endVerifyMajor"]}
+                           if "endVerifyMajor" in d else {}),
                         "localScan": d.get("localScan"),
                         "build": d.get("build"),
                         # Carried only when the mined return object actually had it. Writing an
@@ -624,6 +631,19 @@ def summarize_reviews(rows):
         c = collections.Counter(r.get(field) for r in reviews if r.get(field))
         if c:
             print(f"{title}: " + " · ".join(f"{k} {v}" for k, v in c.most_common()))
+
+    # The findings the end-verify size gate withheld from its fixer. Read beside the outcome line
+    # above: a `findings-unresolved` run with majors is not the same failure as one without. The
+    # first handed you a decision it refused to make on its own, the second tried and did not
+    # converge. Rows with the key ABSENT never had the gate and are named as such rather than
+    # counted as zero — the same reading `scanChangedCode` gets below.
+    gated = [r for r in reviews if "endVerifyMajor" in r]
+    if gated:
+        held = sum(r["endVerifyMajor"] for r in gated)
+        runs_held = sum(1 for r in gated if r["endVerifyMajor"])
+        print(f"end-verify size gate: {held} finding(s) withheld from the fixer over "
+              f"{runs_held}/{len(gated)} gated run(s); "
+              f"{len(reviews) - len(gated)} earlier row(s) predate the gate")
 
     # The one yield number local-scan can produce. It never appears in `fixes by source` because it
     # applies its OWN fixes rather than handing them to the triage fix-list — so a zero there says

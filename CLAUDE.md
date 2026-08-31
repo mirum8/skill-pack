@@ -187,6 +187,23 @@ stays that skill's store. Rules that are load-bearing:
   why the store's only `ui-functional` row is a blocked track reading as 100% precision.
   Every report-only track therefore gets its own channel for that (`blockedReason`, `coverage`),
   and `fixed` is derived from the fixer returning, never from a finding's own size tag.
+- **The end-verify is fenced, because it is the one track with no reader on either side.** Every
+  other correctness finding is adjudicated by `task-review`'s triage; this pass adjudicates its
+  own, and it is simultaneously the LAST write to the diff — nothing downstream re-reads what its
+  fixer does. Below `full` its framing invites the reviewer to challenge the whole change rather
+  than only regressions, so unfenced, the last agent to touch the code can rewrite what the change
+  was for. Two fences, both in the script and asserted in `control-flow.test.mjs`: it applies only
+  findings the reviewer sized `fixSize: minor` **by the size and risk of the fix, never by
+  severity** — a major or *untagged* one is surfaced and the code left alone, the same split the UI
+  track makes — and **pass 2 reports rather than fixes**, since a pass-2 fix is the one nothing
+  re-reads and the verdict is `findings-unresolved` either way (~4.01M tokens and 424s per fixer
+  over the 14 recorded runs that reached it, for no caller-visible signal). A withheld finding must
+  keep the verdict off `passed`: outstanding is outstanding whether or not anyone attempted it.
+  `real` unmarked means REAL and `fixSize` unmarked means MAJOR — both fail toward surfacing, never
+  toward silently acting. And because nothing else judges this track, **both sides of its own
+  adjudication are recorded** — what it kept and what it rejected. Recording only the remainder is
+  what made it read as never wrong: 18 rows, every one `confirmed`, while the same wrapper under
+  triage runs 29 confirmed against 24 dismissed.
 - **A track fails to certify in two ways, and they need opposite fixes.** `tracksBlocked` is a tool
   that did not run; `tracksDrifted` is a tool that ran, returned a real report, and read a
   *different changeset* — a hunter whose prepared diff capture was missing derives the change
