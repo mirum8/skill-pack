@@ -1446,6 +1446,67 @@ test('a clean end-verify pays nothing for the citation check', async () => {
   assert.equal(counts['end-verify-cite'], undefined)
 })
 
+test('REGRESSION: a fix applied after the build forces a rebuild before "green" stands', async () => {
+  // wf_0df046aa-cde returned build:"green" endVerify:"passed" over a tree where `mvn clean package`
+  // failed 1 of 959 tests. The end-verify fixer edits AFTER Phase 4's build, is only TOLD to rebuild
+  // (rebuildClause) and carries no schema, so nothing ever read a build result back. Its fix put a
+  // checkbox group into a SHARED fragment and broke a sibling page's pinned test. The caller merges
+  // on `build`.
+  const f = { file: CHANGED, line: 72, category: 'correctness', what: 'retired types are silently dropped', real: true, fixSize: 'minor' }
+  const { out, counts, logText } = await run({
+    overrides: {
+      'fix-triage': { correctness: [`${CHANGED}:42 guard the empty batch`], readability: [] },
+      'end-verify#1': { ran: true, findings: [f] },
+      'end-verify#2': CLEAN,
+      'post-fix-rebuild': { green: false, failures: 'PublicInventoryListRenderTest.aRetiredTypeStaysVisibleAndRemovable' },
+    },
+  })
+  assert.equal(counts['post-fix-rebuild'], 1)
+  assert.equal(out.build, 'red', 'green must not survive a fix the build never saw')
+  assert.match(out.buildRedAfterFix, /PublicInventoryListRenderTest/)
+  assert.match(logText, /post-fix rebuild is RED/)
+})
+
+test('a green post-fix rebuild lets the verdict stand', async () => {
+  const f = { file: CHANGED, line: 72, category: 'correctness', what: 'retired types are silently dropped', real: true, fixSize: 'minor' }
+  const { out, counts } = await run({
+    overrides: {
+      'fix-triage': { correctness: [`${CHANGED}:42 guard the empty batch`], readability: [] },
+      'end-verify#1': { ran: true, findings: [f] },
+      'end-verify#2': CLEAN,
+      'post-fix-rebuild': { green: true },
+    },
+  })
+  assert.equal(counts['post-fix-rebuild'], 1)
+  assert.equal(out.build, 'green')
+  assert.equal(out.buildRedAfterFix, '')
+})
+
+test('a dead post-fix rebuild is neither green nor red — it says the verdict is stale', async () => {
+  // Inventing either answer is worse than admitting the gap: "red" fails a good change, "green" is
+  // the bug this step exists for.
+  const f = { file: CHANGED, line: 72, category: 'correctness', what: 'retired types are silently dropped', real: true, fixSize: 'minor' }
+  const { out, logText } = await run({
+    overrides: {
+      'fix-triage': { correctness: [`${CHANGED}:42 guard the empty batch`], readability: [] },
+      'end-verify#1': { ran: true, findings: [f] },
+      'end-verify#2': CLEAN,
+      'post-fix-rebuild': null,
+    },
+  })
+  assert.match(out.buildRedAfterFix, /did not run/)
+  assert.match(logText, /Re-run the build before merging/)
+})
+
+test('a run that wrote nothing after the build pays for no rebuild', async () => {
+  const { counts, out } = await run({
+    overrides: { 'fix-triage': { correctness: [`${CHANGED}:42 guard the empty batch`], readability: [] } },
+  })
+  assert.equal(out.endVerify, 'passed')
+  assert.equal(counts['post-fix-rebuild'], undefined)
+  assert.equal(out.build, 'green')
+})
+
 // ------------------------------------------- the end-verify size gate ---
 // This is the only correctness track whose findings reach a fixer with nothing between them, and
 // it is also the LAST write to the diff — nothing re-reads what its fixer does. Below full tier

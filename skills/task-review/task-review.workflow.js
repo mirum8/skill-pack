@@ -1584,6 +1584,9 @@ const rebuildClause = triage.buildTool !== 'none'
   : 'then verify nothing is broken (no build tool was detected for this project).'
 phase('Build')
 let buildGreen = false
+// What a rebuild AFTER the post-build fixers found, when one was owed. Empty when nothing was
+// written after the build, or when the rebuild came back green.
+let buildRedAfterFix = ''
 if (triage.buildTool !== 'none') {
   const changed = (triage.changedFiles || []).join(', ')
   for (let i = 1; i <= 3; i++) {
@@ -2460,6 +2463,48 @@ try {
         `finding(s) are NOT in issues/ and exist only in this transcript. File them by hand.`)
   }
   minorFixed = minor.length > 0 && !!minorFixer
+
+  // EVERY write above landed after Phase 4's build. The end-verify fixer and the UI minor fixer
+  // both edit the tree once the green bar has been recorded; each is TOLD to rebuild
+  // (`rebuildClause`) and NEITHER is asked to prove it — they are dispatched with no schema, and
+  // nothing reads a build result back. So `buildGreen` describes a tree that stops existing the
+  // moment either of them applies a fix, and `build: 'green'` in the handoff is a claim about a
+  // tree nobody has built.
+  //
+  // A caller merges on that field. Observed on wf_0df046aa-cde: `build: "green"` and
+  // `endVerify: "passed"` over a tree where `mvn clean package` failed 1 of 959 tests, because an
+  // end-verify fix put a checkbox group back into a SHARED fragment and broke a sibling page's
+  // pinned test. The finding was real and the fix satisfied its words; nothing checked what else
+  // the fix touched, and the pipeline reported green over it.
+  //
+  // So re-establish the verdict instead of carrying it. This does NOT dispatch a fixer: the
+  // end-verify is deliberately the last write to this diff, and adding a writer after the last
+  // writer is how a run ends up certifying code that arrived after its final read. A red rebuild
+  // is REPORTED — which is the whole gain, since it turns a silent bad merge into a build the
+  // caller can act on.
+  if (buildGreen && triage.buildTool !== 'none' && (endVerifyFixed > 0 || minorFixed)) {
+    const who = [endVerifyFixed > 0 ? `${endVerifyFixed} end-verify fix(es)` : '', minorFixed ? 'the UI minor fix' : ''].filter(Boolean).join(' and ')
+    log(`post-task-review: ${who} landed AFTER the green build — rebuilding, because the recorded verdict describes the tree as it was before them`)
+    const rb = await agent(
+      `Run \`${fastCmd}\` via the ${triage.runnerAgent} agent (incremental — a clean baseline build
+       already ran in this working tree). Fixes landed in this tree after that build, and this run
+       has to know whether it is still green. green=true ONLY on a fully clean success. If red, put
+       the failing tests or compile errors in 'failures'. Do NOT fix anything and do NOT touch a
+       test to make it pass — you are reporting, not repairing. ${staleRule} ${exitCodeRule}`,
+      { label: 'post-fix-rebuild', phase: 'End-verify', schema: BUILD, agentType: triage.runnerAgent, ...REBUILD_RUN })
+    if (rb && rb.green) {
+      log('post-task-review: the post-fix rebuild is green — the recorded build verdict now describes the tree that ships')
+    } else if (!rb) {
+      // A dead runner is not evidence of red, and not evidence of green either. Say so and leave
+      // the verdict alone rather than inventing one in either direction.
+      log('post-task-review: the post-fix rebuild did NOT run — `build` still describes the tree as it was BEFORE the post-build fixes. Re-run the build before merging.')
+      buildRedAfterFix = 'the post-fix rebuild did not run — the build verdict predates the end-verify/UI fixes'
+    } else {
+      buildGreen = false
+      buildRedAfterFix = (rb.failures || '').trim() || 'the post-fix rebuild failed and named no failure'
+      log(`post-task-review: the post-fix rebuild is RED — a fix applied after the build broke it: ${buildRedAfterFix}`)
+    }
+  }
   if (uiWanted && triage.hasTestApp) {
     uiSummary = {
       // Which surface this run actually verified. Free to carry: record-run.py JSON-dumps the whole
@@ -2696,6 +2741,10 @@ const statsRow = {
   // Collapsing either of the last two into `false` invents a quiet scan that never ran.
   scanChangedCode: localScan === 'ok' ? scanChangedCode : null,
   build: buildGreen ? 'green' : (triage.buildTool === 'none' ? 'n/a' : 'red'),
+  // Why the build is not the one Phase 4 recorded: a fix landed after it and the rebuild came back
+  // red, or that rebuild could not run. Present only in those two cases, so a reader can tell "this
+  // change was always broken" from "a fix at the very end of the run broke it".
+  buildRedAfterFix,
   // The resolved fixer row, for the same reason task-run records the implementer's: mined item
   // effort is the SUBAGENT's, and on codex that is the driver's rather than the writer's — so this
   // is the only thing that can bucket fixes by provider later. Recorded on every run, including
@@ -2863,6 +2912,10 @@ return {
   fixed: { correctness: (fixList && fixApplied.correctness ? fixList.correctness.length : 0) + endVerifyFixed,
            readability: fixList && fixApplied.readability ? fixList.readability.length : 0 },
   build: buildGreen ? 'green' : (triage.buildTool === 'none' ? 'n/a' : 'red'),
+  // Why the build is not the one Phase 4 recorded: a fix landed after it and the rebuild came back
+  // red, or that rebuild could not run. Present only in those two cases, so a reader can tell "this
+  // change was always broken" from "a fix at the very end of the run broke it".
+  buildRedAfterFix,
   // ok | skipped (nothing JVM changed) | blocked (scan died/errored — NOT scanned) | n/a (no build tool).
   // Reported because /r:code-scan is mandatory in every tier: a caller has to be able to see that
   // the static pass did not actually happen, rather than infer it from a silent success.
