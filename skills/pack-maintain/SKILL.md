@@ -47,6 +47,18 @@ Run it from the pack's own repository; it is the only working tree you may write
 user **verbatim**, because it is the string they hand to a run as `--ask <session>`, and a name they
 have to reconstruct from memory is a report that never arrives.
 
+**The address can go stale mid-session, so re-read it rather than remember it.** An auto-derived
+name is `<repo>-<suffix>`, and the suffix belongs to the session record rather than to the
+directory — a resume produces a new record, so the name AND the ref both change under a session
+that never stopped running. This post is long-running, which makes it the likeliest thing in the
+pack to be resumed: one held here came back as `skill-pack-6d [ab81fc]` after announcing itself as
+`skill-pack-f6 [b9202e]`, with the whole conversation intact. Two rules follow. Run `ListAgents`
+again before handing the address out a second time, and never re-print a name from earlier in the
+conversation. And when a run reports that `--ask <name>` does not resolve, **re-read your own name
+first** — the default assumption must be that the address drifted, not that the caller mistyped it.
+A repo with an older session still live makes this worse rather than better: the stale name may
+resolve to a real peer that is not you, and that peer will not answer a report it never took.
+
 **Read the stats once, up front.** `python3 lib/skill-stats.py` from the repo root. Doing it now
 means Step 2's third rule costs nothing later, and the report ages slowly enough that one read
 serves a whole session.
