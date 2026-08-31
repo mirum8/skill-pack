@@ -1559,6 +1559,65 @@ test('build red from PRE-EXISTING failures only is surfaced, never fixed', async
   assert.equal(counts['build-fix#1'], undefined) // never handed to a fixer
 })
 
+test('REGRESSION: "None." in inScopeFailures is not in-scope work', async () => {
+  // wf_b1da7de4-36a. The runner answered the classification honestly — inScopeFailures: "None. All
+  // modules/tests related to the change set compiled and passed." — and the emptiness test read
+  // that non-empty string as in-scope failures. Three fixers were dispatched at a failure nobody
+  // owned, and the run stopped as `build-red`, which tells the caller THIS CHANGE broke the build.
+  // /r:issues-fix then discards a green 12-file implementation over an already-red base.
+  const { out, counts } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    build: () => ({ green: false, inScopeGreen: true,
+                    inScopeFailures: 'None. All modules/tests related to the change set compiled and passed.',
+                    preExistingFailures: 'LandingCategoryTileMobileAlignmentTest', failures: 'Tests run: 957, Failures: 1' }),
+  })
+  assert.equal(out.stopped, 'build-red-preexisting')
+  assert.equal(out.preExisting, 'LandingCategoryTileMobileAlignmentTest')
+  assert.equal(counts['build-fix#1'], undefined)
+})
+
+test('the flag beats the prose in both directions', async () => {
+  // inScopeGreen:false with no failure list still means this change broke something — the fixer
+  // must run. Reading the prose here would skip it.
+  const { counts, out } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    build: () => ({ green: false, inScopeGreen: false, inScopeFailures: '', failures: 'compile error' }),
+  })
+  assert.equal(out.stopped, 'build-red')
+  assert.equal(counts['build-fix#1'], 1)
+})
+
+test('a runner that answers no flag falls back to the emptiness test', async () => {
+  // A dead or malformed result must be no worse off than before the flag existed.
+  const { out, counts } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    build: () => ({ green: false, preExistingFailures: 'LegacyPricingTest', failures: 'x' }),
+  })
+  assert.equal(out.stopped, 'build-red-preexisting')
+  assert.equal(counts['build-fix#1'], undefined)
+})
+
+test('the build-red halt carries its triage, not just the branch', async () => {
+  // The caller acts hard on this stop. "This change broke the build" and "these tests still fail,
+  // and these others were already red on base" are different things to hand a user.
+  const { out } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    build: () => ({ green: false, inScopeGreen: false, inScopeFailures: 'RateSheetImportTest',
+                    preExistingFailures: 'LegacyPricingTest', failures: 'Tests run: 957, Failures: 2' }),
+  })
+  assert.equal(out.stopped, 'build-red')
+  assert.equal(out.inScope, 'RateSheetImportTest')
+  assert.equal(out.preExisting, 'LegacyPricingTest')
+  assert.match(out.buildLog, /Failures: 2/)
+})
+
+test('the build runner is asked for the flag as a boolean', async () => {
+  const { prompts } = await run({ review: OK_REVIEW, planfix: OK_FIX })
+  assert.match(prompts['build#1'], /inScopeGreen: ALWAYS set it/)
+  assert.match(prompts['build#1'], /boolean rather than describing it/)
+  assert.match(prompts['build#1'], /do not answer "None\." in one and leave this unset/)
+})
+
 // The baseline build certifies the whole run (the caller banks it as `buildGreen`), so it stays
 // clean and full-reactor. A RETRY only re-checks a surgical fix to code this run just wrote, and
 // on a multi-module reactor rebuilding everything to re-run one module's tests is most of what

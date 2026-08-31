@@ -384,6 +384,15 @@ const BUILD = {
   properties: {
     green: { type: 'boolean' },              // true ONLY on a fully clean build
     failures: { type: 'string' },
+    // The BRANCH is this boolean, never the prose beside it. Emptiness is not a usable signal for
+    // "nothing in scope failed": an agent asked to classify failures answers "None." as readily as
+    // it answers "", and a non-empty string that MEANS none inverts the test. That is what
+    // wf_b1da7de4-36a did — `inScopeFailures: "None. All modules/tests related to the change set
+    // compiled and passed."` read as in-scope work, so a red-on-base build dispatched three fixers
+    // at a failure nobody owned and then stopped as `build-red`, which tells the caller the change
+    // broke the build. Matching English words instead would just move the guess: "No in-scope
+    // failures were found" contains one, and so does half of what a runner writes.
+    inScopeGreen: { type: 'boolean' },       // did everything THIS run changed build and pass?
     inScopeFailures: { type: 'string' },     // in code THIS run changed -> ours to fix
     preExistingFailures: { type: 'string' }, // already red on base -> NEVER ours to fix
   },
@@ -2472,6 +2481,7 @@ if (src.buildTool !== 'none') {
   const scopeRule = src.buildTool === 'maven'
     ? `Scope it: add \`-pl <the modules holding the changed files> -am\` so the reactor rebuilds those modules and their upstream dependencies rather than the whole project. If you cannot map the changed files to modules confidently, or the project is single-module, run it unscoped.`
     : `Scope it: run \`:<module>:build\` for the modules holding the changed files rather than the root build. If you cannot map the changed files to modules confidently, or the project is single-module, run it unscoped.`
+  let lastBuild = null
   for (let i = 1; i <= 3; i++) {
     const b = await agent(
       `Run the build \`${i === 1 ? src.buildCmd : src.buildCmdFast}\` via the ${src.runnerAgent} agent.
@@ -2483,11 +2493,23 @@ if (src.buildTool !== 'none') {
        - preExistingFailures: failures UNRELATED to this work — a test or class the change never
          touched, the kind that already fails on ${src.base}. List the failing class names.
          These are NEVER ours to fix and never a reason to weaken a test.
+       - inScopeGreen: ALWAYS set it, and set it as a boolean rather than describing it. true when
+         NOTHING in the changed files failed — every in-scope module compiled and every in-scope
+         test passed — even while the build is red from pre-existing failures. false when this
+         change broke something. This flag is what the pipeline branches on; the two strings above
+         are the detail a human reads, so do not answer "None." in one and leave this unset.
        Put a short combined log in 'failures'.`,
       { label: `build#${i}`, phase: 'Build', schema: BUILD, agentType: src.runnerAgent, ...BUILD_RUN })
+    lastBuild = b || lastBuild
     if (b && b.green) { buildGreen = true; break }
     const inScope = b && b.inScopeFailures && b.inScopeFailures.trim()
-    if (!inScope) {
+    // The boolean decides. It falls back to the old emptiness test only when the runner did not
+    // answer at all — a dead or malformed result is no worse off than before, and both readings
+    // stop the run either way, so the cost of the fallback being wrong is a misattribution rather
+    // than a merge.
+    const inScopeClean = b && typeof b.inScopeGreen === 'boolean' ? b.inScopeGreen : !inScope
+    if (inScopeClean) {
+      if (inScope) log(`run-task-implement: the runner reported inScopeGreen with in-scope prose beside it ("${inScope.slice(0, 60)}") — believing the flag`)
       log('run-task-implement: build RED from PRE-EXISTING failures only — not fixing them, surfacing to the user')
       return await stop('build-red-preexisting', { preExisting: (b && b.preExistingFailures) || (b && b.failures) || 'unknown',
                                                    branch: onBranch, base: src.base }, buildGreen)
@@ -2508,7 +2530,17 @@ if (src.buildTool !== 'none') {
   }
   if (!buildGreen) {
     log('run-task-implement: in-scope build still RED after 3 attempts — stopping and surfacing to the user')
-    return await stop('build-red', { branch: onBranch, base: src.base }, buildGreen)
+    // Carry the triage out with the halt. A caller acts hard on `build-red` — /r:issues-fix records
+    // the group as failed and restores a clean base — and "this change broke the build" is a very
+    // different thing to hand a user than "these three tests still fail, and these others were
+    // already red on base". The workflow has both strings in hand here; dropping them made the
+    // caller re-derive from a tree it is about to discard.
+    return await stop('build-red', {
+      branch: onBranch, base: src.base,
+      inScope: (lastBuild && lastBuild.inScopeFailures) || 'unknown',
+      preExisting: (lastBuild && lastBuild.preExistingFailures) || '',
+      buildLog: (lastBuild && lastBuild.failures) || '',
+    }, buildGreen)
   }
 }
 
