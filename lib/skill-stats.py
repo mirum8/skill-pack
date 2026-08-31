@@ -1026,6 +1026,58 @@ def _skip_string(src, i, quote):
     return i
 
 
+# A regex literal is the one token in a script that looks like nothing else: `/([^\s"'`,]+)/`
+# carries a quote and a backtick as ordinary characters, and a scanner with no notion of regexes
+# reads that quote as opening a string and swallows everything up to the next one. That is not a
+# cosmetic miss — it takes every prompt in the swallowed region out of the classifier, and a step
+# whose prompts go unread costs its cost, effort and depth on every run it ever made. Whether a `/`
+# opens a regex or divides is decided by the token before it, the same rule every JS tokeniser uses.
+REGEX_PREV = set("(,=:[!&|?{};+-*%^~<>")
+REGEX_KEYWORDS = ("return", "typeof", "instanceof", "in", "of", "new", "delete", "void",
+                  "case", "do", "else", "yield", "await")
+
+
+def _regex_here(src, i):
+    """Does the `/` at i open a regex literal rather than divide?"""
+    j = i - 1
+    while j >= 0 and src[j] in " \t\r\n":
+        j -= 1
+    if j < 0 or src[j] in REGEX_PREV:
+        return True
+    k = j
+    while k >= 0 and (src[k].isalnum() or src[k] in "_$"):
+        k -= 1
+    return src[k + 1:j + 1] in REGEX_KEYWORDS
+
+
+def _skip_regex(src, i):
+    """The index just past the regex literal whose opening `/` sits at i.
+
+    A newline ends the scan where it stands: a regex never spans one, so a `/` this heuristic read
+    as an opening bracket when it was a division sign costs a line rather than the rest of the file.
+    """
+    i += 1
+    klass = False
+    while i < len(src):
+        c = src[i]
+        if c == "\\":
+            i += 2
+        elif c == "\n":
+            return i
+        elif c == "[":
+            klass, i = True, i + 1
+        elif c == "]":
+            klass, i = False, i + 1
+        elif c == "/" and not klass:
+            i += 1
+            while i < len(src) and src[i].isalpha():
+                i += 1
+            return i
+        else:
+            i += 1
+    return i
+
+
 def _skip_expr(src, i):
     """The index just past the `}` closing a brace that opened at i-1."""
     depth = 1
@@ -1047,6 +1099,8 @@ def _skip_expr(src, i):
         elif c == "/" and src[i + 1:i + 2] == "*":
             j = src.find("*/", i)
             i = len(src) if j < 0 else j + 2
+        elif c == "/" and _regex_here(src, i):
+            i = _skip_regex(src, i)
         else:
             i += 1
     return i
@@ -1088,6 +1142,8 @@ def _template_literals(src):
         elif c == "/" and src[i + 1:i + 2] == "*":
             j = src.find("*/", i)
             i = n if j < 0 else j + 2
+        elif c == "/" and _regex_here(src, i):
+            i = _skip_regex(src, i)
         elif c in "'\"":
             i = _skip_string(src, i + 1, c)
         elif c == "`":
@@ -1123,6 +1179,23 @@ def _label_after(window):
     return _step(m.group(1)) if m else None
 
 
+# One dispatch, two steps: `agent(cond ? citePrompt(b) : judgePrompt(b), { label })`, where `label`
+# is itself `cond ? 'cite' : 'judge'`. The branches are paired by the CONDITION TEXT, never by
+# position — two ternaries that happen to sit near each other say nothing, and a step name awarded
+# on ordering alone is the confidently-wrong answer this whole scheme exists to avoid.
+TERNARY_DISPATCH = re.compile(
+    r"\bagent\(\s*(?P<cond>[^?()\n]+?)\s*\?\s*(?P<a>[A-Za-z_$][\w$]*)\s*\([^()]*\)\s*"
+    r":\s*(?P<b>[A-Za-z_$][\w$]*)\s*\([^()]*\)\s*,")
+
+
+def _ternary_steps(src, at, cond):
+    """('cite', 'judge') for the `label` computed above `at` by a ternary on the SAME condition."""
+    pat = (r"label\s*=\s*`?\$?\{?\s*" + re.escape(cond.strip()) +
+           r"\s*\?\s*['\"`]([\w:-]+)['\"`]\s*:\s*['\"`]([\w:-]+)['\"`]")
+    hits = list(re.finditer(pat, src[:at]))
+    return (_step(hits[-1].group(1)), _step(hits[-1].group(2))) if hits else None
+
+
 def _builder_labels(src):
     """{name: step} for a dispatch whose prompt is a named builder — `agent(implBrief(a), {…})`.
 
@@ -1133,6 +1206,11 @@ def _builder_labels(src):
         label = _label_after(src[m.end() - 1:])
         if label:
             out.setdefault(m.group(1), set()).add(label)
+    for m in TERNARY_DISPATCH.finditer(src):
+        steps = _ternary_steps(src, m.start(), m.group("cond"))
+        if steps:
+            out.setdefault(m.group("a"), set()).add(steps[0])
+            out.setdefault(m.group("b"), set()).add(steps[1])
     # A builder dispatched under two different steps names neither of them.
     return {n: next(iter(l)) for n, l in out.items() if len(l) == 1}
 
@@ -1141,13 +1219,21 @@ def _builder_spans(src, lits):
     """[(start, end, step)] over each named builder's definition, so the literals inside it are
     claimed by the step that dispatches it."""
     inside = lambda p: any(s < p < e for s, e, _ in lits)
-    tops = [m.start() for m in re.finditer(r"^\S", src, re.M) if not inside(m.start())]
+    # Where each non-blank line starts, and how deep it sits. A builder is bounded by the next line
+    # at its own indentation or shallower — the one rule that reads a top-level builder and one
+    # nested inside a phase alike. Bounding on column 0 only would hand every nested builder the
+    # whole rest of the file, which is worse than not reading it: its step would then claim every
+    # literal after it.
+    starts = [(m.start(), len(m.group(1))) for m in re.finditer(r"^([ \t]*)(?=\S)", src, re.M)
+              if not inside(m.start())]
     spans = []
     for name, label in _builder_labels(src).items():
-        m = re.search(r"^(?:const|let|var|function|async function)\s+" + re.escape(name) + r"\b",
-                      src, re.M)
+        m = re.search(r"^([ \t]*)(?:const|let|var|function|async function)\s+" + re.escape(name)
+                      + r"\b", src, re.M)
         if m:
-            spans.append((m.start(), next((t for t in tops if t > m.start()), len(src)), label))
+            depth = len(m.group(1))
+            end = next((p for p, d in starts if p > m.start() and d <= depth), len(src))
+            spans.append((m.start(), end, label))
     return spans
 
 
@@ -1332,12 +1418,21 @@ def mine_items(db, label_sources=()):
             if not run_id:
                 # No echoed id: fall back to the payload quoted in the stats item's own prompt.
                 for ap in agents:
+                    # The whole first line, never a fixed-size head: the marker and the payload both
+                    # sit in that one prompt, and a slice of it is neither valid JSON nor a reliable
+                    # place to look for the marker. Parse defensively for the same reason every other
+                    # read here does -- one unparseable transcript must cost its own link, not the
+                    # entire mining pass, which is how ten days of items go missing while the report
+                    # prints `unrecorded` as though the pipeline had stopped recording.
                     with open(ap, encoding="utf-8", errors="replace") as fh:
-                        head = fh.read(6000)
-                    if "_STATS_JSON" not in head:
+                        first = fh.readline()
+                    if "_STATS_JSON" not in first:
                         continue
-                    p = _stats_payload(_text((json.loads(head.splitlines()[0]).get("message")
-                                              or {}).get("content")))
+                    try:
+                        content = (json.loads(first).get("message") or {}).get("content")
+                    except Exception:
+                        break
+                    p = _stats_payload(_text(content))
                     if p and _signature(p) in sigs:
                         run_id = sigs[_signature(p)]
                         linked_by_sig += 1

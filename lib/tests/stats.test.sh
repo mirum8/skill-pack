@@ -248,6 +248,85 @@ ok "a chunk two steps share names neither" \
 ok "a chunk only one step uses still names it" \
    "$(in_fixture 'Take the screenshots at three viewports and say what each one shows.')" gamma
 
+# One dispatch, two steps: `agent(cond ? citePrompt(b) : judgePrompt(b), { label })`, where `label`
+# is the same condition choosing between two step names. Nothing in the call names either step, so
+# without this shape the pack's widest fan-out — the plan review's two triage lanes — records
+# nothing at all, and the report reads `cited% 0%` as though the cheap lane never fired.
+TERNARY="$TMP/ternary.workflow.js"
+cat > "$TERNARY" <<'JS'
+export const meta = { name: 'fixture' }
+const cheap = (b) => `Check the finding against the line it cites. This is a LOOKUP and not a call.`
+const deep = (b) => `Weigh the finding against the whole design and say whether it truly holds up.`
+for (const b of batches) {
+  const label = `${b.lane === 'citation' ? 'cite' : 'judge'}#${b.key}`
+  await agent(b.lane === 'citation' ? cheap(b) : deep(b), { label, phase: 'P' })
+}
+JS
+tern() { python3 - "$TERNARY" "$1" <<'PYX'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("ss", "lib/skill-stats.py")
+ss = importlib.util.module_from_spec(spec); spec.loader.exec_module(ss)
+print(ss.classify(sys.argv[2], ss.label_signatures([sys.argv[1]])) or "<none>")
+PYX
+}
+ok "a ternary dispatch names its first branch" \
+   "$(tern 'Check the finding against the line it cites. This is a LOOKUP and not a call.')" cite
+ok "and its second"  "$(tern 'Weigh the finding against the whole design and say whether it truly holds up.')" judge
+
+# Paired by the CONDITION, never by position: two ternaries that merely sit near each other say
+# nothing about each other, and a step name awarded on ordering alone is the confidently-wrong
+# answer the whole scheme exists to avoid.
+MISMATCH="$TMP/mismatch.workflow.js"
+sed 's/b.lane === .citation. ? .cite./b.mode === "x" ? "cite"/' "$TERNARY" > "$MISMATCH"
+mism() { python3 - "$MISMATCH" "$1" <<'PYX'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("ss", "lib/skill-stats.py")
+ss = importlib.util.module_from_spec(spec); spec.loader.exec_module(ss)
+print(ss.classify(sys.argv[2], ss.label_signatures([sys.argv[1]])) or "<none>")
+PYX
+}
+ok "a different condition pairs nothing" \
+   "$(mism 'Check the finding against the line it cites. This is a LOOKUP and not a call.')" '<none>'
+
+# A regex literal holds quotes and backticks as ordinary characters. A scanner that reads one as a
+# string opens it and never closes it, and every prompt after it in the file falls out of the
+# classifier — a step's whole cost, effort and depth history, gone silently.
+REGEXY="$TMP/regexy.workflow.js"
+cat > "$REGEXY" <<'JS'
+export const meta = { name: 'fixture' }
+const fileOf = (w) => /([^\s:()[\]<>"'`,]+\.[A-Za-z0-9_]+)/.exec(String(w || ''))
+await agent(`Deploy the app and wait until it answers, then report the URL you reached it on.`,
+  { label: 'deploy', phase: 'D' })
+JS
+rex() { python3 - "$REGEXY" "$1" <<'PYX'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("ss", "lib/skill-stats.py")
+ss = importlib.util.module_from_spec(spec); spec.loader.exec_module(ss)
+print(ss.classify(sys.argv[2], ss.label_signatures([sys.argv[1]])) or "<none>")
+PYX
+}
+ok "a regex literal does not swallow later prompts" \
+   "$(rex 'Deploy the app and wait until it answers, then report the URL you reached it on.')" deploy
+
+# Division must still divide: reading `a / b` as an opening bracket loses everything up to the next
+# slash, which is the same blindness arrived at from the opposite mistake.
+DIVIDE="$TMP/divide.workflow.js"
+cat > "$DIVIDE" <<'JS'
+export const meta = { name: 'fixture' }
+const share = (a, b) => a / b
+await agent(`Summarise the run and report the share each step took of the total, as a percentage.`,
+  { label: 'report', phase: 'R' })
+JS
+div() { python3 - "$DIVIDE" "$1" <<'PYX'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("ss", "lib/skill-stats.py")
+ss = importlib.util.module_from_spec(spec); spec.loader.exec_module(ss)
+print(ss.classify(sys.argv[2], ss.label_signatures([sys.argv[1]])) or "<none>")
+PYX
+}
+ok "a division sign is not read as a regex" \
+   "$(div 'Summarise the run and report the share each step took of the total, as a percentage.')" report
+
 # --- reading the fixes-by-source table honestly ------------------------------
 # The two ways this table lies about a track that is behaving correctly. Both end in the same
 # place: a name on the retirement list, which is the one line here anybody acts on.
@@ -460,6 +539,41 @@ N="$TMP/nolane.db"
 echo '{"kind":"implement","run_id":"n1","repo":"acme","findings":[{"track":"coverage","verdict":"confirmed"}]}' \
   | python3 "$SINK" --db "$N" >/dev/null 2>&1
 ok "no lanes recorded, no lane table"      "$(python3 "$REPORT" --db "$N" 2>&1 | grep -c 'plan triage by lane')" 0
+
+# --- mining the workflow transcripts ----------------------------------------
+# The miner walks every transcript on disk, and one of them is always about to be unreadable: a
+# first line longer than any fixed-size read, a half-written line from a run still in flight. A
+# parse that dies takes the WHOLE pass with it, and nothing downstream says so — the report goes on
+# printing `unrecorded` and `cited% 0%`, which reads as "the pipeline stopped recording" rather than
+# "the miner never ran". So one bad transcript may cost its own run_id link and nothing more.
+M="$TMP/mined.db"; MHOME="$TMP/home"
+WFD="$MHOME/.claude/projects/proj/sess/subagents/workflows/wf_mine"
+mkdir -p "$WFD"
+python3 - "$WFD" <<'PYEOF'
+import json, sys
+d = sys.argv[1]
+pad = "x" * 9000                       # longer than any head-sized read of the line
+prompt = ("PTR_STATS_JSON marker below\n" + pad +
+          "\ncat <<'PTR_STATS_JSON'\n" + json.dumps({"kind": "review"}) + "\nPTR_STATS_JSON\n")
+with open(f"{d}/agent-a1.jsonl", "w") as fh:
+    fh.write(json.dumps({"type": "user", "timestamp": "2026-01-01T00:00:00.000Z",
+                         "message": {"role": "user", "content": prompt,
+                                     "usage": {"input_tokens": 5}}}) + "\n")
+with open(f"{d}/agent-a2.jsonl", "w") as fh:
+    fh.write(json.dumps({"type": "user", "timestamp": "2026-01-01T00:00:01.000Z",
+                         "message": {"role": "user", "content": "a second agent",
+                                     "usage": {"output_tokens": 7}}}) + "\n")
+PYEOF
+out=$(HOME="$MHOME" python3 "$REPORT" --db "$M" --mine-items 2>&1); rc=$?
+ok "an oversized first line does not kill the pass" "$rc" 0
+ok "every agent in that run is still mined"  "$(q "$M" "select count(*) from items")" 2
+# A truncated or half-written line is the same shape and must cost the same: its own link, not the
+# run beside it.
+printf 'not json at all\n' > "$WFD/agent-a1.jsonl"
+rm -f "$M"
+out=$(HOME="$MHOME" python3 "$REPORT" --db "$M" --mine-items 2>&1); rc=$?
+ok "an unparseable transcript does not kill it"  "$rc" 0
+ok "and the run's other agents still land"   "$(q "$M" "select count(*) from items")" 2
 
 # --- importing the pre-SQLite archive ---------------------------------------
 A="$TMP/archive.jsonl"; I="$TMP/imported.db"
