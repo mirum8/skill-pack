@@ -1013,10 +1013,11 @@ ITEM_COLUMNS = ("run_id", "wf_run_id", "agent_id", "agent_type", "label", "model
 # the report — rather than a confidently wrong one.
 LABEL_SIG_MIN = 28   # shorter chunks start matching more than one dispatch site
 INTERP = "\x00"     # where a `${…}` stood: the static text around it is what identifies a step
-# `label:` up to the first string in its value, so a step chosen by a ternary
-# (`label: attempt === 1 ? 'branch' : 'branch-retry'`) is read as the step it names first rather
-# than skipped. Bounded to the property's own value: it may not reach past a comma into the next.
-LABEL_RE = re.compile(r"""label:\s*[^,}\n]*?[`'"]([^`'"]*)""")
+LABEL_KEY = re.compile(r"\blabel:\s*")
+# Every string or template literal inside one `label:` value. The CLOSING delimiter is part of the
+# match, so consecutive literals pair up correctly — without it the scan resumes on the closing
+# quote and reads the gap between two literals (`' : '`) as a third one.
+LABEL_LIT = re.compile(r"""[`'"]([^`'"]*)[`'"]""")
 # The pre-pack skill names, frozen. History was written by scripts that used them, and without this
 # every run before the rename classifies as unlabelled.
 LABEL_ALIASES = {"post-task-review": "task-review", "run-task-implement": "task-run",
@@ -1182,6 +1183,79 @@ def _step(raw):
     return re.sub(r"[#$:].*", "", raw).rstrip("-") or raw
 
 
+def _label_value(text, start):
+    """The source of the expression one `label:` is set to — from just after the colon to the `,`
+    or newline that ends the property, skipping strings, templates and anything nested. It may not
+    reach past the property's own end into the next one: a step name borrowed from a neighbour is
+    the confidently-wrong answer this whole scheme exists to avoid."""
+    i, depth = start, 0
+    while i < len(text):
+        c = text[i]
+        if c in "([{":
+            depth += 1
+            i += 1
+        elif c in ")]}":
+            if not depth:
+                break
+            depth -= 1
+            i += 1
+        elif c in "'\"":
+            i = _skip_string(text, i + 1, c)
+        elif c == "`":
+            i = _scan_template(text, i + 1)[1]
+        elif c in ",\n" and not depth:
+            break
+        else:
+            i += 1
+    return text[start:i]
+
+
+def _label_step(expr):
+    """The step a `label:` value names, or None when it names more than one.
+
+    A label is often computed, and a naive "first string in the value" read is WRONG on the shape
+    that matters most: `label: step === 'implement' ? 'config' : \\`config-${step}\\``, where the
+    first string belongs to the CONDITION. Read that way, the pack's config-reader agent — an 11s
+    shell-out — was banked as 25 `implement` runs and dragged that step's average from 810s to
+    695s, understating the most expensive step in the pipeline by 14%. A wrong step name is
+    averaged in silently; an unlabelled one is visible and counted. So take the BRANCHES only,
+    never the condition, and award a step only when every branch agrees on one.
+    """
+    cut, i, depth = -1, 0, 0
+    while i < len(expr):
+        c = expr[i]
+        if c in "([{":
+            depth += 1
+            i += 1
+        elif c in ")]}":
+            depth -= 1
+            i += 1
+        elif c in "'\"":
+            i = _skip_string(expr, i + 1, c)
+        elif c == "`":
+            i = _scan_template(expr, i + 1)[1]
+        elif c == "?" and not depth:
+            cut = i
+            break
+        else:
+            i += 1
+    steps = {_step(m.group(1)) for m in LABEL_LIT.finditer(expr[cut + 1:] if cut >= 0 else expr)}
+    steps.discard("")
+    if not steps:
+        return None
+    # Branches that differ only by a `-suffix` are ONE step, not two: `attempt === 1 ? 'branch' :
+    # 'branch-retry'` is the same dispatch retried, exactly what `_step` already collapses for
+    # `#`, `$` and `:`. Splitting a step by its retry leaves both slices too small to read.
+    base = min(steps, key=len)
+    return base if all(s == base or s.startswith(base + "-") for s in steps) else None
+
+
+def _label_in(text):
+    """The step named by the FIRST `label:` in `text`, or None."""
+    m = LABEL_KEY.search(text)
+    return _label_step(_label_value(text, m.end())) if m else None
+
+
 def _label_after(window):
     """The step named by the opts object that follows a prompt argument, or None.
 
@@ -1195,8 +1269,7 @@ def _label_after(window):
     if not re.match(r"\s*,\s*\{", text):
         return None
     opts = text.index("{")
-    m = LABEL_RE.search(text[opts:_skip_expr(text, opts + 1)])
-    return _step(m.group(1)) if m else None
+    return _label_in(text[opts:_skip_expr(text, opts + 1)])
 
 
 # One dispatch, two steps: `agent(cond ? citePrompt(b) : judgePrompt(b), { label })`, where `label`
@@ -1282,8 +1355,10 @@ def label_signatures(paths):
                 head = src[lits[k - 1][1] if k else 0:start]
                 if re.search(r"\bprompt:\s*$", head):
                     # A track table pairs the two the other way round: `{ label: …, prompt: `…` }`.
-                    hits = list(LABEL_RE.finditer(head))
-                    label = _step(hits[-1].group(1)) if hits else None
+                    # The LAST `label:` before this prompt is its own; earlier ones belong to the
+                    # rows above it in the table.
+                    hits = list(LABEL_KEY.finditer(head))
+                    label = _label_step(_label_value(head, hits[-1].end())) if hits else None
             if not label:
                 label = next((lb for s, e, lb in spans if s <= start < e), None)
             if not label:

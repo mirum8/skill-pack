@@ -253,8 +253,17 @@ stays that skill's store. Rules that are load-bearing:
   reads `/([^\s:()[\]<>"'`,]+)/` as an opening quote and swallows every prompt up to the next —
   8.5KB of `task-run-implement.workflow.js`, taking `cite` and `judge` with it. Division must still
   divide; the `/` is decided by the token before it. `implement` is the most expensive step in the
-  pipeline at 2.13B tokens and `judge` the third at 607M, and neither number was readable while
-  those two shapes went unread. A chunk two steps share names neither. A stored label is corrected only when it is a step these
+  pipeline at 2.15B tokens and `judge` the third at 607M, and neither number was readable while
+  those two shapes went unread. A chunk two steps share names neither.
+  **A `label:` is often computed, and only its BRANCHES name steps — never its condition.**
+  `label: step === 'implement' ? 'config' : \`config-${step}\`` read as "the first string in the
+  value" awards the config reader to `implement`: 25 eleven-second shell-outs banked as
+  implementer runs, pulling the pack's most expensive step from 808s to 695s and understating it
+  by 14%. So the value is read to the end of its own property, cut at the first top-level `?`, and
+  a step awarded only when every branch agrees on one — branches differing by a `-suffix`
+  (`'branch'` / `'branch-retry'`) being one step retried, exactly what `_step` already collapses
+  for `#`, `$` and `:`. Disagreement leaves it unlabelled, which is the visible failure.
+  A stored label is corrected only when it is a step these
   same scripts can write — that one is this classifier's own earlier answer, so a disagreement is
   it having improved; a label outside their vocabulary came from a `--label-source` run over older
   scripts and is left alone.

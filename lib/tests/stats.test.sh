@@ -211,6 +211,19 @@ BRANCH_PROMPT='Put the repo on the feature branch item-x, based on main.
        run.'
 ok "a label picked by a ternary still names its step" "$(cls "$BRANCH_PROMPT")" branch
 
+# REGRESSION: the config reader's own label is `step === 'implement' ? 'config' : `config-${step}``,
+# and a "first string in the value" read takes `implement` — out of the CONDITION. That banked 25
+# of these 11-second shell-outs as `implement` runs and pulled the pack's most expensive step from
+# 810s to 695s. A branch is a label; a condition never is.
+CONFIG_PROMPT='Resolve the pack'"'"'s implement settings. Run exactly this from the repo root and return the
+   object it prints on stdout, VERBATIM — do not re-derive, re-order or "correct" any field:'
+ok "the config reader is not counted as an implementer" "$(cls "$CONFIG_PROMPT")" config
+
+IMPL_PROMPT='READ THAT FILE FIRST — it holds
+   the Context, the acceptance criteria, and the TDD test plan, so you build what the plan intends
+   rather than your own reinterpretation.'
+ok "a real implementer still classifies as implement" "$(cls "$IMPL_PROMPT")" implement
+
 # The prompt handed over by name (`agent(implBrief(a), { label })`): its literal lives under the
 # builder, a dispatch away from the label that names it.
 IMPL_PROMPT='Implement your slice of the plan at .task-plans/issue-1-x.md. READ THAT FILE FIRST — it holds
