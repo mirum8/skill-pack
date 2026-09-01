@@ -484,7 +484,12 @@ ${pad}dispatched with the Bash tool's own timeout set to 590000. It returns the 
 ${pad}gone; if it returns while the PID is still alive, run it again — that is the wait continuing,
 ${pad}never a signal that anything is wrong. Then read the job record's "rendered" field under
 ${pad}~/.claude/plugins/data/codex-openai-codex/state/*/jobs/*.json. Never wait on output-size
-${pad}stability — the log goes quiet for minutes mid-reasoning.`
+${pad}stability — the log goes quiet for minutes mid-reasoning.
+${pad}A DEAD PID OVER A RECORD WITH NO "rendered" MEANS THE JOB DIED — report that, immediately.
+${pad}A worker that is killed or crashes never writes a terminal status, so its record keeps
+${pad}"status":"running" for good. That field is therefore not evidence of life and re-reading it
+${pad}is not waiting: it will never change, and polling it burns the entire Bash cap on work that
+${pad}ended minutes ago. The pid is the liveness check; "status" only ever confirms a finish.`
 // Run one fixed command and report what it printed. There is no branch, no classification and no
 // prose in the output — the comparison that uses it happens in THIS script, not in the agent — so
 // the cheapest model is the right one. Effort is moot at this tier and stays low for clarity.
@@ -1908,10 +1913,14 @@ ${checks.map((c, i) => `     ${i + 1}. ${c}`).join('\n')}
      re-enter the wrapper that launches Codex, inside a read-only sandbox where it dies on mktemp.
        C="$HOME/.claude/plugins/marketplaces/openai-codex/plugins/codex/scripts/codex-companion.mjs"
        [ -f "$C" ] || C="$(ls -1d "$HOME"/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs | sort -V | tail -n1)"
-       node "$C" task --wait --effort medium "<the review prompt you build from the rubric below>"
-     Pass --wait so Codex runs in the FOREGROUND, --write=false — this is a review, not an edit —
-     and --effort medium, set explicitly so the depth is pinned rather than inherited from whatever
-     the CLI default happens to be. Medium is the right level for THIS job: the rubric below is a
+       node "$C" task --write=false --effort medium "<the review prompt you build from the rubric below>"
+     The subcommand takes [--background] [--write] [--resume-last|--resume|--fresh] [--model]
+     [--effort] and then the prompt. There is NO --wait flag on it, and an unrecognised flag is not
+     rejected: it becomes a POSITIONAL and is joined onto the prompt, so task --wait "<prompt>"
+     hands Codex a review brief opening with the literal token --wait. Omitting a mode flag is what
+     runs it in the FOREGROUND. Pass --write=false — this is a review, not an edit — and
+     --effort medium, set explicitly so the depth is pinned rather than inherited from whatever the
+     CLI default happens to be. Medium is the right level for THIS job: the rubric below is a
      fixed five-item checklist against a document and the code it cites, which is concrete checking
      rather than open-ended reasoning. It is also what keeps the run inside the foreground window —
      at high this step routinely ran 16-26 minutes and spilled into the background collection path
@@ -1920,7 +1929,11 @@ ${checks.map((c, i) => `     ${i + 1}. ${c}`).join('\n')}
      Set ran=true ONLY if the real Codex actually produced a critique. If the CLI is missing, the
      job failed, or it timed out and moved to the background and you could not collect the
      finished review, set ran=false — there is NO fallback reviewer here and no stand-in model is
-     acceptable, so a false "clean" is worse than an honest failure. A review longer than the
+     acceptable, so a false "clean" is worse than an honest failure. Say in the note WHICH of the
+     three it was, in those words — missing CLI, job died, still running when you gave up. The
+     reader of a halt is diagnosing, and "did not complete within time constraints" over a job that
+     died two minutes in sends them to look at timeouts for a failure that was never about time.
+     A review longer than the
      ~600s Bash cap WILL be moved to the background — that is expected, not a failure, and giving
      up there is the single most common way this step reports a false block. You ARE permitted to
      wait here. ${collect('     ')}`,

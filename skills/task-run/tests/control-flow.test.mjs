@@ -226,6 +226,26 @@ test('the rubric is a CLOSED vocabulary, in the schema and in the prompt', async
   assert.match(prompts['codex-plan-review#1'], /EXACTLY ONE rubric/)
 })
 
+test('the plan review drives the companion with flags it actually has, and treats a dead pid as death', async () => {
+  // The companion's `task` takes [--background] [--write] [--resume-last|--resume|--fresh]
+  // [--model] [--effort] and then the prompt. It has no `--wait`, and an unrecognised flag is not
+  // rejected — it becomes a POSITIONAL and is joined onto the prompt, so `task --wait "<prompt>"`
+  // sends Codex a review brief opening with the literal token `--wait`. Measured on a real run:
+  // the job record's summary read `--wait Review this Go Kubernetes TUI project's Phase 25 plan`.
+  const { prompts } = await run({ review: OK_REVIEW, planfix: OK_FIX })
+  const p = prompts['codex-plan-review#1']
+  assert.doesNotMatch(p, /node "\$C" task --wait/, 'the command line must not pass a flag `task` does not have')
+  assert.match(p, /node "\$C" task --write=false --effort medium/)
+  assert.match(p, /There is NO --wait flag/, 'and it must say why, or the next editor puts it back')
+  // And the collect protocol has to name the one state that is neither alive nor finished. A
+  // worker that is killed or crashes never writes a terminal status, so the record keeps
+  // "status":"running" for good. Trusting that field turned a job that died 1m44s in into a block
+  // that ran out the full ~600s Bash cap and halted a 43-minute run with
+  // "did not complete within time constraints".
+  assert.match(p, /DEAD PID OVER A RECORD WITH NO "rendered" MEANS THE JOB DIED/)
+  assert.match(p, /never writes a terminal status/)
+})
+
 test('every finding is judged, in rubric batches, and the judges get the explorer briefs', async () => {
   // Two failure modes locked out at once. ONE agent handed nothing but the finding strings has to
   // re-read the codebase to answer the first finding and then works the rest serially — hence the

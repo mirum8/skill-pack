@@ -322,6 +322,21 @@ const withFix = (over = {}) => ({
   ...over,
 })
 
+test('the Codex fix wrapper is told a dead pid is death, not a reason to keep polling', async () => {
+  // The collect protocol is shared with task-run, and the state it has to name is the one that is
+  // neither alive nor finished: a worker that is killed or crashes never writes a terminal status,
+  // so its record keeps "status":"running" for good. Trusting that field once turned a Codex job
+  // that died 1m44s in into a wait that ran out the full ~600s Bash cap.
+  // The shipped row puts the fixer on codex, which is the branch that drives the CLI and so the
+  // only one that is handed the collect protocol at all.
+  const { prompts } = await run(withFix())
+  const p = prompts['fix-correctness']
+  assert.match(p, /DEAD PID OVER A RECORD WITH NO "rendered" MEANS THE JOB DIED/)
+  assert.match(p, /never writes a terminal status/)
+  // The pid is the liveness check — the loop the wrapper is handed must be the ps loop.
+  assert.match(p, /ps -p <pid>/)
+})
+
 test('fixers never run deeper than the implementers; the agents that JUDGE keep the top tier', async () => {
   const { opts } = await run(withFix({ config: CLAUDE_FIX_CONFIG }))
   // A patch is strictly less than the plan-following change it patches, so `steps.fix` tracks

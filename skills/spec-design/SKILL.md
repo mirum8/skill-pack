@@ -352,7 +352,7 @@ carry on. A skipped review reported as a review is worse than none.
 Do **not** reach for `/r:code-adversarial` or its `run.sh`: those review a git diff, there is no
 diff here, and running one from a Codex-backed context makes Codex re-enter the wrapper that
 launches Codex. If the review outlives the foreground window, call the companion directly —
-`node "$C" task --wait --write=false --effort medium "<the rubric prompt>"` — as `task-run` does
+`node "$C" task --write=false --effort medium "<the rubric prompt>"` — as `task-run` does
 for the same job and reason.
 
 **The rubric — five questions, fixed.** A fixed list makes two runs comparable and stops the review

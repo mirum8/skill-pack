@@ -442,7 +442,12 @@ ${pad}dispatched with the Bash tool's own timeout set to 590000. It returns the 
 ${pad}gone; if it returns while the PID is still alive, run it again — that is the wait continuing,
 ${pad}never a signal that anything is wrong. Then read the job record's "rendered" field under
 ${pad}~/.claude/plugins/data/codex-openai-codex/state/*/jobs/*.json. Never wait on output-size
-${pad}stability — the log goes quiet for minutes mid-reasoning.`
+${pad}stability — the log goes quiet for minutes mid-reasoning.
+${pad}A DEAD PID OVER A RECORD WITH NO "rendered" MEANS THE JOB DIED — report that, immediately.
+${pad}A worker that is killed or crashes never writes a terminal status, so its record keeps
+${pad}"status":"running" for good. That field is therefore not evidence of life and re-reading it
+${pad}is not waiting: it will never change, and polling it burns the entire Bash cap on work that
+${pad}ended minutes ago. The pid is the liveness check; "status" only ever confirms a finish.`
 
 // ------------------------------------------------------- find-bugs hunters ---
 // The pattern hunters of /r:code-bugs Phase 2, spawned by THIS SCRIPT instead of beneath a single
