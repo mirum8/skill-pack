@@ -376,6 +376,88 @@ out=$(CMUX_STUB_LIST_EMPTY=1 "$FAN" wait --id p6 --timeout 2 2>&1); rc=$?
                || bad "an empty listing is 'cannot tell' too" "exit $rc: $out"
 
 echo
+echo "== --any rolls the window instead of waiting on the slowest =="
+# A wave is a rolling window only if the caller can be told about the FIRST unit back rather than
+# the last. Bare `wait` blocks until every unit in the set has a sentinel, which is batches waiting
+# on the slowest; `--any` is what lets the freed slot admit the next queued leaf while the rest are
+# still working. It cannot be built from the other subcommands: the alternative is polling `status`
+# on a timer, which is deciding "is it done yet" by re-reading a report — exactly the shape this
+# script exists to keep away from the caller.
+while IFS= read -r line; do
+  case $line in *workspace=*) "$FAN" cleanup --id "${line%% *}" >/dev/null 2>&1 ;; esac
+done < <("$FAN" status 2>/dev/null)
+for u in a1 a2 a3; do
+  "$FAN" spawn --id "$u" --dir "$TMP/wt-$u" --base main --prompt x \
+         --marker-file todo.md --marker-prefix 'built: ' >/dev/null 2>&1
+done
+
+finish_unit a2 "$TMP/wt-a2" phase-a2 ok
+out=$("$FAN" wait --any --timeout 3 2>&1); rc=$?
+[[ $rc == 0 ]] && ok "--any returns on the first unit back, with two still working" \
+               || bad "--any returns on the first unit back, with two still working" "exit $rc: $out"
+grep -q "^a2 ok phase-a2" <<<"$out" && ok "and names exactly that unit, ready to land and cleanup" \
+                                    || bad "and names exactly that unit, ready to land and cleanup" "$out"
+grep -qE "^(a1|a3) " <<<"$out" && bad "and says nothing about the units still working" "$out" \
+                               || ok "and says nothing about the units still working"
+
+out=$("$FAN" wait --timeout 2 2>&1); rc=$?
+[[ $rc == 3 ]] && ok "bare wait over the same set still blocks on the slowest — the two shapes differ" \
+               || bad "bare wait over the same set still blocks on the slowest — the two shapes differ" "exit $rc: $out"
+out=$("$FAN" wait --any --id a1 --id a3 --timeout 2 2>&1); rc=$?
+[[ $rc == 3 ]] && ok "--any honours an explicit --id set rather than always scanning every live unit" \
+               || bad "--any honours an explicit --id set rather than always scanning every live unit" "exit $rc: $out"
+
+# The trap the once-only rule exists for. A failed unit is REQUIRED to be left standing — workspace
+# open, worktree in place, since that state is the only evidence of what went wrong — so it keeps
+# its rec and stays live. Handed back on every later call, it would starve its wave-mates forever:
+# a loop that never ends and never says why.
+finish_unit a1 "$TMP/wt-a1" phase-a1 halted
+out=$("$FAN" wait --any --timeout 3 2>&1); rc=$?
+[[ $rc == 1 ]] && ok "a failed unit comes back through --any as failed, not as ok" \
+               || bad "a failed unit comes back through --any as failed, not as ok" "exit $rc: $out"
+grep -q "^a1 failed" <<<"$out" && ok "and is named" || bad "and is named" "$out"
+out=$("$FAN" wait --any --timeout 2 2>&1); rc=$?
+[[ $rc == 3 ]] && ok "and is not handed back twice — the wait moves on to the unit still working" \
+               || bad "and is not handed back twice — the wait moves on to the unit still working" "exit $rc: $out"
+grep -q "a3" <<<"$out" && ok "naming that one, while the failed unit stays standing" \
+                       || bad "naming that one, while the failed unit stays standing" "$out"
+[[ -d "$TMP/wt-a1" ]] && ok "a reported failure is still left standing for a human" \
+                      || bad "a reported failure is still left standing for a human" "removed"
+
+# What the whole flag is for: cleanup the unit --any named, and the slot it frees takes the next.
+"$FAN" cleanup --id a2 >/dev/null 2>&1
+out=$("$FAN" spawn --id a4 --dir "$TMP/wt-a4" --base main --prompt x 2>&1); rc=$?
+[[ $rc == 0 ]] && ok "the slot freed by cleaning up that unit admits the next while the rest work" \
+               || bad "the slot freed by cleaning up that unit admits the next while the rest work" "exit $rc: $out"
+
+# Nothing pending and nothing unreported is not a wait, it is an answer. Blocking four hours over
+# units that cannot change would be indistinguishable from a stall.
+finish_unit a3 "$TMP/wt-a3" phase-a3 ok
+finish_unit a4 "$TMP/wt-a4" phase-a4 ok
+out=$("$FAN" wait --any --timeout 5 2>&1); rc=$?
+grep -q "^a3 " <<<"$out" && grep -q "^a4 " <<<"$out" \
+  && ok "two units back in one tick are both handed over, not one and a re-wait" \
+  || bad "two units back in one tick are both handed over, not one and a re-wait" "$out"
+out=$("$FAN" wait --any --timeout 5 2>&1); rc=$?
+[[ $rc == 0 ]] && ok "with everything already handed back, --any returns instead of blocking" \
+               || bad "with everything already handed back, --any returns instead of blocking" "exit $rc: $out"
+grep -q "no unreported units" <<<"$out" \
+  && ok "and says why, so a caller that lost its place reads status rather than hanging" \
+  || bad "and says why, so a caller that lost its place reads status rather than hanging" "$out"
+
+# The mark is the unit's, not the id's: cleanup takes it away with everything else, so an id reused
+# later is a new unit rather than a silently pre-reported one.
+"$FAN" cleanup --id a3 >/dev/null 2>&1
+"$FAN" spawn --id a3 --dir "$TMP/wt-a3" --base main --prompt x >/dev/null 2>&1
+finish_unit a3 "$TMP/wt-a3" phase-a3-again ok
+out=$("$FAN" wait --any --id a3 --timeout 3 2>&1); rc=$?
+grep -q "^a3 ok phase-a3-again" <<<"$out" \
+  && ok "cleanup clears the once-only mark, so a reused id reports again" \
+  || bad "cleanup clears the once-only mark, so a reused id reports again" "exit $rc: $out"
+
+for u in a1 a3 a4; do "$FAN" cleanup --id "$u" >/dev/null 2>&1; done
+
+echo
 echo "== usage errors are never a silent success =="
 out=$("$FAN" nonsense 2>&1); rc=$?
 [[ $rc != 0 ]] && ok "an unknown subcommand exits non-zero" \

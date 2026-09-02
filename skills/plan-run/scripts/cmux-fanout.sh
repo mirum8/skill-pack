@@ -32,10 +32,17 @@
 #                          unit past the cap: MAX_UNITS comes from the config
 #                          (`steps.fanout.maxUnits`) and is enforced here, where
 #                          a caller cannot forget it.
-#   wait [--id U]... [--timeout S]
+#   wait [--id U]... [--any] [--timeout S]
 #                          block until every live unit has a sentinel, then read
 #                          it AND verify the marker. A timeout is a stop naming
 #                          the stalled units, never "assume done".
+#                          --any returns as soon as ONE of them comes back and
+#                          reports only that unit, so the caller can cleanup and
+#                          refill the slot while the rest are still working --
+#                          the difference between a rolling window and batches
+#                          waiting on the slowest. A verdict is handed back once;
+#                          a failed unit is deliberately left standing, and
+#                          without that it would be re-reported forever.
 #   status                 one line per unit: live | ok | failed | stalled.
 #   cleanup --id U         close the workspace, remove the worktree, free a slot.
 #                          Refuses a tree with uncommitted changes -- a unit that
@@ -106,6 +113,15 @@ mkdir -p "$state"
 
 rec()      { printf '%s/%s.rec' "$state" "$1"; }
 sentinel() { printf '%s/%s.sentinel' "$state" "$1"; }
+# Written by `wait --any` when it hands a unit's verdict back, and removed with
+# the unit by `cleanup`. It exists because the caller is REQUIRED to leave a
+# failed unit standing -- workspace open, worktree in place, since that state is
+# the only evidence of what went wrong -- so a failed unit keeps its rec, stays
+# live, and would be handed back by every later `--any` call, forever, while its
+# wave-mates finished unseen. Tracking it here rather than asking the caller to
+# narrow the set by hand is the same choice the rest of this script makes: a
+# judgement that fails by looping silently belongs in the script.
+reported() { printf '%s/%s.reported' "$state" "$1"; }
 
 # A unit is live from spawn until cleanup, not until its sentinel lands: a failed
 # unit still holds a worktree on disk and a workspace on screen, so it still
@@ -355,11 +371,26 @@ workspace_gone() {
 }
 
 # --- wait --------------------------------------------------------------------
+# Two shapes, and the difference is what the caller can do next.
+#
+#   wait          blocks until EVERY unit in the set has a sentinel, then reports
+#                 all of them. Right for a wave being landed as a unit.
+#   wait --any    blocks until AT LEAST ONE unit in the set comes back, reports
+#                 exactly those, and returns. This is what makes the window
+#                 actually roll: the caller cleans that unit up, spawns the next
+#                 queued one into the freed slot, and calls again -- rather than
+#                 holding three slots hostage to the slowest of the three. There
+#                 is no way to build it out of the other subcommands, because the
+#                 only alternative is polling `status`, and deciding "is it done
+#                 yet" by re-reading a report on a timer is precisely the
+#                 confident-wrong-answer shape this script exists to remove from
+#                 the caller.
 do_wait() {
-  local ids=() timeout=${CMUX_FANOUT_TIMEOUT:-14400} poll=${CMUX_FANOUT_POLL:-10}
+  local ids=() timeout=${CMUX_FANOUT_TIMEOUT:-14400} poll=${CMUX_FANOUT_POLL:-10} any=0
   while [ $# -gt 0 ]; do
     case $1 in
       --id)      ids+=("${2:-}"); shift 2 ;;
+      --any)     any=1;           shift   ;;
       --timeout) timeout=${2:-};  shift 2 ;;
       *) die "wait: unknown argument $1" ;;
     esac
@@ -372,13 +403,41 @@ do_wait() {
   local id
   for id in "${ids[@]}"; do [ -e "$(rec "$id")" ] || die "wait: no such unit '$id'"; done
 
-  local waited=0 pending
+  local waited=0 pending ready
   while :; do
-    pending=()
+    pending=(); ready=()
     for id in "${ids[@]}"; do
-      [ -e "$(sentinel "$id")" ] || pending+=("$id")
+      if [ -e "$(sentinel "$id")" ]; then
+        if [ "$any" = 1 ] && [ ! -e "$(reported "$id")" ]; then ready+=("$id"); fi
+      else
+        pending+=("$id")
+      fi
     done
-    [ ${#pending[@]} -eq 0 ] && break
+    if [ "$any" = 1 ]; then
+      # Good news already in hand is delivered before anything else is judged: a
+      # unit that finished is not made less finished by a wave-mate whose session
+      # died, and that one is still there to be caught on the next call.
+      if [ ${#ready[@]} -gt 0 ]; then
+        local arc=0 av
+        for id in "${ready[@]}"; do
+          : > "$(reported "$id")"
+          av=$(unit_verdict "$id")
+          echo "$id $av"
+          case $av in failed*) arc=1 ;; esac
+        done
+        return $arc
+      fi
+      # Nothing pending and nothing unreported: every unit in the set has already
+      # been handed back once. Say so and return rather than blocking for four
+      # hours on units that are not going to change -- a caller that lost its
+      # place recovers with `status`, which reports regardless of this flag.
+      if [ ${#pending[@]} -eq 0 ]; then
+        echo "no unreported units — every unit in the set has already been handed back; cleanup the ones that are done, or read status"
+        return 0
+      fi
+    else
+      [ ${#pending[@]} -eq 0 ] && break
+    fi
     local dead=()
     for id in "${pending[@]}"; do
       workspace_gone "$(field "$(rec "$id")" workspace_uuid)" && dead+=("$id")
@@ -443,7 +502,7 @@ do_cleanup() {
   [ -n "$ws" ] && CMUX_QUIET=1 cmux workspace close "$ws" >/dev/null 2>&1 || true
   [ -d "$dir" ] && git worktree remove "$dir" >/dev/null 2>&1 || true
   git worktree prune >/dev/null 2>&1 || true
-  rm -f "$r" "$(sentinel "$id")"
+  rm -f "$r" "$(sentinel "$id")" "$(reported "$id")"
   echo "$id cleaned ($(live_count)/$MAX_UNITS slots in use)"
 }
 

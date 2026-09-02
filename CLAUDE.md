@@ -150,6 +150,19 @@ one setting, not one per skill, since both drive the same script. It defaults to
 refuses to run uncapped: an empty or non-numeric value falls back to 3 and is named, because the
 comparison is `-ge` and a blank cap would let every spawn through.
 
+Under `--cmux` **every** unit gets a workspace, a wave of one included — a wave decides how many run
+at once, never whether a session opens, and the orchestrator builds nothing itself. A unit running
+alone is landed **before the next worktree is cut**, because `git worktree add --detach` pins a tree
+to the base it was created from and a queue of solo spawns with no merge between them is a
+concurrent wave wearing a queue. The window rolls on `wait --any`, not `wait`: the bare form blocks
+until every unit in the set has reported, which holds all three slots until the slowest finishes,
+so a queued unit waits behind one that came back an hour ago. `--any` hands each verdict back
+**once** — a failed unit is required to be left standing, so it keeps its slot and stays live, and
+without the once-only rule every later call would re-report that failure while its wave-mates
+finished unseen. The script tracks that rather than asking the caller to narrow the set by hand,
+for the reason everything else here is in the script: a judgement that fails by looping silently is
+not one to leave to a model reading a screen.
+
 **Every workflow edit needs its control-flow test.** `tests/control-flow.test.mjs` executes the
 script with `agent()`/`parallel()`/`phase()`/`log()` stubbed and asserts the branches — what stops
 the run, what is retried, what reaches the handoff. It models both agent death shapes: `agent()`

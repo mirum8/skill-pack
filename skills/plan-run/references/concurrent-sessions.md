@@ -59,13 +59,21 @@ FAN="${CLAUDE_PLUGIN_ROOT}/skills/plan-run/scripts/cmux-fanout.sh"
 "$FAN" spawn --id phase-5 --dir ../billing-p5 --base main \
        --marker-file docs/billing/todo.md --marker-prefix 'built: ' \
        --prompt "/r:plan-run docs/billing/todo.md --phases 5 --no-merge --yes"
-"$FAN" wait                                         # blocks; exit 3 = a unit stalled, and is named
+"$FAN" wait --any                                   # blocks until ONE unit is back and names it
 "$FAN" cleanup --id phase-5                         # closes the workspace, removes the worktree
 ```
 
 `spawn` opens a cmux workspace holding a **full interactive `claude` session**, not `claude -p`: a
 human can watch it, answer a prompt inside it or take it over — the reason the fan-out goes through
 cmux rather than background processes.
+
+**Every unit is spawned, whatever its wave.** A wave of one, a leaf the `--slice` preflight held
+back, a leaf `footprint-warn` flagged — each still gets its own worktree and its own workspace, and
+the orchestrator builds none of them. What a wave decides is how many are live at once, never
+whether a workspace opens. A unit running alone is landed **before the next worktree is cut**:
+`git worktree add --detach <base>` pins a tree to the base it was created from, so a queue of solo
+spawns with no merge between them is a concurrent wave wearing a queue — the one thing the preflight
+above exists to refuse.
 
 **Workspace trust is per path, and a worktree is a new path.** Left alone, every unit would open on
 the trust dialog and sit there until the wait timed out. So `spawn` copies the repo's own
@@ -122,6 +130,15 @@ working one, and the freed slot admits the next leaf against the cap of three. *
 stalled unit is deliberately not cleaned up** — its workspace and worktree are the only evidence of
 what went wrong.
 
+Which is why the loop is `wait --any`, not `wait`. A bare `wait` blocks until every unit in the set
+has reported, so all three slots stay held until the slowest of them finishes — batches, and a
+queued leaf sitting behind a unit that came back an hour ago. `--any` returns the first one back and
+says nothing about the rest, so the cleanup and the next `spawn` happen while the others are still
+working. Each verdict is handed back **once**: a failed unit keeps its slot by the rule above, and
+without that it would be re-reported on every later call while its wave-mates finished unseen.
+`status` reports everything regardless, and is the recovery path — but reading it on a timer to
+decide whether a unit is done is polling, which is the one thing the orchestrator must not do.
+
 ## Which tree am I in
 
 ```sh
@@ -172,13 +189,14 @@ unasked.
 | exit | means | what to do |
 |---|---|---|
 | 0 | clean, or not enough history to judge — it says which | continue |
-| 2 | a package is claimed by two leaves and its hub files are undeclared | serial: print and continue · `--cmux`: **stop** |
+| 2 | a package is claimed by two leaves and its hub files are undeclared | serial: print and continue · `--cmux`: **stop**, or under `--unattended` one unit at a time, landed between |
 | 1 | usage or git trouble | a named skip; this improves the preflight, it is not the preflight |
 
 `--cmux` is the strict one because that is where being wrong is expensive: serially it costs one
 merge conflict, across a wave every hour the wave spent building.
 
-Two answers to an exit 2, and the report names both: run one leaf per package at a time, or correct
+Two answers to an exit 2, and the report names both: run one leaf per package at a time — still a
+workspace each, just one live — or correct
 the `Files:` lines from the code that now exists. Step 3.6 does the second for every phase it
 commits, so this warning fades as the plan fills in.
 

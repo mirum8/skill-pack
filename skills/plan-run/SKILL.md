@@ -63,10 +63,12 @@ between them: **ask** — the one place the run stops for input that isn't the g
   plan's `v1 (MVP)` block and leave `Advanced` for later.
 - **`--phases <n,n>`** → run exactly these phases, whatever their position — the primitive `--from`
   and `--to` are sugar over, and how one session takes a single leaf out of a wave.
-- **`--cmux`** → run each wave's leaves at the same time: a detached worktree and a cmux workspace
-  per leaf, each holding a real interactive `claude` session, then land the wave from here — the
-  executor for the command block `--dry-run` prints ([Running phases
-  concurrently](#running-phases-concurrently)). **Without it nothing about this skill changes**:
+- **`--cmux`** → build every leaf in a session of its own: a detached worktree and a cmux workspace
+  per leaf, each holding a real interactive `claude` session, then land from here — the executor for
+  the command block `--dry-run` prints ([Running phases
+  concurrently](#running-phases-concurrently)). The wave decides only **how many run at once**; a
+  wave of one still gets its own workspace, and you build nothing yourself.
+  **Without it nothing about this skill changes**:
   the run is the serial one below, and no worktree is created. `--cmux` with `--no-merge` or
   `--land` is a contradiction — those two *are* the halves it drives — so refuse and name which one
   clashed.
@@ -190,13 +192,15 @@ Resolve first: none outstanding
   questions — but it **stops at the first phase that fails**, and reports the `--from N` to resume.
   Saying both halves is what makes it safe for the user to walk away.
 - **Under `--unattended`, say that instead**: the run works around a dirty base, a conflict it can
-  prove additive, and a wave the preflight refuses (that one goes serial); it stops on a failed
+  prove additive, and a wave the preflight refuses (that one runs one unit at a time); it stops on a failed
   phase, and notifies only then. Print the table's halt column from [Running
   unattended](#running-unattended) in one sentence — what will and will not fetch them back is what
   they need before walking away.
 - **Under `--cmux` only**, add the wave as a column — from the `check_todo.py` run Step 0 made,
   nothing new is computed — and say how many leaves will be built at once and how many at a time
-  (the cap is three).
+  (the cap is three). Say plainly that **every** leaf gets a workspace, a wave of one included: a
+  run whose waves are all single-leaf still opens a session per phase, one at a time, and a user
+  reading "wave 1" beside every row would otherwise expect no fan-out at all.
 
 ## Step 3 — Run the phases in order
 
@@ -208,9 +212,10 @@ indexed) and only a real call is evidence; nested spawning may return in a later
 can reach neither `Workflow` nor `Agent`, you are nested inside a subagent: stop and tell the user
 to re-run from a top-level session. Never re-run the fan-out inline and report success.
 
-This is the whole of Step 3 unless `--cmux` was passed. With it, a wave's leaves are handed to
-sessions of their own and you orchestrate rather than build — [`--cmux`, the driven
-form](#--cmux--the-driven-form) — but every phase still runs exactly the loop below. For each phase:
+This is the whole of Step 3 unless `--cmux` was passed. With it, **every** leaf is handed to a
+session of its own — a wave of one included — and you orchestrate rather than build any of them
+([`--cmux`, the driven form](#--cmux--the-driven-form)), but every phase still runs exactly the loop
+below inside its own session. For each phase:
 
 1. **Start from a clean base.** `git checkout <base>` and confirm `git status --porcelain` is empty.
    If a previous phase left the tree dirty, **do not plow ahead** — that is a halt (Step 3.7), not
@@ -436,10 +441,12 @@ try, so it is a preflight refusal rather than a warning.
    missing, say so and **stop anyway** — nothing else checks the slice, so a named skip is not good
    enough here.
 
-   **Under `--unattended` a refusal degrades rather than stops**: build that wave's leaves serially,
-   in numeric order, and name the refusal in the report — the refusal is about *concurrency* only,
-   and every leaf is still buildable. A missing checker is still a stop, unattended or not: not
-   knowing whether the slice is safe is a different thing from knowing it is not.
+   **Under `--unattended` a refusal degrades rather than stops**: run that wave's leaves **one unit
+   at a time** — under `--cmux` still one spawned workspace each, landed before the next is cut, and
+   in numeric order — and name the refusal in the report. The refusal is about *concurrency* only,
+   and every leaf is still buildable. What degrades is the schedule, never where the work happens.
+   A missing checker is still a stop, unattended or not: not knowing whether the slice is safe is a
+   different thing from knowing it is not.
 
 3. **Ask history what the plan cannot know**, once the checker has cleared the slice:
 
@@ -454,8 +461,8 @@ try, so it is a preflight refusal rather than a warning.
 
    **Exit 2 is a risk, not an error.** Serially, print it and carry on: the cost of being wrong is
    one merge conflict. Under `--cmux`, **stop** — there the cost is the whole wave, built over hours
-   before anything discovers it. Under `--cmux --unattended`, build that wave serially instead of
-   stopping, and name it. Exit 0 covers both "looks clean" and "not enough history to judge", and it
+   before anything discovers it. Under `--cmux --unattended`, run that wave one unit at a time
+   instead of stopping — a workspace each, landed between — and name it. Exit 0 covers both "looks clean" and "not enough history to judge", and it
    says which; exit 1 is usage or git trouble and is a named skip, because this check improves the
    preflight rather than being it.
 
@@ -477,11 +484,14 @@ single commit — is unchanged. A concurrent session is not a lesser run.
 ### What `--dry-run` prints
 
 The worktree/`--no-merge`/`--land` command block from the reference, filled in for the wave — but
-only for a wave with **more than one unbuilt leaf**. A wave of one has nothing to parallelise, and a
-table of hopeful commands over single-leaf waves buries the waves where it pays.
+only for a wave with **more than one unbuilt leaf**. This block is a recipe for a human to run by
+hand in a second terminal, and a wave of one has nothing to parallelise: a table of hopeful commands
+over single-leaf waves buries the waves where it pays.
 
 Under `--dry-run --cmux`, print the same block as the `spawn` calls that would be made instead, and
-**stop**: no worktree, no workspace, nothing on screen.
+**stop**: no worktree, no workspace, nothing on screen. **Print one for every wave**, single-leaf
+waves included — under the flag those are spawned too, so leaving them out would show a run smaller
+than the one about to happen.
 
 ### `--cmux` — the driven form
 
@@ -493,8 +503,10 @@ Each leaf gets a **full interactive `claude` session**, not a headless one — t
 this through cmux: the work is visible in a workspace the user can open, answer a question in, or
 take over, none of which a `-p` run allows.
 
-You are the orchestrator and you **build nothing yourself while a wave is in flight** — you hold the
-primary tree, the only tree that can check out `<base>` to land what the units produce.
+You are the orchestrator and you **build no phase yourself** — not merely none while a wave is in
+flight. You hold the primary tree at `<base>` for the whole run, the only tree that can check out
+`<base>` to land what the units produce, and it stays clean throughout, so `preflight`'s clean-tree
+check holds for the run rather than only between waves.
 
 The mechanics are `${CLAUDE_PLUGIN_ROOT}/skills/plan-run/scripts/cmux-fanout.sh`, a script rather
 than prose because it decides two things a model must never decide by reading a screen — whether
@@ -503,8 +515,19 @@ answer.
 
 For each wave, in wave order:
 
-1. **A wave with one unbuilt leaf runs inline**, exactly as the serial loop above — no worktree, no
-   workspace; a session for a single phase buys nothing and costs a round trip and a context re-read.
+1. **Every leaf is spawned, including a wave of one.** There is no inline path under this flag: a
+   solo leaf gets the same detached worktree and the same workspace as a leaf with three siblings.
+   A wave decides the *schedule*, not where the work happens — a wave of one is one live unit rather
+   than none. The round trip and the context re-read are paid on purpose, and here is what they buy:
+   every unit is reported the same way whatever its schedule (a sentinel **and** a marker, never one
+   of them), every unit is watchable and take-overable in a workspace of its own, and your context
+   never holds an implement+review — the same reason both pipelines are `Workflow` scripts.
+
+   **A solo wave lands before the next one spawns.** `git worktree add --detach <base>` pins a
+   unit's tree to whatever `<base>` pointed at when the worktree was made, so a queue of solo spawns
+   with no merge between them is a concurrent wave wearing a queue — exactly the collision the
+   `--slice` preflight exists to refuse. Serial under this flag means **one live unit, landed before
+   the next is created**, never *spawned in order*. Step 7 then runs per unit rather than per wave.
 2. **`check_todo.py --slice <n,n>`** over the wave's unbuilt leaves — the same preflight, with the
    same three refusals, and a missing checker is still a **stop**. Nothing else verifies the slice.
 3. **`cmux-fanout.sh preflight`.** It checks four things: cmux is reachable, this is the primary
@@ -530,16 +553,37 @@ For each wave, in wave order:
    The `--marker-*` pair lets `wait` check the branch itself rather than trusting the session's own
    account. `[--ask <session>]` is there only when this run was given one, and it is passed through
    **verbatim to every unit** ([`--ask <session>`](#--ask-session--reporting-a-defect-in-the-pack)).
-5. **`wait`**, then `cleanup` each unit **the moment it comes back ok** — its workspace closes and
-   its worktree is removed on the spot: a stale worktree is what the next `spawn` collides with, a
-   finished workspace looks like a working one in the sidebar, and the freed slot admits the next
-   queued leaf. A wave wider than three is therefore a **rolling window**, not batches waiting on
-   the slowest.
+5. **`wait --any`, then `cleanup` that unit and spawn the next — a loop, not one call.**
+
+   ```sh
+   while :; do
+     "$FAN" wait --any || true          # blocks until ONE unit comes back; names it
+     "$FAN" cleanup --id "<the unit it named, if it came back ok>"
+     "$FAN" spawn ...                   # the freed slot takes the next queued leaf
+   done
+   ```
+
+   `--any` is what makes the window actually roll. A bare `wait` blocks until **every** unit in the
+   set has reported, so the three slots stay held until the slowest of the three is done and a
+   queued leaf waits behind a unit that finished an hour ago — batches, not a window. `--any`
+   returns the first unit back and says nothing about the others.
+
+   `cleanup` runs **the moment a unit comes back ok**: a stale worktree is what the next `spawn`
+   collides with, a finished workspace looks like a working one in the sidebar, and the freed slot
+   is what admits the next queued leaf.
+
+   **A verdict is handed back once.** A failed unit is left standing by the rule below, so it keeps
+   its slot and stays live — without the once-only rule every later `--any` would hand back that
+   same failure while its wave-mates finished unseen. The script tracks it; `status` still reports
+   everything, and is how a caller that lost its place picks it up again. Do not poll `status` in
+   place of `--any`: deciding "is it done yet" by re-reading a report on a timer is the judgement
+   this script exists to take off you.
 6. **A unit that failed or stalled is left standing** — workspace open, worktree in place, both named
    in the report. A stall is usually a question waiting for a human, and that state is the only
    evidence of what went wrong.
 7. **Land the whole wave in ascending phase order** with the `--land` logic below, once every leaf is
-   in. Order comes from the plan, never from which unit finished first.
+   in. Order comes from the plan, never from which unit finished first. A solo wave lands its one
+   unit the moment it comes back ok, because the next unit's worktree is cut from the result.
 
 A leaf that fails, or lands a branch carrying no `<!-- built: … -->` marker, is a **halt** with the
 usual semantics: the branch stays unmerged, nothing is ticked past it, and the report names the wave
@@ -724,8 +768,8 @@ building on one that is not true. This is the list of which is which:
 | a merge conflict | no | `--auto-resolve`, then build + full tests; halt on what it refuses |
 | the base tree is dirty | no | snapshot to `refs/wip/pre-phase-<n>`, clean, continue |
 | `.git/MERGE_HEAD` — another session holds the repo | no | wait one poll, retry, then halt |
-| `--slice` refused the slice | no | build that wave **serially** |
-| `footprint-warn` returned 2 under `--cmux` | no | build that wave **serially** |
+| `--slice` refused the slice | no | run that wave **one unit at a time**, landed between |
+| `footprint-warn` returned 2 under `--cmux` | no | run that wave **one unit at a time**, landed between |
 
 The last two are the ones that pay for the flag: both are facts about *scheduling* with an obvious
 local response, and stopping a four-hour run over one is the pipeline refusing to do what a person
@@ -753,11 +797,11 @@ things:
 
 One line, under 200 characters, leading with what they would act on: `plan-run halted at Phase 7:
 done-when red. resume: --from 7` says more than "run failed". Nothing else notifies — not a phase
-completing, a wave landing, a conflict auto-resolved or a degrade to serial. Those are the report.
+completing, a wave landing, a conflict auto-resolved or a degrade to one-at-a-time. Those are the report.
 
 ### Every workaround is named
 
-The report carries a line per degrade — "wave 13 ran serially: footprint-warn flagged
+The report carries a line per degrade — "wave 13 ran one unit at a time: footprint-warn flagged
 `internal/ui`", "Phase 9's review was blocked and passed on retry", "base was dirty at Phase 4;
 snapshotted to `refs/wip/pre-phase-4`" — and the stats line carries `degraded` (how many) and
 `questionsQueued`. A degrade nobody hears about is indistinguishable from nothing having gone
@@ -849,7 +893,7 @@ any of it exists:
 Worked around:
   Phase 4  base was dirty — snapshotted to refs/wip/pre-phase-4, then cleaned
   Phase 6  merge conflict in 3 files — 6 of 7 hunks resolved as additive, build + tests green
-  wave 13  footprint-warn flagged internal/ui across 5 leaves — built serially instead of fanned out
+  wave 13  footprint-warn flagged internal/ui across 5 leaves — one unit at a time, not fanned out
 
 Needs you:
   Phase 8  "the retry window" is not defined anywhere in the plan or the spec — built to 24h, say if wrong
@@ -895,9 +939,10 @@ merged, landed or ticked. Never retry it.
   each in its own detached worktree, with `--no-merge`, verified by the checker's `--slice` preflight
   first. Two runs sharing a working tree or a base ref destroy each other, so the preflight enforces
   the separation: a slice run in one directory is a **stop**, and one the graph refuses is a stop
-  too — or, under `--unattended`, that wave built serially. `--cmux` drives that same protocol and
-  nothing else — the sessions it spawns are real separate sessions, and the orchestrator builds no
-  phase of its own while a wave is in flight.
+  too — or, under `--unattended`, that wave run one unit at a time. `--cmux` drives that same
+  protocol and nothing else — the sessions it spawns are real separate sessions, **every** leaf gets
+  one including a wave of one, and the orchestrator builds no phase of its own at any point in the
+  run.
 - **A failed phase halts the whole run.** Restore a clean base, leave the failed branch unmerged,
   never tick it, and report the `--from N` that resumes. Building Phase 5 on a Phase 4 that failed
   its build, its review or its `Done when:` is the single worst outcome this skill can produce,

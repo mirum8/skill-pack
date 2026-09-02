@@ -34,8 +34,8 @@ the diff unread is a different failure from a red build, and the one that would 
 merged.
 
 **`degraded` and `questionsQueued` are what `--unattended` costs.** `degraded` counts the
-workarounds it took — a dirty base snapshotted, a conflict auto-resolved, a wave built serially
-because the preflight refused it — and `questionsQueued` the things it declined to stop for. Read
+workarounds it took — a dirty base snapshotted, a conflict auto-resolved, a wave run one unit at a
+time because the preflight refused it — and `questionsQueued` the things it declined to stop for. Read
 them against `merged`: five phases merged with one degrade is the flag working; six degrades is a
 plan or a repo that needs attention rather than more autonomy.
 `unattended` is the boolean that makes the pair readable, because zero means "nothing to work

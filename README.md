@@ -128,7 +128,7 @@ no review at all.
 | `gh` (authenticated) | `task-run` issue sources and PRs; `issues-fix` against GitHub | GitHub stops being one of the sources |
 | `codex` plugin | `code-adversarial`, and the **default fixer** in `task-review` (see below) | the review step is recorded as **skipped** and named; the fixers fall back to Claude and say so |
 | `tmux` | driving a **terminal** app in a real pty — `test-app-create`'s TUI track and `task-review` Step 8 on a `tui` surface | the TUI checks are recorded as **not run** and named, and that track is reported blocked rather than clean; web and command-line projects are unaffected |
-| `cmux` | `--cmux` on `plan-run` and `issues-fix` — a worktree and a watchable session per concurrent unit | the flag stops and names it; both skills run their serial path and lose no coverage, only wall-clock |
+| `cmux` | `--cmux` on `plan-run` and `issues-fix` — a worktree and a watchable session per unit, however many run at once | the flag stops and names it; both skills run their serial path and lose no coverage, only wall-clock |
 
 `--cmux` also needs the repo to have been **trusted in Claude Code** at least once. Workspace trust
 is per path and a worktree is a new path, so each unit's session would otherwise open on the trust
