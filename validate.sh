@@ -72,7 +72,8 @@ for t in skills/spec-brainstorm/tests/check_spec.test.sh \
          skills/plan-run/tests/cmux-fanout.test.sh \
          skills/plan-run/tests/footprint-warn.test.sh \
          skills/plan-run/tests/merge-resolve.test.sh \
-         skills/test-app-create/tests/tui-session.test.sh; do
+         skills/test-app-create/tests/tui-session.test.sh \
+         skills/plan-report/tests/milestone_scope.test.sh; do
   if out=$(bash "$t" 2>&1); then
     printf '  ✓ %-52s %s\n' "${t#skills/}" "$(tail -1 <<<"$out" | tr -s ' ')"
   else

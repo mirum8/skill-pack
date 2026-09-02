@@ -48,7 +48,7 @@ Four things shape the design:
 
 ## Invocation
 
-`/r:plan-run [<plan>] [--from <n>] [--to <n>] [--phases <n,n>] [--cmux] [--no-merge] [--land] [--auto-resolve] [--unattended] [--ask <session>] [--yes] [--dry-run]`
+`/r:plan-run [<plan>] [--from <n>] [--to <n>] [--phases <n,n>] [--cmux] [--no-merge] [--land] [--auto-resolve] [--unattended] [--ask <session>] [--no-reports] [--yes] [--dry-run]`
 
 **`<plan>`** is the path to the plan file. Strip a leading `@` and any trailing `/` (Claude Code's
 `@todo.md` arrives verbatim). With no argument, look for one and **name what you found before using
@@ -89,6 +89,9 @@ between them: **ask** — the one place the run stops for input that isn't the g
   It changes nothing about the run — a report is never a halt and never a question. **Pair it with
   `--unattended`**, which otherwise works around a pack defect and leaves nobody able to fix it any
   the wiser.
+- **`--no-reports`** → do not write a milestone report when a milestone finishes ([The milestone
+  boundary](#the-milestone-boundary)). Everything else is unchanged: the phases still build, still
+  merge and still tick.
 - **`--yes`** → skip the approval gate and run every phase in the list. It does **not** disable the
   halt: a failed phase still stops the run.
 - **`--dry-run`** → read the plan, run the plan check, print the run list **and the wave table with
@@ -130,6 +133,20 @@ at.
   because the checklist is where the acceptance criteria come from. Everything else is a judgement
   about plan quality a hand-written plan can fail while still being buildable. A missing script is a
   named skip, not a stop: say so and continue.
+- **Read the plan's milestones**, so the run knows where its reports fall before it builds anything:
+
+  ```sh
+  python3 "${CLAUDE_PLUGIN_ROOT}/skills/plan-report/scripts/milestone_scope.py" <plan> --list
+  ```
+
+  A plan whose leaves are grouped under `## Milestone N — name` headings gets one report per
+  milestone as it finishes ([The milestone boundary](#the-milestone-boundary)). A plan with none —
+  `hasMilestones: false`, which every hand-written plan and every `flat` one is — gets none, and
+  **that is named here, once**: "this plan has no milestone headings, so no milestone reports will be
+  written." Same rule as the missing `Risk:`, `Done when:` and `Files:` lines below: what a plan's
+  shape costs is said at the gate, where the user can still change the plan, not discovered per phase
+  when they have walked away. Never group unmilestoned phases yourself — a grouping nobody authored
+  would be reported as though the plan had asserted it.
 
 ## Step 1 — Read the plan
 
@@ -196,6 +213,10 @@ Resolve first: none outstanding
   phase, and notifies only then. Print the table's halt column from [Running
   unattended](#running-unattended) in one sentence — what will and will not fetch them back is what
   they need before walking away.
+- **When the plan has milestones**, add the milestone as a column and say which of them this run
+  would finish — that is where a report will be written, and the gate is the place to say so
+  (`--no-reports` if the user does not want them). A run that finishes no milestone says that too:
+  "no milestone completes in this range, so no report is due."
 - **Under `--cmux` only**, add the wave as a column — from the `check_todo.py` run Step 0 made,
   nothing new is computed — and say how many leaves will be built at once and how many at a time
   (the cap is three). Say plainly that **every** leaf gets a workspace, a wave of one included: a
@@ -369,6 +390,23 @@ below inside its own session. For each phase:
      HEAD that moved afterwards arrives as `branchDrifted: true` with the real branch — but this
      check is the one that runs after the review, and a review that halted never reached it);
      this check stops a whole phase landing on `main`.
+
+     **`--abbrev-ref` prints the literal word `HEAD` when the checkout is detached, so this
+     comparison passes on a unit that is on no branch at all** — and under `--no-merge` that is the
+     shape Step 3.1 *mandates*, not an edge case. Ask the question that distinguishes them:
+     `git symbolic-ref -q --short HEAD` prints nothing and exits 1 when detached. If it is
+     detached, the work is on a commit-ish and `<pb>` is wherever it was last left — put HEAD back
+     on `<pb>` (`git branch -f <pb> HEAD && git checkout <pb>`, or `git reset --soft <base>` first
+     if the work was committed) **before** merging, because merging `<pb>` while it points at the
+     old base merges nothing and reports success.
+
+   - **Confirm the work is still UNCOMMITTED** before Step 3.4's review, not just before the merge:
+     `git status --porcelain` non-empty. The implement half's contract is that it leaves the diff
+     uncommitted so the reviewer reads it; a clean tree with HEAD moved off `<base>` means
+     something inside the run committed, and the review then reads a diff of only your own later
+     edits and certifies a change it never saw. The handoff now names this as `treeCommitted: true`
+     alongside `headDetached`, but check it yourself when either arrives — `git reset --soft
+     <base>` on the intended branch restores the documented shape with nothing lost.
    - **Confirm nobody else is holding the repo**, before the merge into base: `.git/MERGE_HEAD`
      present is an unfinished merge, and `<base>` at a different commit than Step 0 read is a session
      that landed something meanwhile. Either is a **halt** — merging over it sweeps another run's
@@ -400,6 +438,10 @@ below inside its own session. For each phase:
      **Under `--no-merge`, stop here instead** — no merge, no branch deletion — and report the
      branch name; `--land` merges it from the primary tree later. Nothing earlier in this step
      changes: the phase is still reviewed, still done-checked, still ticked, still one commit.
+   - **Then check the milestone boundary**, on base, with the merge behind you: if this phase was
+     the last unticked leaf of its milestone, write that milestone's report — [The milestone
+     boundary](#the-milestone-boundary). Skipped entirely under `--no-merge`, where the phase never
+     merged and this session cannot see its wave-mates.
    - **If `CMUX_FANOUT_SENTINEL` is set in the environment, write the outcome there as the very last
      thing you do** — two lines, `status=ok` and `branch=<pb>`. That variable means this session is
      one unit of a `--cmux` fan-out; an interactive session never exits and yields no status, so this
@@ -433,6 +475,66 @@ below inside its own session. For each phase:
    **This is deliberately the opposite of `/r:issues-fix`, where items are independent and one
    failure is one item's.** Here carrying on past a failure builds real code on a premise that isn't
    true — silently, because everything after the break still compiles and merges.
+
+## The milestone boundary
+
+A `## Milestone N — name` groups leaves into a coherent area of the product. When its last one
+lands, one report is written describing what the milestone built — `/r:plan-report`, the real skill,
+never a summary written here.
+
+**Where it runs, in all three modes: on base, after the merge, as its own commit.** Not folded into
+the phase's commit, and the reason is structural rather than a preference. The report describes
+*merged* code, so it cannot be written before the merge — while the phase's commit is sealed one
+step earlier, ticks and code together, so that "built" and "done" revert together. And a report
+written onto the phase branch would work in a serial run and be impossible in a concurrent one,
+where a unit does not know its milestone completed: its wave-mates land later, from another tree.
+This is the slot the reuse-index refresh already occupies after a wave, for the same reasons.
+
+**Skip the whole thing** when `--no-reports` or `--dry-run` was passed, when the plan has no
+milestone headings (Step 0 already said so), or when this session is a `--no-merge` unit.
+
+1. **Ask, don't count.** After the merge, on base:
+
+   ```sh
+   python3 "${CLAUDE_PLUGIN_ROOT}/skills/plan-report/scripts/milestone_scope.py" <plan> --complete
+   ```
+
+   `unreported` is the answer: milestones whose every leaf is ticked and which have no report on
+   disk yet. Reading the markdown and counting checkboxes instead is the one thing this step must
+   not do — a milestone called complete one phase early still produces a document that reads as
+   authoritative, and nothing downstream re-checks it. The list is derived from disk, not from your
+   memory of the run, which is also what makes the step idempotent: a resumed run does not rewrite
+   a report it already wrote.
+
+2. **Dispatch it as a subagent, one per milestone, in ascending order.** Its whole brief:
+
+   ```
+   Invoke /r:plan-report <plan> <n> --no-commit through the Skill tool and let it finish.
+   Return { written: <bool>, path, diagrams, snippets, blocked }.
+   ```
+
+   **A subagent, not inline**, for the reason this loop already gives for not invoking `/r:task-run`
+   through the Skill tool: a report is a multi-thousand-line HTML document, and read into this
+   thread it is re-read as context on every phase that follows. The subagent reaches the real skill
+   because `/r:plan-report` carries no `disable-model-invocation` flag — check that the Skill tool
+   actually loaded it, and treat a subagent that summarised the milestone in prose instead as a
+   failed report, not a written one.
+
+3. **You own git; the subagent does not.** It returns a path. Stage that one file and commit it
+   alone on base — `docs: milestone <n> report` — then confirm the tree is clean before the next
+   phase starts. `--no-commit` is what keeps the two from both reaching for the index.
+
+4. **A report that cannot be written is a named SKIP, never a halt.** The script blocked, the
+   subagent died, `/r:plan-report` stopped: record *milestone N — report skipped: <reason>*, count
+   it, and carry on to the next phase. Nothing downstream reads the report, and halting a green plan
+   over a document would throw away work that is already merged. This is the pack's standing "real
+   tools, or a named skip" rule, and the terminal-UI exception does not apply — nothing in the plan
+   *declared* a report the way a `/test-app` declares a terminal surface.
+
+**Under `--cmux` and `--land` the check runs once, after the wave, not per phase** — a milestone can
+straddle waves, so a per-unit check would fire on a milestone whose remaining leaves are still being
+built elsewhere. It sits after the last merge and its green build, and **before** the stats row.
+Everything else above is unchanged: same script, same subagent, same own-commit, same named skip.
 
 ## Running phases concurrently
 
@@ -610,6 +712,10 @@ For each wave, in wave order:
 7. **Land the whole wave in ascending phase order** with the `--land` logic below, once every leaf is
    in. Order comes from the plan, never from which unit finished first. A solo wave lands its one
    unit the moment it comes back ok, because the next unit's worktree is cut from the result.
+8. **Then check the milestone boundary once, for the whole wave** — [The milestone
+   boundary](#the-milestone-boundary). Once, not per unit: a milestone can straddle waves, and the
+   units themselves ran `--no-merge` and never reached it. You are in the primary tree with the wave
+   merged, which is the only place and moment the question has a true answer.
 
 A leaf that fails, or lands a branch carrying no `<!-- built: … -->` marker, is a **halt** with the
 usual semantics: the branch stays unmerged, nothing is ticked past it, and the report names the wave
@@ -731,6 +837,11 @@ checked out there). It builds after every merge, and nothing else.
    conflicts that are provably additive are resolved first and only the rest reach this step — see
    [Auto-resolving the additive
    conflicts](#--auto-resolve--resolving-the-conflicts-that-are-provably-additive).
+
+Then, before the stats row, **check the milestone boundary** — [The milestone
+boundary](#the-milestone-boundary) — and write one report per milestone this landing finished, in
+ascending order. A landing pass is where a `--cmux` or hand-driven wave's milestones actually
+complete, so skipping it here means they are never reported at all.
 
 Then **record the run** — Step 4's stats line with `mode: "land"`, `landed` set to what merged, and
 `phasesInRun: 0`, since a landing pass builds nothing. A conflict that stopped it is
@@ -904,9 +1015,20 @@ Halted:
                                        never ran, so the review's own fixes are unreviewed.
                                        Branch phase-csv-export-of-payouts left in place, unmerged.
 
+Milestone reports:
+  Milestone 1  Ledger    docs/billing/reports/milestone-1-ledger.html — 3 figures, 5 snippets
+  Milestone 2  Payouts   not finished (Phase 6 halted) — no report due
+
 Not reached: Phase 7 (Retry failed payouts).
 Resume with: /r:plan-run docs/billing/todo.md --from 6
 ```
+
+**Print the milestone section whenever the plan has milestones**, even when nothing completed —
+"no milestone finished in this run" is information, and its absence reads the same as not looking.
+A report that was **skipped** is named with its reason there, never left out: a milestone that
+finished and produced no document is exactly what a reader of this report needs to know, since
+nothing later will offer it again. Omit the section entirely only for a plan that has no milestone
+headings, which Step 0 already said once.
 
 Name every phase built, which branch merged into base, every phase the re-check found already done,
 the phase that halted and why, and the phases never reached. **Say plainly what was written back
@@ -936,7 +1058,8 @@ Then record one line into the pack-wide store — counts only, never phase title
 python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
 {"skill":"r:plan-run","mode":"serial","phasesInPlan":0,"phasesInRun":0,"merged":0,"landed":0,
  "alreadyDone":0,"doneCheckRan":0,"doneCheckFailed":0,"haltedAt":null,"haltReason":null,
- "unattended":false,"degraded":0,"questionsQueued":0}
+ "unattended":false,"degraded":0,"questionsQueued":0,
+ "milestonesInPlan":0,"milestoneReports":0,"reportsSkipped":0}
 STATS_JSON
 ```
 
@@ -1011,5 +1134,10 @@ merged, landed or ticked. Never retry it.
 - **Clean base between phases.** Every phase starts from a clean checkout of the recorded base; never
   sweep an unrelated dirty tree into a phase's commit. If the merge conflicts, surface it and halt —
   never force it.
+- **A milestone report is written after the merge, as its own commit, by the real skill — and never
+  halts the run.** `/r:plan-report` through a subagent, dispatched from the boundary check, never a
+  prose summary written here and never folded into a phase's commit. When it cannot be written, name
+  the skip and carry on: the milestone's code is already merged, and no plan should stop over a
+  document.
 - **Honor the approval gate unless `--yes`.** `--dry-run` never mutates anything; `--yes` skips the
   gate but never the halt.

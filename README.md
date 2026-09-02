@@ -1,6 +1,6 @@
 # r — a personal Claude Code skill pack
 
-Twenty engineering skills and the eight agents they dispatch, in one repository,
+Twenty-two engineering skills and the eight agents they dispatch, in one repository,
 loaded as a skills-directory plugin named `r`. Every skill is reachable as
 `/r:<name>`.
 
@@ -53,7 +53,7 @@ skills-directory case. Whether plugin discovery follows a *symlinked* entry is
 documented neither way, and it fails identically to a malformed manifest, so the
 pack does not rely on it.
 
-## The twenty skills
+## The twenty-two skills
 
 | command | does |
 |---|---|
@@ -70,6 +70,7 @@ pack does not rely on it.
 | `/r:spec-brainstorm` | idea → one `spec.html`: domain model, user stories, modules, stack, API |
 | `/r:spec-design` | docs → `todo.md` + `design.md`: milestones, contracts, leaves and a dependency graph; rewrites a plan that already exists rather than overwriting it |
 | `/r:plan-run` | build a whole `todo.md` phase by phase; non-overlapping phases can run in parallel sessions |
+| `/r:plan-report` | one finished milestone → a self-contained HTML report: design as built, SVG diagrams, cited snippets |
 | `/r:hexagonal-architecture` | Hexagonal Lite boundaries: what lives in core, what a module may import |
 | `/r:tests-write` | JVM test conventions; loads proactively on Java/Kotlin work |
 | `/r:test-app-create` | scaffold a project-local `/test-app` for the detected stack |
@@ -77,19 +78,20 @@ pack does not rely on it.
 | `/r:claudemd-compact` | compact and de-stale a CLAUDE.md hierarchy |
 | `/r:claudemd-patch` | insert the standard rule blocks and the test-writing hook |
 | `/r:reuse-index` | mine the plan corpus into one doc naming the canonical example of each pattern |
+| `/r:pack-maintain` | take the maintainer post for this pack: ground a peer's defect report, then fix, test, publish and reply |
 
 Names are domain-first (`<domain>-<action>`, at most three kebab segments) so the
 alphabetically sorted `/` menu groups the families: `claudemd-*`, `code-*`,
 `issues-*`, `spec-*`, `task-*`. `hexagonal-architecture` is the one exception — it
 is a rulebook rather than an action, and "hexagonal" is the word someone reaches for.
 
-`task-run`, `task-quick`, `issues-fix`, `plan-run` and `spec-design` carry
-`disable-model-invocation: true` — each says in its own text that it must never
-fire on its own, and the frontmatter enforces that rather than trusting the
-prose. Each mutates the repo or a plan on a scale nobody wants arrived at by
-inference. They stay invocable by name; they just will not auto-load, and their
-descriptions are not in context at all, which is why none of the five counts
-against the 16,000-character listing budget below.
+`task-run`, `task-quick`, `issues-fix`, `plan-run`, `spec-design` and
+`pack-maintain` carry `disable-model-invocation: true` — each says in its own
+text that it must never fire on its own, and the frontmatter enforces that rather
+than trusting the prose. Each mutates the repo or a plan on a scale nobody wants
+arrived at by inference. They stay invocable by name; they just will not
+auto-load, and their descriptions are not in context at all, which is why none of
+the six counts against the 16,000-character listing budget below.
 
 `task-review` says the same thing but carries no flag, on purpose. The flag is
 all-or-nothing: it blocks the Skill tool outright, so it cannot tell "the model
@@ -97,7 +99,9 @@ auto-loaded this" from "the model was told to run this" — and `task-run`'s Ste
 is *required* to invoke `/r:task-review`. With the flag on, that step could not
 reach it and the mandatory review would be something the user has to type. For
 that one skill the no-auto-fire rule is carried by its description and its
-non-negotiables instead.
+non-negotiables instead. `plan-report` is the second such case, for the same
+reason: `/r:plan-run` invokes it at each milestone boundary, so a flag would block
+the boundary along with the auto-load it was meant to stop.
 
 The eight agents in `agents/` are what the review fan-out dispatches to — four
 bug hunters, two build runners, and two stack-specific implementers.

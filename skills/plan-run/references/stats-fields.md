@@ -12,6 +12,7 @@ question gets a plausible number instead of a true one.
 3. `haltReason`
 4. `degraded` and `questionsQueued`
 5. `doneCheckFailed`
+6. `milestonesInPlan`, `milestoneReports` and `reportsSkipped`
 
 **Count what this run actually did, and leave the rest at zero.** A `no-merge` session sets
 `phasesInRun` and `merged: 0`; a `land` pass sets `landed` and leaves `phasesInRun: 0`, since it
@@ -49,3 +50,21 @@ executed; only `doneCheckFailed` records the case the step exists for — a phas
 and whose own check did not. Zero across many runs means the check costs a command per phase and
 catches nothing; otherwise it is catching what no reviewer could. `alreadyDone` justifies the
 per-phase re-check the same way.
+
+**`milestonesInPlan`, `milestoneReports` and `reportsSkipped` are three numbers because a missing
+report has three different causes and they need opposite fixes.** `milestonesInPlan: 0` is a plan
+with no `## Milestone N` headings — nothing was owed, and every run over a hand-written or `flat`
+plan looks like this. A non-zero `milestonesInPlan` with `milestoneReports: 0` is a run that simply
+did not finish a milestone, which is the normal shape of a short run and of every halt. Only
+`reportsSkipped` is a failure: a milestone that completed and produced no document, because the
+scope script, the subagent or `/r:plan-report` could not run.
+
+Read `reportsSkipped` against `milestoneReports`. One skip among several written reports is the
+named-skip rule working. `reportsSkipped` tracking `milestoneReports` one-for-one over many runs
+means the boundary is firing into something that cannot run at all — and from the outside that is
+indistinguishable from a pack full of plans with no milestones, which is exactly why
+`milestonesInPlan` is recorded rather than inferred from the other two.
+
+A `no-merge` unit leaves all three at zero: it never merges, so it never reaches the boundary. A
+`cmux` or `land` row is where a concurrent wave's reports appear, for the same reason `landed`
+does — the orchestrator owns the merge, and the boundary sits behind it.

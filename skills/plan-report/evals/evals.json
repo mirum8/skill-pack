@@ -1,0 +1,118 @@
+{
+  "skill_name": "plan-report",
+  "evals": [
+    {
+      "id": 0,
+      "name": "routing-triggers",
+      "kind": "trigger",
+      "prompt": "we just finished the payouts milestone in docs/billing/todo.md — write it up properly, with diagrams, so the rest of the team can see what actually got built",
+      "expected_output": "plan-report loads, resolves the milestone's scope with milestone_scope.py rather than by reading the markdown, reads each phase's landing commit, and writes one self-contained HTML page at docs/billing/reports/milestone-<N>-<slug>.html with 2-4 inline SVG figures and cited code snippets.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 1,
+      "name": "routing-triggers-short-form",
+      "kind": "trigger",
+      "prompt": "document what we built in milestone 2",
+      "expected_output": "plan-report loads, finds the plan, and writes the report for milestone 2. If milestone 2 is not complete it stops and names the outstanding phases rather than writing a document that implies completeness.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 2,
+      "name": "routing-excludes-plan-run",
+      "kind": "neighbour-exclusion",
+      "neighbour": "plan-run",
+      "prompt": "work through the rest of docs/billing/todo.md — build every phase that's still unticked",
+      "expected_output": "Building the plan is plan-run's job; plan-report must not load, because it writes a document about work that has already landed and builds nothing.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 3,
+      "name": "routing-excludes-spec-design",
+      "kind": "neighbour-exclusion",
+      "neighbour": "spec-design",
+      "prompt": "take the spec in docs/billing/spec.html and break it into milestones and phases we can actually build",
+      "expected_output": "Decomposing a spec into milestones is spec-design's job; plan-report must not load, because it reports on a milestone that is already built rather than inventing one.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 4,
+      "name": "routing-excludes-task-review",
+      "kind": "neighbour-exclusion",
+      "neighbour": "task-review",
+      "prompt": "go over the diff on this branch and tell me what's wrong with it before I merge",
+      "expected_output": "Judging a diff for defects is task-review's job; plan-report must not load, because it describes finished work rather than certifying it, and it never reports a defect it found in the code.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 5,
+      "name": "incomplete-milestone-stops-rather-than-implying-done",
+      "kind": "behaviour",
+      "prompt": "/r:plan-report docs/billing/todo.md 2",
+      "expected_output": "With one phase of milestone 2 still half-ticked, the run STOPS and names the outstanding phases. It does not write the report over the finished phases and leave the reader to infer the gap — a document titled after a milestone reads as covering it. Only --partial writes that report, and then the partial scope is stated in the HTML itself, not just in the terminal.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 6,
+      "name": "divergence-from-the-contracts-is-reported-not-smoothed",
+      "kind": "behaviour",
+      "prompt": "/r:plan-report docs/billing/todo.md 1",
+      "expected_output": "Where design.md says the endpoint returns 400 on a malformed cursor and the code returns 409, the report says the code returns 409 AND names the divergence. It never prints the contract's version as though it were the fact: design.md is the claim written before the code existed, and a report that silently repeats it is the version a reader will trust over the code.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 7,
+      "name": "scope-comes-from-the-script-never-from-counting-ticks",
+      "kind": "behaviour",
+      "prompt": "write up the milestone we just finished in docs/billing/todo.md",
+      "expected_output": "The phases the report covers, and the verdict that the milestone is complete, both come from milestone_scope.py. The run does not read the markdown and count checkboxes itself: a report scoped to the wrong phases still renders and reads as authoritative, so the answer has to come from the one place that cannot quietly be off by one.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 8,
+      "name": "unresolvable-citation-is-dropped-and-named",
+      "kind": "behaviour",
+      "prompt": "/r:plan-report docs/billing/todo.md 1",
+      "expected_output": "A snippet whose path:LINE no longer resolves — the file moved, or the symbol went — is dropped from the report and named in its coverage line. It is never retyped from memory or silently replaced with the nearest surviving code: a near-miss reproduction is the one error in this document that no reader catches by reading it.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 9,
+      "name": "flat-plan-stops-instead-of-inventing-a-grouping",
+      "kind": "behaviour",
+      "prompt": "/r:plan-report todo.md",
+      "expected_output": "A plan with only '### Phase N' headings and no '## Milestone N' grouping stops the run, and the flat shape is named. It does not group the phases into milestones of its own invention, or fall back to one report over every phase — a grouping nobody authored would be reported as though the plan had asserted it.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 10,
+      "name": "register-comprehensive-but-short",
+      "kind": "behaviour",
+      "prompt": "/r:plan-report docs/billing/todo.md 1",
+      "expected_output": "Every decision the milestone made appears in the report, and each is stated once. No paragraph narrates the code snippet beneath it or restates its own heading, and no decision is dropped to keep the page short. Sections with nothing true to say are omitted rather than padded — except 'What is not done yet', which prints 'nothing', because its absence and its emptiness would otherwise read the same.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    }
+  ]
+}

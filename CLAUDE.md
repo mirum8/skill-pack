@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repository is
 
-The source of `r`, a **skills-directory plugin** for Claude Code: 20 skills (`/r:<name>`) and the
+The source of `r`, a **skills-directory plugin** for Claude Code: 22 skills (`/r:<name>`) and the
 8 agents they dispatch. There is no application here — the "product" is prose (`SKILL.md`),
 workflow scripts, agent definitions and a hook, all loaded by Claude Code itself.
 
@@ -46,6 +46,7 @@ bash skills/code-scan/tests/local-scan.test.sh              # scoping + the fail
 bash skills/code-adversarial/tests/run.test.sh              # the Codex wrapper's exit codes
 bash skills/task-review/tests/worktree-deploy.test.sh       # main-vs-worktree + compose isolation
 bash skills/test-app-create/tests/tui-session.test.sh       # the TUI driver's fail-closed contract
+bash skills/plan-report/tests/milestone_scope.test.sh       # milestone scope + the boundary predicate
 bash hooks/tests/guard.test.sh                             # workflow-guard behaviour
 bash lib/tests/stats.test.sh                               # stats sink + hook + reporter
 bash tests/install.test.sh                                 # installer behaviour
@@ -163,6 +164,22 @@ finished unseen. The script tracks that rather than asking the caller to narrow 
 for the reason everything else here is in the script: a judgement that fails by looping silently is
 not one to leave to a model reading a screen.
 
+**The milestone report is written after the merge, as its own commit — never folded into a phase's.**
+`plan-run`'s boundary check dispatches `plan-report` when a `## Milestone N`'s last leaf lands, and
+the placement is forced rather than chosen. The report describes *merged* code, so it cannot be
+written before the merge; the phase's commit is sealed one step earlier so that "built" and "ticked"
+revert together; and a report written onto a phase branch would work serially and be impossible
+under `--cmux`, where a unit's wave-mates land later from another tree and no unit can know its
+milestone finished. So it takes the slot the reuse-index refresh already occupies — primary tree,
+after the last merge, own commit. Which phases a milestone holds and whether it is done come from
+`plan-report/scripts/milestone_scope.py`, never from reading the markdown: a report scoped to the
+wrong phases still renders, and a milestone called complete one phase early still produces a
+document that reads as authoritative. And a report that cannot be written is a **named skip**, never
+a halt — the milestone's code is already merged, and no plan should stop over a document. That makes
+three numbers necessary rather than one, because a missing report has three causes needing opposite
+fixes: `milestonesInPlan: 0` is a plan that owed none, `milestoneReports: 0` under a non-zero
+`milestonesInPlan` is a run that finished no milestone, and only `reportsSkipped` is a failure.
+
 **Every workflow edit needs its control-flow test.** `tests/control-flow.test.mjs` executes the
 script with `agent()`/`parallel()`/`phase()`/`log()` stubbed and asserts the branches — what stops
 the run, what is retried, what reaches the handoff. It models both agent death shapes: `agent()`
@@ -180,7 +197,7 @@ alone. It fails open on any parse/IO trouble.
 not in a skill's `scripts/`, because every skill writes to it — a shared store owned by one skill
 stays that skill's store. Rules that are load-bearing:
 
-- **A skill records an outcome when it owns a run, and only then.** Thirteen skills write a
+- **A skill records an outcome when it owns a run, and only then.** Fourteen skills write a
   `result` row; `r:tests-write` and `r:hexagonal-architecture` write none, and that is correct
   rather than a gap to close. Both are consulted *inside* someone else's task — `tests-write` shapes
   tests another skill is writing, `hexagonal-architecture` answers where a class goes — so neither
@@ -427,7 +444,9 @@ from a suite that passes. So read the case count `run-evals.py` prints, never th
 `task-review` must not self-trigger either, but carries **no** flag: the flag blocks the Skill tool
 outright and cannot tell an auto-load from a deliberate call, so it also blocked `task-run`'s
 mandatory Step 5 from invoking the review. There the rule lives in the description and the
-non-negotiables — don't "fix" it back.
+non-negotiables — don't "fix" it back. `plan-report` is the second unflagged case and the same
+trade: `plan-run`'s milestone boundary invokes it through a subagent's Skill tool, which a flag
+would block along with the auto-load it was meant to stop.
 
 **Real tools, or a named skip.** The pipelines call `gh`, the real Codex review, real build runners,
 `agent-browser`, `tmux`, `code-scan`. Never substitute a model-written prose imitation — a

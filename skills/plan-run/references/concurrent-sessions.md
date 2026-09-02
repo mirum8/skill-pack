@@ -275,3 +275,19 @@ every other unit rewrites — the branches conflict on that one file every time,
 beneath it, and unioning two derivations each computed against a partial corpus is only correct by
 accident. The count column is not even defined under such a union. Only a pass over the landed corpus
 entire can be right, which is why there is exactly one and it runs here.
+
+## The milestone report takes the same slot, for the same reasons
+
+After the wave has landed and before the run is recorded, one `/r:plan-report` per milestone the
+landing finished — the boundary check in the main skill has the protocol. It sits here rather than
+inside a unit for two reasons that are already established above.
+
+A unit **cannot know**: its milestone's remaining leaves are being built in another tree by another
+session, so the only place the question "is this milestone finished" has a true answer is the primary
+tree after the merge. And a report written per unit would be the reuse index's failure again — every
+unit writing its own version of one shared file, conflicting each time with no code conflict beneath
+it, and no union of the two that means anything.
+
+A unit therefore writes none, and its `milestoneReports` is zero because there was nothing to write,
+not because something failed. The orchestrator's row carries the wave's reports, beside the `landed`
+count they belong to.
