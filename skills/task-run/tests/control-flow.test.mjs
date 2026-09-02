@@ -2654,3 +2654,19 @@ test('the plan header tells its readers the source is read-only', async () => {
   // path in the first place.
   assert.match(prompts['plan-write'], /names a document this run READS and never writes/)
 })
+
+test('the implementers and the build fixer may not skip a test to reach green', async () => {
+  // The build fixer is holding exactly the test that just went red, so the pipeline's existing
+  // "do not touch a PRE-EXISTING test" rule points one step to the side of the temptation.
+  const { prompts } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    overrides: { 'build#': (n) => (n === 1 ? { green: false, inScopeFailures: 'ImporterTest fails' } : { green: true }) },
+  })
+  for (const label of ['implement:backend', 'build-fix#1']) {
+    const p = prompts[label]
+    assert.ok(p, `${label} must have been dispatched`)
+    assert.match(p, /NEVER MAKE A CHECK STOP ASKING/, `${label} must carry the rule`)
+    assert.match(p, /t\.Skip/, `${label} must name the skip forms`)
+    assert.match(p, /EXITS 0/, `${label} must say why a skip is invisible downstream`)
+  }
+})

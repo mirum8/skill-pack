@@ -347,6 +347,21 @@ below inside its own session. For each phase:
    If `Done when:` is prose with no runnable command, say so and record the phase as **merged,
    done-check skipped** — a named skip, never a silent pass.
 
+   **An exit code is not a result when the command runs tests: a SKIPPED test exits 0.** `go test`
+   prints `PASS` and returns 0 for a run in which every named test was skipped; so do pytest, JUnit
+   and every other runner this pack drives. So a `Done when:` that names tests is green only when
+   those tests **ran and passed** — read the output, not the status. Run it verbosely (`go test -v`,
+   `pytest -v`) and treat `--- SKIP:`, `SKIPPED`, `@Disabled` or an empty result set for a test the
+   pattern names as a **red done-check**, not a pass.
+
+   This is not hypothetical and it is why the check is worded this way: a review fixer handed "this
+   test is vacuous" answered by inserting `t.Skip("env view render not yet implemented")` above the
+   unchanged body, and the phase's own gate — `go test -run 'TestRevealClearsOnClose'` — came back
+   green over a feature that did not exist. The fixers are now forbidden to do that, but this step
+   is the backstop, and a backstop that reads the same exit code the fixer just satisfied is not
+   one. A test that vanishes from a run is the same signal as a test that fails: the phase has not
+   been shown to work.
+
 6. **Finish.** With the review's fixes folded into the working tree, still uncommitted on the phase
    branch `<pb>`:
    - **Confirm you are on `<pb>`**: `git rev-parse --abbrev-ref HEAD`. It should never be `<base>`

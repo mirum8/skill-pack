@@ -87,6 +87,16 @@ async function run({ triage = baseTriage(), args = {}, overrides = {}, config = 
     if (l === 'codex' || l === 'code-quality' || l.startsWith('find-bugs:')) return CLEAN
     if (l === 'fix-triage') return { correctness: [], readability: [] }
     if (l === 'stats') return { ok: true }
+    // The fix-verification reads. The pipeline hashes each cited file either side of a fixer and
+    // derives `fixed` from whether the bytes moved, so the stub has to model a tree that CHANGES:
+    // returning the same hash twice means "the fixer touched nothing", which is a real outcome but
+    // the wrong default. Paths come out of the prompt the helper built.
+    if (l.startsWith('end-verify-pre#') || l.startsWith('end-verify-post#') ||
+        l.startsWith('ui-fix-pre') || l.startsWith('ui-fix-post')) {
+      const files = [...prompt.matchAll(/"([^"]+\.[A-Za-z0-9]+)"/g)].map((m) => m[1])
+      const side = l.includes('-pre') ? 'A' : 'B'
+      return { hashes: files.map((f) => ({ file: f, hash: `${side}-${f}` })) }
+    }
     if (l.startsWith('build#') || l.startsWith('rebuild#')) return { green: true }
     if (l === 'local-scan') return { status: 'ok', changedCode: false }
     if (l.startsWith('end-verify#')) return CLEAN
@@ -2435,4 +2445,133 @@ test("buildTool 'none' still means no build at all — 'generic' did not absorb 
   const { out, counts } = await run({ triage: baseTriage({ buildTool: 'none', buildCmd: '', buildCmdFast: '', runnerAgent: '' }) })
   assert.equal(counts['build#1'], undefined)
   assert.equal(out.build, 'n/a')
+})
+
+// --- a fixer may never make a check stop asking -------------------------------
+// The pipeline already said "do NOT touch any pre-existing / out-of-scope test to force a pass",
+// which covers a fixer reaching SIDEWAYS at somebody else's test. It said nothing about the test
+// the finding is actually about — the one a fixer is holding when the cheap way out presents
+// itself. Observed: a UI fixer handed "this test is vacuous, it never reveals anything and never
+// checks masking" inserted t.Skip above the same unchanged body. `go test` prints PASS and exits 0
+// for a skipped test, so the phase's own `Done when:` gate went green over a feature that did not
+// exist, and both UI tracks recorded the finding as confirmed and fixed.
+const FIXERS = ['fix-correctness', 'fix-readability', 'build-fix#1', 'ui-fix-minor']
+
+test('every fixer is forbidden to skip, disable or weaken a test', async () => {
+  const { prompts } = await run({
+    triage: baseTriage({ uiTouched: true, hasTestApp: true }),
+    overrides: {
+      'fix-triage': { correctness: ['fix the importer'], readability: ['rename the helper'] },
+      'build#': (n) => (n === 1 ? { green: false, inScopeFailures: 'ImporterTest fails' } : { green: true }),
+      'ui-functional': { ran: true, findings: [{ title: 'vacuous test', where: 'envview_test.go:8', fixSize: 'minor', suggestedFix: 'make it real' }] },
+    },
+  })
+  for (const label of FIXERS) {
+    const p = prompts[label]
+    if (!p) continue
+    assert.match(p, /NEVER MAKE A CHECK STOP ASKING/, `${label} must carry the rule`)
+    assert.match(p, /t\.Skip/, `${label} must name the skip forms`)
+    assert.match(p, /NOT\s+the very test the finding is about|NOT the test you are\s+here to fix/,
+      `${label} must cover the IN-SCOPE test, which is the one that was actually skipped`)
+    assert.match(p, /EXITS 0/, `${label} must say why a skip is undetectable downstream`)
+  }
+})
+
+test('the rule tells a blocked fixer what to do INSTEAD of skipping', async () => {
+  // A prohibition with no alternative is how a fixer talks itself back into the skip: it was handed
+  // a finding it cannot honestly resolve and told only what it may not do.
+  const { prompts } = await run({
+    overrides: { 'fix-triage': { correctness: ['fix the importer'], readability: [] } },
+  })
+  const p = prompts['fix-correctness']
+  assert.match(p, /LEAVE THE TEST AS IT IS, apply\s+nothing, and say so/)
+})
+
+// --- `fixed` describes the TREE, not the dispatch ------------------------------
+// The two post-build fixers are sent with no schema and nothing read their work back, so `fixed`
+// meant only "the agent returned". Observed in one result: the same defect recorded fixed:true in
+// appliedFindings AND unresolved in endVerifyFindings, with the cited file absent from
+// `git status --porcelain` entirely. That row also reaches the stats store as confirmed/fixed, so a
+// fixer that changed nothing scored as one that worked.
+const REACH_EV = { 'fix-triage': { correctness: [{ item: 'A.java:1 x', source: 'codex' }], readability: [] } }
+const sameHash = { hashes: [{ file: CHANGED, hash: 'unchanged' }] }
+
+test('a fixer that returns without changing the file does NOT mark the finding fixed', async () => {
+  const { out, logText } = await run({
+    overrides: {
+      ...REACH_EV,
+      'end-verify#1': { ran: true, findings: [finding('regression from the fix')] },
+      'end-verify#2': CLEAN,
+      'end-verify-pre#': sameHash,
+      'end-verify-post#': sameHash,
+    },
+  })
+  const applied = (out.appliedFindings || []).filter((f) => f.track === 'end-verify')
+  assert.ok(applied.length, 'the finding must still be recorded')
+  assert.equal(applied.every((f) => f.fixed === false), true, 'but never as fixed')
+  assert.match(logText, /left their file unchanged — recorded as NOT fixed/)
+  assert.notEqual(out.fixedBySource['end-verify'], 1)
+})
+
+test('a finding recorded fixed can never also be listed unresolved', async () => {
+  // The contradiction that made this visible: one result claiming both about one defect.
+  const { out } = await run({
+    overrides: {
+      ...REACH_EV,
+      'end-verify#1': { ran: true, findings: [finding('regression from the fix')] },
+      'end-verify#2': CLEAN,
+      'end-verify-pre#': sameHash,
+      'end-verify-post#': sameHash,
+    },
+  })
+  const fixedDescs = (out.appliedFindings || []).filter((f) => f.fixed).map((f) => f.description)
+  for (const d of fixedDescs) {
+    assert.ok(!(out.endVerifyFindings || []).includes(d), `"${d}" is reported fixed AND unresolved`)
+  }
+})
+
+test('an unreadable tree leaves findings unresolved, never fixed', async () => {
+  // Unknown must not be promoted to fixed: nothing downstream re-reads this, so the safe direction
+  // is the only honest one.
+  const { out, logText } = await run({
+    overrides: {
+      ...REACH_EV,
+      'end-verify#1': { ran: true, findings: [finding('regression from the fix')] },
+      'end-verify#2': CLEAN,
+      'end-verify-post#': null,
+    },
+  })
+  assert.match(logText, /could not read the tree after the end-verify fixer/)
+  assert.equal((out.appliedFindings || []).filter((f) => f.track === 'end-verify').every((f) => f.fixed === false), true)
+  assert.notEqual(out.endVerify, 'passed')
+})
+
+test('a fix that DID land is still recorded as fixed', async () => {
+  // The check must not simply mark everything unfixed — that would be a different wrong answer.
+  const { out } = await run({
+    overrides: {
+      ...REACH_EV,
+      'end-verify#1': { ran: true, findings: [finding('regression from the fix')] },
+      'end-verify#2': CLEAN,
+    },
+  })
+  assert.equal(out.fixedBySource['end-verify'], 1)
+  assert.equal((out.appliedFindings || []).filter((f) => f.track === 'end-verify' && f.fixed).length, 1)
+})
+
+test('a clean pass 2 does NOT clear findings whose fix never reached the tree', async () => {
+  // Clearing on that turns "the fixer did nothing" into endVerify:passed — pass 2 re-read the same
+  // code that raised the finding and agreed with itself.
+  const { out, logText } = await run({
+    overrides: {
+      ...REACH_EV,
+      'end-verify#1': { ran: true, findings: [finding('regression from the fix')] },
+      'end-verify#2': CLEAN,
+      'end-verify-pre#': sameHash,
+      'end-verify-post#': sameHash,
+    },
+  })
+  assert.match(logText, /never reached the tree/)
+  assert.notEqual(out.endVerify, 'passed')
+  assert.ok((out.endVerifyFindings || []).length, 'the finding stays outstanding')
 })

@@ -1063,6 +1063,94 @@ const intentBlock = intent
   : `\n\n   Run \`git diff\` FIRST to understand what this change is trying to do, so you don't
    "fix" something that was done on purpose.`
 
+// A fixer's job is to make the code right, never to make the check stop asking. The existing
+// "do NOT touch any pre-existing / out-of-scope test to force a pass" covers a fixer reaching
+// SIDEWAYS at somebody else's test; it says nothing about the test the finding is actually about,
+// and that is the one a fixer is holding when the cheap way out presents itself.
+//
+// Observed, and it is the worst thing this pipeline has done: a UI fixer handed "this test is
+// vacuous — it never reveals anything and never checks masking" inserted `t.Skip("env view render
+// not yet implemented")` above the same unchanged body. `go test` prints PASS and exits 0 for a
+// skipped test, so the phase's `Done when:` gate — `go test -run 'TestRevealClearsOnClose'` is
+// green — came back GREEN over a feature that did not exist. Both UI tracks recorded the finding
+// as confirmed and fixed. Nothing downstream re-reads a fixer's edit, so a phase would have
+// shipped hollow, reporting success.
+//
+// Quarantining is a real thing, and it is deliberately NOT a fixer's to do: this pipeline already
+// says a pre-existing red is "the user's to fix/quarantine on main". A skip decided by an agent
+// mid-run is that decision made by the one party with an incentive to make the red go away.
+const NO_WEAKENING = `
+
+   NEVER MAKE A CHECK STOP ASKING. You may not skip, disable, delete, rename-out, comment out,
+   loosen or narrow ANY test or assertion to resolve a finding — not a pre-existing one, and NOT
+   the very test the finding is about. That means no \`t.Skip\`/\`t.Skipf\`, no \`@Disabled\`/
+   \`@Ignore\`, no \`it.skip\`/\`xit\`/\`describe.skip\`, no \`@pytest.mark.skip\`, no build tag or
+   \`-short\` guard that excludes it, no weakening an assertion until it passes, and no deleting the
+   case. A skipped test EXITS 0 in every runner this pack drives, so a gate reading exit codes sees
+   green — which makes this the one edit that converts "not implemented" into "verified" with
+   nothing downstream able to catch it.
+   If a finding says a test is vacuous or wrong, the fix is to make the test REAL and then make the
+   code satisfy it. If you cannot — the feature genuinely is not built, the fix is out of your
+   scope, or making the test real would take a redesign — then LEAVE THE TEST AS IT IS, apply
+   nothing, and say so plainly in your summary. An unfixed finding that is reported is cheap; a
+   finding "fixed" by silencing its test is the most expensive thing you can hand back.`
+
+// `fixed: true` has to describe the TREE, not the dispatch. The two post-build fixers are sent
+// with no schema and nothing reads their work back, so `fixed` meant only "the agent returned" —
+// which is not the same claim at all. Observed in one result: the same defect recorded
+// fixed:true in appliedFindings and unresolved in endVerifyFindings, with the cited file absent
+// from `git status --porcelain` entirely. That row also reaches the stats store as
+// verdict=confirmed/fixed=true, so a fixer that changed nothing scores as a fixer that worked.
+//
+// This is the house rule the Codex wrappers already follow — what a wrapper reports comes from
+// `git status --porcelain`/`git diff`, never from the agent's own summary. Hash the cited files
+// either side of the fixer and let the bytes answer. A file whose hash did not move was not
+// fixed, whatever the fixer said; a hash read that FAILS leaves the answer unknown, and unknown
+// must not be promoted to fixed.
+const HASHES = {
+  type: 'object', additionalProperties: false, required: ['hashes'],
+  properties: {
+    hashes: {
+      type: 'array',
+      items: {
+        type: 'object', additionalProperties: false, required: ['file', 'hash'],
+        properties: {
+          file: { type: 'string' },
+          // The empty string for a file that does not exist — distinct from a read that failed,
+          // because "absent then present" is a real fix (a fixer creating the missing test).
+          hash: { type: 'string' },
+        },
+      },
+    },
+  },
+}
+// Returns a Map(file -> hash), or null when the read could not be made. Null is NOT an empty map:
+// an empty map would compare equal to itself and silently mark every finding unfixed.
+const hashCited = async (files, label) => {
+  const list = [...new Set(files.map((f) => String(f || '').trim()).filter(Boolean))]
+  if (!list.length) return new Map()
+  const r = await agent(
+    `Print a content hash for each of these repo-relative paths and return them.
+       for f in ${list.map((f) => JSON.stringify(f)).join(' ')}; do
+         if [ -f "$f" ]; then printf '%s %s\n' "$f" "$(shasum -a 256 "$f" | cut -d' ' -f1)";
+         else printf '%s \n' "$f"; fi
+       done
+     Return one entry per path, in 'hashes'. A path that does not exist gets an EMPTY hash — that
+     is a real answer, not an error, because a fixer creating a missing file is a fix. Do not read,
+     summarise or judge the contents; do not edit anything.`,
+    { label, phase: 'End-verify', schema: HASHES, ...GP, ...MECHANICAL })
+  if (!r || !Array.isArray(r.hashes)) return null
+  return new Map(r.hashes.map((h) => [String(h.file), String(h.hash == null ? '' : h.hash)]))
+}
+// Which of `files` actually moved between the two reads. `null` from either side means the tree
+// could not be read, and the caller must treat that as UNKNOWN rather than as fixed or unfixed.
+const movedFiles = (before, after) => {
+  if (!before || !after) return null
+  const moved = new Set()
+  for (const [f, h] of after) if (before.has(f) && before.get(f) !== h) moved.add(f)
+  return moved
+}
+
 // Resolve the review tier. A caller (e.g. /r:task-run) may pass { profile, uiTouched }; otherwise
 // use what triage classified from the diff. Two different defaults are at work and they must not
 // be confused: 'standard' is where an UNSURE CLASSIFIER lands (see the tree above), while 'full'
@@ -1529,7 +1617,7 @@ if (!nothingToFix) {
        - Respect project conventions: no new comments or Javadocs, @Builder on data classes with
          more than 3 fields, match the surrounding code.
        - ${selfCheckClause}${noFullBuild}
-       - Return a short summary (files + one line each).${intentBlock}`,
+       - Return a short summary (files + one line each).${intentBlock}${NO_WEAKENING}`,
       { label: 'fix-correctness', phase: 'Fix', ...fixAgentType({ agentType: persona }), ...fixRun })
     // Same rule the end-verify fixer follows: only count what a live fixer took. Counting a dead
     // one leaves `fixed.correctness` reporting the full triaged list — the same false-confidence
@@ -1552,7 +1640,7 @@ if (!nothingToFix) {
     // Only now, and only into a tree the correctness fixer has finished writing.
     const fr = await fix(
       `Invoke the /r:code-refactor skill on the changed files ONLY, applying these readability
-       wins ${commitClause}:\n${fixList.readability.join('\n')}${intentBlock}${BATCH_CLAUSE}`,
+       wins ${commitClause}:\n${fixList.readability.join('\n')}${intentBlock}${NO_WEAKENING}${BATCH_CLAUSE}`,
       { label: 'fix-readability', phase: 'Fix', ...GP })
     if (blocked(fr)) {
       readabilityFixed = false
@@ -1662,7 +1750,7 @@ if (hasBuild) {
        rules) and do NOT touch any pre-existing / out-of-scope test or class to force a
        pass:\n${inScope}
        ${selfCheckClause}${noFullBuild} (This loop rebuilds and re-runs the suite as soon as
-       you return — that is what proves the failures are gone.)${intentBlock}`,
+       you return — that is what proves the failures are gone.)${intentBlock}${NO_WEAKENING}`,
       { label: `build-fix#${i}`, phase: 'Build', agentType: buildFixAgent() })
   }
   if (!buildGreen) {
@@ -1757,7 +1845,7 @@ if (isJvm) {
           these (surgical-fixer rules) and do NOT touch any pre-existing / out-of-scope test or
           class to force a pass:\n${failed}
           ${selfCheckClause}${noFullBuild} (This loop rebuilds and re-runs the suite as soon as you
-          return — that is what proves the failures are gone.)${intentBlock}`,
+          return — that is what proves the failures are gone.)${intentBlock}${NO_WEAKENING}`,
           { label: `rebuild-fix#${i}`, phase: 'Local-scan', agentType: buildFixAgent() })
       }
       if (!rebuildGreen) {
@@ -1962,7 +2050,20 @@ ${priorPass.findings.map(f => `         - ${f.file}:${f.line} [${f.category}] ${
     // A pass that came back clean is the only thing that clears the remainder. Assigning here (not
     // just breaking) is what makes "pass 1 found X, pass 2 read the fix and was happy" resolve.
     // It cannot clear `endVerifyMajor` — no fixer touched those, so there was nothing to re-read.
-    if (!real.length) { endVerifyUnresolved = []; break }
+    // A pass that came back clean clears the remainder ONLY if the fix it is reading actually
+    // landed. When the previous fixer returned without changing a byte, pass 2 re-reads the SAME
+    // code that raised the finding and agrees with itself — and clearing on that turns "the fixer
+    // did nothing" into `endVerify: passed`, which is the strongest possible wrong answer from the
+    // one track nothing downstream re-reads. `priorPass.fixed` is the tree's answer, not the
+    // agent's, so it is the right thing to gate on.
+    if (!real.length) {
+      if (pass > 1 && priorPass && priorPass.fixed === false) {
+        log('post-task-review: pass 2 came back clean, but pass 1\'s fix never reached the tree — the findings stay UNRESOLVED rather than being cleared by a re-read of unchanged code')
+        break
+      }
+      endVerifyUnresolved = []
+      break
+    }
     // The size gate. `!== 'minor'` rather than `=== 'major'`: an untagged finding is one nobody
     // sized, and applying an unsized change as the last write to the diff is the failure this
     // gate exists for.
@@ -1992,12 +2093,14 @@ ${priorPass.findings.map(f => `         - ${f.file}:${f.line} [${f.category}] ${
       break
     }
     endVerifyUnresolved = minor.map(evKey)
+    const beforeHashes = await hashCited(minor.map((f) => f.file), `end-verify-pre#${pass}`)
+    let landedCount = 0
     const fx = await agent(`${fixProvider === 'codex' ? codexFixPreamble : ''}Fix these end-verify findings (surgical), ${rebuildClause}
       Fix ONLY these items; do NOT touch any pre-existing / out-of-scope test or class to
       force a pass (the green bar is never relaxed). Every item below was sized as a SMALL, LOW-RISK
       fix by the reviewer that raised it — if applying one turns out to need more than that, STOP
       and report it back rather than widening the change:
-      ${minor.map(f => `${f.file}:${f.line} ${f.what}`).join('\n')}${intentBlock}`,
+      ${minor.map(f => `${f.file}:${f.line} ${f.what}`).join('\n')}${intentBlock}${NO_WEAKENING}`,
       { label: `end-verify-fix#${pass}`, phase: 'End-verify', ...fixAgentOpts, ...fixRun })
     // Only count what a live fixer took. A dead fixer must not inflate `fixed.correctness` — the
     // whole point of that number is that a caller can trust it. The findings stay in
@@ -2007,12 +2110,26 @@ ${priorPass.findings.map(f => `         - ${f.file}:${f.line} [${f.category}] ${
       for (const m of minor) endVerifyRecorded.push({ verdict: 'confirmed', fixed: false, description: evKey(m) })
     }
     else {
-      endVerifyFixed += minor.length
-      for (const m of minor) endVerifyRecorded.push({ verdict: 'confirmed', fixed: true, description: evKey(m) })
+      // The fixer returned; now ask the tree whether it did anything. A finding whose cited file
+      // did not change is NOT fixed, whatever the summary said. An unreadable tree leaves every
+      // finding unknown, and unknown is recorded as unfixed — it keeps the verdict off 'passed',
+      // which is the safe direction when nothing downstream re-reads this.
+      const moved = movedFiles(beforeHashes, await hashCited(minor.map((f) => f.file), `end-verify-post#${pass}`))
+      if (moved === null) log('post-task-review: could not read the tree after the end-verify fixer — its findings stay UNRESOLVED rather than being recorded as fixed')
+      const landed = minor.filter((m) => moved && moved.has(String(m.file || '').trim()))
+      landedCount = landed.length
+      const missed = minor.filter((m) => !landed.includes(m))
+      if (missed.length) log(`post-task-review: the end-verify fixer returned but ${missed.length} of ${minor.length} finding(s) left their file unchanged — recorded as NOT fixed`)
+      endVerifyFixed += landed.length
+      for (const m of landed) endVerifyRecorded.push({ verdict: 'confirmed', fixed: true, description: evKey(m) })
+      for (const m of missed) endVerifyRecorded.push({ verdict: 'confirmed', fixed: false, description: evKey(m) })
+      // Only what actually landed leaves the unresolved list. This is what stops one result saying
+      // fixed and unresolved about the same defect.
+      endVerifyUnresolved = missed.map(evKey)
       // Attributable by construction — nothing but the end-verify Codex produced these. Recorded
       // separately from the up-front tracks because it answers a different question: how often
       // does the machine-written code from the fix/refactor/scan phase need fixing itself?
-      fixedBySource['end-verify'] = (fixedBySource['end-verify'] || 0) + minor.length
+      fixedBySource['end-verify'] = (fixedBySource['end-verify'] || 0) + landed.length
       // The UI track is running alongside this one, against an image built BEFORE these edits.
       // If a fix landed in a frontend file, what it verified is now stale — see the re-verify
       // guard after the barrier.
@@ -2021,7 +2138,7 @@ ${priorPass.findings.map(f => `         - ${f.file}:${f.line} [${f.category}] ${
       // Treat any end-verify fix there as render-affecting: the cost calculus that made this guard
       // narrow on the web (an 86s docker deploy) does not exist when a restart is seconds.
       if (terminalSurface(uiSurfaceResolved)) endVerifyTouchedFrontend = true
-      else if (minor.some((f) => FRONTEND_FILE.test(String(f.file || '')))) endVerifyTouchedFrontend = true
+      else if (landed.some((f) => FRONTEND_FILE.test(String(f.file || '')))) endVerifyTouchedFrontend = true
     }
     // The next pass's only link to this one, and it carries the MINOR items only — those are the
     // ones a fixer touched, so they are the ones pass 2 has a fix to verify. A major finding was
@@ -2030,7 +2147,10 @@ ${priorPass.findings.map(f => `         - ${f.file}:${f.line} [${f.category}] ${
     // Recorded AFTER the fixer so it carries whether the edits actually happened — a dead fixer
     // changes what re-finding these items means, and pass 2 has no other way to tell the two
     // situations apart.
-    priorPass = { findings: minor, fixed: !blocked(fx) }
+    // `fixed` here is what the TREE showed, not that the agent came back: pass 2 is verifying a
+    // fix, and telling it a fix landed when the file never moved sends it to re-read unchanged code
+    // and agree with itself.
+    priorPass = { findings: minor, fixed: !blocked(fx) && landedCount > 0 }
   }
 }
 
@@ -2481,8 +2601,16 @@ try {
   // the tag alone, `fixed` says a defect was repaired on every run where the fixer died — the one
   // shape of this record that cannot be checked later, since a dead agent leaves no diff to read.
   let minorFixer = null
+  // Same question as the end-verify fixer's, and it is where the observed failure actually
+  // happened: a UI fixer handed "this test is vacuous" reported the finding fixed while the cited
+  // file never appeared in `git status --porcelain`. `where` is a UI finding's location field and
+  // carries a `file:line` or a route, so only the entries that look like a path can be checked —
+  // a route-only finding has no file to hash and is left to the fixer's word, which is the honest
+  // limit of this check rather than a hole in it.
+  const uiCited = minor.map((f) => String(f.where || '').split(':')[0].trim()).filter((f) => /\.[A-Za-z0-9]+$/.test(f))
+  const uiBefore = uiCited.length ? await hashCited(uiCited, 'ui-fix-pre') : new Map()
   if (minor.length) minorFixer = await agent(`${fixProvider === 'codex' ? codexFixPreamble : ''}Fix these minor UI/runtime defects (surgical), ${rebuildClause}
-    Then redeploy and re-verify once:\n${minor.map(f => `${f.where}: ${f.title} — ${f.suggestedFix}`).join('\n')}${intentBlock}`,
+    Then redeploy and re-verify once:\n${minor.map(f => `${f.where}: ${f.title} — ${f.suggestedFix}`).join('\n')}${intentBlock}${NO_WEAKENING}`,
     { label: 'ui-fix-minor', phase: 'UI', ...domainFixer, ...fixRun })
   // Same rule as the fixer above, for the same reason: whether the FILER came back, not whether
   // findings were TAGGED major. A filer that died wrote nothing, and a summary still reporting
@@ -2512,7 +2640,19 @@ try {
     log(`post-task-review: the issue filer did NOT come back — ${major.length} major UI ` +
         `finding(s) are NOT in issues/ and exist only in this transcript. File them by hand.`)
   }
-  minorFixed = minor.length > 0 && !!minorFixer
+  // `minorFixed` gates the post-fix rebuild below, so it must mean "the tree changed", not "the
+  // agent came back". A fixer that returned having written nothing needs no rebuild, and recording
+  // it as a fix is what put a confirmed/fixed row in the store for work that never happened.
+  let uiMoved = null
+  if (minor.length && minorFixer && uiCited.length) {
+    uiMoved = movedFiles(uiBefore, await hashCited(uiCited, 'ui-fix-post'))
+    if (uiMoved === null) log('post-task-review: could not read the tree after the UI fixer — its findings are recorded as NOT fixed')
+    else if (!uiMoved.size) log(`post-task-review: the UI fixer returned but none of the ${uiCited.length} cited file(s) changed — recorded as NOT fixed`)
+  }
+  // No citable file means nothing to check: fall back to the fixer having returned, and say so in
+  // the log rather than letting an unverifiable claim look like a verified one.
+  minorFixed = minor.length > 0 && !!minorFixer && (uiCited.length ? !!(uiMoved && uiMoved.size) : true)
+  if (minor.length && minorFixer && !uiCited.length) log('post-task-review: the UI findings cite no file path, so this fix is recorded on the fixer\'s word — not verified against the tree')
 
   // EVERY write above landed after Phase 4's build. The end-verify fixer and the UI minor fixer
   // both edit the tree once the green bar has been recorded; each is TOLD to rebuild

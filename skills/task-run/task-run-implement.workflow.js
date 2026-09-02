@@ -2483,6 +2483,22 @@ const codexFixClause = `Drive the Codex CLI for this fix rather than editing you
    produced the code the review is about to certify.
 
    `
+// A fixer's job is to make the code right, never to make the check stop asking. The build fixer
+// here is holding exactly the test that just went red, so "do not touch a PRE-EXISTING test" — the
+// rule this pipeline already carries — is aimed one step to the side of where the temptation is.
+// Observed in the review half: a fixer handed "this test is vacuous" answered with a `t.Skip` above
+// the same unchanged body, and since a skipped test exits 0 in every runner this pack drives, the
+// phase's `Done when:` gate went green over a feature that did not exist.
+const NO_WEAKENING = `
+
+   NEVER MAKE A CHECK STOP ASKING. You may not skip, disable, delete, comment out, loosen or
+   narrow ANY test or assertion to get to green — not a pre-existing one, and NOT the test you are
+   here to fix. No \`t.Skip\`, no \`@Disabled\`/\`@Ignore\`, no \`it.skip\`/\`xit\`, no
+   \`@pytest.mark.skip\`, no build tag that excludes it, no weakening an assertion until it passes.
+   A skipped test EXITS 0, so every gate downstream reads it as green — which makes this the one
+   edit that turns "not implemented" into "verified" with nothing able to catch it. If the test is
+   wrong, make it RIGHT and satisfy it; if you cannot, leave it and say so in blockedOn.`
+
 const implBrief = (a) => `${implProvider === 'codex' ? codexPreamble(a) : ''}Implement your slice of the plan at ${planPath}. READ THAT FILE FIRST — it holds
    the Context, the acceptance criteria, and the TDD test plan, so you build what the plan intends
    rather than your own reinterpretation.
@@ -2532,7 +2548,7 @@ const implBrief = (a) => `${implProvider === 'codex' ? codexPreamble(a) : ''}Imp
    - Reuse the existing patterns and utilities the plan's Reuse map points at; do not invent new
      ones. Match the surrounding code: no new comments or Javadocs, @Builder on data classes with
      more than 3 fields.
-   - No scope creep beyond the plan.${LEAVE_SOURCE_ALONE}
+   - No scope creep beyond the plan.${LEAVE_SOURCE_ALONE}${NO_WEAKENING}
    - ${selfCheckClause}${noFullBuild}
    - Leave EVERYTHING UNCOMMITTED in the working tree. The whole task lands as ONE commit at the
      very end, after the review — so the reviewer reads the work before any of it is committed.
@@ -2668,7 +2684,7 @@ if (hasBuild) {
        ${inScope}
        Intent (do not undo it): ${src.taskIntent}
        ${selfCheckClause} Plus the one test you touched. Do not run the full suite — this loop rebuilds and re-runs it the moment
-       you return, and that is what proves the failures are gone.`,
+       you return, and that is what proves the failures are gone.${NO_WEAKENING}`,
       // The resolved implementer settings, for the same reason the implementers carry them: this
       // is the same agent on the same provider, editing the code it just wrote. Left unpinned it
       // took its depth from the entry point, and left on Claude it would quietly hand a codex run's
