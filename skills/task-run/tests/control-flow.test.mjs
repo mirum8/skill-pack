@@ -2525,3 +2525,75 @@ test("buildTool 'none' still hands on n/a — 'generic' did not absorb it", asyn
   const { out } = await run({ source: baseSource({ buildTool: 'none', runnerAgent: '' }), review: OK_REVIEW, planfix: OK_FIX })
   assert.equal(out.buildGreen, 'n/a')
 })
+
+// --- a Codex plan review whose SUBPROCESS died --------------------------------
+// reliable() re-dispatches when an agent produces nothing — a null return or a throw. A wrapper
+// that did its job and reported `ran:false, blockedCause:'job-died'` produced a value, so it was
+// returned on the first attempt and halted the run. The two failures got opposite treatment for no
+// reason anyone chose, and the honest one got the worse deal: observed, a transient Codex death
+// took down a whole implement half before a line was written, discarding 11 completed agents,
+// 667k tokens and 23 minutes of map+plan work.
+const codexDead = (cause) => ({ ran: false, findings: [], blockedCause: cause, note: `Codex ${cause}` })
+
+test('a transient Codex death is re-dispatched, not a halt', async () => {
+  const { out, counts } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    overrides: { 'codex-plan-review#1': (n) => (n === 1 ? codexDead('job-died') : OK_REVIEW) },
+  })
+  assert.equal(counts['codex-plan-review#1'], 2, 'the dead attempt must be re-dispatched')
+  assert.notEqual(out.stopped, 'codex-plan-review-unavailable')
+  assert.equal(out.planReview.ran, true)
+})
+
+test('a job still running when the wrapper gave up is retried too', async () => {
+  const { out, counts } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    overrides: { 'codex-plan-review#1': (n) => (n === 1 ? codexDead('still-running') : OK_REVIEW) },
+  })
+  assert.equal(counts['codex-plan-review#1'], 2)
+  assert.equal(out.planReview.ran, true)
+})
+
+test('a MISSING CLI is terminal — retrying cannot make a binary appear', async () => {
+  const { out, counts } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    overrides: { 'codex-plan-review#1': codexDead('missing-cli') },
+  })
+  assert.equal(counts['codex-plan-review#1'], 1, 'a deterministic failure must not be re-dispatched')
+  assert.equal(out.stopped, 'codex-plan-review-unavailable')
+})
+
+test('an UNSET cause is terminal, not retried', async () => {
+  // Unmarked fails toward halting, the direction every other unmarked field in this pack takes: a
+  // retry loop entered by accident is harder to see than a halt.
+  const { out, counts } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    overrides: { 'codex-plan-review#1': { ran: false, findings: [], note: 'something went wrong' } },
+  })
+  assert.equal(counts['codex-plan-review#1'], 1)
+  assert.equal(out.stopped, 'codex-plan-review-unavailable')
+})
+
+test('three dead attempts still halt — a retry is not a fallback reviewer', async () => {
+  // The standing rule is untouched: the plan is critiqued by the REAL Codex or not at all.
+  const { out, counts } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    overrides: { 'codex-plan-review#1': codexDead('job-died') },
+  })
+  assert.equal(counts['codex-plan-review#1'], 3)
+  assert.equal(out.stopped, 'codex-plan-review-unavailable')
+  assert.equal(out.planReview.ran, false)
+})
+
+test('the halt says the review was DISPATCHED, never "stopped before" it', async () => {
+  // `reason` is the field a caller reads programmatically, and it carried the initializer's string
+  // describing a run that stopped BEFORE this step — contradicting the halt's own detail, which
+  // described Codex dying midway through reviewing the plan file.
+  const { out } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    overrides: { 'codex-plan-review#1': codexDead('job-died') },
+  })
+  assert.doesNotMatch(out.planReview.reason, /stopped before the plan review/)
+  assert.match(out.planReview.reason, /dispatched and could not complete/)
+  assert.match(out.detail, /job-died/, 'and the note survives all three attempts into the detail')
+})

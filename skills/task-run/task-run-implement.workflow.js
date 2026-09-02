@@ -1915,7 +1915,25 @@ ${checks.map((c, i) => `     ${i + 1}. ${c}`).join('\n')}
      Then apply the rubric to the ${nothingApplied ? 'plan' : 'revised plan'} for anything ${nothingApplied ? 'the first pass missed' : 'the rewrite newly broke'}.`
   }
 
-  const askCodex = (pass, prior) => reliable(`codex-plan-review#${pass}`, 'Plan-review', () => agent(
+  // A Codex job that died is the step producing NOTHING, which is exactly what reliable() already
+  // re-dispatches for. Without this the two failures were treated in opposite ways for no reason
+  // anyone chose: a wrapper that CRASHED got three attempts, and a wrapper that did its job and
+  // honestly reported `ran:false` got one — so the honest report was punished, and a transient
+  // child-process death halted the whole implement half before a line was written, discarding
+  // every completed map and plan agent behind it (observed: 11 agents, 667k tokens, 23 minutes,
+  // thrown away).
+  //
+  // 'missing-cli' is NOT retried: it is deterministic, and three dispatches cannot make a CLI
+  // appear. That distinction is why the cause is an enum on the schema rather than a grep over the
+  // note. An UNSET cause is treated as terminal — the same direction every other unmarked field in
+  // this pack fails toward, since a retry loop entered by accident is harder to see than a halt.
+  //
+  // This changes nothing about the standing rule: the plan is critiqued by the REAL Codex or not
+  // at all. A re-dispatch runs Codex again; it never substitutes a stand-in reviewer, and if all
+  // three attempts come back dead the run still halts.
+  let lastCodexNote = ''
+  const askCodex = (pass, prior) => reliable(`codex-plan-review#${pass}`, 'Plan-review', async () => {
+    const r = await agent(
     `Run the REAL Codex over the PLAN FILE ${planPath} (not a diff) and challenge it.
      Task source: ${rawSource}
 
@@ -1941,20 +1959,37 @@ ${checks.map((c, i) => `     ${i + 1}. ${c}`).join('\n')}
      job failed, or it timed out and moved to the background and you could not collect the
      finished review, set ran=false — there is NO fallback reviewer here and no stand-in model is
      acceptable, so a false "clean" is worse than an honest failure. Say in the note WHICH of the
-     three it was, in those words — missing CLI, job died, still running when you gave up. The
+     three it was, in those words — missing CLI, job died, still running when you gave up — and set
+     blockedCause to the matching enum ('missing-cli', 'job-died', 'still-running'). The prose is
+     for the human reading a halt; the enum is what this pipeline branches on, and a transient
+     death is RE-DISPATCHED rather than halting the run, so getting it wrong either wastes two
+     Codex runs or throws a whole phase away. The
      reader of a halt is diagnosing, and "did not complete within time constraints" over a job that
      died two minutes in sends them to look at timeouts for a failure that was never about time.
      A review longer than the
      ~600s Bash cap WILL be moved to the background — that is expected, not a failure, and giving
      up there is the single most common way this step reports a false block. You ARE permitted to
      wait here. ${collect('     ')}`,
-    { label: `codex-plan-review#${pass}`, phase: 'Plan-review', schema: REVIEW, ...GP, ...CODEX_RUN }))
+    { label: `codex-plan-review#${pass}`, phase: 'Plan-review', schema: REVIEW, ...GP, ...CODEX_RUN })
+    if (r && typeof r.note === 'string' && r.note.trim()) lastCodexNote = r.note
+    if (r && r.ran === false && (r.blockedCause === 'job-died' || r.blockedCause === 'still-running')) {
+      log(`run-task-implement: the Codex plan review reported '${r.blockedCause}' — re-dispatching rather than halting the phase`)
+      return null
+    }
+    return r
+  })
 
   let review = await askCodex(1)
   // Step 2 has no fallback: the plan is critiqued by the real Codex or not at all.
   if (blocked(review)) {
-    log('run-task-implement: the Codex plan review could NOT run — stopping. No stand-in reviewer is acceptable here.')
-    return await stop('codex-plan-review-unavailable', { detail: (review && review.note) || '' })
+    log('run-task-implement: the Codex plan review could NOT run after 3 attempts — stopping. No stand-in reviewer is acceptable here.')
+    // The initializer's reason describes a run that stopped BEFORE this step, and leaving it here
+    // contradicted the halt's own detail: `reason` said "stopped before the plan review" while the
+    // detail described Codex dying midway through reviewing the plan file. `reason` is the field a
+    // caller reads programmatically, so the two disagreeing means the machine-readable half was
+    // the wrong one.
+    planReview.reason = 'the Codex plan review was dispatched and could not complete — 3 attempts, no critique'
+    return await stop('codex-plan-review-unavailable', { detail: (review && review.note) || lastCodexNote || '' })
   }
   planReview.ran = true
   // The initializer's reason described a run that stopped before this point; a reason surviving
