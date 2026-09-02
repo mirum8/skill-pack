@@ -137,6 +137,60 @@ live_count() { live_ids | wc -l | tr -d ' '; }
 
 field() { sed -n "s/^$2=//p" "$1" 2>/dev/null | head -1; }
 
+# --- test-app fixtures -------------------------------------------------------
+# `git worktree add` checks out TRACKED files only, and the generated /test-app skill keeps
+# the things it needs to reach a live target -- a kubeconfig, a cluster env file, the
+# credentials file -- on gitignored paths. `r:test-app-create` is what put them there: it
+# writes `test_creds.txt` and adds it to the project's .gitignore itself. So a unit's tree
+# holds the skill and not what the skill reads, and its UI verification is blocked on every
+# unit of every credentialed project -- which subtracts from the merge gate, on every run,
+# without ever looking like a fan-out problem.
+#
+# Copy them, but NOT every ignored file under the skill: most of them are that skill's own
+# accumulated OUTPUT -- captured frames and screenshots from earlier runs, 169 of 172 on the
+# project this was found on. Copying those hands a unit a predecessor's captured screen to
+# read as this run's evidence, which is the same confident-wrong-answer this script exists
+# to stop.
+#
+# The discriminator is the skill's own tracked text: an ignored file whose basename is named
+# by one of the skill directory's TRACKED files is an input the skill reads; one nothing
+# names is something it wrote. Ask the skill, rather than guessing from the layout -- a
+# project invents its own fixture paths (`cluster/kubeconfig.yaml` is not a name this pack
+# could have known), so any pack-side list of names would be a guess that silently misses.
+#
+# Every file is named out loud, copied or not. A fan-out that quietly restored a capability
+# is as hard to reason about as one that quietly lost it, and a fixture that could NOT be
+# copied is exactly what the unit needs to hear before it discovers an unexplained missing
+# file mid-review.
+copy_test_app_fixtures() {
+  local dir=$1 skill=.claude/skills/test-app
+  [ -d "$skill" ] || return 0
+
+  local tracked; tracked=$(git ls-files -- "$skill/" 2>/dev/null) || return 0
+  [ -n "$tracked" ] || return 0
+
+  local ignored; ignored=$(git ls-files --others --ignored --exclude-standard -- "$skill/" 2>/dev/null)
+  [ -n "$ignored" ] || return 0
+
+  local f base copied=0 failed=0
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    [ -f "$f" ] || continue
+    base=${f##*/}
+    printf '%s\n' "$tracked" | tr '\n' '\0' \
+      | xargs -0 grep -qF -- "$base" 2>/dev/null || continue
+    if mkdir -p "$dir/${f%/*}" 2>/dev/null && cp -p "$f" "$dir/$f" 2>/dev/null; then
+      copied=$((copied + 1)); say "spawn: copied test-app fixture '$f' into the unit tree (gitignored, so the checkout has none)"
+    else
+      failed=$((failed + 1)); say "spawn: could NOT copy test-app fixture '$f' — this unit's runtime verification is DEGRADED and will block, not pass"
+    fi
+  done <<EOF
+$ignored
+EOF
+  [ "$copied" = 0 ] && [ "$failed" = 0 ] && return 0
+  return 0
+}
+
 # --- workspace trust ---------------------------------------------------------
 # Claude Code records trust per project path in .claude.json. A worktree is a new
 # path, so it inherits nothing -- which is why this is not optional plumbing.
@@ -251,6 +305,8 @@ do_spawn() {
 
   git worktree add --detach "$dir" "$base" >/dev/null \
     || die "spawn: git worktree add --detach '$dir' '$base' failed"
+
+  copy_test_app_fixtures "$dir"
 
   # Without this the session opens on the trust dialog instead of the prompt, and
   # the unit stalls until the wait times out — every time, on every unit.

@@ -495,6 +495,49 @@ rm -f "$CAPREPO/.config/skill-pack.yaml"
 [[ $(capof) == 3 ]] && ok "and no project file at all resolves the shipped cap" \
                     || bad "and no project file at all resolves the shipped cap" "got '$(capof)'"
 
+echo
+echo "== a unit's tree gets the test-app fixtures, and only the fixtures =="
+# `git worktree add` checks out TRACKED files only, and the generated /test-app skill keeps what it
+# needs to reach a live target on gitignored paths -- `r:test-app-create` writes test_creds.txt and
+# gitignores it itself. Without the copy, the unit holds the skill and not what the skill reads, so
+# its UI verification blocks on every unit of every credentialed project and subtracts from the
+# merge gate without ever looking like a fan-out problem.
+#
+# The other half is what must NOT be copied: the same directory accumulates that skill's own
+# captured frames, and handing a unit a predecessor's screen to read as this run's evidence is the
+# confident-wrong-answer this script exists to stop. So both directions are asserted here -- a test
+# that only checked the fixture arrived would pass a script that copied all 172 files.
+FX="$TMP/fxrepo"; mkdir -p "$FX/.claude/skills/test-app/cluster" "$FX/.claude/skills/test-app/e2e/frames"
+git -C "$FX" init -q; git -C "$FX" config user.email t@t; git -C "$FX" config user.name t
+printf 'kubeconfig at cluster/kubeconfig.yaml, creds at test_creds.txt\n' > "$FX/.claude/skills/test-app/SKILL.md"
+printf 'apiVersion: v1\n'  > "$FX/.claude/skills/test-app/cluster/kubeconfig.yaml"
+printf 'u=admin\n'         > "$FX/.claude/skills/test-app/test_creds.txt"
+printf 'stale screen\n'    > "$FX/.claude/skills/test-app/e2e/frames/geom-80x24.txt"
+printf '.claude/skills/test-app/cluster/\n.claude/skills/test-app/test_creds.txt\n.claude/skills/test-app/e2e/frames/\n' > "$FX/.gitignore"
+printf 'a\n' > "$FX/todo.md"
+git -C "$FX" add -A >/dev/null; git -C "$FX" commit -qm base
+FXBASE=$(git -C "$FX" rev-parse HEAD)
+trust_repo "$FX"
+
+out=$(cd "$FX" && PATH="$STUB:$PATH" "$FAN" spawn \
+        --id fx --dir "$TMP/wt-fx" --base "$FXBASE" --prompt 'go' 2>&1)
+
+[ -f "$TMP/wt-fx/.claude/skills/test-app/cluster/kubeconfig.yaml" ] \
+  && ok "the gitignored kubeconfig the skill names is in the unit tree" \
+  || bad "the gitignored kubeconfig the skill names is in the unit tree" "$out"
+[ -f "$TMP/wt-fx/.claude/skills/test-app/test_creds.txt" ] \
+  && ok "and so is the credentials file" \
+  || bad "and so is the credentials file" "$out"
+[ -f "$TMP/wt-fx/.claude/skills/test-app/e2e/frames/geom-80x24.txt" ] \
+  && bad "a previous run's captured frame is NOT copied" "geom-80x24.txt was copied into the unit tree" \
+  || ok "a previous run's captured frame is NOT copied"
+grep -q "copied test-app fixture '.claude/skills/test-app/test_creds.txt'" <<<"$out" \
+  && ok "and every copied fixture is named out loud" \
+  || bad "and every copied fixture is named out loud" "$out"
+
+cd "$FX" && git worktree remove --force "$TMP/wt-fx" >/dev/null 2>&1
+cd "$REPO"
+
 cd "$REPO" && git worktree remove --force "$TMP/wt-p6" >/dev/null 2>&1
 cd "$REPO" && git worktree remove --force "$TMP/wt-p1" >/dev/null 2>&1
 
