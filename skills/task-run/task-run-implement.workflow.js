@@ -112,10 +112,14 @@ const SOURCE = {
     uiVisualChange: { type: 'boolean' },
     hasBackend: { type: 'boolean' },
     hasFrontend: { type: 'boolean' },
-    buildTool: { type: 'string', enum: ['maven', 'gradle', 'none'] },
+    // 'generic' = a real build+test command that is not a JVM one. Separate from 'none' because the
+    // two answer different questions: 'none' means there is nothing to run, 'generic' means there
+    // is but no bundled runner agent knows it. Folding Go into 'none' is what let this half hand on
+    // buildGreen 'n/a' for a project that builds and tests perfectly well.
+    buildTool: { type: 'string', enum: ['maven', 'gradle', 'generic', 'none'] },
     buildCmd: { type: 'string' },        // CLEAN certifying build — used ONCE
     buildCmdFast: { type: 'string' },    // incremental — every rebuild after that
-    runnerAgent: { type: 'string' },     // r:maven-build-runner | r:gradle-build-runner
+    runnerAgent: { type: 'string' },     // r:maven-build-runner | r:gradle-build-runner | '' on 'generic'
     // 1 aspect for light, 2 for standard, 2-3 for full. Each becomes one read-only Explore agent.
     exploreAspects: { type: 'array', items: { type: 'string' } },
     planPath: { type: 'string' },
@@ -872,7 +876,14 @@ ${inRepo}
       build used exactly ONCE; buildCmdFast is the incremental rebuild used every time after.
       maven -> "mvn clean package" / "mvn package", runnerAgent "r:maven-build-runner".
       gradle -> "./gradlew clean build" / "./gradlew build", runnerAgent "r:gradle-build-runner".
-      neither -> buildTool "none".
+      neither, but the repo HAS an obvious build+test command (go.mod -> \`go build ./... && go test ./...\`,
+        Cargo.toml -> \`cargo build && cargo test\`, a package.json test script, a Makefile test target, ...)
+        -> buildTool "generic", runnerAgent "" (empty), and BOTH commands set to that command.
+        Prefer the project's OWN documented command where its CLAUDE.md or README names one: that is
+        the command the repo is known to pass under, and a guessed near-equivalent is how a green
+        build certifies something nobody runs. Outside the JVM there is usually no clean/fast split,
+        so the two commands being identical is correct rather than lazy.
+      nothing to build and nothing to test (docs, shell, config only) -> buildTool "none".
       NOT \`install\`: a multi-module reactor resolves inter-module dependencies within the same
       session, so writing every module into ~/.m2 buys this run nothing and costs the whole
       install phase. /r:task-review certifies the same tree with \`package\`, and the caller hands
@@ -2304,8 +2315,14 @@ if (onBranch !== wantBranch) log(`run-task-implement: on "${onBranch}", not the 
 // is the correct answer), and one blockedOn stops the run even when the other implementer did the
 // whole job. Three phases of one Go project stopped exactly that way with the work already
 // complete on disk. /r:task-review guards its own fixers on the same condition (`domainFixer`).
+// Two different questions, and conflating them is the bug this pair exists to prevent. `hasBuild`
+// asks whether there is a command to run and gates the Build phase; `isJvm` asks whether the
+// bundled Spring/Thymeleaf personas apply and gates every agent choice. A Go repo answers yes to
+// the first and no to the second.
+const isJvm = src.buildTool === 'maven' || src.buildTool === 'gradle'
+const hasBuild = src.buildTool !== 'none'
 const areas = []
-if (src.buildTool === 'none') {
+if (!isJvm) {
   if (src.hasBackend || src.hasFrontend) log('run-task-implement: no JVM build tool — routing to ONE general-purpose implementer rather than the Spring/Thymeleaf personas, whatever hasBackend/hasFrontend say')
   areas.push({ label: 'general', agentType: 'general-purpose', slice: 'everything the plan calls for' })
 } else {
@@ -2332,8 +2349,10 @@ const selfCheckClause = src.buildTool === 'maven'
   ? 'Self-check by COMPILING, not by building: `mvn -q test-compile` — plus `mvn -q test -Dtest=<TheTestsYouWrote>` for the tests in your own slice.'
   : src.buildTool === 'gradle'
     ? 'Self-check by COMPILING, not by building: `./gradlew -q testClasses` — plus `./gradlew -q test --tests <TheTestsYouWrote>` for the tests in your own slice.'
-    : 'Verify your change is syntactically sound before returning.'
-const noFullBuild = src.buildTool === 'none' ? ''
+    : src.buildTool === 'generic'
+      ? `Self-check with the project's own build command — \`${(src.buildCmdFast || src.buildCmd || '').replace(/`/g, '')}\` — scoped as narrowly as that toolchain allows (one package, or the tests in your own slice), never the whole suite.`
+      : 'Verify your change is syntactically sound before returning.'
+const noFullBuild = !hasBuild ? ''
   : ' Do NOT run the full build or the whole test suite: the pipeline builds and runs everything the moment you return, and that is what proves your slice is green.'
 
 // On the codex provider the subagent does not write the code — it drives the Codex CLI, which
@@ -2515,7 +2534,7 @@ phase('Build')
 // build that never ran, and the PR body then reported it as passing. post-task-review already
 // reports 'n/a' for the same case; the two now agree. Only ever true | false | 'n/a'.
 let buildGreen = 'n/a'
-if (src.buildTool !== 'none') {
+if (hasBuild) {
   buildGreen = false
   const changed = impls.flatMap((r) => (r && r.filesChanged) || []).join(', ')
   const staleRule = `If any source file was DELETED or RENAMED since the last build, run \`${src.buildCmd}\` instead — a removed source can leave a stale .class behind that would let a broken build pass.`
@@ -2526,16 +2545,20 @@ if (src.buildTool !== 'none') {
   // module the change broke — and that is caught by the review's own full build before anything
   // merges, which is the gate that actually matters. The i === 1 baseline is NEVER scoped: it is
   // the clean build this whole run certifies against, and the caller hands it on as `buildGreen`.
-  const scopeRule = src.buildTool === 'maven'
+  // A generic toolchain has no reactor and no module graph this pipeline can address, so there is
+  // nothing honest to narrow to — say so rather than inventing a flag for a build system we did not
+  // detect. Unscoped is the correct instruction, not a degraded one.
+  const scopeRule = src.buildTool === 'generic'
+    ? `Run it unscoped: this project's build tool was detected generically, so there is no module graph to narrow to.`
+    : src.buildTool === 'maven'
     ? `Scope it: add \`-pl <the modules holding the changed files> -am\` so the reactor rebuilds those modules and their upstream dependencies rather than the whole project. If you cannot map the changed files to modules confidently, or the project is single-module, run it unscoped.`
     : `Scope it: run \`:<module>:build\` for the modules holding the changed files rather than the root build. If you cannot map the changed files to modules confidently, or the project is single-module, run it unscoped.`
   let lastBuild = null
   for (let i = 1; i <= 3; i++) {
     const b = await agent(
-      `Run the build \`${i === 1 ? src.buildCmd : src.buildCmdFast}\` via the ${src.runnerAgent} agent.
+      `Run the build \`${i === 1 ? src.buildCmd : src.buildCmdFast}\` ${src.runnerAgent ? `via the ${src.runnerAgent} agent` : 'from the repo root'}.
        ${i === 1 ? "This is the run's one clean build — it establishes the baseline." : `${staleRule} ${scopeRule}`}
-       green=true ONLY on a fully clean success (BUILD SUCCESS / BUILD SUCCESSFUL, exit 0, zero
-       failures). The green bar is NEVER relaxed. If red, CLASSIFY every failure:
+       green=true ONLY on a fully clean success (exit 0, zero failures${isJvm ? ' — BUILD SUCCESS / BUILD SUCCESSFUL' : ''}). The green bar is NEVER relaxed. If red, CLASSIFY every failure:
        - inScopeFailures: compile errors or test failures in code THIS run changed
          (changed files: ${changed || 'derive from git diff'}). Ours to fix.
        - preExistingFailures: failures UNRELATED to this work — a test or class the change never
@@ -2547,7 +2570,7 @@ if (src.buildTool !== 'none') {
          change broke something. This flag is what the pipeline branches on; the two strings above
          are the detail a human reads, so do not answer "None." in one and leave this unset.
        Put a short combined log in 'failures'.`,
-      { label: `build#${i}`, phase: 'Build', schema: BUILD, agentType: src.runnerAgent, ...BUILD_RUN })
+      { label: `build#${i}`, phase: 'Build', schema: BUILD, agentType: src.runnerAgent || 'general-purpose', ...BUILD_RUN })
     lastBuild = b || lastBuild
     if (b && b.green) { buildGreen = true; break }
     const inScope = b && b.inScopeFailures && b.inScopeFailures.trim()
@@ -2567,8 +2590,7 @@ if (src.buildTool !== 'none') {
        touch any pre-existing or out-of-scope test or class to force a pass:
        ${inScope}
        Intent (do not undo it): ${src.taskIntent}
-       Self-check by COMPILING, not by building: \`${src.buildTool === 'maven' ? 'mvn -q test-compile' : './gradlew -q testClasses'}\` plus the one
-       test you touched. Do not run the full suite — this loop rebuilds and re-runs it the moment
+       ${selfCheckClause} Plus the one test you touched. Do not run the full suite — this loop rebuilds and re-runs it the moment
        you return, and that is what proves the failures are gone.`,
       // The resolved implementer settings, for the same reason the implementers carry them: this
       // is the same agent on the same provider, editing the code it just wrote. Left unpinned it

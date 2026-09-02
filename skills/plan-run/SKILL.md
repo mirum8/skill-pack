@@ -319,10 +319,21 @@ below inside its own session. For each phase:
    - `endVerify: "blocked"` — the mandatory Codex pass over the **final** diff did not run, so
      everything the review's own fixers changed is unreviewed.
    - `tracksBlocked` non-empty — a track died; whatever it covers had no reader.
-   - `build` or `localScan` not green.
+   - `tracksDrifted` non-empty — a track ran and read a *different* changeset, so its clean report
+     is about a diff that is not this one.
+   - `endVerify: "findings-unresolved"` — the final Codex pass ran and came back with findings
+     nobody fixed. Outstanding is outstanding whether or not anyone attempted it, which is exactly
+     why the review withholds `passed` here; a gate that reads only `blocked` merges the one state
+     the pipeline went out of its way to distinguish from a pass.
+   - `build` or `localScan` **not green** — and `"n/a"` is not green. It means no build ran at all,
+     the same reading `baselineBuilt` already takes of it above. On a project whose build tool the
+     review does not detect, nothing is ever red because nothing is ever run, so a gate phrased as
+     "red" is vacuous exactly where it is most needed: measured, 33 recorded reviews returned
+     `build: "n/a"`, 31 of them over Go worktrees carrying 42k added lines that were reviewed
+     without a single compile or test.
 
    Any of these means part of the change had no reader. **Do not merge** — re-run the blocked step
-   until it genuinely runs, or halt.
+   until it genuinely runs, fix what is outstanding, or halt.
 
 5. **Run the phase's own `Done when:` check** — the runnable command or observable response the plan
    wrote for exactly this moment — and record its output.
@@ -962,9 +973,12 @@ merged, landed or ticked. Never retry it.
 - **The review runs as the Workflow — verify it, never accept a silent prose fallback.** Confirm the
   `wf_…` Run ID. If the `Workflow` tool isn't available, `/r:plan-run` is not in a real main thread
   — **halt and tell the user** to re-run from a top-level session.
-- **A returned Workflow is not a passed review.** `endVerify: "blocked"`, a non-empty
-  `tracksBlocked`, or a red `build`/`localScan` each mean part of the diff had no reader. Do not
-  merge on any of them.
+- **A returned Workflow is not a passed review.** `endVerify` anything but `passed` (`blocked` —
+  the pass never ran; `findings-unresolved` — it ran and nobody fixed what it found), a non-empty
+  `tracksBlocked` or `tracksDrifted`, or a `build`/`localScan` that is **not green** each mean part
+  of the diff had no reader. `"n/a"` is not green — it is no build at all. Do not merge on any of
+  them. State the gate the same way everywhere it appears: "red" and "not green" are different
+  gates, and the narrower one silently passes every project whose build tool went undetected.
 - **Run the phase's `Done when:`, or name the skip.** It is the only check that asks whether the
   phase delivered what it was for rather than whether the diff is sound. Prose with no runnable
   command is recorded as *done-check skipped*, never as a pass.

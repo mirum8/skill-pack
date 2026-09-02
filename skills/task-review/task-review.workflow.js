@@ -153,10 +153,16 @@ const TRIAGE = {
     uiTouched: { type: 'boolean' },         // any frontend file changed -> the UI gate, in EVERY tier
     reason: { type: 'string' },
     changeIntent: { type: 'string' }, // 1-3 sentences: what this change is trying to do (fix subagents get it so they don't undo intentional work)
-    buildTool: { type: 'string', enum: ['maven', 'gradle', 'none'] },
+    // 'generic' is a project with a real build+test command that is not a JVM one. It is a
+    // separate value from 'none' because the two answer different questions: 'none' means there is
+    // nothing to run, 'generic' means there is, but no bundled runner agent knows it. Folding Go
+    // into 'none' is what made the gate vacuous — measured, 33 recorded reviews returned
+    // build "n/a", 31 of them over Go worktrees carrying 42k added lines that were reviewed with
+    // no compile and no test, and nothing was ever red because nothing was ever run.
+    buildTool: { type: 'string', enum: ['maven', 'gradle', 'generic', 'none'] },
     buildCmd: { type: 'string' },           // CLEAN, certifying build — used once, for the run's first build
     buildCmdFast: { type: 'string' },       // incremental rebuild — every build AFTER the first one in this run
-    runnerAgent: { type: 'string' },        // r:maven-build-runner | r:gradle-build-runner
+    runnerAgent: { type: 'string' },        // r:maven-build-runner | r:gradle-build-runner | '' on 'generic'
     changedFiles: { type: 'array', items: { type: 'string' } },
     hasBackend: { type: 'boolean' },
     hasFrontend: { type: 'boolean' },
@@ -920,7 +926,17 @@ const triage = await reliable('triage', 'Triage', () => agent(
       build (the first) and every rebuild after it is incremental over that same run's output:
         pom.xml        => buildTool 'maven',  buildCmd \`mvn clean package\`,   buildCmdFast \`mvn package\`,      runnerAgent r:maven-build-runner
         build.gradle*  => buildTool 'gradle', buildCmd \`./gradlew clean build\`, buildCmdFast \`./gradlew build\`, runnerAgent r:gradle-build-runner
-        neither        => buildTool 'none'
+        neither, but the repo HAS an obvious build+test command (go.mod => \`go build ./... && go test ./...\`,
+                       Cargo.toml => \`cargo build && cargo test\`, package.json with a test script,
+                       Makefile with a test target, …)
+                       => buildTool 'generic', runnerAgent '' (empty), and BOTH commands set to
+                          that command. Prefer the project's OWN documented command when its
+                          CLAUDE.md or README names one — it is the command that repo is known to
+                          pass under, and a guessed near-equivalent is how a green build certifies
+                          something nobody runs. There is usually no clean/fast split outside the
+                          JVM, so setting buildCmdFast to the same string is correct, not lazy.
+        nothing to build and nothing to test (docs, shell, config only)
+                       => buildTool 'none'
       Do NOT add parallelism flags (-T, --parallel, --build-cache): a non-thread-safe plugin
       would turn them into a flaky false-red, which halts the whole routine.
    4. Set hasBackend (*.java/*.kt changed) and hasFrontend (templates/css/js changed).
@@ -1203,12 +1219,21 @@ if (profile !== 'light' && opts.scope !== 'all') {
 // one test the fixer wrote test-first still runs, and Phase 4 runs everything else right after.
 // No `-o` (offline): fixers run BEFORE this run's first build, so on a fresh clone an uncached
 // dependency would make it fail hard.
+// Two different questions, and conflating them is what this pipeline did wrong. `hasBuild` asks
+// whether there is a command to run — it gates the Build phase. `isJvm` asks whether the BUNDLED
+// personas and the JVM analyzers apply — it gates /r:code-scan and every fixer agent choice. A Go
+// repo answers yes to the first and no to the second, and every branch that used
+// `buildTool === 'none'` to mean "not JVM" now asks isJvm instead.
+const isJvm = triage.buildTool === 'maven' || triage.buildTool === 'gradle'
+const hasBuild = triage.buildTool !== 'none'
 const selfCheckClause = triage.buildTool === 'maven'
   ? 'Self-check with `mvn -q test-compile` — COMPILE ONLY — plus `mvn -q test -Dtest=<TheTestYouWrote>` for the test you just wrote.'
   : triage.buildTool === 'gradle'
     ? 'Self-check with `./gradlew -q testClasses` — COMPILE ONLY — plus `./gradlew -q test --tests <TheTestYouWrote>` for the test you just wrote.'
-    : 'Verify your change is syntactically sound before returning.'
-const noFullBuild = triage.buildTool === 'none' ? ''
+    : triage.buildTool === 'generic'
+      ? `Self-check with the project's own build command — \`${(triage.buildCmdFast || triage.buildCmd || '').replace(/`/g, '')}\` — scoped as narrowly as that toolchain allows (a single package or a single test), never the whole suite.`
+      : 'Verify your change is syntactically sound before returning.'
+const noFullBuild = !hasBuild ? ''
   : ' Do NOT run the full build or the whole test suite: the pipeline runs it immediately after you return, so doing it here only duplicates it.'
 
 // --- Phases 1–3: up-front review + fix (SKIPPED in the light tier) -----------
@@ -1562,11 +1587,13 @@ const fastCmd = (triage.buildCmdFast || cleanCmd.replace(/\bclean\s+/, '')) || c
 // deleted/renamed escape hatch below still covers the one case where incremental can lie.
 // Only ever set from `buildGreen === true`: 'n/a' means no build ran at all, and treating that as
 // a baseline would skip the run's only clean build entirely.
-const baselineBuilt = opts.baselineBuilt === true && triage.buildTool !== 'none'
+const baselineBuilt = opts.baselineBuilt === true && hasBuild
 if (baselineBuilt) log('post-task-review: caller certified a clean green build in this tree — starting incremental, skipping the duplicate clean build')
 // The one case incremental is unsafe: a deleted/renamed source can leave a stale .class that
 // makes a genuinely broken build pass. Every rebuild prompt carries this escape hatch.
-const staleRule = `If any source file was DELETED or RENAMED since the last build, run \`${cleanCmd}\` instead — a removed source can leave a stale .class behind that would let a broken build pass.`
+const staleRule = isJvm
+  ? `If any source file was DELETED or RENAMED since the last build, run \`${cleanCmd}\` instead — a removed source can leave a stale .class behind that would let a broken build pass.`
+  : `If any source file was DELETED or RENAMED since the last build, prefer a clean/no-cache run of \`${cleanCmd}\` — a stale build artefact from a removed source can let a broken build pass.`
 // How a build agent decides green, stated once and carried by EVERY build prompt below. The exit
 // code is the verdict; the log only explains it. The reverse — grepping the log for a success
 // marker — cannot work here: the fast commands are quiet (`-q`), under which Maven and Gradle
@@ -1584,19 +1611,32 @@ const exitCodeRule = `Decide green from the process EXIT CODE, never from the lo
   `because you could not grep one. A non-zero exit is red, and then the log says why.`
 // Handed to the later fixers (end-verify, UI minor) so they rebuild incrementally too. Told only
 // "ensure the build is green", a fixer picks its own command, and that is usually the clean one.
-const rebuildClause = triage.buildTool !== 'none'
-  ? `then rebuild via the ${triage.runnerAgent} agent with \`${fastCmd}\` (incremental — a clean baseline build already ran in this working tree) until green. ${staleRule} ${exitCodeRule}`
+// The bundled fixers are Spring/JPA-shaped and Thymeleaf-shaped. Pointed at Go or Rust they are a
+// persona for a stack that is not there, so off the JVM the fix goes to a general-purpose agent
+// that reads the project's own conventions instead of importing somebody else's. Same rule the
+// end-verify and UI fixers already apply below; it belongs to the build fixers too.
+const buildFixAgent = () => isJvm
+  ? (triage.hasFrontend && !triage.hasBackend ? 'r:htmx-thymeleaf-dev' : 'r:java-backend-developer')
+  : 'general-purpose'
+// A 'generic' project has no bundled runner, so the build is run by a general-purpose agent
+// executing the detected command. The runner agents exist to parse mvn/gradle output; a shell
+// command's exit code needs no parser, and inventing a per-language agent for each new toolchain
+// is the work this branch exists to avoid.
+const runnerFor = () => triage.runnerAgent || 'general-purpose'
+const runnerPhrase = triage.runnerAgent ? `via the ${triage.runnerAgent} agent ` : ''
+const rebuildClause = hasBuild
+  ? `then rebuild ${runnerPhrase}with \`${fastCmd}\` (incremental — a clean baseline build already ran in this working tree) until green. ${staleRule} ${exitCodeRule}`
   : 'then verify nothing is broken (no build tool was detected for this project).'
 phase('Build')
 let buildGreen = false
 // What a rebuild AFTER the post-build fixers found, when one was owed. Empty when nothing was
 // written after the build, or when the rebuild came back green.
 let buildRedAfterFix = ''
-if (triage.buildTool !== 'none') {
+if (hasBuild) {
   const changed = (triage.changedFiles || []).join(', ')
   for (let i = 1; i <= 3; i++) {
     const b = await agent(
-      `Run the build \`${i === 1 && !baselineBuilt ? cleanCmd : fastCmd}\` via the ${triage.runnerAgent} agent.
+      `Run the build \`${i === 1 && !baselineBuilt ? cleanCmd : fastCmd}\` ${runnerPhrase}from the repo root.
        ${i === 1 && !baselineBuilt ? 'This is the run\'s one clean build — it establishes the baseline.' : staleRule}
        ${exitCodeRule}
        green=true ONLY on a fully clean success (exit 0, zero failures). The green bar is
@@ -1607,7 +1647,7 @@ if (triage.buildTool !== 'none') {
          didn't touch, the kind that already fails on the base commit. List the failing
          class names. These are NEVER ours to fix and NEVER a reason to edit the pipeline.
        Put a short combined log in 'failures'.`,
-      { label: `build#${i}`, phase: 'Build', schema: BUILD, agentType: triage.runnerAgent, ...BUILD_RUN })
+      { label: `build#${i}`, phase: 'Build', schema: BUILD, agentType: runnerFor(), ...BUILD_RUN })
     if (b && b.green) { buildGreen = true; break }
     // Green is real: if the ONLY failures are pre-existing/out-of-scope, we do NOT fix
     // them, do NOT touch them, and do NOT tolerate them — we stop and surface. The review
@@ -1623,7 +1663,7 @@ if (triage.buildTool !== 'none') {
        pass:\n${inScope}
        ${selfCheckClause}${noFullBuild} (This loop rebuilds and re-runs the suite as soon as
        you return — that is what proves the failures are gone.)${intentBlock}`,
-      { label: `build-fix#${i}`, phase: 'Build', agentType: 'r:java-backend-developer' })
+      { label: `build-fix#${i}`, phase: 'Build', agentType: buildFixAgent() })
   }
   if (!buildGreen) {
     log('post-task-review: in-scope build still RED after 3 attempts — stopping, surfacing to user')
@@ -1640,7 +1680,12 @@ if (triage.buildTool !== 'none') {
 // on fix-list alone would let exactly that code ship unreviewed.
 let scanChangedCode = false
 let localScan = 'n/a'
-if (triage.buildTool !== 'none') {
+// /r:code-scan drives PMD, SpotBugs and Semgrep, and two of the three are JVM bytecode analyzers.
+// So this phase asks isJvm, not hasBuild: a Go project now BUILDS above but has no JVM analyzer to
+// run here, and dispatching one would spend a subagent to be told the scope was empty. 'n/a' is the
+// honest answer for it, and the merge gates read "not green" rather than "red" precisely so an
+// n/a is not mistaken for a pass.
+if (isJvm) {
   phase('Local-scan')
   {
     // The scan agent computes its OWN class list, at scan time — it is NOT handed
@@ -1694,13 +1739,13 @@ if (triage.buildTool !== 'none') {
       // stopped run never made, which is what a resume can still reach live.
       let rebuildGreen = false
       for (let i = 1; i <= 3; i++) {
-        const rb = await agent(`Rebuild via ${triage.runnerAgent}: \`${fastCmd}\` (incremental — the
+        const rb = await agent(`Rebuild ${runnerPhrase}: \`${fastCmd}\` (incremental — the
           clean baseline build already ran in this working tree). ${staleRule}
           ${exitCodeRule}
           green=true ONLY on a fully clean success. The build was fully green before local-scan
           ran, so ANY failure here is a regression from local-scan's own self-fixes (in-scope) —
           name it in 'inScopeFailures'; do not touch out-of-scope tests/code.`,
-          { label: `rebuild#${i}`, phase: 'Local-scan', schema: BUILD, agentType: triage.runnerAgent, ...REBUILD_RUN })
+          { label: `rebuild#${i}`, phase: 'Local-scan', schema: BUILD, agentType: runnerFor(), ...REBUILD_RUN })
         if (rb && rb.green) { rebuildGreen = true; break }
         if (i === 3) break
         const failed = ((rb && (rb.inScopeFailures || rb.failures)) || '').trim()
@@ -1713,7 +1758,7 @@ if (triage.buildTool !== 'none') {
           class to force a pass:\n${failed}
           ${selfCheckClause}${noFullBuild} (This loop rebuilds and re-runs the suite as soon as you
           return — that is what proves the failures are gone.)${intentBlock}`,
-          { label: `rebuild-fix#${i}`, phase: 'Local-scan', agentType: 'r:java-backend-developer' })
+          { label: `rebuild-fix#${i}`, phase: 'Local-scan', agentType: buildFixAgent() })
       }
       if (!rebuildGreen) {
         log('post-task-review: rebuild after local-scan still RED after 3 attempts — stopping. To retry this step, run the review again on the branch; RESUMING this run replays the cached red verdict instead of rebuilding.')
@@ -1805,7 +1850,7 @@ const evKey = (f) => `${f.file}:${f.line} [${f.category}] ${f.what}`
 // /test-app is the first thing that reaches this code path with buildTool 'none' — before it, all
 // 42 stored end-verify-fix runs were in one Spring repo, so this branch has never been exercised.
 const domainFixer = fixAgentType(triage.hasFrontend ? { agentType: 'r:htmx-thymeleaf-dev' }
-  : triage.buildTool === 'none' ? { ...GP }
+  : !isJvm ? { ...GP }
   : { agentType: 'r:java-backend-developer' })
 let endVerifyTouchedFrontend = false
 const endVerifyTrack = async () => {
@@ -1813,7 +1858,7 @@ const endVerifyTrack = async () => {
   // Same problem as the UI fixer's: on a project with no JVM build, 'r:java-backend-developer' is
   // a Spring/JPA persona pointed at Rust or Go. Narrower than domainFixer on purpose — this one
   // only reaches for the Thymeleaf agent when the change is frontend-ONLY.
-  const fixAgent = triage.buildTool === 'none' ? null
+  const fixAgent = !isJvm ? null
     : (triage.hasFrontend && !triage.hasBackend ? 'r:htmx-thymeleaf-dev' : 'r:java-backend-developer')
   const fixAgentOpts = fixAgentType(fixAgent ? { agentType: fixAgent } : { ...GP })
   // What pass 1 raised and what happened to it. Each pass shells out to `run.sh --mode review`,
@@ -2487,16 +2532,16 @@ try {
   // writer is how a run ends up certifying code that arrived after its final read. A red rebuild
   // is REPORTED — which is the whole gain, since it turns a silent bad merge into a build the
   // caller can act on.
-  if (buildGreen && triage.buildTool !== 'none' && (endVerifyFixed > 0 || minorFixed)) {
+  if (buildGreen && hasBuild && (endVerifyFixed > 0 || minorFixed)) {
     const who = [endVerifyFixed > 0 ? `${endVerifyFixed} end-verify fix(es)` : '', minorFixed ? 'the UI minor fix' : ''].filter(Boolean).join(' and ')
     log(`post-task-review: ${who} landed AFTER the green build — rebuilding, because the recorded verdict describes the tree as it was before them`)
     const rb = await agent(
-      `Run \`${fastCmd}\` via the ${triage.runnerAgent} agent (incremental — a clean baseline build
+      `Run \`${fastCmd}\` ${runnerPhrase}(incremental — a clean baseline build
        already ran in this working tree). Fixes landed in this tree after that build, and this run
        has to know whether it is still green. green=true ONLY on a fully clean success. If red, put
        the failing tests or compile errors in 'failures'. Do NOT fix anything and do NOT touch a
        test to make it pass — you are reporting, not repairing. ${staleRule} ${exitCodeRule}`,
-      { label: 'post-fix-rebuild', phase: 'End-verify', schema: BUILD, agentType: triage.runnerAgent, ...REBUILD_RUN })
+      { label: 'post-fix-rebuild', phase: 'End-verify', schema: BUILD, agentType: runnerFor(), ...REBUILD_RUN })
     if (rb && rb.green) {
       log('post-task-review: the post-fix rebuild is green — the recorded build verdict now describes the tree that ships')
     } else if (!rb) {

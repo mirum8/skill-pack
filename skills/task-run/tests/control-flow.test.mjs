@@ -2474,3 +2474,54 @@ test('the literal placeholder is treated as absent, not as a path', async () => 
   assert.equal(out.stopped, 'no-pack-root')
 })
 
+
+// --- a non-JVM project with a real build command ------------------------------
+// This half detected pom.xml/build.gradle and called everything else 'none', which skips the Build
+// phase and hands the caller buildGreen 'n/a'. /r:plan-run then passes baselineBuilt:false so the
+// review will run the only clean build in the loop — and the review, JVM-only by the same rule,
+// ran none either. So a Go phase was implemented, reviewed and handed on with no compile and no
+// test anywhere in the loop, and nothing was ever red because nothing was ever run.
+const goSource = (over = {}) => baseSource({
+  buildTool: 'generic', buildCmd: 'go build ./... && go test ./...',
+  buildCmdFast: 'go build ./... && go test ./...', runnerAgent: '',
+  hasBackend: false, hasFrontend: false, uiTouched: false, uiVisualChange: false, ...over,
+})
+
+test('source detection is TOLD about a non-JVM build, and the schema lets it say so', async () => {
+  // Same trap as the review's: the Build phase already ran on any buildTool that is not 'none', so
+  // stubbing 'generic' exercises a path the broken version also took. The defect is in DETECTION —
+  // the prompt offered maven, gradle or 'none' and the enum permitted nothing else — so that is
+  // what gets asserted.
+  const { prompts, optsBy } = await run({ review: OK_REVIEW, planfix: OK_FIX })
+  assert.match(prompts['source'], /go\.mod/, 'the detection prompt must name a non-JVM project')
+  assert.match(prompts['source'], /buildTool "generic"/, 'and must offer it as an answer')
+  assert.match(prompts['source'], /nothing to build and nothing to test/,
+    "and must keep 'none' meaning nothing to run, not merely 'not JVM'")
+  assert.ok(optsBy['source'].schema.properties.buildTool.enum.includes('generic'),
+    'the schema must permit the value the prompt asks for')
+})
+
+test('a generic build tool builds and hands on a REAL buildGreen, not n/a', async () => {
+  const { out, prompts, optsBy } = await run({ source: goSource(), review: OK_REVIEW, planfix: OK_FIX })
+  assert.equal(out.buildGreen, true)
+  assert.notEqual(out.buildGreen, 'n/a')
+  assert.match(prompts['build#1'], /go build \.\/\.\.\. && go test \.\/\.\.\./)
+  // No bundled agent parses `go test` output, so the run itself goes to a general-purpose agent
+  // rather than to a Maven/Gradle parser that would read it wrong.
+  assert.equal(optsBy['build#1'].agentType, 'general-purpose')
+})
+
+test('a generic project keeps the general implementer and gets a real self-check', async () => {
+  const { prompts } = await run({ source: goSource({ hasBackend: true, hasFrontend: true }), review: OK_REVIEW, planfix: OK_FIX })
+  // hasBackend/hasFrontend must not resurrect the Spring/Thymeleaf personas off the JVM: the
+  // routing asks isJvm, not "is buildTool none".
+  const p = prompts['implement:general']
+  assert.ok(p, 'a non-JVM project routes to ONE general implementer whatever the flags say')
+  assert.match(p, /go build \.\/\.\.\. && go test \.\/\.\.\./, 'the self-check names the real command')
+  assert.match(p, /Do NOT run the full build/, 'and the duplication ban applies, since there IS a build')
+})
+
+test("buildTool 'none' still hands on n/a — 'generic' did not absorb it", async () => {
+  const { out } = await run({ source: baseSource({ buildTool: 'none', runnerAgent: '' }), review: OK_REVIEW, planfix: OK_FIX })
+  assert.equal(out.buildGreen, 'n/a')
+})

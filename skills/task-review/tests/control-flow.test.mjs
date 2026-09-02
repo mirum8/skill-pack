@@ -2363,3 +2363,76 @@ test('a non-JVM UI fix does not go to the Java agent', async () => {
     'ui-functional': { ran: true, findings: [{ title: 'x', where: '/w', fixSize: 'minor' }] } } })
   assert.equal(w.opts['ui-fix-minor'].agentType, 'r:java-backend-developer')
 })
+
+// --- a non-JVM project with a real build command ------------------------------
+// The gate was JVM-only: pom.xml or build.gradle, and everything else fell to buildTool 'none',
+// which skips the Build phase entirely and reports build "n/a". On a Go repo that made the whole
+// build+test gate vacuous — nothing was ever red because nothing was ever run — and `baselineBuilt:
+// false`, documented as the way to make the review run the only clean build in the loop, silently
+// bought nothing. Measured before the fix: 33 recorded reviews returned build "n/a", 31 of them
+// over Go worktrees carrying 42k added lines reviewed with no compile and no test.
+//
+// Both halves of the split are asserted here. A test that only checked the build ran would pass a
+// version that also pointed the Spring persona and the JVM analyzers at Go.
+const goTriage = (over = {}) => baseTriage({
+  buildTool: 'generic', buildCmd: 'go build ./... && go test ./...',
+  buildCmdFast: 'go build ./... && go test ./...', runnerAgent: '',
+  changedFiles: ['internal/ui/table.go'], hasBackend: false, hasFrontend: false, ...over,
+})
+
+test('triage is TOLD to detect a non-JVM build, and the schema lets it say so', async () => {
+  // The branching below already ran on any buildTool that is not 'none' — so stubbing triage with
+  // 'generic' exercises a path the broken version also took, and a test that only did that would
+  // pass against the bug. The defect lives in DETECTION: the prompt offered maven, gradle, or
+  // 'none', and the schema enum permitted nothing else, so triage could never return the value
+  // that makes the build run. Assert the prompt and the enum, which is where it was.
+  const { prompts, opts } = await run()
+  assert.match(prompts['triage'], /go\.mod/, 'the detection prompt must name a non-JVM project')
+  assert.match(prompts['triage'], /buildTool 'generic'/, "and must offer 'generic' as an answer")
+  assert.match(prompts['triage'], /nothing to build and nothing to test/,
+    "and must keep 'none' meaning nothing to run, not merely 'not JVM'")
+  assert.ok(opts['triage'].schema.properties.buildTool.enum.includes('generic'),
+    'the schema must permit the value the prompt asks for')
+})
+
+test('a generic build tool BUILDS — n/a is no longer the answer for a project that builds', async () => {
+  const { out, counts, prompts } = await run({ triage: goTriage() })
+  assert.equal(counts['build#1'], 1, 'the Build phase must actually dispatch')
+  assert.match(prompts['build#1'], /go build \.\/\.\.\. && go test \.\/\.\.\./)
+  assert.equal(out.build, 'green')
+  assert.notEqual(out.build, 'n/a')
+})
+
+test('a red generic build stops the run, exactly as a red Maven one does', async () => {
+  const { out } = await run({
+    triage: goTriage(),
+    overrides: { 'build#': { green: false, inScopeFailures: 'TestGoModPins: pin dropped from go.mod' } },
+  })
+  assert.equal(out.stopped, 'build-red')
+})
+
+test('a generic project gets no JVM analyzer and no Spring persona', async () => {
+  const { out, counts, opts } = await run({ triage: goTriage() })
+  // /r:code-scan drives PMD and SpotBugs over bytecode. Dispatching it at a Go tree spends a
+  // subagent to be told the scope was empty, and 'n/a' is the honest field for it.
+  assert.equal(counts['local-scan'], undefined, 'no JVM static analysis on a non-JVM project')
+  assert.equal(out.localScan, 'n/a')
+  // The build fixer must not be the Spring/JPA persona pointed at Go.
+  const { counts: c2, opts: o2 } = await run({
+    triage: goTriage(),
+    overrides: { 'build#': (n) => (n === 1 ? { green: false, inScopeFailures: 'compile error in table.go' } : { green: true }) },
+  })
+  assert.equal(c2['build-fix#1'], 1)
+  assert.equal(o2['build-fix#1'].agentType, 'general-purpose')
+  assert.notEqual(o2['build-fix#1'].agentType, 'r:java-backend-developer')
+  // And the runner itself, since there is no bundled agent that parses `go test` output.
+  assert.equal(opts['build#1'].agentType, 'general-purpose')
+})
+
+test("buildTool 'none' still means no build at all — 'generic' did not absorb it", async () => {
+  // The two answer different questions and must stay separate: a docs/shell repo has nothing to
+  // run, and reporting 'red' there would block every merge on a build that does not exist.
+  const { out, counts } = await run({ triage: baseTriage({ buildTool: 'none', buildCmd: '', buildCmdFast: '', runnerAgent: '' }) })
+  assert.equal(counts['build#1'], undefined)
+  assert.equal(out.build, 'n/a')
+})
