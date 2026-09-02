@@ -381,7 +381,21 @@ const IMPL = {
 const BRANCH = {
   type: 'object', additionalProperties: false,
   required: ['onBranch'],
-  properties: { onBranch: { type: 'string' }, note: { type: 'string' } },
+  properties: {
+    onBranch: { type: 'string' },
+    // `git rev-parse --abbrev-ref HEAD` prints the literal string "HEAD" on a detached checkout,
+    // and every guard in this file compared that string to a branch name. So a detached run passed
+    // all of them: onBranch "HEAD" is not the base, and the handoff re-read compares "HEAD" to
+    // "HEAD" and finds no drift. /r:plan-run's --no-merge mandates `git checkout --detach <base>`,
+    // so this is the ORDINARY shape of a fan-out unit, not an edge case.
+    detached: { type: 'boolean' },
+    // The tree at the moment of the read. This half's whole contract is that it leaves the work
+    // UNCOMMITTED for the reviewer, and nothing checked. A clean tree with HEAD moved off the base
+    // means an agent committed: the review would then read a diff of nothing and certify it.
+    dirty: { type: 'boolean' },
+    headSha: { type: 'string' },
+    note: { type: 'string' },
+  },
 }
 const TREE = {
   type: 'object', additionalProperties: false,
@@ -1338,7 +1352,10 @@ const branchP = !wantBranch ? null : (async () => {
        ${attempt === 1 ? '' : `The previous attempt ended on ${src.base}, i.e. the checkout did NOT happen. Run it again and READ ITS EXIT STATUS: if it fails, put the git error in 'note' rather than reporting whichever branch you happen to be on.`}
        Commit nothing, and do not touch any file — another agent may be writing the plan while you
        run. Then run \`git rev-parse --abbrev-ref HEAD\` and return its EXACT output as onBranch —
-       the branch the repo is REALLY on now, never the name you intended to create.`,
+       the branch the repo is REALLY on now, never the name you intended to create.
+       Also run \`git symbolic-ref -q --short HEAD\` and set detached=true when it prints NOTHING
+       (exit 1). That is the only reliable answer: --abbrev-ref prints the literal word "HEAD" on a
+       detached checkout, which reads like a branch name and compares equal to nothing useful.`,
       { label: attempt === 1 ? 'branch' : 'branch-retry', phase: 'Implement', schema: BRANCH, ...GP, ...MECHANICAL }))
     if (blocked(br) || !br.onBranch) break
     if (String(br.onBranch).trim() !== src.base) break
@@ -1365,6 +1382,19 @@ const branchP = !wantBranch ? null : (async () => {
 //
 // The agent is read-only and writes nothing. The section reaches disk through the same scribe that
 // writes the plan, so there is exactly one artifact and one verbatim-copy check.
+// The ONLY signal available here is the plan file's own status header — a Workflow script is not
+// told whether the runtime resumed it, so "this is a resume" and "a plan file from an earlier run
+// is lying on disk" are indistinguishable from inside. That is not a reason to describe one as the
+// other. Observed: a FRESH run with no resumeFromRunId adopted the plan left by an earlier attempt
+// at the same phase and reported `reason: "resume — the plan was reviewed in the original run"`,
+// which reads as benign. The Codex plan challenge — one of the two things separating this pipeline
+// from a single-context run — was skipped on the strength of a file, and the file came from the
+// attempt that halted with the feature unimplemented.
+//
+// So the behaviour stands (re-reviewing an unchanged plan buys nothing when the review really did
+// happen) and the REPORT stops guessing: it says a plan was adopted at status X, that its review
+// was not re-run in THIS run, and that whether an earlier one reviewed it is not knowable here.
+// A caller that wants the challenge deletes the plan file, which is the one lever that works.
 const resuming = src.planStatus === 'implementing' || src.planStatus === 'done'
 // Shared by the design agent, both planners and the implementers: everyone downstream builds
 // against the same acceptance criteria, so they are rendered once.
@@ -1596,7 +1626,10 @@ const stop = async (reason, extra = {}, buildGreen) => {
 // --- Phase 2: the plan -------------------------------------------------------
 // Resume: a plan already past review is not re-planned or re-reviewed.
 phase('Plan')
-if (resuming) log(`run-task-implement: resuming — ${planPath} is already at status "${src.planStatus}", skipping plan + plan-review`)
+if (resuming) log(`run-task-implement: ADOPTING the existing ${planPath} (status "${src.planStatus}") — skipping plan + plan-review. ` +
+    `The Codex plan challenge does NOT run in this run. This is a resume only if you meant it to be: a plan file left by an earlier ` +
+    `attempt at this task looks identical from here, and an abandoned attempt's plan is the least trustworthy one in the repo. ` +
+    `Delete ${planPath} and re-run to force a fresh plan and review.`)
 
 // What the planner is told about the visuals, in three shapes.
 //
@@ -1851,8 +1884,9 @@ ${uiDesignNote}
 // field says which rather than leaving the caller to infer it from the tier.
 if (resuming || profile !== 'full') {
   planReview.reason = resuming
-    ? 'resume — the plan was reviewed in the original run'
+    ? `not re-run — this run adopted an existing ${planPath} at status "${src.planStatus}", so the plan was NOT challenged by Codex in THIS run. Whether an earlier run reviewed it cannot be determined from here; delete the plan file to force a fresh review`
     : `not run at the ${profile} tier — the Codex plan review is full-tier only`
+  planReview.adoptedPlan = !!resuming
 }
 
 if (!resuming && profile === 'full') {
@@ -2727,11 +2761,39 @@ if (hasBuild) {
 // leaving it to be discovered. A re-read that cannot run leaves the remembered value and says so:
 // a guess about which branch to merge is worse than an admitted gap.
 const finalBr = await agent(
-  `Run \`git rev-parse --abbrev-ref HEAD\` in the repo and return its EXACT output as onBranch.
-   Read only — change nothing, check nothing out, commit nothing. The working tree has uncommitted
-   work in it and must stay exactly as it is.`,
+  `Report the repo's HEAD state. Read only — change nothing, check nothing out, commit nothing,
+   stage nothing. The working tree has uncommitted work in it and must stay exactly as it is.
+     git rev-parse --abbrev-ref HEAD     -> onBranch, its EXACT output
+     git symbolic-ref -q --short HEAD    -> prints NOTHING (exit 1) when detached => detached=true
+     git rev-parse HEAD                  -> headSha
+     git status --porcelain              -> dirty=true when it prints ANY line, false when empty
+   Set detached from symbolic-ref, never from onBranch: --abbrev-ref prints the literal word "HEAD"
+   on a detached checkout, which reads like an ordinary branch name.`,
   { label: 'head-check', phase: 'Build', schema: BRANCH, ...GP, ...ECHO }).catch(() => null)
-const realBranch = (finalBr && String(finalBr.onBranch || '').trim()) || ''
+const headDetached = !!(finalBr && finalBr.detached)
+// This half's contract is that it hands the reviewer an UNCOMMITTED diff, and nothing checked that
+// it had. Observed on a detached fan-out unit: an agent committed the work, `git status` came back
+// empty, HEAD had moved off the base, and the handoff still reported branchDrifted:false — so the
+// review would have read a diff of only the caller's own later edits and certified a change of 668
+// lines it never saw. The feature branch never advanced either, so the commit was reachable only
+// from the detached HEAD, and merging the branch the handoff named would have merged nothing.
+const treeCommitted = !!(finalBr && finalBr.dirty === false
+  && String(finalBr.headSha || '').trim() && String(finalBr.headSha).trim() !== String(src.base).trim())
+// A detached HEAD is not a branch, and reporting the literal "HEAD" as one is how a caller comes to
+// merge a name that does not resolve. Report the SHA instead — it is what the work is actually on —
+// and mark it drifted so nothing treats it as the branch this run asked for.
+const realBranch = headDetached
+  ? (String((finalBr && finalBr.headSha) || '').trim() || 'HEAD (detached)')
+  : ((finalBr && String(finalBr.onBranch || '').trim()) || '')
+if (headDetached) {
+  branchDrifted = true
+  log(`run-task-implement: HEAD is DETACHED at ${realBranch} — the repo is on no branch at all, so "${onBranch}" is not where this work lives. ` +
+      `Reporting the commit-ish; the caller must place it on a branch before merging anything.`)
+}
+if (treeCommitted) {
+  log(`run-task-implement: the working tree is CLEAN and HEAD has moved off ${src.base} — an agent COMMITTED this run's work, which this half never does. ` +
+      `The review expects an uncommitted diff and would read an empty one. Reset it back (\`git reset --soft ${src.base}\`) onto the intended branch before reviewing.`)
+}
 if (!realBranch) {
   log(`run-task-implement: could not re-read HEAD at the handoff — reporting the branch this run claimed (${onBranch}); the caller re-checks before it merges`)
 } else if (realBranch !== onBranch) {
@@ -2753,6 +2815,13 @@ return {
   // inferring it from a name that looks fine.
   branch: handoffBranch,
   branchDrifted,
+  // Two states a caller MUST act on before it reviews or merges, and neither was visible before:
+  // `headDetached` says `branch` is a commit-ish rather than a branch name, and `treeCommitted`
+  // says this half's uncommitted-diff contract was broken by something inside the run. Both are
+  // reported rather than halted, for the same reason branchDrifted is: the work exists, and
+  // stop() would drop `implemented` and `testEvidence` — the run's only record of what it did.
+  headDetached,
+  treeCommitted,
   base: src.base,
   profile,
   profileReason: src.profileReason || '',

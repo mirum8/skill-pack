@@ -2145,7 +2145,26 @@ test('resume: a plan already at "implementing" skips planning and plan-review', 
   assert.equal(counts['planner'], undefined)
   assert.equal(counts['codex-plan-review#1'], undefined)
   assert.equal(out.planReview.ran, false)
-  assert.match(logText, /resuming/)
+  assert.match(logText, /ADOPTING the existing/)
+})
+
+test('an adopted plan is not described as a resume the run cannot verify', async () => {
+  // A Workflow script is never told whether the runtime resumed it, so "this is a resume" and "a
+  // plan file from an earlier attempt is lying on disk" are indistinguishable from inside. The old
+  // reason picked one — "resume — the plan was reviewed in the original run" — and a FRESH run with
+  // no resumeFromRunId got it, having adopted the plan left by an attempt that halted with the
+  // feature unimplemented. The Codex plan challenge was skipped on the strength of a file.
+  const { out, logText } = await run({
+    source: baseSource({ planStatus: 'implementing', branchExists: true }),
+  })
+  assert.equal(out.planReview.adoptedPlan, true, 'the caller needs a field, not just prose')
+  assert.doesNotMatch(out.planReview.reason, /the plan was reviewed in the original run/)
+  assert.match(out.planReview.reason, /NOT challenged by Codex in THIS run/)
+  assert.match(out.planReview.reason, /cannot be determined from here/)
+  assert.match(out.planReview.reason, /delete the plan file/, 'and the one lever that works')
+  // The log has to say the same thing: a caller reading the transcript must not be told a resume
+  // happened when the run has no way of knowing that.
+  assert.match(logText, /This is a resume only if you meant it to be/)
 })
 
 // ------------------------------------------------- agent() throws, not just dies ---
@@ -2669,4 +2688,58 @@ test('the implementers and the build fixer may not skip a test to reach green', 
     assert.match(p, /t\.Skip/, `${label} must name the skip forms`)
     assert.match(p, /EXITS 0/, `${label} must say why a skip is invisible downstream`)
   }
+})
+
+// --- a detached HEAD is not a branch, and a clean tree is not a handoff --------
+// /r:plan-run's --no-merge mandates `git checkout --detach <base>`, so a detached fan-out unit is
+// the ORDINARY shape here, not an edge case. Every guard in the workflow compared the output of
+// `git rev-parse --abbrev-ref HEAD`, which prints the literal string "HEAD" when detached — so
+// onBranch "HEAD" is not the base (the Phase 4 halt passes), and the handoff re-read compares
+// "HEAD" to "HEAD" and reports branchDrifted:false. Observed on a live unit, together with an agent
+// having COMMITTED the work: `git status` empty, HEAD moved off the base, the feature branch never
+// advanced, and the handoff still looked clean. The review would have read a diff of nothing.
+const detachedHead = (over = {}) => ({
+  onBranch: 'HEAD', detached: true, dirty: true, headSha: '45f807bdeadbeef', ...over,
+})
+
+test('a detached HEAD is reported as detached, never as the branch it is not', async () => {
+  const { out, logText } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    overrides: { 'head-check': detachedHead() },
+  })
+  assert.equal(out.headDetached, true)
+  assert.equal(out.branchDrifted, true, 'a detached HEAD is a drift from the branch this run asked for')
+  assert.equal(out.branch, '45f807bdeadbeef', 'report the commit-ish, not the literal word HEAD')
+  assert.notEqual(out.branch, 'HEAD')
+  assert.match(logText, /HEAD is DETACHED/)
+})
+
+test('a clean tree with HEAD off the base means an agent committed — and it is said out loud', async () => {
+  const { out, logText } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    overrides: { 'head-check': detachedHead({ dirty: false }) },
+  })
+  assert.equal(out.treeCommitted, true)
+  assert.match(logText, /an agent COMMITTED this run's work/)
+  assert.match(logText, /git reset --soft/, 'and the caller is told how to restore the shape')
+})
+
+test('an ordinary attached run is untouched by either check', async () => {
+  // The regression that matters: these two fields must be false on every normal run, or a caller
+  // that acts on them halts a run that was fine.
+  const { out } = await run({ review: OK_REVIEW, planfix: OK_FIX })
+  assert.equal(out.headDetached, false)
+  assert.equal(out.treeCommitted, false)
+  assert.equal(out.branchDrifted, false)
+})
+
+test('a dirty detached tree is detached but NOT reported as committed', async () => {
+  // The two conditions are independent and need opposite responses: one is "put this on a branch",
+  // the other is "un-commit this". Conflating them sends the caller to the wrong repair.
+  const { out } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    overrides: { 'head-check': detachedHead({ dirty: true }) },
+  })
+  assert.equal(out.headDetached, true)
+  assert.equal(out.treeCommitted, false)
 })
