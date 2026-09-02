@@ -2597,3 +2597,60 @@ test('the halt says the review was DISPATCHED, never "stopped before" it', async
   assert.match(out.planReview.reason, /dispatched and could not complete/)
   assert.match(out.detail, /job-died/, 'and the note survives all three attempts into the detail')
 })
+
+// --- the task's SOURCE document is the caller's, not this half's ---------------
+// The rule existed in exactly one place — the source step, which READS the file to locate the task
+// and was never going to violate it. Every step after that learns the path from the plan's own
+// `source:` header and had nothing telling it to keep off. Observed: an implementer ticked all five
+// of a phase's criteria and stamped its `built:` marker before any review ran, so the review's
+// doc-consistency hunter read a plan claiming five criteria met that nothing had verified; and a
+// plan-review agent added a bullet to `## Resolve first`, which is /r:spec-design's section for
+// work needing a person rather than an agent.
+const todoSource = (over = {}) => baseSource({
+  kind: 'todo', sourceDoc: 'docs/fyl/todo.md', slug: 'save-a-log-buffer', ...over,
+})
+
+test('the implementers are told not to tick or mark the source document', async () => {
+  const { prompts } = await run({
+    source: todoSource(), args: { source: 'docs/fyl/todo.md / Phase 35' },
+    review: OK_REVIEW, planfix: OK_FIX,
+  })
+  const p = prompts['implement:backend']
+  assert.match(p, /DO NOT EDIT docs\/fyl\/todo\.md/)
+  assert.match(p, /Do not tick its checkboxes/)
+  assert.match(p, /built:/, 'the marker is named, since that is the other half of what was written')
+  assert.match(p, /caller ticks it/, 'and it says whose job it is instead')
+})
+
+test('plan-fix is pointed at the plan file and warned off the source doc', async () => {
+  const { prompts } = await run({
+    source: todoSource(), args: { source: 'docs/fyl/todo.md / Phase 35' },
+    review: { ran: true, findings: F(1) }, planfix: OK_FIX,
+    overrides: { 'judge': { verdicts: [{ finding: 'f1', real: true, fixSize: 'minor', fix: 'x' }] } },
+  })
+  const p = prompts['plan-fix#1']
+  if (p) {
+    assert.match(p, /never the task's source document/)
+    assert.match(p, /Resolve first/, "and names the section that must not be written")
+  }
+})
+
+test('an issue or free-text task has no source document, and no rule about one', async () => {
+  // The rule must name a real path or say nothing: a "do not edit" pointed at nothing is noise in
+  // every implementer prompt for every issue-sourced run.
+  const { prompts } = await run({
+    source: baseSource({ kind: 'issue', sourceDoc: '' }), args: { source: '#81' },
+    review: OK_REVIEW, planfix: OK_FIX,
+  })
+  assert.doesNotMatch(prompts['implement:backend'], /DO NOT EDIT/)
+})
+
+test('the plan header tells its readers the source is read-only', async () => {
+  const { prompts } = await run({
+    source: todoSource(), args: { source: 'docs/fyl/todo.md / Phase 35' },
+    review: OK_REVIEW, planfix: OK_FIX,
+  })
+  // The rule has to travel with the document, since that header is where a later agent learns the
+  // path in the first place.
+  assert.match(prompts['plan-write'], /names a document this run READS and never writes/)
+})

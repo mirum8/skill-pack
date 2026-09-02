@@ -123,6 +123,12 @@ const SOURCE = {
     // 1 aspect for light, 2 for standard, 2-3 for full. Each becomes one read-only Explore agent.
     exploreAspects: { type: 'array', items: { type: 'string' } },
     planPath: { type: 'string' },
+    // The file the task was READ from, when there is one — the todo, backlog or spec. Reported by
+    // this step because it is the one that resolved it; deriving it downstream by splitting the
+    // raw source on " / " gets the common shape right and silently returns nothing for a path
+    // passed without a locator, which turns the "do not edit it" rule below into a no-op exactly
+    // where a whole-file task makes ticking most tempting. Empty for an issue or free text.
+    sourceDoc: { type: 'string' },
     planStatus: { type: 'string', enum: ['none', 'reviewing', 'implementing', 'done'] },
     branchExists: { type: 'boolean' },
     blockedReason: { type: 'string' },   // e.g. gh missing/unauthenticated, source unreadable
@@ -890,6 +896,9 @@ ${inRepo}
       THIS build's result to it as \`baselineBuilt\`, so the two pipelines agree on what the
       certifying build is.
    7. base: the CURRENT branch (\`git branch --show-current\`)${opts.base ? `, unless it differs from the caller's stated base ${JSON.stringify(opts.base)} — then return that one` : ''}.
+   7b. SOURCE DOC: sourceDoc = the repo-relative path of the file you read the task out of
+       (the markdown path before the " / ", or the whole argument when it is a bare path). Empty
+       string for an issue or for free text. Later steps are told not to write to it.
    8. RESUME STATE: planPath = ".task-plans/<slug>.md". Report planStatus from its "status:"
       header if the file exists (else "none"), and branchExists from
       \`git rev-parse --verify <branch>\`. Do NOT create the branch or the plan file here.
@@ -909,6 +918,33 @@ if (src.blockedReason) {
 let profile = forcedProfile || (TIERS.includes(src.profile) ? src.profile : 'full')
 let profileEscalated = false
 const planPath = src.planPath || `.task-plans/${src.slug}.md`
+// The SOURCE document — the todo, backlog or spec the task came from — belongs to the caller, and
+// this half must not write to it. The rule existed only in the step that READS it to locate the
+// task, which is the one step that was never going to violate it; every step after that learns the
+// path from the plan's own `source:` header and had nothing telling it to keep off.
+//
+// Both halves of what that cost are real. An implementer ticked all five of a phase's criteria and
+// stamped its `built:` marker before any review had run — so the review's doc-consistency hunter
+// read a plan claiming five criteria met that nothing had verified, and a red review would have
+// had to undo them. And a plan-review agent added a bullet to `## Resolve first`, which is
+// /r:spec-design's section for work that needs A PERSON, not an agent.
+//
+// The caller ticks, at /r:plan-run Step 3.6, AFTER the review and BEFORE the commit — deliberately
+// in that order, so the reviewer's diff is the code change rather than a bookkeeping edit its doc
+// hunter has to rule on, and so only what was actually verified gets ticked. Anything this half
+// wants to say about the plan goes in ${planPath}, which is the document it owns.
+// Reported by the source step, which resolved it. The split is a fallback for a run whose source
+// step predates the field, not the primary answer.
+const sourceDocRule = (src.sourceDoc || '').trim()
+  || (src.kind !== 'issue' && src.kind !== 'text' && rawSource.includes(' / ') ? rawSource.split(' / ')[0].trim() : '')
+const LEAVE_SOURCE_ALONE = sourceDocRule
+  ? `
+   - DO NOT EDIT ${sourceDocRule} — the task's source document. Do not tick its checkboxes, do not
+     add a \`built:\` marker, do not add or reword a bullet, do not reorder it. The caller ticks it
+     after this review passes, from the criteria it actually verified; a tick written here is a
+     claim nothing has checked yet, and the review reads it as one. If you have something to say
+     about the task, say it in ${planPath} or in your own summary.`
+  : ''
 log(`run-task-implement: ${src.kind} "${src.slug}" — tier ${profile} (${forcedProfile ? 'forced' : 'classified'}: ${src.profileReason || 'no reason given'}), base ${src.base}, branch ${src.branch}`)
 
 // --- the implementers' settings ----------------------------------------------
@@ -1733,7 +1769,9 @@ ${uiDesignNote}
      now: this file is committed with the rest of the task at finish, and the reuse-index links
      back to it, so a gitignored plan would be a dead link for everyone but you. If a prior run
      left ".task-plans/" in .gitignore, remove that line so the plan can be committed.
-     Do not edit any other file (beyond the plan and that one .gitignore line).
+     Do not edit any other file (beyond the plan and that one .gitignore line) — the \`source:\`
+     line above names a document this run READS and never writes: the caller ticks it after the
+     review passes, and a tick written here is a claim nothing has verified yet.
 
      COPY THE PLAN BODY BYTE FOR BYTE. You are a scribe, not an editor: no re-wrapping, no
      reformatting or "tidying" of markdown, no fixing what looks like a typo, no summarising, no
@@ -2235,7 +2273,11 @@ ${b.items.map((f, n) => `         ${n + 1}. [${f.severity}][${f.rubric}] ${f.wha
          so. Do not go read the whole codebase to settle them.
          ${unjudged.map((f) => `- [${f.severity}][${f.rubric}] ${f.what}`).join('\n')}` : ''}
 
-         Edit ONLY the plan file. Fold each fix into the relevant section and, when one changes the
+         Edit ONLY ${planPath} — never the task's source document, even when a finding is really
+         about it: that file belongs to the caller, and \`## Resolve first\` in particular is
+         /r:spec-design's section for work that needs a person rather than an agent. A finding
+         about the source goes into the plan, where the caller will read it.
+         Fold each fix into the relevant section and, when one changes the
          APPROACH rather than a detail, add a short "Plan review changes" note so the decision stays
          auditable and can be carried into the PR body later.
          Record in 'applied' what actually landed, in the plan's own words.
@@ -2490,7 +2532,7 @@ const implBrief = (a) => `${implProvider === 'codex' ? codexPreamble(a) : ''}Imp
    - Reuse the existing patterns and utilities the plan's Reuse map points at; do not invent new
      ones. Match the surrounding code: no new comments or Javadocs, @Builder on data classes with
      more than 3 fields.
-   - No scope creep beyond the plan.
+   - No scope creep beyond the plan.${LEAVE_SOURCE_ALONE}
    - ${selfCheckClause}${noFullBuild}
    - Leave EVERYTHING UNCOMMITTED in the working tree. The whole task lands as ONE commit at the
      very end, after the review — so the reviewer reads the work before any of it is committed.
