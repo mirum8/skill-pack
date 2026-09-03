@@ -343,3 +343,44 @@ PY
 )
 [ "$gate" = "stop 0" ] && ok "it still stops, but names NO phase — the fail-closed reason, not a fabricated edge" \
                        || bad "it still stops, but names NO phase — the fail-closed reason, not a fabricated edge" "gate=$gate"
+
+echo
+echo "== a stop names its remedy, because a gate without one gets routed around =="
+# The message here read "no '- [ ]' checkbox, so it can never be closed". That is FALSE:
+# /r:plan-unblock's Step 2 migrates a legacy entry into the checkbox form in the same edit that
+# resolves it. Two separate sessions read that line, concluded the plan carried a permanent
+# unclearable stop, and an orchestrator issued a standing instruction to proceed past the gate —
+# which is the worst thing a gate can teach. A message stating a problem without its remedy is how
+# a working gate gets routed around, so the remedy is asserted here rather than left to prose.
+REM="$TMP/remedy.md"
+cat > "$REM" <<'EOF'
+# Plan
+
+## Resolve first
+
+- **Does port-forwarding survive the cluster proxy?**
+  *Owner: the author. Blocks: nothing.*
+
+## Milestone 1
+
+### Phase 33 — A thing
+- [ ] do it
+EOF
+
+out=$(python3 "$SCOPE" "$REM" --outstanding --phases 33 2>&1)
+grep -q "plan-unblock" <<<"$out" \
+  && ok "the gate's own output names /r:plan-unblock" \
+  || bad "the gate's own output names /r:plan-unblock" "$out"
+grep -q "can never be closed" <<<"$out" \
+  && bad "and never claims the entry can never be closed" "the false wording is back" \
+  || ok "and never claims the entry can never be closed"
+# The other half of the wrong lesson: the fix is NOT to reword the plan. An agent is forbidden by
+# name from writing in this section, so a message that invites editing invites the one thing
+# nobody may do.
+grep -q "editing the plan to satisfy this parser is not the fix" <<<"$out" \
+  && ok "and says editing the plan to satisfy the parser is not the fix" \
+  || bad "and says editing the plan to satisfy the parser is not the fix" "$out"
+# It must still STOP. Naming the remedy is not softening the gate.
+grep -q '"gate": "stop"' <<<"$out" \
+  && ok "and it still stops — a named remedy is not a softer gate" \
+  || bad "and it still stops — a named remedy is not a softer gate" "$out"

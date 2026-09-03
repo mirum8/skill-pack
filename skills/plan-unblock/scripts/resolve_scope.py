@@ -187,13 +187,16 @@ def parse_entries(body):
         raw_blocks = f.get("blocks")
         if raw_blocks is None:
             blocks = None
-            malformed.append("no Blocks: — it blocks the entire run list")
+            malformed.append("no Blocks: — it blocks the entire run list, because nothing can "
+                             "tell what it was guarding. /r:plan-unblock settles the entry")
         else:
             found = [int(n) for n in re.findall(r"(?:Phase\s*)?(\d+)", raw_blocks)]
             blocks = found or None
             if not found:
                 malformed.append(f"Blocks: {raw_blocks!r} names no phase — it blocks the "
-                                 "entire run list")
+                                 "entire run list, because nothing can tell what it was "
+                                 "guarding. /r:plan-unblock settles the entry; editing the plan "
+                                 "to satisfy this parser is not the fix")
         resolution = f.get("resolved") or None
         if ticked and not resolution:
             malformed.append("ticked with no Resolved: line — nothing records what settled it")
@@ -262,8 +265,16 @@ def problems(d):
         for why in e["malformed"]:
             out.append(f"entry {e['i']} ({e['name'] or 'unnamed'}): {why}")
         if e["legacyShape"]:
-            out.append(f"entry {e['i']} ({e['name'] or 'unnamed'}): no '- [ ]' checkbox, so it can "
-                       "never be closed — /r:plan-run gates on unticked entries")
+            # "can never be closed" was the literal wording here, and it is FALSE in a way that
+            # cost real runs: /r:plan-unblock's Step 2 migrates a legacy entry into the checkbox
+            # form in the same edit that resolves it. Two separate sessions read this line,
+            # concluded the plan carried a permanent unclearable stop, and an orchestrator issued a
+            # standing instruction to proceed past the gate — which is the worst thing a gate can
+            # teach. A message that states a problem without its remedy is how a working gate gets
+            # routed around.
+            out.append(f"entry {e['i']} ({e['name'] or 'unnamed'}): no '- [ ]' checkbox, so nothing "
+                       "can tick it as it stands — /r:plan-unblock migrates it to the checkbox "
+                       "form and closes it in the same edit")
     for n in d["unknownPhaseRefs"]:
         out.append(f"Blocks: Phase {n}, which this plan does not have")
     for n in d["blockedPhasesBuilt"]:

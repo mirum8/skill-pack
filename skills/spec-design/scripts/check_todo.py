@@ -220,8 +220,9 @@ def resolve_first_notes(text):
         name = (re.search(r"\*\*(.+?)\*\*", flat) or re.match(r"^[-*]\s*(.{0,40})", flat))
         label = (name.group(1) if name else flat[:40]).strip()
         if not re.match(r"^\s*[-*]\s*\[[ xX]\]", chunk):
-            notes.append(f"Resolve first {label!r}: a plain bullet, not a '- [ ]' checkbox — it can "
-                         "never be ticked, so the gate it feeds can only ever fire")
+            notes.append(f"Resolve first {label!r}: a plain bullet, not a '- [ ]' checkbox — "
+                         "nothing can tick it as it stands; /r:plan-unblock migrates it to the "
+                         "checkbox form and closes it in the same edit")
         found = {mm.group(1).lower(): mm for mm in RF_LABEL.finditer(flat)}
         known = {f.lower() for f in RF_FIELDS}
         for key, mm in found.items():
@@ -241,7 +242,7 @@ def resolve_first_notes(text):
             if not re.search(r"(?:Phase\s*)?\d+", value):
                 shown = value.strip().rstrip('.').strip()
                 notes.append(f"Resolve first {label!r}: 'Blocks: {shown}' names no phase — it "
-                             "blocks the ENTIRE run list")
+                             "blocks the ENTIRE run list until /r:plan-unblock settles it")
     return notes
 
 

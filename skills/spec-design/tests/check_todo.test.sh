@@ -593,6 +593,15 @@ EOF
 out=$(python3 "$CHECK" "$RF" 2>&1); rc=$?
 grep -q "note:.*not a '- \[ \]' checkbox" <<<"$out" \
   && ok "a plain bullet is named" || bad "a plain bullet is named" "$out"
+# Naming the problem without its remedy is what taught two sessions that a stop was permanent, and
+# an orchestrator to instruct units past the gate. These notes carry the same remedy the run gate
+# does, so both halves of the pack say one thing.
+grep -q "note:.*/r:plan-unblock migrates it" <<<"$out" \
+  && ok "and the note names /r:plan-unblock as what closes it" \
+  || bad "and the note names /r:plan-unblock as what closes it" "$out"
+grep -q "never be ticked" <<<"$out" \
+  && bad "and never claims it can never be ticked" "the false wording is back" \
+  || ok "and never claims it can never be ticked"
 grep -q "note:.*'Informs:' is not a field" <<<"$out" \
   && ok "an invented field is named, with the real field list" || bad "an invented field is named, with the real field list" "$out"
 grep -q "note:.*names no phase — it blocks the ENTIRE run list" <<<"$out" \
