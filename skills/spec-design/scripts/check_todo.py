@@ -190,6 +190,61 @@ def ticked_items(block):
     return [" ".join(i.split()) for i in re.findall(r"^\s*-\s*\[[xX]\]\s*(.+)$", block, re.M)]
 
 
+# The `## Resolve first` field contract, duplicated from plan-unblock/scripts/resolve_scope.py on
+# purpose: that script is the ENFORCER and this one is the author's mirror of it, and a runtime
+# import across two skill directories is more fragile than two lists someone must keep in step.
+# Change one, change the other.
+RF_FIELDS = ("Owner", "Blocks", "Timebox", "Output", "Resolved", "Alternative", "Outstanding")
+RF_LABEL = re.compile(r"\b([A-Z][A-Za-z]{2,}):")
+
+
+def resolve_first_notes(text):
+    """What `/r:plan-run`'s gate will make of each `## Resolve first` entry, said at authoring time.
+
+    The contract is enforced by resolve_scope.py when a run starts, and only there -- so a plan
+    could be written, pass this gate, and stop a run a week later on an entry nobody could still
+    remember writing. Observed: three entries carrying `Blocks: nothing. Informs: ...` halted a
+    fan-out on a plan authored nine days earlier. These are NOTES rather than problems: the same
+    text has been valid under an older shape of this contract, and failing a plan already on disk
+    over a rule that postdates it would reject documents nobody may rewrite -- an agent is
+    forbidden by name from editing this section.
+    """
+    m = re.search(r"^##\s+Resolve\s+first\b(.*?)(?=^#{1,6}\s|\Z)", text, re.M | re.S | re.I)
+    if not m:
+        return []
+    notes = []
+    for chunk in re.split(r"(?=^ {0,1}[-*]\s)", m.group(1), flags=re.M):
+        if not chunk.strip() or not re.match(r"^\s*[-*]\s", chunk):
+            continue
+        flat = " ".join(chunk.split())
+        name = (re.search(r"\*\*(.+?)\*\*", flat) or re.match(r"^[-*]\s*(.{0,40})", flat))
+        label = (name.group(1) if name else flat[:40]).strip()
+        if not re.match(r"^\s*[-*]\s*\[[ xX]\]", chunk):
+            notes.append(f"Resolve first {label!r}: a plain bullet, not a '- [ ]' checkbox — it can "
+                         "never be ticked, so the gate it feeds can only ever fire")
+        found = {mm.group(1).lower(): mm for mm in RF_LABEL.finditer(flat)}
+        known = {f.lower() for f in RF_FIELDS}
+        for key, mm in found.items():
+            if key not in known:
+                notes.append(f"Resolve first {label!r}: '{mm.group(1)}:' is not a field of this "
+                             f"contract ({', '.join(RF_FIELDS)}) — it is ignored")
+        if "owner" not in found:
+            notes.append(f"Resolve first {label!r}: no 'Owner:' — nothing says who may close it")
+        if "blocks" not in found:
+            notes.append(f"Resolve first {label!r}: no 'Blocks:' — it blocks the ENTIRE run list, "
+                         "because nothing can tell what it was guarding")
+        else:
+            marks = sorted(found.values(), key=lambda x: x.start())
+            nxt = [x for x in marks if x.start() > found["blocks"].start()]
+            end = nxt[0].start() if nxt else len(flat)
+            value = flat[found["blocks"].end():end]
+            if not re.search(r"(?:Phase\s*)?\d+", value):
+                shown = value.strip().rstrip('.').strip()
+                notes.append(f"Resolve first {label!r}: 'Blocks: {shown}' names no phase — it "
+                             "blocks the ENTIRE run list")
+    return notes
+
+
 def resolved_entries(text):
     """The subject line of every CLOSED `## Resolve first` entry, whitespace collapsed.
 
@@ -343,6 +398,9 @@ def main():
         # Informational, never a defect. A note that counts as a problem makes "clean" unreachable
         # and suppresses everything printed on the clean path.
         notes.append(msg)
+
+    for n in resolve_first_notes(t):
+        note(n)
 
     # --- structural contract /r:task-run depends on -------------------------------
     heads = re.findall(r"^###\s+Phase\s+(\d+)\s*[—-]\s*(.+)$", t, re.M)

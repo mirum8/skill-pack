@@ -554,3 +554,55 @@ against_silent "one carried over is not" "resolved 'Resolve first' entry is gone
 echo
 printf '  %d passed, %d failed\n' "$pass" "$fail"
 [[ $fail == 0 ]]
+
+echo
+echo "== the Resolve-first contract is mirrored at authoring time, as notes =="
+# The contract is ENFORCED by plan-unblock/scripts/resolve_scope.py when a run starts, and only
+# there — so a plan could be written, pass this gate, and stop a run a week later on an entry
+# nobody could still remember writing. Observed: three entries carrying
+# `Blocks: nothing. Informs: …` halted a fan-out on a plan authored nine days earlier.
+#
+# NOTES, never problems. The same text was valid under an older shape of this contract (the
+# checkbox rule postdates plain bullets, by design-contracts.md's own account), and failing a plan
+# already on disk over a rule that postdates it would reject documents nobody may rewrite — an
+# agent is forbidden by name from editing this section.
+RF="$TMP/resolve-first.md"
+cat > "$RF" <<'EOF'
+# Demo — Implementation Plan
+
+## Resolve first
+
+- **Does port-forwarding survive the cluster proxy?**
+  *Owner: the author. Blocks: nothing. Informs: Phases 32 and 33.*
+
+- [ ] **A well-formed one**
+  *Owner: platform. Blocks: Phase 1. Timebox: an hour. Output: a line in the spec.*
+
+## Milestone 1 — Core
+**Design**
+- Schema `thing(id uuid primary key, name text not null)`
+
+### Phase 1 — Thing store
+**Implements:** Store a thing
+**Depends on:** —
+**Files:** `db/V1__thing.sql` (new)
+- [ ] `V1__thing.sql` creates `thing` with a primary key on `id`
+**Done when:** `mvn test -Dtest=ThingRepositoryIT` is green.
+EOF
+
+out=$(python3 "$CHECK" "$RF" 2>&1); rc=$?
+grep -q "note:.*not a '- \[ \]' checkbox" <<<"$out" \
+  && ok "a plain bullet is named" || bad "a plain bullet is named" "$out"
+grep -q "note:.*'Informs:' is not a field" <<<"$out" \
+  && ok "an invented field is named, with the real field list" || bad "an invented field is named, with the real field list" "$out"
+grep -q "note:.*names no phase — it blocks the ENTIRE run list" <<<"$out" \
+  && ok "and a Blocks that names no phase is named, in the gate's own terms" \
+  || bad "and a Blocks that names no phase is named, in the gate's own terms" "$out"
+# The whole point of notes: discovery moves to authoring time WITHOUT rejecting a plan on disk.
+grep -q "Does port-forwarding" <<<"$out" && [ "$rc" = 0 ] \
+  && ok "and none of it fails the gate — a plan nobody may rewrite is not rejected" \
+  || bad "and none of it fails the gate — a plan nobody may rewrite is not rejected" "rc=$rc"
+# A well-formed entry must be silent, or every plan carries noise and the notes stop being read.
+grep -q "A well-formed one" <<<"$out" \
+  && bad "a well-formed entry produces no note" "$out" \
+  || ok "a well-formed entry produces no note"
