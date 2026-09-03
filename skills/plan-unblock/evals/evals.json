@@ -113,6 +113,16 @@
       "files": [],
       "fixture": null,
       "assertions": []
+    },
+    {
+      "id": 11,
+      "name": "entries-are-briefed-and-taken-one-at-a-time",
+      "kind": "behaviour",
+      "prompt": "/r:plan-unblock docs/billing/todo.md",
+      "expected_output": "With three open entries, they are worked in document order as R1, R2, R3 — one raised, briefed and settled before the next appears, never all three questions in one message. Each brief is written in Simplified Technical English and in the plan's own nouns: one idea per sentence, active voice, the class and entity names the phase block already uses. It opens with why it blocks, read from the blocked phase's items and Done when: rather than asserted, then at least two options with what each costs, then a recommendation. It is shorter and clearer, not shorter and blunter — it supplies the premise the reader is missing rather than clipping words. A person entry is briefed in its place in the walk, with no options, and closed by nobody.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
     }
   ]
 }

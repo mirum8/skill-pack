@@ -8,10 +8,11 @@ after, and what has to be true of a `Resolved:` line for the record to be worth 
 1. The entry
 2. Migrating a plain bullet
 3. The `Resolved:` stamp
-4. A decision, and what makes one recoverable
-5. A person's entry
-6. What is left outstanding
-7. What never gets written
+4. The brief — why it blocks, and what the options are
+5. A decision, and what makes one recoverable
+6. A person's entry
+7. What is left outstanding
+8. What never gets written
 
 ---
 
@@ -36,7 +37,7 @@ Five parts, and `resolve_scope.py` reads each by name:
   An entry whose `Blocks:` is missing or names no phase blocks the **entire run list**, because
   there is no way to tell what it was guarding.
 - **`Timebox:`** and **`Output:`** — how long a probe may spend, and where the answer is supposed to
-  land. `Output:` is what Step 6 reports as outstanding when it names a file this skill does not own.
+  land. `Output:` is what Step 5 reports as outstanding when it names a file this skill does not own.
 
 ## 2. Migrating a plain bullet
 
@@ -82,7 +83,51 @@ happened and nothing about what it was.
 wholesale by a `/r:spec-design` rewrite, which is exactly the follow-up a resolution triggers, and
 two copies of one decision drift apart with nothing to notice.
 
-## 4. A decision, and what makes one recoverable
+## 4. The brief — why it blocks, and what the options are
+
+Every entry gets one before you ask anything about it. The walk raises **one entry at a time**, so
+the reader holds one context and not five.
+
+Write it in **ASD-STE100 Simplified Technical English** — the register `/wait-what` asks for. One
+idea per sentence. Active voice. Plain words. **Use the plan's own nouns**: the class, entity and
+phase names in the phase block, in `design.md` and in the spec (or `CONTEXT.md`, where the project
+keeps one). A noun you invent is one the reader has to map back to something real.
+
+> **R1 — Debezium against RDS** · decision · platform · blocks Phase 7 · one afternoon
+>
+> Phase 7 writes `LedgerChangeSink`. Its test asserts that a row arrives within 2s of the commit.
+> A Debezium consumer and a polling reader share no code. The phase cannot start until you choose.
+>
+> - **Debezium** — needs `rds_superuser` and a reboot. Latency stays well inside 2s.
+> - **Polling on `updated_at`** — needs no privilege. Adds an index, duplicate rows to drop, and a
+>   latency floor at the poll interval.
+>
+> The probe read `terraform/rds.tf:41`. The parameter group is the default one, and our role stops
+> at `rds_iam`.
+>
+> I would take polling. We cannot grant that privilege ourselves. Your call.
+
+Four parts, and the first two are the ones that carry it:
+
+- **The header** — label, kind, owner, phases blocked, timebox. One line.
+- **Why this blocks** — read the blocked phase's items, `Files:` and `Done when:`, and name what
+  cannot be built or verified. "Phase 7 is blocked" repeats the entry. "The class and the test are
+  different on each side of the answer" is a reason. If you cannot write one, the entry may block
+  nothing, and that is worth saying.
+- **The options** — at least two. Give each one its cost. One option is a default, not a decision:
+  say so, and do not stage a choice.
+- **The probe, then the recommendation** — what it read, cited, and what it could not settle. Drop
+  the probe line when there was no probe. Never imply a read that did not happen. Then say which
+  you would take, why, and hand it back.
+
+**Shorter and clearer, never shorter and blunter.** The brief exists to supply the premise the
+reader is missing. Cutting that premise to save two lines defeats the whole thing. What you cut is
+anything that repeats the entry, and anything that shows your work.
+
+A `person` entry gets the header and **why this blocks**. Nothing else. No options and no
+recommendation: nothing in this session can close it, and a choice implies otherwise.
+
+## 5. A decision, and what makes one recoverable
 
 Write the force, not just the outcome — the constraint, the measurement, or the preference that
 decided it. This is the same rule `/r:spec-brainstorm` applies to its `## Decisions` log
@@ -98,7 +143,7 @@ Three shapes arrive here, and all three are decisions:
   `Resolved: 2026-09-03 — polling fallback (recommended; not contested).` A default recorded as a
   decision reads as more agreement than there was.
 
-## 5. A person's entry
+## 6. A person's entry
 
 Closed only by the user saying it is done, and the stamp records that this is what happened rather
 than something anyone worked out:
@@ -112,7 +157,7 @@ cannot be closed by asking a model, because the cost of the two mistakes is not 
 decision wrongly filed as paperwork waits for a human who says "just decide it", while paperwork
 wrongly filed as a decision gets closed by an interview and the plan then claims a contract exists.
 
-## 6. What is left outstanding
+## 7. What is left outstanding
 
 The entry's `Output:` names where the answer is supposed to land, and it is usually a file this
 skill does not own — the spec's Risks, an ADR, a doc elsewhere. Report those as outstanding, by
@@ -122,7 +167,7 @@ shared space; an unrequested edit there is a second writer of a document with on
 The `Outstanding:` field on the stamp is what keeps that visible after the terminal has scrolled
 away.
 
-## 7. What never gets written
+## 8. What never gets written
 
 - **A tick nobody authorised.** Not from `--yes` on a `person` entry, not from a probe, not from a
   session with no human in it.

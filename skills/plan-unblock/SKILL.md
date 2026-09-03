@@ -36,6 +36,9 @@ this skill reaches it that way.
 - **The sort is derived, not judged.** `scripts/resolve_scope.py` classifies each entry from the
   same patterns `check_todo.py` uses to keep this work out of a numbered phase. A model re-sorting
   the section every run would produce numbers nobody can average and a fence nobody can trust.
+- **One entry at a time, in order, each opening with why it blocks and what the options are.** A
+  batch of questions is answered as a list; a blocker briefed on its own is answered on its merits,
+  and an answer to one often changes the next.
 - **Silence is not consent.** The one thing this skill must never do is tick an entry nobody
   answered.
 
@@ -48,7 +51,8 @@ this skill reaches it that way.
 - **`<plan>`** — the `todo.md` to work on. Omitted, discover it: a plan named in the conversation,
   else `docs/*/todo.md`, else a root `todo.md`. Several candidates and no steer → list them and ask;
   never pick one silently, because the wrong plan gets edited and committed.
-- **`--entry <n>`** — work one entry, by its number in the report. Everything else is left alone.
+- **`--entry <n>`** — work one entry, by the `R<n>` label the report gives it (`--entry 3` or
+  `--entry R3`). Everything else is left alone.
 - **`--no-commit`** — write the file and touch no git state, for a caller that owns the index.
 - **`--dry-run`** — report the sort and stop. Writes nothing, ever, and still records the run.
 - **`--yes`** — take the recommendation on every decision rather than asking. It does **not** reach
@@ -112,33 +116,62 @@ is asked cold — a question you could not narrow is still a question.
 Skip the probe entirely for `person` entries. No amount of reading tells you whether a contract
 was signed.
 
-## Step 4 — ask, once, batched
+## Step 4 — walk the entries in order, one at a time
 
-Every decision in **one** message, in the form `/r:spec-design` Step 3.5 uses: *the decision · the
-options · what each costs · which you would take and why.* Give a recommendation — a question with
-no lean makes the user do the analysis you just did.
+**One entry, fully, before the next one is raised.** Not one message carrying every question. These
+are not interview rounds sweeping a topic — each is a discrete blocker with its own consequence,
+and five of them in one message forces the user to hold five contexts at once and answer them in a
+list, which is how the cheap ones get a real answer and the expensive one gets a shrug. Sequential
+also lets an answer inform what comes next: R2 is sometimes moot once R1 is settled, and you can
+only see that from inside the walk.
 
-Question style follows reversibility (`interview.md` §1 Rule 2): genuinely open where the answer
-reshapes the plan, a forced trade-off where every option sounds free, propose-then-correct where a
-section gets rewritten, default-and-veto where it is one line to change later.
+Work in **document order** and label each `R1`, `R2`, … by its position in the section, so the user
+can refer back to one and `--entry` names something they have seen.
 
-Push back **once** on an answer that is expensive to reverse, using §8's four beats — name the
-mechanism, the alternative with its cost, the reversibility, then hand it back. Never twice.
+Each entry opens with a brief — **why this blocks, then what the options are** — before you ask
+anything about it. The template is in `${CLAUDE_SKILL_DIR}/references/resolution-format.md` §4.
+Write it in Simplified Technical English, in the plan's own nouns: one idea per sentence, active
+voice, and the class and entity names the phase block and `design.md` already use.
 
-**"I don't know" is an answer.** Take the recommendation, record it as the resolution with the
-alternative beside it, and move on (§9). Never re-ask, never block.
+Read the blocked phase's own items, `Files:` and `Done when:` first, so "why this blocks" names
+what cannot be built or verified. Asserting that something is blocked is not a reason.
+
+**Shorter and clearer, never shorter and blunter.** The brief supplies the premise the reader is
+missing; that is the half worth its lines. What you cut is the part that repeats the entry, and the
+part that shows your work.
+
+Then, by kind:
+
+- **A `decision`** — put the question and **wait**. Style follows reversibility
+  (`interview.md` §1 Rule 2): genuinely open where the answer reshapes the plan, a forced trade-off
+  where every option sounds free, propose-then-correct where a section gets rewritten,
+  default-and-veto where it is one line to change later. Give a recommendation with its reason — a
+  question with no lean makes the user do the analysis you just did.
+
+  Push back **once** on an answer that is expensive to reverse, using §8's four beats: name the
+  mechanism, the alternative with its cost, the reversibility, then hand it back. Never twice.
+
+  **"I don't know" is an answer.** Take the recommendation, record it as the resolution with the
+  alternative beside it, and move on (§9). Never re-ask, never block.
+
+- **A `person`** — brief it in its place in the walk, then say plainly that nothing here can close
+  it and move on. No question, no recommendation, no probe: no amount of reading tells you whether
+  a contract was signed. It closes only when the user says it is done, and the stamp records that
+  they said so. `unclassified` is treated as one of these.
+
+**Under `--yes`**, print each brief and take the recommendation without asking. The briefs still
+appear — they are the record of what was decided on the user's behalf. `--yes` reaches no `person`
+entry.
 
 **Silence is not an answer.** If there is no human in this session to answer — an unattended run, a
 container, a piped prompt — record `blocked: "no-human"`, tick nothing, and stop. The whole reason
 this section exists is that somebody has to decide; a default taken on nobody's behalf and written
 into the plan as settled is exactly the lie it was built to prevent.
 
-## Step 5 — `person` entries are presented, never resolved
+**Carry the walk forward.** When an answer moots or reshapes a later entry, say so when you reach
+it rather than asking a question that no longer stands.
 
-Show them with their owner and what they block. An explicit "that's done" from the user is the only
-thing that ticks one, and the stamp records that they said so. Under `--yes`, they stay open.
-
-## Step 6 — write back, then commit alone
+## Step 5 — write back, then commit alone
 
 Tick each resolved entry and add its `Resolved:` line — the format is in
 `references/resolution-format.md`. Then:
@@ -154,7 +187,7 @@ Tick each resolved entry and add its `Resolved:` line — the format is in
   an unattended one snapshots it to `refs/wip/` and cleans it, reverting the answers while the gate
   it already passed says everything is settled. `--no-commit` opts out; `--dry-run` writes nothing.
 
-## Step 7 — re-check
+## Step 6 — re-check
 
 ```sh
 python3 "${CLAUDE_SKILL_DIR}/scripts/resolve_scope.py" <plan> --check
@@ -163,7 +196,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/spec-design/scripts/check_todo.py" <plan>
 
 Report what they say. `--check` exits 1 on any finding, which is the point of it.
 
-## Step 8 — name what has to be re-planned
+## Step 7 — name what has to be re-planned
 
 For each resolved entry, say whether the answer changed the **shape** of the phase it blocked — a
 different approach, a different file, a criterion that no longer holds. That is all this step owns:
@@ -174,7 +207,7 @@ It does **not** re-plan, renumber, regenerate `## Waves` or re-match `Implements
 rewrite is genuinely wanted, say what it costs: `/r:spec-design <the documents>` replaces `todo.md`
 and `design.md` together, with `--against` freezing what is already built.
 
-## Step 9 — report, then record the run
+## Step 8 — report, then record the run
 
 Tell the user what closed, what stayed open and why, what is outstanding elsewhere (the `Output:`
 files), and which phases now need re-planning. Then one line into the pack-wide store — counts
@@ -213,6 +246,10 @@ retry it.
   person; a run nobody asked for has nobody to ask.
 - **Never tick an entry nobody answered.** "I don't know" is an answer and takes the
   recommendation. No human at all is not, and stops the run with `no-human`.
+- **Brief every entry before asking anything about it, and never raise two at once.** The brief
+  names what cannot be built without the answer — read from the blocked phase, not asserted — and
+  at least two options with what each costs. An entry with one option is a default, not a decision;
+  say so rather than staging a choice.
 - **A `person` entry is closed by a person saying so, and by nothing else.** Not by `--yes`, not by
   a probe, not by an inference from the repo. An `unclassified` entry is treated as one of these.
 - **The sort comes from the script.** Never decide by reading the markdown which entries are open,
