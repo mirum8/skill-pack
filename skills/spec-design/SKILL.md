@@ -360,9 +360,11 @@ carry on. A skipped review reported as a review is worse than none.
 **Review the plan DOCUMENT, not a diff.** Run `/codex:rescue` with the draft and the rubric below.
 Do **not** reach for `/r:code-adversarial` or its `run.sh`: those review a git diff, there is no
 diff here, and running one from a Codex-backed context makes Codex re-enter the wrapper that
-launches Codex. If the review outlives the foreground window, call the companion directly —
-`node "$C" task --write=false --effort medium "<the rubric prompt>"` — as `task-run` does
-for the same job and reason.
+launches Codex. If `/codex:rescue` cannot collect the run, call the companion directly —
+`node "$C" task --background --write=false --effort medium "<the rubric prompt>"` — as `task-run`
+does for the same job and reason. `--background` is not optional: it is the only flag that hands
+the run to a detached worker, and without it the CLI is killed along with the Bash call that
+launched it, about two minutes in, leaving a job record stuck at `"status":"running"`.
 
 **The rubric — five questions, fixed.** A fixed list makes two runs comparable and stops the review
 wandering into prose style:

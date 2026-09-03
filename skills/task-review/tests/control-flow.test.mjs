@@ -336,7 +336,7 @@ test('the Codex fix wrapper is told a dead pid is death, not a reason to keep po
   // The collect protocol is shared with task-run, and the state it has to name is the one that is
   // neither alive nor finished: a worker that is killed or crashes never writes a terminal status,
   // so its record keeps "status":"running" for good. Trusting that field once turned a Codex job
-  // that died 1m44s in into a wait that ran out the full ~600s Bash cap.
+  // that died 1m44s in into a wait that ran out the full 590s.
   // The shipped row puts the fixer on codex, which is the branch that drives the CLI and so the
   // only one that is handed the collect protocol at all.
   const { prompts } = await run(withFix())
@@ -344,7 +344,10 @@ test('the Codex fix wrapper is told a dead pid is death, not a reason to keep po
   assert.match(p, /DEAD PID OVER A RECORD WITH NO "rendered" MEANS THE JOB DIED/)
   assert.match(p, /never writes a terminal status/)
   // The pid is the liveness check — the loop the wrapper is handed must be the ps loop.
-  assert.match(p, /ps -p <pid>/)
+  assert.match(p, /ps -p "\$PID"/)
+  // The one way the wait loop fails OPEN: a record with no pid makes `ps -p ""` error, the loop
+  // breaks on its first pass, and a job that never started reads as one that finished instantly.
+  assert.match(p, /An EMPTY \$PID means the record names no worker/)
 })
 
 test('fixers never run deeper than the implementers; the agents that JUDGE keep the top tier', async () => {
@@ -388,8 +391,12 @@ test('on the codex provider the fixers DRIVE the CLI and never patch the code th
   assert.equal(opts['fix-correctness'].model, 'haiku')
   assert.equal(opts['fix-correctness'].effort, 'medium')
   assert.match(prompts['fix-correctness'], /codex-companion\.mjs/)
-  assert.match(prompts['fix-correctness'], /--model gpt5\.6-sol --effort low --write/)
-  // The collect protocol: a run that outlives the ~600s cap is the normal case, not a failure.
+  assert.match(prompts['fix-correctness'], /--background --model gpt5\.6-sol --effort low --write/)
+  // --background is the flag the whole protocol rests on: the companion hands the run to a
+  // `detached: true` + `unref()`ed worker only under that flag, and without it the CLI is awaited
+  // inside the Bash call and killed with it at the tool's 120s default.
+  assert.match(prompts['fix-correctness'], /--background is REQUIRED/)
+  // The collect protocol: a run that outlives the launch call is the normal case, not a failure.
   // ONE blocking wait rather than a poll per turn — the loop is what takes "does this look stuck?"
   // away from the model, which is the judgement a cheap wrapper gets wrong.
   assert.match(prompts['fix-correctness'], /WAITING ON THE WORKER PID IN ONE BASH CALL/)
@@ -413,7 +420,7 @@ test('on the codex provider the fixers DRIVE the CLI and never patch the code th
 
 test('the codex wrapper is tuned apart from the writer, and never dispatched untiered', async () => {
   // Two agents, two jobs: gpt5.6-sol writes the patch, a Claude subagent drives the CLI and
-  // collects a run past the ~600s cap. Tuning one must not move the other — and the wrapper's
+  // collects the detached run. Tuning one must not move the other — and the wrapper's
   // failure mode is reporting a fix Codex applied as unfixed, which is why it cannot go untiered.
   const tuned = await run(withFix({
     config: { ...DEFAULT_FIX_CONFIG, wrapperModel: 'opus', wrapperEffort: 'high' },

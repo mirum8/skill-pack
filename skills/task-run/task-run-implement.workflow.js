@@ -490,7 +490,17 @@ const BATCH_CLAUSE = `
      several greps, several reads, a \`git diff\` beside a \`git status\` — issue them in ONE
      block rather than one per turn. Calls that genuinely need a previous result stay serial.`
 // The background-collect protocol, in ONE place because it is one protocol: the plan review, the
-// implementers and the build fixer all drive the Codex CLI and all outlive the ~600s Bash cap.
+// implementers and the build fixer all drive the Codex CLI, and every one of them outlives the
+// Bash call that launched it. `--background` is what makes that survivable, and it is not optional
+// on any of the three. The companion branches on that single flag: with it the run goes to a
+// worker spawned `detached: true` and `unref()`ed, which outlives its parent; without it the CLI
+// is awaited in-process, and NOTHING migrates a foreground run to the background — an overrunning
+// one is simply killed alongside the Bash call. The Bash tool's default timeout is 120000ms
+// (600000 is the most a caller may REQUEST, never what an unset timeout gets), so a foreground
+// Codex run dies about two minutes in: the last sub-command exits 0, the log stops, and the job
+// record keeps "status":"running" with no "rendered" field for good — the exact shape of a crash,
+// which is what makes it expensive to diagnose. Two plan reviews died that way at 110.2s and
+// 110.9s, 0.7s apart in duration, which is a wall rather than a failure.
 //
 // It is a single BLOCKING call rather than a poll per turn, for two reasons that point the same
 // way. Cost: a subagent pays turns x context, every turn re-reading everything accumulated so far,
@@ -498,21 +508,30 @@ const BATCH_CLAUSE = `
 // read off two implementers on one run, 14 extra minutes of waiting cost ~40k tokens. Correctness:
 // every poll is another moment at which the model gets to decide the run looks stuck, and deciding
 // that over a live PID is precisely the false block the preambles below spend paragraphs
-// forbidding. A shell loop has no opinion. The bound sits INSIDE the loop and below the cap on
-// purpose: a call the harness kills comes back as a tool ERROR, and a tool error is exactly what
+// forbidding. A shell loop has no opinion. The bound sits INSIDE the loop and below the timeout it
+// asks for on purpose: a call the harness kills comes back as a tool ERROR, and that error is what
 // talks a wrapper into halting over work Codex had nearly finished.
-const collect = (pad) => `Collect it by WAITING ON THE WORKER PID IN ONE BASH CALL rather than
-${pad}checking it once per turn:
-${pad}  for i in $(seq 1 57); do ps -p <pid> >/dev/null 2>&1 || break; sleep 10; done
-${pad}dispatched with the Bash tool's own timeout set to 590000. It returns the moment the PID is
-${pad}gone; if it returns while the PID is still alive, run it again — that is the wait continuing,
-${pad}never a signal that anything is wrong. Then read the job record's "rendered" field under
-${pad}~/.claude/plugins/data/codex-openai-codex/state/*/jobs/*.json. Never wait on output-size
-${pad}stability — the log goes quiet for minutes mid-reasoning.
+const collect = (pad) => `The launch returns IMMEDIATELY with a job id — that is the queue
+${pad}confirming, never the run finishing. Collect it by WAITING ON THE WORKER PID IN ONE BASH CALL
+${pad}rather than checking it once per turn. The pid is in that job's record, not in the launch
+${pad}output:
+${pad}  J=$(ls ~/.claude/plugins/data/codex-openai-codex/state/*/jobs/<jobId>.json)
+${pad}  PID=$(grep -o '"pid":[[:space:]]*[0-9][0-9]*' "$J" | head -1 | tr -dc 0-9)
+${pad}  [ -n "$PID" ] || echo "NO PID IN THE JOB RECORD"
+${pad}  for i in $(seq 1 57); do ps -p "$PID" >/dev/null 2>&1 || break; sleep 10; done
+${pad}An EMPTY $PID means the record names no worker, so the launch never detached. That is a job
+${pad}that failed to START — report it as such; do NOT read "rendered" and do NOT let the loop's
+${pad}immediate exit read as a finished run. The wait is
+${pad}dispatched with the Bash tool's own timeout set to 590000 — the tool DEFAULTS to 120000 and
+${pad}600000 is merely the most it will accept, so an unset timeout kills the wait two minutes in.
+${pad}It returns the moment the PID is gone; if it returns while the PID is still alive, run it
+${pad}again — that is the wait continuing, never a signal that anything is wrong. Then read the job
+${pad}record's "rendered" field. Never wait on output-size stability — the log goes quiet for
+${pad}minutes mid-reasoning.
 ${pad}A DEAD PID OVER A RECORD WITH NO "rendered" MEANS THE JOB DIED — report that, immediately.
 ${pad}A worker that is killed or crashes never writes a terminal status, so its record keeps
 ${pad}"status":"running" for good. That field is therefore not evidence of life and re-reading it
-${pad}is not waiting: it will never change, and polling it burns the entire Bash cap on work that
+${pad}is not waiting: it will never change, and polling it burns the entire wait on work that
 ${pad}ended minutes ago. The pid is the liveness check; "status" only ever confirms a finish.`
 // Run one fixed command and report what it printed. There is no branch, no classification and no
 // prose in the output — the comparison that uses it happens in THIS script, not in the agent — so
@@ -1864,7 +1883,7 @@ ${uiDesignNote}
 // Runs on `general-purpose`, NOT `codex:codex-rescue`. The rescue type auto-loads
 // `codex-cli-runtime`, which makes it a one-shot forwarder and forbids `status`/`result` — so it
 // physically cannot obey the collect-the-backgrounded-run instruction below, and returns ran=false
-// on every review that outlives the 600s Bash cap. Observed on issues #82 and #55.
+// on every review it cannot sit and wait for. Observed on issues #82 and #55.
 //
 // Audit trail. Everything else in this pipeline refuses to let a track vanish quietly (`ran`
 // flags, blocked sentinels, the in-scope/pre-existing split) — and the triage step is the easiest
@@ -2014,18 +2033,20 @@ ${checks.map((c, i) => `     ${i + 1}. ${c}`).join('\n')}
      re-enter the wrapper that launches Codex, inside a read-only sandbox where it dies on mktemp.
        C="$HOME/.claude/plugins/marketplaces/openai-codex/plugins/codex/scripts/codex-companion.mjs"
        [ -f "$C" ] || C="$(ls -1d "$HOME"/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs | sort -V | tail -n1)"
-       node "$C" task --write=false --effort medium "<the review prompt you build from the rubric below>"
+       node "$C" task --background --write=false --effort medium "<the review prompt you build from the rubric below>"
      The subcommand takes [--background] [--write] [--resume-last|--resume|--fresh] [--model]
      [--effort] and then the prompt. There is NO --wait flag on it, and an unrecognised flag is not
      rejected: it becomes a POSITIONAL and is joined onto the prompt, so task --wait "<prompt>"
-     hands Codex a review brief opening with the literal token --wait. Omitting a mode flag is what
-     runs it in the FOREGROUND. Pass --write=false — this is a review, not an edit — and
+     hands Codex a review brief opening with the literal token --wait. --background is REQUIRED:
+     it is the only flag that hands the run to a detached worker, and omitting it runs the CLI
+     inside your own Bash call, where it is killed with that call about two minutes in — leaving a
+     job record stuck at "status":"running" that nobody can collect. Pass --write=false — this is a
+     review, not an edit — and
      --effort medium, set explicitly so the depth is pinned rather than inherited from whatever the
      CLI default happens to be. Medium is the right level for THIS job: the rubric below is a
      fixed five-item checklist against a document and the code it cites, which is concrete checking
-     rather than open-ended reasoning. It is also what keeps the run inside the foreground window —
-     at high this step routinely ran 16-26 minutes and spilled into the background collection path
-     below, which is the slowest and most failure-prone way to get the same critique. ${rubric}${delta(prior)}
+     rather than open-ended reasoning, and at high this step routinely ran 16-26 minutes to produce
+     the same critique. ${rubric}${delta(prior)}
 
      Set ran=true ONLY if the real Codex actually produced a critique. If the CLI is missing, the
      job failed, or it timed out and moved to the background and you could not collect the
@@ -2038,10 +2059,10 @@ ${checks.map((c, i) => `     ${i + 1}. ${c}`).join('\n')}
      Codex runs or throws a whole phase away. The
      reader of a halt is diagnosing, and "did not complete within time constraints" over a job that
      died two minutes in sends them to look at timeouts for a failure that was never about time.
-     A review longer than the
-     ~600s Bash cap WILL be moved to the background — that is expected, not a failure, and giving
-     up there is the single most common way this step reports a false block. You ARE permitted to
-     wait here. ${collect('     ')}`,
+     The launch hands back a job id in
+     seconds and the review then runs for as long as it needs — that is expected, not a failure,
+     and giving up on a live worker is the single most common way this step reports a false block.
+     You ARE permitted to wait here. ${collect('     ')}`,
     { label: `codex-plan-review#${pass}`, phase: 'Plan-review', schema: REVIEW, ...GP, ...CODEX_RUN })
     if (r && typeof r.note === 'string' && r.note.trim()) lastCodexNote = r.note
     if (r && r.ran === false && (r.blockedCause === 'job-died' || r.blockedCause === 'still-running')) {
@@ -2469,22 +2490,25 @@ const noFullBuild = !hasBuild ? ''
 // On the codex provider the subagent does not write the code — it drives the Codex CLI, which
 // does, and then reports what landed. Same shape as the codex-plan-review step above, and for the
 // same reason: `codex:codex-rescue` auto-loads codex-cli-runtime, becomes a one-shot forwarder that
-// cannot poll, and reports failure on every run that outlives the ~600s Bash cap. Implementers
-// average 963s, so that cap is the normal case here rather than the exception — which makes the
-// background-and-collect protocol the whole point of this preamble, not a fallback within it.
+// cannot poll, and reports failure on every run it cannot sit and wait for. Implementers average
+// 963s against a Bash call that dies at 120s unless a timeout is asked for, so a detached worker is
+// the normal case here rather than the exception — which makes the background-and-collect protocol
+// the whole point of this preamble, not a fallback within it.
 const codexPreamble = (a) => `YOU ARE NOT WRITING THIS CODE YOURSELF. Drive the Codex CLI and let IT make the edits, then
    report what landed. Call the companion DIRECTLY with Bash — do NOT invoke the adversarial-review
    skill or its run.sh, which review a diff and would re-enter the wrapper that launches Codex:
      C="$HOME/.claude/plugins/marketplaces/openai-codex/plugins/codex/scripts/codex-companion.mjs"
      [ -f "$C" ] || C="$(ls -1d "$HOME"/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs | sort -V | tail -n1)"
-     node "$C" task --model ${implCfg.model} --effort ${implCfg.effort} --write "<the full brief below, verbatim>"
+     node "$C" task --background --model ${implCfg.model} --effort ${implCfg.effort} --write "<the full brief below, verbatim>"
    Writes are ENABLED here — unlike the plan review, this run edits the repo. Pass the ENTIRE brief
    below through to Codex, including the plan path, the acceptance criteria and the TDD rules: a
    summarized brief is how an implementer ends up building its own reinterpretation of the plan.
 
-   THIS RUN WILL ALMOST CERTAINLY OUTLIVE THE ~600s Bash CAP AND MOVE TO THE BACKGROUND. That is
-   expected, not a failure, and giving up there is the single most common way this step reports a
-   false block. ${collect('   ')}
+   --background is REQUIRED. It is the only flag that hands the run to a detached worker; omit it
+   and the CLI runs inside your own Bash call and is killed with that call about two minutes in,
+   over an implementer that averages 963s. The launch hands back a job id in seconds and the run
+   then works for as long as it needs — that is expected, not a failure, and giving up on a live
+   worker is the single most common way this step reports a false block. ${collect('   ')}
 
    A LIVE WORKER PID IS NEVER A BLOCK. While \`ps -p <pid>\` still answers, that run is working and
    your job is to keep waiting — implementers average 963s and the long ones pass 40 minutes.
@@ -2505,13 +2529,15 @@ const codexPreamble = (a) => `YOU ARE NOT WRITING THIS CODE YOURSELF. Drive the 
 // The build fixer runs on the same provider as the implementers — a codex run whose red build is
 // repaired by a Claude agent has two writers on one change, which is the thing the slices exist to
 // prevent. Shorter than the implementers' preamble because the job is bounded: the failures are
-// named, so this is far less likely to reach the background cap.
+// named, so this is far likelier than an implementer to be finished in minutes. It still launches
+// detached: a bounded job is not a short one, and the flag is what decides whether it survives.
 const codexFixClause = `Drive the Codex CLI for this fix rather than editing yourself — it wrote this code:
      C="$HOME/.claude/plugins/marketplaces/openai-codex/plugins/codex/scripts/codex-companion.mjs"
      [ -f "$C" ] || C="$(ls -1d "$HOME"/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs | sort -V | tail -n1)"
-     node "$C" task --model ${implCfg ? implCfg.model : ''} --effort ${implCfg ? implCfg.effort : ''} --write "<everything below, verbatim>"
-   If it outlives the ~600s Bash cap it moves to the background, the same as the implementers.
-   ${collect('   ')} If Codex cannot
+     node "$C" task --background --model ${implCfg ? implCfg.model : ''} --effort ${implCfg ? implCfg.effort : ''} --write "<everything below, verbatim>"
+   --background is REQUIRED for the same reason it is on the implementers: it is the only flag that
+   detaches the worker, and a foreground call takes the run down with it when the Bash timeout
+   fires. ${collect('   ')} If Codex cannot
    be reached at all, say so plainly — do NOT quietly fix the build yourself, because the next
    build is what decides whether this loop stops and a silent substitution hides which writer
    produced the code the review is about to certify.

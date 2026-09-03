@@ -431,7 +431,13 @@ const BATCH_CLAUSE = `
      block rather than one per turn. Calls that genuinely need a previous result stay serial.`
 // The background-collect protocol for the codex fixers, worded exactly as task-run words it for
 // the implementers — it is one protocol, and a step that collects differently is a step that
-// reports a different kind of false block.
+// reports a different kind of false block. `--background` on the launch is the half of it that
+// looks skippable and is not: the companion branches on that single flag, handing the run to a
+// `detached: true` + `unref()`ed worker that outlives its parent, where without it the CLI is
+// awaited in-process and nothing migrates it to the background. The Bash tool's default timeout is
+// 120000ms (600000 is the most a caller may REQUEST, never what an unset timeout gets), so a
+// foreground run dies about two minutes in and leaves a job record that keeps "status":"running"
+// with no "rendered" field for good — indistinguishable from a crash.
 //
 // A single BLOCKING call, never a poll per turn, for two reasons that point the same way. Cost: a
 // subagent pays turns x context, every turn re-reading everything accumulated so far, so a wait
@@ -439,20 +445,29 @@ const BATCH_CLAUSE = `
 // is another moment at which the model gets to decide the run looks stuck, and deciding that over
 // a live PID is precisely the failure the preamble below spends paragraphs forbidding — a fix
 // Codex applied, reported as unfixed. A shell loop has no opinion. The bound sits INSIDE the loop
-// and below the cap on purpose: a call the harness kills comes back as a tool ERROR, and a tool
-// error is what talks a wrapper into giving up on a run that was still working.
-const collect = (pad) => `Collect it by WAITING ON THE WORKER PID IN ONE BASH CALL rather than
-${pad}checking it once per turn:
-${pad}  for i in $(seq 1 57); do ps -p <pid> >/dev/null 2>&1 || break; sleep 10; done
-${pad}dispatched with the Bash tool's own timeout set to 590000. It returns the moment the PID is
-${pad}gone; if it returns while the PID is still alive, run it again — that is the wait continuing,
-${pad}never a signal that anything is wrong. Then read the job record's "rendered" field under
-${pad}~/.claude/plugins/data/codex-openai-codex/state/*/jobs/*.json. Never wait on output-size
-${pad}stability — the log goes quiet for minutes mid-reasoning.
+// and below the timeout it asks for on purpose: a call the harness kills comes back as a tool ERROR,
+// and that error is what talks a wrapper into giving up on a run that was still working.
+const collect = (pad) => `The launch returns IMMEDIATELY with a job id — that is the queue
+${pad}confirming, never the run finishing. Collect it by WAITING ON THE WORKER PID IN ONE BASH CALL
+${pad}rather than checking it once per turn. The pid is in that job's record, not in the launch
+${pad}output:
+${pad}  J=$(ls ~/.claude/plugins/data/codex-openai-codex/state/*/jobs/<jobId>.json)
+${pad}  PID=$(grep -o '"pid":[[:space:]]*[0-9][0-9]*' "$J" | head -1 | tr -dc 0-9)
+${pad}  [ -n "$PID" ] || echo "NO PID IN THE JOB RECORD"
+${pad}  for i in $(seq 1 57); do ps -p "$PID" >/dev/null 2>&1 || break; sleep 10; done
+${pad}An EMPTY $PID means the record names no worker, so the launch never detached. That is a job
+${pad}that failed to START — report it as such; do NOT read "rendered" and do NOT let the loop's
+${pad}immediate exit read as a finished run. The wait is
+${pad}dispatched with the Bash tool's own timeout set to 590000 — the tool DEFAULTS to 120000 and
+${pad}600000 is merely the most it will accept, so an unset timeout kills the wait two minutes in.
+${pad}It returns the moment the PID is gone; if it returns while the PID is still alive, run it
+${pad}again — that is the wait continuing, never a signal that anything is wrong. Then read the job
+${pad}record's "rendered" field. Never wait on output-size stability — the log goes quiet for
+${pad}minutes mid-reasoning.
 ${pad}A DEAD PID OVER A RECORD WITH NO "rendered" MEANS THE JOB DIED — report that, immediately.
 ${pad}A worker that is killed or crashes never writes a terminal status, so its record keeps
 ${pad}"status":"running" for good. That field is therefore not evidence of life and re-reading it
-${pad}is not waiting: it will never change, and polling it burns the entire Bash cap on work that
+${pad}is not waiting: it will never change, and polling it burns the entire wait on work that
 ${pad}ended minutes ago. The pid is the liveness check; "status" only ever confirms a finish.`
 
 // ------------------------------------------------------- find-bugs hunters ---
@@ -1203,14 +1218,14 @@ log(`post-task-review: fixers — ${fixCfg ? (fixProvider === 'codex'
 // On the codex provider the fixer subagent does not write the patch — it drives the Codex CLI,
 // which does, and then reports what landed. Same shape and the same reason as the implementers'
 // preamble in task-run-implement.workflow.js: `codex:codex-rescue` auto-loads codex-cli-runtime,
-// becomes a one-shot forwarder that cannot poll, and reports failure on every run that outlives
-// the ~600s Bash cap.
+// becomes a one-shot forwarder that cannot poll, and reports failure on every run it cannot sit
+// and wait for.
 const codexFixPreamble = `YOU ARE NOT WRITING THIS PATCH YOURSELF. Drive the Codex CLI and let IT make the edits, then
    report what landed. Call the companion DIRECTLY with Bash — do NOT invoke the adversarial-review
    skill or its run.sh, which review a diff and would re-enter the wrapper that launches Codex:
      C="$HOME/.claude/plugins/marketplaces/openai-codex/plugins/codex/scripts/codex-companion.mjs"
      [ -f "$C" ] || C="$(ls -1d "$HOME"/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs | sort -V | tail -n1)"
-     node "$C" task --model ${fixCfg ? fixCfg.model : ''} --effort ${fixCfg ? fixCfg.effort : ''} --write "<everything below, verbatim>"
+     node "$C" task --background --model ${fixCfg ? fixCfg.model : ''} --effort ${fixCfg ? fixCfg.effort : ''} --write "<everything below, verbatim>"
    Writes are ENABLED — this run edits the repo. Pass the ENTIRE brief below through, including the
    findings and the intent block: a summarized brief is how a surgical fix turns into a rewrite.
 
@@ -1219,8 +1234,11 @@ const codexFixPreamble = `YOU ARE NOT WRITING THIS PATCH YOURSELF. Drive the Cod
    dispatch other agents and run this project's tooling, which the CLI cannot reach from inside its
    own job. Codex gets the findings and the rules; you get the loop around them.
 
-   If it outlives the ~600s Bash cap it moves to the background. That is expected, not a failure,
-   and giving up there is the most common way this step reports work as unfixed that was fixed.
+   --background is REQUIRED: it is the only flag that hands the run to a detached worker, and
+   without it the CLI runs inside your own Bash call and is killed with that call about two minutes
+   in. The launch hands back a job id in seconds and the fix then runs for as long as it needs —
+   that is expected, not a failure, and giving up on a live worker is the most common way this step
+   reports work as unfixed that was fixed.
    ${collect('   ')}
 
    When Codex finishes, VERIFY against the working tree rather than trusting its summary: read

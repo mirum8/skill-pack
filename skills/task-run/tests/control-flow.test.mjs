@@ -235,12 +235,18 @@ test('the plan review drives the companion with flags it actually has, and treat
   const { prompts } = await run({ review: OK_REVIEW, planfix: OK_FIX })
   const p = prompts['codex-plan-review#1']
   assert.doesNotMatch(p, /node "\$C" task --wait/, 'the command line must not pass a flag `task` does not have')
-  assert.match(p, /node "\$C" task --write=false --effort medium/)
+  assert.match(p, /node "\$C" task --background --write=false --effort medium/)
   assert.match(p, /There is NO --wait flag/, 'and it must say why, or the next editor puts it back')
+  // --background is the flag the whole collect protocol rests on. The companion branches on it:
+  // with it the run goes to a `detached: true` + `unref()`ed worker, without it the CLI is awaited
+  // in-process and nothing migrates it. The Bash tool defaults to a 120s timeout, so a foreground
+  // review is killed about two minutes in — measured at 110.2s and 110.9s over two runs, 0.7s
+  // apart, each leaving a job record stuck at "status":"running" with no "rendered" field.
+  assert.match(p, /--background is REQUIRED/, 'the flag must be justified, or an editor drops it as noise')
   // And the collect protocol has to name the one state that is neither alive nor finished. A
   // worker that is killed or crashes never writes a terminal status, so the record keeps
   // "status":"running" for good. Trusting that field turned a job that died 1m44s in into a block
-  // that ran out the full ~600s Bash cap and halted a 43-minute run with
+  // that ran out the full 590s wait and halted a 43-minute run with
   // "did not complete within time constraints".
   assert.match(p, /DEAD PID OVER A RECORD WITH NO "rendered" MEANS THE JOB DIED/)
   assert.match(p, /never writes a terminal status/)
@@ -787,14 +793,21 @@ test('the codex provider drives the CLI and keeps the slices, not the personas',
     assert.equal(optsBy[l].model, 'sonnet', `${l} must carry the configured wrapper model`)
     assert.equal(optsBy[l].effort, 'medium', `${l} must carry the configured wrapper effort`)
     assert.match(prompts[l], /codex-companion\.mjs/)
-    assert.match(prompts[l], /--model gpt5\.6-sol --effort low --write/)
-    // The collect protocol is the whole point: implementers average 963s against a ~600s cap.
+    assert.match(prompts[l], /--background --model gpt5\.6-sol --effort low --write/)
+    // Without --background the CLI is awaited inside the Bash call and dies with it at the tool's
+    // 120s default, over an implementer that averages 963s.
+    assert.match(prompts[l], /--background is REQUIRED/)
+    // The collect protocol is the whole point: implementers average 963s.
     // It is ONE blocking wait, not a poll per turn — the loop is what removes "does this look
     // stuck?" from the model, which is the judgement a cheap wrapper gets wrong.
     assert.match(prompts[l], /WAITING ON THE WORKER PID IN ONE BASH CALL/)
-    assert.match(prompts[l], /ps -p <pid>/)
+    assert.match(prompts[l], /ps -p "\$PID"/)
     assert.match(prompts[l], /timeout set to 590000/)
-    assert.match(prompts[l], /jobs\/\*\.json/)
+    assert.match(prompts[l], /jobs\/<jobId>\.json/)
+    // The pid comes out of the job record, and a record with none is the one way this loop fails
+    // OPEN: `ps -p ""` errors, the loop breaks on its first pass, and a job that never started
+    // reads as one that finished in under a second. Naming it is what keeps that a report.
+    assert.match(prompts[l], /An EMPTY \$PID means the record names no worker/)
     assert.match(prompts[l], /Never wait on output-size/)
     // A fabricated success would have the review certify code nobody wrote.
     assert.match(prompts[l], /set blockedOn/)
@@ -805,8 +818,8 @@ test('the codex provider drives the CLI and keeps the slices, not the personas',
     // batching rule — so the brief has to. Turns x context is what this step actually pays.
     assert.match(prompts[l], /Batch independent tool calls/)
   }
-  // The plan reviewer drives the same CLI and hits the same cap, so it collects the same way —
-  // an unrendered helper there would be silent, and the plan review has no fallback reviewer.
+  // The plan reviewer drives the same CLI the same way, so it collects the same way — an
+  // unrendered helper there would be silent, and the plan review has no fallback reviewer.
   assert.match(prompts['codex-plan-review#1'], /WAITING ON THE WORKER PID IN ONE BASH CALL/)
   assert.match(prompts['codex-plan-review#1'], /timeout set to 590000/)
 
@@ -822,7 +835,7 @@ test('the codex provider drives the CLI and keeps the slices, not the personas',
 
 test('the codex wrapper is tuned apart from the writer, and never dispatched untiered', async () => {
   // Two agents, two jobs: gpt5.6-sol writes the code, a Claude subagent drives the CLI and collects
-  // a run past the ~600s cap. Tuning one must not move the other — and the wrapper's failure mode
+  // the detached run. Tuning one must not move the other — and the wrapper's failure mode
   // is halting the run over work Codex finished, which is why it cannot quietly become untiered.
   const tuned = await run({
     source: baseSource({ buildTool: 'maven', hasBackend: true, hasFrontend: false }),
@@ -1560,9 +1573,10 @@ test('the re-review is handed the triage decisions, so a dismissal is answerable
     'the dismissal and its reason must be named so Codex can push back')
 })
 
-test('the Codex plan review pins --effort medium, so it stays inside the foreground window', async () => {
-  // At high this step measured 16-26 minutes and spilled past the ~600s Bash cap into the
-  // background-collection path — the slowest and most failure-prone way to get the same critique.
+test('the Codex plan review pins --effort medium, the depth the rubric actually needs', async () => {
+  // The rubric is a fixed five-item checklist against a document and the code it cites — concrete
+  // checking, not open-ended reasoning. At high this step measured 16-26 minutes to produce the
+  // same critique.
   const { prompts } = await run({ review: OK_REVIEW, planfix: OK_FIX })
   assert.match(prompts['codex-plan-review#1'], /--effort medium/)
   assert.doesNotMatch(prompts['codex-plan-review#1'], /--effort high/)

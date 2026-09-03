@@ -382,10 +382,24 @@ stays that skill's store. Rules that are load-bearing:
   met rather than worked around — Codex writes the change and Codex patches it, shallower, because
   a fixer's brief is one finding at one line. `fixProvider`/`fixModel`/`fixEffort` go into the review's payload so the
   question can eventually be answered from rows rather than argued.
+- **Every Codex dispatch passes `--background`, and it is the flag the collect protocol rests on.**
+  All five sites — the plan review, the implementers and the build fixer in `task-run`, the fixers
+  in `task-review`, and the command `spec-design` documents — launch `codex-companion.mjs task`
+  with it. The companion branches on that one flag: with it the run goes to a worker spawned
+  `detached: true` and `unref()`ed, which outlives its parent; without it the CLI is awaited
+  in-process, and **nothing migrates a foreground run to the background**. The Bash tool's default
+  timeout is 120000ms — 600000 is the most a caller may *request*, never what an unset timeout
+  gets — so a foreground Codex run is killed about two minutes in, the last sub-command having
+  exited 0, and its job record keeps `"status":"running"` with no `rendered` field for good, which
+  is the exact shape of a crash. Two plan reviews died that way at 110.2s and 110.9s, 0.7s apart in
+  duration; the wall is the give-away, since a real crash does not repeat to within a second. The
+  wrapper prompts say `--background is REQUIRED` and both control-flow suites assert it, because
+  the flag reads like a stylistic choice and the failure it prevents is indistinguishable from the
+  CLI dying on its own.
 - **On codex the writer and the wrapper are separate settings, because they fail differently.**
   `model`/`effort` reach the Codex CLI; `wrapperModel`/`wrapperEffort` (`haiku`/`medium`, fallback
   `IMPL_CODEX_RUN` in `task-run`, `FIX_CODEX_RUN` in `task-review`) are the Claude subagent that
-  drives it, collects a run past the ~600s Bash cap and reads the working tree to report what
+  drives it, collects the detached run and reads the working tree to report what
   landed. A cheap *writer* writes worse code, which the review catches; a cheap *wrapper* gives up
   on the collect and halts the run — or reports a fix Codex applied as unfixed — over work that was
   actually finished, which nothing catches. Each wrapper carries its own constant rather than the
@@ -397,7 +411,7 @@ stays that skill's store. Rules that are load-bearing:
   **The shipped `haiku` is an experiment under measurement, and it is the direction this row was
   written to warn against.** What makes it worth running is that the failure was never depth: it
   was the wrapper *deciding* a live PID looked stuck. The collect is now ONE blocking shell loop
-  (`collect()` in both scripts) bounded below the ~600s cap, so that judgement is not the model's
+  (`collect()` in both scripts) bounded below the 590s timeout it asks for, so that judgement is not the model's
   any more, and what the wrapper reports comes from `git status --porcelain`/`git diff` rather than
   from Codex's summary. `wrapperEffort` deliberately does NOT follow it down — the tree read at the
   end is real work. A regression looks like blocked slices over a working tree that already holds
