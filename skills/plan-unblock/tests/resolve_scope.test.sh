@@ -292,3 +292,54 @@ run "--phases with nothing after it"      1 "$TMP/todo.md" --outstanding --phase
 echo
 printf '  %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
+
+echo
+echo "== an unknown field terminates the one before it, instead of being eaten by it =="
+# A field ends at the NEXT LABEL, and "label" cannot mean "label this script knows about".
+# Observed: `Owner: … Blocks: nothing. Informs: Phases 32 and 33.` ran the Blocks slice to the end
+# of the entry, and since Blocks is the load-bearing edge, the phase regex harvested 32 and 33 out
+# of the *Informs* clause — reporting the entry as blocking exactly the phases its author had
+# listed as merely informed. `gate` is the value /r:plan-run is told to obey without
+# second-guessing, so this silently stopped a run on a lie about what was blocking it.
+INF="$TMP/informs.md"
+cat > "$INF" <<'EOF'
+# Plan
+
+## Resolve first
+
+- [ ] **Does port-forwarding survive the cluster proxy?**
+  *Owner: the author. Blocks: nothing. Informs: Phases 32 and 33.*
+
+## Milestone 1
+
+### Phase 32 — A thing
+- [ ] do it
+
+### Phase 33 — Another thing
+- [ ] do it
+EOF
+
+out=$(python3 "$SCOPE" "$INF" --outstanding --phases 33 2>&1)
+res=$(python3 - "$out" <<'PY'
+import json, sys
+d = json.loads(sys.argv[1])
+e = d["entries"][0]
+ok = not e.get("blocks") and any("Informs" in m for m in e.get("malformed", []))
+print("yes" if ok else "no")
+PY
+)
+[ "$res" = yes ] && ok "Blocks: stops at Informs:, and the unknown field is named" \
+                 || bad "Blocks: stops at Informs:, and the unknown field is named" "$out"
+
+# The other half, and it is a DIFFERENT failure: an entry that names no phase blocks the entire run
+# list by design (spec-design/SKILL.md:337, design-contracts.md:78 — "nothing can tell what it was
+# guarding"). What must never happen is the gate stopping a run while naming phases the author
+# never blocked, because that reads as a specific, checked answer.
+gate=$(python3 - "$out" <<'PY'
+import json, sys
+d = json.loads(sys.argv[1])
+print(d.get("gate"), len(d.get("blockedPhases") or []))
+PY
+)
+[ "$gate" = "stop 0" ] && ok "it still stops, but names NO phase — the fail-closed reason, not a fabricated edge" \
+                       || bad "it still stops, but names NO phase — the fail-closed reason, not a fabricated edge" "gate=$gate"

@@ -62,7 +62,19 @@ NAME = re.compile(r"\*\*(.+?)\*\*")
 # matched one regex at a time: `Output: a line in the spec's Risks.` holds a period of its own, and
 # a non-greedy match to the next full stop would cut it in half.
 FIELDS = ("Owner", "Blocks", "Timebox", "Output", "Resolved", "Alternative", "Outstanding")
+# A field ends at the NEXT LABEL, and "label" cannot mean "label this script knows about". An entry
+# carrying a field outside FIELDS -- `Informs: Phases 32 and 33.` was the observed one -- ran the
+# PREVIOUS field to the end of the entry, and since `Blocks:` is the load-bearing edge, the phase
+# regex then harvested 32 and 33 out of the Informs clause. The entry was reported as blocking
+# exactly the phases its author had listed as merely informed, and `gate` is the value /r:plan-run
+# is told to obey without second-guessing.
+#
+# So slice on anything SHAPED like a label and keep only the known ones. An unknown label is then
+# named in `malformed` rather than silently eaten: it is not a field this contract has, and an
+# author who wrote one needs to be told that, not to have it folded into their neighbour.
 LABEL = re.compile(r"\b(" + "|".join(FIELDS) + r"):", re.I)
+ANY_LABEL = re.compile(r"\b([A-Z][A-Za-z]{2,}):")
+KNOWN = {f.lower() for f in FIELDS}
 
 # Which side of the section an entry falls on, derived rather than judged fresh each run. The
 # patterns are check_todo.py's NOT_BUILDABLE, read for the question it answers one document later:
@@ -106,15 +118,30 @@ def built(block):
 
 
 def fields(chunk):
-    """Every `Label:` in the entry, sliced from one label to the next."""
+    """Every `Label:` in the entry, sliced from one label to the next.
+
+    Returns (head, known_fields, unknown_labels). Slicing uses EVERY label-shaped token, so a
+    field this contract does not define still terminates the one before it; only the known ones
+    are returned as fields, and the rest come back named so the caller can say so.
+    """
     flat = " ".join(chunk.split())
-    marks = list(LABEL.finditer(flat))
-    out = {}
+    marks = [m for m in ANY_LABEL.finditer(flat)]
+    # A label-shaped token inside prose is possible, so the head is still cut at the first KNOWN
+    # label: that is where the fields provably begin.
+    first_known = LABEL.search(flat)
+    out, unknown = {}, []
     for i, m in enumerate(marks):
+        if first_known and m.start() < first_known.start():
+            continue
         end = marks[i + 1].start() if i + 1 < len(marks) else len(flat)
-        out[m.group(1).lower()] = flat[m.end():end].strip().rstrip(".").strip()
-    head = flat[:marks[0].start()] if marks else flat
-    return head, out
+        key = m.group(1).lower()
+        value = flat[m.end():end].strip().rstrip(".").strip()
+        if key in KNOWN:
+            out[key] = value
+        else:
+            unknown.append(m.group(1))
+    head = flat[:first_known.start()] if first_known else flat
+    return head, out, unknown
 
 
 def classify(name, question, owner):
@@ -138,8 +165,12 @@ def parse_entries(body):
     for i, chunk in enumerate(re.split(ENTRY_SPLIT, body, flags=re.M), start=0):
         if not chunk.strip() or not re.match(r"^\s*[-*]\s", chunk):
             continue
-        head, f = fields(chunk)
+        head, f, unknown = fields(chunk)
         malformed = []
+        if unknown:
+            malformed.append(f"unknown field(s) {', '.join(unknown)}: — not part of this contract "
+                             f"(the fields are {', '.join(FIELDS)}); it is ignored, not merged "
+                             "into the field before it")
         legacy = not (TICKED.match(chunk) or UNTICKED.match(chunk))
         ticked = bool(TICKED.match(chunk))
         m = NAME.search(head)
