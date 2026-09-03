@@ -49,6 +49,7 @@ bash skills/test-app-create/tests/tui-session.test.sh       # the TUI driver's f
 bash skills/plan-report/tests/milestone_scope.test.sh       # milestone scope + the boundary predicate
 bash skills/plan-unblock/tests/resolve_scope.test.sh        # the Resolve-first parser + the gate
 bash hooks/tests/guard.test.sh                             # workflow-guard behaviour
+bash hooks/tests/normalize-cd-paths.test.sh                # the cd rewrite + every case it declines
 bash lib/tests/stats.test.sh                               # stats sink + hook + reporter
 bash tests/install.test.sh                                 # installer behaviour
 claude plugin validate .                                   # the loader's own view of the pack
@@ -90,7 +91,7 @@ The runner redirects `CLAUDE_SKILL_STATS_DB` to a throwaway so a sweep never wri
 .claude-plugin/plugin.json   identity + namespace (name must stay "r")
 skills/<name>/SKILL.md       the skill; plus references/ scripts/ tests/ evals/
 agents/<name>.md             the 8 agents skills dispatch to
-hooks/                       hooks.json + guard-workflow.py + record-skill-run.py
+hooks/                       hooks.json + guard-workflow.py + record-skill-run.py + normalize-cd-paths.py
 lib/                         pack-wide stats sink + reporter + config reader, shared by every skill
 .config/defaults.yaml        the shipped settings; a project overrides them in its own .config/
 tools/                       build/validation scripts — NOT shipped
@@ -218,6 +219,31 @@ resolving to `null`, and `agent()` throwing.
 allowed. Its allow-list is built at run time from `$CLAUDE_PLUGIN_ROOT`, and it matches only real
 workflow scripts (`export const meta` + a guarded `name`), so prose quoting a pipeline name is left
 alone. It fails open on any parse/IO trouble.
+
+**The cd-path normalizer keeps an unattended run from stalling on a prompt nobody can answer.**
+`hooks/normalize-cd-paths.py` (a `PreToolUse` hook on `Bash`) rewrites `cd /abs; grep -rn x
+internal/` into `cd /abs; grep -rn x /abs/internal/`. The bash analyzer asks the person about any
+compound command pairing a `cd` with a relative read by grep/rg/diff/git/cp/mv while **any**
+`Read(...)` rule exists in `permissions.deny` — the gate tests only that such a rule exists, never
+whether one could match the target, and then skips resolution entirely, so "not attempted" is
+treated exactly like "denied". Its circuit breaker is bypass-immune and not classifier-approvable,
+so no permission mode clears it: a `--cmux` unit is a full session that hits it with an empty room
+in front of it. An absolute target is one the analyzer will resolve, and a resolved clean path
+passes silently.
+
+Three rules carry it. The `cd` is **kept, never stripped** — after `cd /abs`, `internal/` IS
+`/abs/internal/` whatever the shell's prior directory was, so the rewrite cannot change what the
+command means, while dropping the `cd` would depend on a reported cwd this hook cannot verify from
+outside the shell. It **strengthens** the deny rules rather than working around them: `cd /base;
+grep KEY .ssh/` resolves to an absolute path that `Read(**/.ssh/**)` matches and denies, in place
+of a vague "cannot be determined" ask. And it **declines** everything it cannot vouch for — a
+relative or computed `cd` target, a redirect, a subshell, a second `cd`, an operand escaping the
+base via `..` or absent from disk, and the pattern operand of a grep, which is never a path. The
+asymmetry is the point: a declined rewrite costs one permission prompt, which is the behaviour
+without the hook, while a wrong one silently changes which files a command reads and nothing
+downstream re-reads the command to catch it. Both directions are asserted in
+`hooks/tests/normalize-cd-paths.test.sh`, and it fails open — a hook that fails closed wedges every
+Bash call in every session.
 
 **The stats store measures the pack.** `lib/record-run.py` writes into `~/.claude/skill-stats.db`
 (SQLite/WAL, schema in `lib/schema.sql`); `lib/skill-stats.py` reads it back. It lives in `lib/`,

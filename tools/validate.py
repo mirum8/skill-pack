@@ -724,7 +724,8 @@ def pack_text_files():
                 if any(v in rel for v in R.VENDORED) or not f.endswith(R.TEXT_SUFFIXES):
                     continue
                 out.append(os.path.join(root, f))
-    for f in ("hooks/guard-workflow.py", "hooks/record-skill-run.py", "hooks/hooks.json"):
+    for f in ("hooks/guard-workflow.py", "hooks/record-skill-run.py",
+              "hooks/normalize-cd-paths.py", "hooks/hooks.json"):
         p = os.path.join(REPO, f)
         if os.path.isfile(p):
             out.append(p)
