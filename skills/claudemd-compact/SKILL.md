@@ -3,17 +3,15 @@ description: >-
   Compact, reorganize, and de-stale a project's CLAUDE.md infrastructure — root, nested module
   files, and extracted reference docs — so it costs less always-on context and stops misleading
   the model. Use whenever the user wants to "compact/refactor/reorganize CLAUDE.md", says "my
-  CLAUDE.md is too long / bloated / huge / out of date", wants to "split CLAUDE.md into
-  references", "trim claude md", "rightsize CLAUDE.md", "remove stale/outdated rules from
-  CLAUDE.md", "reduce always-on context", "apply progressive disclosure to my instructions", or
-  "improve context management" — even if they don't name the file. Also for a CLAUDE.md that is
-  accurate but over-constrains the model, restates the repo or the harness, or disagrees with an
-  installed skill: "my CLAUDE.md has too many rules", "these instructions conflict", "my rules
-  fight my skills", "is my CLAUDE.md over-constraining?". Also triggers on "/r:claudemd-compact".
-  `--auto` (`/r:claudemd-compact --auto`) applies without the approval prompt — used by
-  `/r:task-review`'s keep-CLAUDE.md-lean step and whenever the user wants compaction with no
-  confirmations. NOT for: adding the user's standard reusable rule blocks (Test-Writing Policy,
-  Code Conventions, or removing a post-task auto-run block) — that's `r:claudemd-patch`; NOT for `/init` or first-time project bootstrap;
+  CLAUDE.md is too long / bloated / out of date", wants to "split CLAUDE.md into references",
+  "remove stale rules from CLAUDE.md", "reduce always-on context", or "apply progressive
+  disclosure to my instructions" — even if they don't name the file. Also for
+  a CLAUDE.md that is accurate but over-constrains the model, restates the repo or the harness,
+  or disagrees with an installed skill: "my rules fight my skills", "is my
+  CLAUDE.md over-constraining?". `--auto` applies without the approval prompt — used by `/r:task-review`'s keep-CLAUDE.md-lean
+  step and whenever the user wants compaction with no confirmations. NOT for: adding the user's
+  standard reusable rule blocks (Test-Writing Policy, Code Conventions, or removing a post-task
+  auto-run block) — that's `r:claudemd-patch`; NOT for `/init` or project bootstrap;
   NOT for a generic one-off edit to CLAUDE.md.
 effort: medium
 ---

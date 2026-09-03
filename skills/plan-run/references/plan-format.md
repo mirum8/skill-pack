@@ -33,6 +33,13 @@ this" and "a person must", and `/r:spec-design` puts everything on the wrong sid
 `## Resolve first`. Never promote an unnumbered entry into the run list, and never number one
 yourself.
 
+**A `- [ ]` outside a `### Phase N` block is not an item this skill ticks.** The entries under
+`## Resolve first` carry checkboxes too, and they look identical — but a phase item is ticked here
+at Step 3.6, from criteria a review verified, while a Resolve-first entry is closed by a person
+answering a question, which only `/r:plan-unblock` does. Two writers on one file stay apart by
+staying inside their own sections: locate an item by its verbatim text *within the phase block*,
+never by scanning the document.
+
 **`## v1 (MVP)` and `## Advanced` are readability headings, not scopes.** Numbering runs continuously
 across both, so `Phase 8` is unambiguous under either. Use `--to` to stop at the v1 line; never
 renumber and never restart a count at a heading.

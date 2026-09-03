@@ -53,7 +53,7 @@ skills-directory case. Whether plugin discovery follows a *symlinked* entry is
 documented neither way, and it fails identically to a malformed manifest, so the
 pack does not rely on it.
 
-## The twenty-two skills
+## The twenty-three skills
 
 | command | does |
 |---|---|
@@ -71,6 +71,7 @@ pack does not rely on it.
 | `/r:spec-design` | docs → `todo.md` + `design.md`: milestones, contracts, leaves and a dependency graph; rewrites a plan that already exists rather than overwriting it |
 | `/r:plan-run` | build a whole `todo.md` phase by phase; non-overlapping phases can run in parallel sessions |
 | `/r:plan-report` | one finished milestone → a self-contained HTML report: design as built, SVG diagrams, cited snippets |
+| `/r:plan-unblock` | settle a plan's `## Resolve first` blockers — probe what the repo answers, ask a person the rest |
 | `/r:hexagonal-architecture` | Hexagonal Lite boundaries: what lives in core, what a module may import |
 | `/r:tests-write` | JVM test conventions; loads proactively on Java/Kotlin work |
 | `/r:test-app-create` | scaffold a project-local `/test-app` for the detected stack |
@@ -99,9 +100,10 @@ auto-loaded this" from "the model was told to run this" — and `task-run`'s Ste
 is *required* to invoke `/r:task-review`. With the flag on, that step could not
 reach it and the mandatory review would be something the user has to type. For
 that one skill the no-auto-fire rule is carried by its description and its
-non-negotiables instead. `plan-report` is the second such case, for the same
-reason: `/r:plan-run` invokes it at each milestone boundary, so a flag would block
-the boundary along with the auto-load it was meant to stop.
+non-negotiables instead. `plan-report` and `plan-unblock` are the
+second and third such cases, for the same reason: `/r:plan-run` invokes one at
+each milestone boundary and offers the other at its Step 1 gate, so a flag would
+block those along with the auto-load it was meant to stop.
 
 The eight agents in `agents/` are what the review fan-out dispatches to — four
 bug hunters, two build runners, and two stack-specific implementers.

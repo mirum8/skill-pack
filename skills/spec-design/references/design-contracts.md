@@ -12,11 +12,14 @@ no tool reads and every human does.
 
 Spec: `spec.html` · Sources: `spec.html`, `docs/pricing-prd.md` · Status: draft
 Milestones 1–2 deliver v1. Each leaf is scoped to roughly one Claude Code session.
-Everything under "Resolve first" needs a person, not an agent.
+Everything under "Resolve first" is closed by a person, or by `/r:plan-unblock` asking one.
 
 ## Resolve first
-- **Debezium against RDS** — can it read our instance, or do we need a polling fallback?
-  Owner: platform. Blocks: Phase 7. Timebox: one afternoon. Output: a line in the spec's Risks.
+- [ ] **Debezium against RDS** — can it read our instance, or do we need a polling fallback?
+      Owner: platform. Blocks: Phase 7. Timebox: one afternoon. Output: a line in the spec's Risks.
+- [x] **Queue vs cron for retries** — which drives them?
+      Owner: platform. Blocks: Phase 9. Timebox: an hour. Output: a line in `design.md`.
+      Resolved: 2026-06-04 — a queue; cron cannot honour the 30s target. Alternative: cron.
 
 ## Waves
 <!-- generated from the Depends on edges — regenerate, never hand-edit -->
@@ -64,6 +67,25 @@ need, because `/r:task-run` sees one leaf block and nothing else.
 
 A `--shallow` plan has no `design.md` at all — it skips the design pass, and a contracts file left
 beside a plan that never had contracts is worse than none.
+
+### The `Resolve first` entry, and why it is a checkbox
+
+**Write every entry as `- [ ]`.** It is the only thing that can ever be flipped, and
+`/r:plan-run`'s gate reads exactly that: an unticked entry stops the phases its `Blocks:` line
+names. An entry with no checkbox can never be closed, so the gate can only ever fire — which is
+what a plain bullet here used to mean.
+
+Four fields, and `Blocks:` is the load-bearing one. **It is the only edge**: a phase number in the
+subject is part of the subject, and an entry whose `Blocks:` is missing or names no phase blocks
+the **entire run list**, because nothing can tell what it was guarding.
+
+A closed entry keeps its `Resolved:` line — the date, the decision, and the force that settled it —
+and that line is the **single record**. It is not copied into `design.md`: a rewrite replaces both
+files together, so the copy there would be destroyed by the very step a resolution usually triggers.
+
+`/r:plan-unblock` is what closes these. It is also the only thing that may write in this section:
+`/r:task-run` is forbidden by name from adding a bullet here, because an agent-authored entry is a
+claim about who decided something.
 
 ## The three levels
 

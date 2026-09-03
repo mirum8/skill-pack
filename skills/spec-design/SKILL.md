@@ -331,6 +331,15 @@ Both go in an unnumbered **`## Resolve first`** above the milestones, each with 
 which leaf it blocks. Unnumbered keeps them out of `/r:task-run`'s reach — it looks for
 `### Phase N` — while leaving them where the reader will see them.
 
+**Write each one as a `- [ ]` checkbox**, with `Owner:`, `Blocks:`, `Timebox:` and `Output:` on the
+line below. The checkbox is what makes the entry closable: `/r:plan-run` gates on unticked entries,
+and one written as a plain bullet can never be flipped, so it stops the phases it names forever.
+`Blocks:` is the only edge — an entry that names no phase blocks the entire run list, since nothing
+can tell what it was guarding. The shape is in
+[references/design-contracts.md](references/design-contracts.md), and `/r:plan-unblock` is what
+closes these: it probes what the repo can answer, puts the rest to a person, and stamps each entry
+with what settled it.
+
 ## Step 6.5 — Codex challenges the plan
 
 The draft is complete and nothing is on disk. Before the user sees it, have the **real Codex**
@@ -401,7 +410,13 @@ python3 "${CLAUDE_SKILL_DIR}/scripts/check_todo.py" <draft>/todo.md \
     --spec docs/<topic>/spec.html \
     --design <draft>/design.md \
     --against docs/<topic>/todo.md      # rewrite only — the plan this one replaces
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/plan-unblock/scripts/resolve_scope.py" <draft>/todo.md --check
 ```
+
+The second one is the `## Resolve first` half, and it runs **unconditionally** — deciding whether
+that section is empty is the parse it exists to do. It exits 1 on any finding: an entry with no
+checkbox, no `Owner:`, no readable `Blocks:`, a `Blocks:` naming a phase this plan does not have,
+or a tick with nothing recording what settled it.
 
 Fix everything it reports, then re-run. It catches stories with no leaf, leaves with no story,
 missing "done when", oversized leaves, numbering gaps, files referenced before they are created,
@@ -480,7 +495,9 @@ On a rewrite, both files are replaced together. If the plan is tracked, leave it
 change and say so — `git diff` is the best record of what the rewrite moved.
 
 Report the leaf count, where the v1 line falls, the wave table, and anything you had to assume.
-**Lead with `## Resolve first` if it isn't empty** — those block real leaves and need a person. On a
+**Lead with `## Resolve first` if it isn't empty** — those block real leaves and need a person, so
+offer `/r:plan-unblock docs/<topic>/todo.md` beside `/r:plan-run`: nothing else closes them, and
+`/r:plan-run` will stop on them. On a
 rewrite, repeat the migration counts and say which phase numbers moved, since anyone holding an
 earlier `--from N` has a stale one.
 
@@ -566,7 +583,9 @@ the only thing that will ever notice it drifting.
   real code.
 - Never let a leaf item point at the milestone. The implementer cannot see it.
 - Never write a leaf whose "done when" nobody can run.
-- Never number work that isn't buildable — a decision or a signature goes in `Resolve first`.
+- Never number work that isn't buildable — a decision or a signature goes in `Resolve first`,
+  as a `- [ ]` checkbox with a `Blocks:` line. An entry nobody can tick blocks its phases
+  forever, and one that names no phase blocks the whole plan.
 - Never omit `Depends on:`. Without the graph nothing can be built concurrently and nothing checks
   the order.
 - Never renumber leaves per milestone, and never start at 0.

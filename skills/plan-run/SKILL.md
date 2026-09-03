@@ -164,15 +164,49 @@ Take every `### Phase N` block, in **numeric order**, and keep per phase:
   overrides the checkboxes in one direction only — it may re-run a phase marked done (the user asked
   for it), and it never resurrects a phase before it.
 
-**`## Resolve first` is a gate, not a phase.** Anything unticked under that heading needs a
+**`## Resolve first` is a gate, not a phase.** Anything unresolved under that heading needs a
 *person* — an unknown to settle, a contract to sign, a decision to make — and `/r:spec-design` puts
-it there to keep it out of an agent's reach. If it holds unticked entries, **list them with the
-phase each one says it blocks, and stop for the user**, unless every blocked phase falls outside
-the run list. Never treat one as buildable and never number it yourself.
+it there to keep it out of an agent's reach. Never treat one as buildable and never number it
+yourself.
+
+**Ask the script, once the run list is known:**
+
+```sh
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/plan-unblock/scripts/resolve_scope.py" <plan> \
+    --outstanding --phases <the run list, comma-separated>
+```
+
+Pass the **post-done-filter** list — the phases this run will actually build, after `done` and
+`--from`/`--to` — because that is exactly the carve-out: an entry blocking a phase nobody is
+building today does not stop today's run. `gate` is the whole answer, and it is computed rather
+than eyeballed: `"stop"` or `"clear"`. Three of its inputs are places a prose read fails open, so
+do not second-guess them — an entry with no checkbox is **unresolved** (it cannot be ticked, and
+plans written before that shape carry no checkbox at all); an entry whose `Blocks:` is missing or
+names no phase blocks the **entire** run list, because nothing can tell what it was guarding; and a
+blocked phase that is already built is returned in `blockedPhasesBuilt` and drops out, so a stale
+blocker is moot rather than a permanent trap.
+
+On `"stop"`, **list the outstanding entries with the phase each one blocks, and stop for the
+user** — then offer the way out, because a bare halt leaves them hand-editing a plan file:
+
+```
+Resolve first: 2 outstanding
+  "Debezium against RDS"   blocks Phase 7   owner: platform
+  "Sign the payments DPA"  blocks Phase 2   owner: legal
+  → /r:plan-unblock <plan> settles these, then re-run this command.
+```
+
+**The offer is terminal, not a dispatch.** This step parsed the plan once; resuming after the
+entries were closed would build from a run list that predates them. And offer it **only** from an
+attended run in the primary tree — never under `--unattended`, `--no-merge` or `--dry-run`. A
+`--cmux` unit is a full session that reaches this same gate with nobody in front of it, and
+`/r:plan-unblock` closes entries by asking a person; offered there it would interview an empty
+room and write the answers into the plan as settled.
 
 **Under `--unattended`, drop the blocked phases from the run list and build the rest**, naming both
 halves in the report. The blocker still needs a person and no blocked phase is built — one
-unresolved question stops one phase, not the night.
+unresolved question stops one phase, not the night. `blocksEverything` is the exception it cannot
+work around: an entry that names no phase blocks all of them, so there is nothing left to build.
 
 If the run list is empty, say why — "every phase in `docs/billing/todo.md` is ticked", "`--from 9`
 is past the last phase" — and stop.
@@ -192,7 +226,7 @@ Phase  Title                        Tier      Files (from the plan)             
 7      Retry failed payouts         full      PayoutRetryJob · V9__retry.sql    mvn -pl payments test
 
 Plan check: 2 notes (Phase 6 has no Files: line; Phase 7 is 14 items, over the 12 guideline)
-Resolve first: none outstanding
+Resolve first: none outstanding for these phases (1 open, blocks Phase 11, out of this run)
 ```
 
 - **Tier** is `full` where the phase carries a `**Risk:**` line and blank otherwise (Step 3.3
@@ -918,7 +952,8 @@ A question is not a halt. Where an attended run stops for input, an unattended o
 question, builds everything that does not depend on the answer, and reports the queue at the end**:
 
 - **`## Resolve first` blockers** (Step 1) — drop the phases they block out of the run list, build
-  the rest, and name them.
+  the rest, and name them. Never dispatch `/r:plan-unblock`: it closes entries by asking a person,
+  and there is nobody here to ask.
 - **Two candidate plans with nothing to choose between them** (Step 0) — take the first by the
   documented order and say which.
 - **An ambiguous item mid-run** — queue it and carry on.
@@ -1046,6 +1081,7 @@ Worked around:
 Needs you:
   Phase 8  "the retry window" is not defined anywhere in the plan or the spec — built to 24h, say if wrong
   Resolve first: "sign the payments contract" blocks Phase 11, which was dropped from the run list
+                 /r:plan-unblock docs/billing/todo.md settles it
 ```
 
 Print both sections even when empty — "Worked around: nothing" is information, and its absence
@@ -1058,7 +1094,7 @@ Then record one line into the pack-wide store — counts only, never phase title
 python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
 {"skill":"r:plan-run","mode":"serial","phasesInPlan":0,"phasesInRun":0,"merged":0,"landed":0,
  "alreadyDone":0,"doneCheckRan":0,"doneCheckFailed":0,"haltedAt":null,"haltReason":null,
- "unattended":false,"degraded":0,"questionsQueued":0,
+ "unattended":false,"degraded":0,"questionsQueued":0,"resolveFirstOutstanding":0,
  "milestonesInPlan":0,"milestoneReports":0,"reportsSkipped":0}
 STATS_JSON
 ```
@@ -1126,8 +1162,12 @@ merged, landed or ticked. Never retry it.
 - **Force the tier only where the plan does.** `profile: "full"` when the phase carries a `Risk:`
   line; omit `profile` entirely when it doesn't. A missing `Risk:` line means the planner made no
   claim, not that the phase is low risk.
-- **`## Resolve first` is never buildable.** Unticked entries there block the phases they name and
-  need a person. List them and stop; never number one, never hand one to the implement Workflow.
+- **`## Resolve first` is never buildable, and the gate's answer comes from the script.** Run
+  `resolve_scope.py --outstanding --phases <run list>` and read its `gate`; never decide by eye
+  which entries are open, what they block, or whether the run may proceed — all three wrong answers
+  are confident and silent. List the outstanding ones and stop, offering `/r:plan-unblock` when the
+  run is attended and in the primary tree. Never number one, never tick one, never hand one to the
+  implement Workflow.
 - **Tick only what was built and verified, after the review and before the commit.** A partial phase
   leaves partial ticks — an honest record, not a defect. A phase ticked before its review, or after
   its commit, is one whose "built" and "done" no longer revert together.

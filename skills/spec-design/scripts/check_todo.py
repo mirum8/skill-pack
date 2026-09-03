@@ -190,6 +190,27 @@ def ticked_items(block):
     return [" ".join(i.split()) for i in re.findall(r"^\s*-\s*\[[xX]\]\s*(.+)$", block, re.M)]
 
 
+def resolved_entries(text):
+    """The subject line of every CLOSED `## Resolve first` entry, whitespace collapsed.
+
+    A resolution is a decision somebody made, and the entry's `Resolved:` line is the only place
+    the plan keeps it -- deliberately, because a copy in design.md would be destroyed by the very
+    rewrite this function guards. So a closed entry is frozen for the same reason a ticked leaf is:
+    dropping it loses the record, and the plan then reads as though the question is still open.
+    """
+    m = re.search(r"^##\s+Resolve\s+first\b(.*?)(?=^#{1,6}\s|\Z)", text, re.M | re.S | re.I)
+    if not m:
+        return []
+    out = []
+    for chunk in re.split(r"(?=^ {0,1}[-*]\s)", m.group(1), flags=re.M):
+        if not re.match(r"^\s*[-*]\s*\[[xX]\]", chunk):
+            continue
+        head = " ".join(chunk.split())
+        name = re.search(r"\*\*(.+?)\*\*", head)
+        out.append(name.group(1).strip() if name else head[:60])
+    return out
+
+
 def check_against(prev_text, new_text, out):
     """The mechanical guard on the freeze rule.
 
@@ -199,6 +220,13 @@ def check_against(prev_text, new_text, out):
     that is the point of rewriting -- so this reads only the frozen set, and says nothing about the
     rest.
     """
+    kept = {n.lower() for n in resolved_entries(new_text)}
+    for name in resolved_entries(prev_text):
+        if name.lower() not in kept:
+            out(f"a resolved 'Resolve first' entry is gone from the rewrite: {name[:60]!r}. Its "
+                f"Resolved: line is the only record of that decision -- carry it over, or the plan "
+                f"reads as though nobody ever settled it.")
+
     prev = phase_blocks(prev_text)
     if not prev:
         # An unnumbered plan (a hand-written backlog) has no leaves to match, but its ticks still
@@ -328,13 +356,16 @@ def main():
             f"belong in an unnumbered '## Resolve first' section, not Phase 0")
     if nums != list(range(nums[0], nums[0] + len(nums))):
         out(f"phase numbers have gaps or repeats: {nums}")
-    if not re.search(r"^\s*-\s*\[ \]", t, re.M):
-        out("no '- [ ]' checkboxes — /r:task-run reads these as acceptance criteria")
+    # --- per-phase --------------------------------------------------------------
+    blocks = re.split(r"(?=^###\s+Phase\s+\d+)", t, flags=re.M)[1:]
+    # Scoped to the PHASE blocks, never the whole file. `## Resolve first` entries carry checkboxes
+    # of their own, so a whole-file search would find one there and pass a plan whose leaves have no
+    # acceptance criteria at all -- which is the only thing this check was ever about.
+    if not re.search(r"^\s*-\s*\[ \]", "".join(blocks), re.M):
+        out("no '- [ ]' checkboxes under any phase — /r:task-run reads these as acceptance criteria")
     if not re.search(r"^##\s", t, re.M):
         out("no v1 / Advanced headings")
 
-    # --- per-phase --------------------------------------------------------------
-    blocks = re.split(r"(?=^###\s+Phase\s+\d+)", t, flags=re.M)[1:]
     created, referenced = set(), []
     deps, files_of, title_of, done_of = {}, {}, {}, {}
     for num, b in zip(nums, blocks):

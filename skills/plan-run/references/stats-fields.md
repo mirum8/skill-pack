@@ -68,3 +68,12 @@ indistinguishable from a pack full of plans with no milestones, which is exactly
 A `no-merge` unit leaves all three at zero: it never merges, so it never reaches the boundary. A
 `cmux` or `land` row is where a concurrent wave's reports appear, for the same reason `landed`
 does — the orchestrator owns the merge, and the boundary sits behind it.
+
+**`resolveFirstOutstanding` is how often the gate actually fires.** It is the count of unresolved
+`## Resolve first` entries the script found, whatever the run then did about them — zero on the
+plans that carry none, which is most of them. Nothing recorded this before, so "how often does a
+plan stop on a question nobody answered" has never been answerable, and the mechanism was argued
+from first principles alone. Read it against `phasesInRun`: a non-zero count on a run that still
+built everything is the carve-out working (the blocked phases were out of scope); a non-zero count
+with `phasesInRun: 0` is a plan that could not start at all, which is the case `/r:plan-unblock`
+exists for.

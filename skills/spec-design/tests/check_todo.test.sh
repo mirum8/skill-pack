@@ -471,6 +471,86 @@ design <<'EOF'
 EOF
 designs "two copies of one contract are reported" "still carries an inline"
 
+echo "== the acceptance-criteria check reads PHASE blocks, not the whole file =="
+# `## Resolve first` entries carry checkboxes of their own now. A whole-file search finds one
+# there and passes a plan whose leaves have no criteria at all -- the only thing this check is for.
+plan <<'EOF'
+# P
+
+## Resolve first
+- [ ] **An open question** — someone has to answer this.
+      Owner: platform. Blocks: Phase 1.
+
+## Milestone 1 — M
+
+### Phase 1 — Ledger schema
+**Implements:** S
+**Depends on:** —
+**Files:** `a.java` (new)
+**Done when:** `mvn test` is green.
+EOF
+says "a phase with no criteria is still reported" "checkboxes under any phase"
+plan <<'EOF'
+# P
+
+## Resolve first
+- [ ] **An open question** — someone has to answer this.
+      Owner: platform. Blocks: Phase 1.
+
+## Milestone 1 — M
+
+### Phase 1 — Ledger schema
+**Implements:** S
+**Depends on:** —
+**Files:** `a.java` (new)
+- [ ] the migration exists
+**Done when:** `mvn test` is green.
+EOF
+silent "and a plan whose phases have them is quiet" "checkboxes under any phase"
+
+echo
+echo "== a rewrite may not drop a decision somebody made =="
+# The Resolved: line is the ONLY record of the decision -- deliberately, since a copy in design.md
+# would be destroyed by this very rewrite. Dropping it makes the plan read as though the question
+# is still open, which is the same loss as an un-ticked leaf.
+prev <<'EOF'
+# P
+
+## Resolve first
+- [x] **Queue vs cron** — which drives retries?
+      Owner: platform. Blocks: Phase 2.
+      Resolved: 2026-06-04 — a queue; cron cannot honour the 30s target.
+
+### Phase 1 — A
+- [x] built
+**Done when:** green.
+EOF
+plan <<'EOF'
+# P
+
+## Resolve first
+- [ ] **Something else entirely** — a new question.
+      Owner: platform. Blocks: Phase 1.
+
+### Phase 1 — A
+- [x] built
+**Done when:** green.
+EOF
+against "a dropped resolution is reported" "resolved 'Resolve first' entry is gone"
+plan <<'EOF'
+# P
+
+## Resolve first
+- [x] **Queue vs cron** — which drives retries?
+      Owner: platform. Blocks: Phase 2.
+      Resolved: 2026-06-04 — a queue; cron cannot honour the 30s target.
+
+### Phase 1 — A
+- [x] built
+**Done when:** green.
+EOF
+against_silent "one carried over is not" "resolved 'Resolve first' entry is gone"
+
 echo
 printf '  %d passed, %d failed\n' "$pass" "$fail"
 [[ $fail == 0 ]]

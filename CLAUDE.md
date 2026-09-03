@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repository is
 
-The source of `r`, a **skills-directory plugin** for Claude Code: 22 skills (`/r:<name>`) and the
+The source of `r`, a **skills-directory plugin** for Claude Code: 23 skills (`/r:<name>`) and the
 8 agents they dispatch. There is no application here — the "product" is prose (`SKILL.md`),
 workflow scripts, agent definitions and a hook, all loaded by Claude Code itself.
 
@@ -47,6 +47,7 @@ bash skills/code-adversarial/tests/run.test.sh              # the Codex wrapper'
 bash skills/task-review/tests/worktree-deploy.test.sh       # main-vs-worktree + compose isolation
 bash skills/test-app-create/tests/tui-session.test.sh       # the TUI driver's fail-closed contract
 bash skills/plan-report/tests/milestone_scope.test.sh       # milestone scope + the boundary predicate
+bash skills/plan-unblock/tests/resolve_scope.test.sh        # the Resolve-first parser + the gate
 bash hooks/tests/guard.test.sh                             # workflow-guard behaviour
 bash lib/tests/stats.test.sh                               # stats sink + hook + reporter
 bash tests/install.test.sh                                 # installer behaviour
@@ -179,6 +180,32 @@ a halt — the milestone's code is already merged, and no plan should stop over 
 three numbers necessary rather than one, because a missing report has three causes needing opposite
 fixes: `milestonesInPlan: 0` is a plan that owed none, `milestoneReports: 0` under a non-zero
 `milestonesInPlan` is a run that finished no milestone, and only `reportsSkipped` is a failure.
+
+**`## Resolve first` is closed by one skill and read by three, so its shape is a script.**
+`/r:spec-design` writes the section, `/r:plan-run` gates on it, `/r:plan-unblock` closes it, and
+`check_todo.py --against` freezes what it closed. Every one of those is the same judgement — is
+this entry still open, and what does it hold up — and it fails by returning a confident wrong
+answer at the last point before a build, so it lives in
+`plan-unblock/scripts/resolve_scope.py` and nowhere else. Four of its rules fail **closed**,
+because each is a way the section could tell a run it was clear when it wasn't: an entry with no
+checkbox is unresolved (the pre-checkbox template wrote plain bullets, and reading those as settled
+would close every existing entry at once); an entry whose `Blocks:` is missing or names no phase
+blocks the **entire** run list, since nothing can say what it was guarding; a tick with no
+`Resolved:` line counts as closed and is reported, because somebody clearly closed it and nothing
+records what they decided; and an entry the classifier cannot place is **a person's job, not a
+decision** — a decision misfiled as paperwork waits for a human who says "just decide it", while
+paperwork misfiled as a decision gets closed by an interview and the plan then claims a contract
+exists. The blocked-phase check is the one that goes the other way: a blocker on a phase that is
+already built is returned as moot rather than enforced, or nothing could ever close it.
+
+**Only a person closes one, which is why silence is not an answer.** `/r:plan-unblock` takes the
+recommendation when the user *says* they don't know — that is an answer — and halts with
+`no-human` when there is nobody to ask at all. `/r:plan-run` therefore offers it only from an
+attended run in the primary tree: a `--cmux` unit is a full session that reaches the same gate with
+an empty room in front of it, and `--unattended` keeps queueing rather than dispatching. The
+`Resolved:` stamp in the plan is the **single** record — never a copy in `design.md`, which a
+`/r:spec-design` rewrite replaces wholesale, and that rewrite is exactly the follow-up a resolution
+tends to trigger. `--against` is what makes the stamp durable instead.
 
 **Every workflow edit needs its control-flow test.** `tests/control-flow.test.mjs` executes the
 script with `agent()`/`parallel()`/`phase()`/`log()` stubbed and asserts the branches — what stops
@@ -444,9 +471,10 @@ from a suite that passes. So read the case count `run-evals.py` prints, never th
 `task-review` must not self-trigger either, but carries **no** flag: the flag blocks the Skill tool
 outright and cannot tell an auto-load from a deliberate call, so it also blocked `task-run`'s
 mandatory Step 5 from invoking the review. There the rule lives in the description and the
-non-negotiables — don't "fix" it back. `plan-report` is the second unflagged case and the same
-trade: `plan-run`'s milestone boundary invokes it through a subagent's Skill tool, which a flag
-would block along with the auto-load it was meant to stop.
+non-negotiables — don't "fix" it back. `plan-report` and `plan-unblock` are the second and third
+unflagged cases and the same trade: `plan-run`'s milestone boundary invokes one through a
+subagent's Skill tool and its Step 1 gate offers the other, which a flag would block along with the
+auto-load it was meant to stop.
 
 **Real tools, or a named skip.** The pipelines call `gh`, the real Codex review, real build runners,
 `agent-browser`, `tmux`, `code-scan`. Never substitute a model-written prose imitation — a

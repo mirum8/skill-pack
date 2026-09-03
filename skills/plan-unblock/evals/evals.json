@@ -1,0 +1,118 @@
+{
+  "skill_name": "plan-unblock",
+  "evals": [
+    {
+      "id": 0,
+      "name": "routing-triggers",
+      "kind": "trigger",
+      "prompt": "docs/billing/todo.md has a Resolve first list with three open items on it and I can't start Phase 7 until they're sorted — work through them with me",
+      "expected_output": "plan-unblock loads, runs resolve_scope.py rather than reading the section by eye, reports each entry as a decision or a person's job with the phase it blocks, probes the repo where a timeboxed read would answer one, puts the rest to the user with a recommendation, and ticks each resolved entry with a Resolved: line naming what settled it.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 1,
+      "name": "routing-triggers-short-form",
+      "kind": "trigger",
+      "prompt": "what's actually still blocking us on this plan, and can we close any of it today?",
+      "expected_output": "plan-unblock loads, discovers the plan, and answers from the script's output — which entries are outstanding, which phases they block, which are already moot because the phase got built anyway.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 2,
+      "name": "routing-excludes-plan-run",
+      "kind": "neighbour-exclusion",
+      "neighbour": "plan-run",
+      "prompt": "build the rest of docs/billing/todo.md — every phase that's still unticked",
+      "expected_output": "Building the plan is plan-run's job; plan-unblock must not load, because it builds nothing and only writes inside the Resolve first section.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 3,
+      "name": "routing-excludes-spec-design",
+      "kind": "neighbour-exclusion",
+      "neighbour": "spec-design",
+      "prompt": "now that we've settled the Debezium question, re-plan docs/billing/todo.md around a polling fallback",
+      "expected_output": "Re-phasing a plan is spec-design's job; plan-unblock must not load, because it never renumbers a phase, regenerates the wave table or rewrites the graph.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 4,
+      "name": "routing-excludes-plan-run-merge-conflicts",
+      "kind": "neighbour-exclusion",
+      "neighbour": "plan-run",
+      "prompt": "phase 6 and phase 7 both touched PayoutService and the merge is conflicted — resolve it",
+      "expected_output": "A conflicted merge is plan-run's --auto-resolve and merge-resolve.py; plan-unblock must not load, despite sharing the word, because it settles open questions in a plan document and touches no git merge state.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 5,
+      "name": "a-signature-is-never-closed-by-an-interview",
+      "kind": "behaviour",
+      "prompt": "/r:plan-unblock docs/billing/todo.md --yes",
+      "expected_output": "The entry 'Sign the payments DPA' is classified person and stays OPEN. --yes takes the recommendation on every decision and reaches none of the person entries: nothing closes one but the user saying it is done. The run reports it as still outstanding rather than ticking it and moving on.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 6,
+      "name": "no-human-halts-instead-of-defaulting",
+      "kind": "behaviour",
+      "prompt": "/r:plan-unblock docs/billing/todo.md",
+      "expected_output": "With no human able to answer — an unattended session — the run records blocked: 'no-human', ticks nothing and stops. It does NOT fall through to the recommendation: 'I don't know' from the user is an answer and takes the default, but silence is not one, and a default written into the plan as settled is the lie this section exists to prevent.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 7,
+      "name": "an-unclassified-entry-fails-closed-to-person",
+      "kind": "behaviour",
+      "prompt": "/r:plan-unblock docs/billing/todo.md",
+      "expected_output": "An entry matching no pattern comes back kind: unclassified and is presented as a person's job, not as a decision — and the run says out loud that it could not classify it, so the user can correct a real decision no pattern matched. The fail-closed direction is the one that cannot close paperwork by asking a model.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 8,
+      "name": "a-legacy-bullet-is-migrated-not-read-as-settled",
+      "kind": "behaviour",
+      "prompt": "/r:plan-unblock docs/billing/todo.md",
+      "expected_output": "An entry written as a plain '- **Name** — ...' bullet with no checkbox reads as OUTSTANDING and is rewritten into the checkbox form, with the count reported. It is never read as resolved: that reading would close every pre-existing entry in every plan at once, silently, on the first run.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 9,
+      "name": "the-plan-is-written-only-inside-its-own-section",
+      "kind": "behaviour",
+      "prompt": "/r:plan-unblock docs/billing/todo.md",
+      "expected_output": "Resolving an entry ticks that entry and adds its Resolved: line, and changes nothing else in the plan — no phase item, no phase heading, no ## Waves, no renumbering — then commits the plan file alone on base. A '- [ ]' inside a phase block belongs to /r:plan-run, which ticks it after a review that verified it.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 10,
+      "name": "a-blocker-on-a-built-phase-is-moot-not-a-halt",
+      "kind": "behaviour",
+      "prompt": "/r:plan-unblock docs/billing/todo.md",
+      "expected_output": "An open entry whose Blocks: names a phase that is already built is reported as moot up front, with an offer to close it on that basis. It does not trap the run, and the skill does not silently tick it either — the script names it, the user closes it.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    }
+  ]
+}
