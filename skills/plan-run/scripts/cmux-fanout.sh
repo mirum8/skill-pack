@@ -113,6 +113,21 @@ mkdir -p "$state"
 
 rec()      { printf '%s/%s.rec' "$state" "$1"; }
 sentinel() { printf '%s/%s.sentinel' "$state" "$1"; }
+# Written by the CHILD, before it execs claude. See `started` in spawn below.
+startmark() { printf '%s/%s.started' "$state" "$1"; }
+
+# Single-quote a string for a shell command line. `'` closes the quote, so each one becomes
+# '\'' -- close, an escaped literal quote, reopen.
+#
+# The prompt is a DOCUMENTED input that callers are told to compose as free prose, and prose about
+# a checklist quotes the checklist. Interpolated raw into "... '$prompt' ...", one apostrophe ends
+# the quoting and the rest of the prompt is parsed as shell: an observed spawn hit `<port>`, which
+# zsh read as an input redirection, and the child sat at a `quote>` continuation prompt forever.
+# Nothing caught it -- a shell WAS running, so `status` said live for twenty minutes and `wait`
+# would have blocked on a sentinel nobody was going to write. The workaround this forced on the
+# caller -- "no apostrophes, no angle brackets" -- is a real restriction on what an orchestrator can
+# tell a unit, and no caller should have to know it.
+shq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 # Written by `wait --any` when it hands a unit's verdict back, and removed with
 # the unit by `cleanup`. It exists because the caller is REQUIRED to leave a
 # failed unit standing -- workspace open, worktree in place, since that state is
@@ -317,6 +332,8 @@ do_spawn() {
 
   local sfile; sfile=$(sentinel "$id")
   rm -f "$sfile"
+  local startf; startf=$(startmark "$id")
+  rm -f "$startf"
 
   local out ws
   # `claude <prompt>` starts a normal interactive session with the prompt already
@@ -330,9 +347,9 @@ do_spawn() {
   # Both spellings of the pack root, so the unit can run the canonical pipelines rather than
   # discovering at its implement step that it cannot reach them (see PACK_ROOT_REAL above).
   local add_dirs=""
-  [ -n "$PACK_ROOT" ] && add_dirs=" --add-dir '$PACK_ROOT'"
+  [ -n "$PACK_ROOT" ] && add_dirs=" --add-dir $(shq "$PACK_ROOT")"
   [ -n "$PACK_ROOT_REAL" ] && [ "$PACK_ROOT_REAL" != "$PACK_ROOT" ] \
-    && add_dirs="$add_dirs --add-dir '$PACK_ROOT_REAL'"
+    && add_dirs="$add_dirs --add-dir $(shq "$PACK_ROOT_REAL")"
   # The prompt goes BEFORE the directories, never after: `--add-dir <directories...>` is variadic,
   # so a positional that follows it is eaten as one more path and the session comes up empty --
   # `claude -p --add-dir /tmp 'x'` answers "Input must be provided", the prompt already gone. That
@@ -341,7 +358,7 @@ do_spawn() {
   if ! out=$(CMUX_QUIET=1 cmux workspace create \
                 --name "$id" --cwd "$dir" --focus false \
                 --env "CMUX_FANOUT_SENTINEL=$sfile" ${orch_env[@]+"${orch_env[@]}"} \
-                --command "claude --permission-mode auto '$prompt'$add_dirs" 2>&1); then
+                --command "printf ok > $(shq "$startf"); exec claude --permission-mode auto $(shq "$prompt")$add_dirs" 2>&1); then
     git worktree remove --force "$dir" >/dev/null 2>&1 || true
     die "spawn: cmux workspace create failed: $out"
   fi
@@ -362,6 +379,22 @@ do_spawn() {
            | grep -E "(^|[[:space:]])$ws([[:space:]]|$)" \
            | grep -oiE '[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}' | head -1)
 
+  # A workspace that CREATED is not a session that STARTED. The child writes this marker as its
+  # first act and then execs claude, so its absence means the shell never reached the exec -- a
+  # malformed command line, a missing binary, a shell sitting at a continuation prompt. Every one of
+  # those leaves a live shell behind, which is why `status` reported a stuck unit as live for twenty
+  # minutes and `wait` would have blocked forever on a sentinel nobody was going to write. From the
+  # orchestrator a hung child and a working implement pass are the same row and the same silence, so
+  # this is the one moment the difference is cheap to observe -- and observing it is what this whole
+  # script exists to do.
+  local waited=0
+  while [ ! -f "$startf" ] && [ "$waited" -lt 15 ]; do sleep 1; waited=$((waited + 1)); done
+  if [ ! -f "$startf" ]; then
+    [ -n "$uuid" ] && CMUX_QUIET=1 cmux workspace close "$uuid" >/dev/null 2>&1
+    git worktree remove --force "$dir" >/dev/null 2>&1 || true
+    die "spawn: unit '$id' never started — the workspace came up but the child did not reach \`claude\` within ${waited}s. Its shell is still live, so a status check would have called this unit healthy; refusing to report it as spawned."
+  fi
+
   {
     printf 'id=%s\n' "$id"
     printf 'dir=%s\n' "$dir"
@@ -369,6 +402,7 @@ do_spawn() {
     printf 'workspace=%s\n' "$ws"
     printf 'workspace_uuid=%s\n' "$uuid"
     printf 'sentinel=%s\n' "$sfile"
+    printf 'started=%s\n' "$startf"
     printf 'marker_file=%s\n' "$mfile"
     printf 'marker_prefix=%s\n' "$mprefix"
     printf 'orchestrator=%s\n' "$orch"

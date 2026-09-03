@@ -124,8 +124,32 @@ Four parts, and the first two are the ones that carry it:
 reader is missing. Cutting that premise to save two lines defeats the whole thing. What you cut is
 anything that repeats the entry, and anything that shows your work.
 
-A `person` entry gets the header and **why this blocks**. Nothing else. No options and no
-recommendation: nothing in this session can close it, and a choice implies otherwise.
+### The brief, then the question
+
+The brief carries the reasoning. `AskUserQuestion` carries the choice. Print one, then call the
+other — one call per entry, and wait. The options you just wrote map straight onto it:
+
+| in the brief | in the tool |
+|---|---|
+| the option's name | `label` — the recommendation first, with `(Recommended)` |
+| the option's cost | `description` — what it costs and what it forecloses |
+| the entry's label and subject | `header` — `R1 Debezium`, inside twelve characters |
+| the question itself | `question` — one sentence, ending in a question mark |
+
+`multiSelect` is false: an entry is one decision. Do not write an "Other" option — the tool always
+offers one, and that is where a different answer, or an "I don't know", arrives.
+
+**Two to four options**, which is the bar the brief already sets. One real option is a default, not
+a decision: say so and skip the call. More than four means the entry is really two entries, or the
+tail is noise — cut to what a reasonable engineer would weigh, and say what you cut.
+
+Where the options are different *shapes* of code or config rather than different values, put a few
+lines of each in that option's `preview`. The tool renders them side by side, which is the one case
+a table of costs cannot settle.
+
+A `person` entry gets the header and **why this blocks**. Nothing else — no options, no
+recommendation, and **no `AskUserQuestion`**. Nothing in this session can close it, and a list of
+options implies otherwise.
 
 ## 5. A decision, and what makes one recoverable
 

@@ -37,6 +37,21 @@ bad() { fail=$((fail + 1)); printf '  FAIL %s\n     %s\n' "$1" "${2:-}"; }
 # A cmux that answers ping and hands back a fresh workspace ref per create, recording every call so
 # the tests can assert what was actually asked of it.
 STUB="$TMP/stub"; mkdir -p "$STUB"
+# The stub RUNS the child command line (see `workspace create` below) so that a line broken by bad
+# quoting fails here exactly as it fails for real. That command ends in `exec claude ...`, and a
+# real `claude` is on PATH in a developer's shell -- so it is shadowed here. Without this the suite
+# launches live interactive sessions.
+# It records its ARGV, one argument per line, because that is the only thing that can tell correct
+# quoting from a prompt that merely appears somewhere in the command string: a broken quote splits
+# the prompt across several argv entries (or never reaches claude at all), while the raw text still
+# shows up in a log of the command line either way.
+cat > "$STUB/claude" <<'CLAUDE_EOF'
+#!/bin/sh
+: > "${CMUX_CLAUDE_ARGV:-/dev/null}"
+for a in "$@"; do printf '%s\n' "$a" >> "${CMUX_CLAUDE_ARGV:-/dev/null}"; done
+exit 0
+CLAUDE_EOF
+chmod +x "$STUB/claude"
 cat > "$STUB/cmux" <<'STUB_EOF'
 #!/bin/sh
 echo "$@" >> "$CMUX_STUB_LOG"
@@ -44,6 +59,16 @@ case "$1 $2" in
   "ping "*)              [ "${CMUX_STUB_PING:-0}" = 0 ] || exit 1; echo pong; exit 0 ;;
   "workspace create")    n=$(( $(cat "$CMUX_STUB_SEQ" 2>/dev/null || echo 0) + 1 ))
                          echo "$n" > "$CMUX_STUB_SEQ"
+                         # The real child writes its start marker and then execs claude. The stub
+                         # RUNS the --command through a shell so the marker appears exactly when a
+                         # real one would -- which means a command line broken by bad quoting fails
+                         # here the same way it fails for real, and the suite can tell them apart.
+                         [ "${CMUX_STUB_NO_START:-0}" = 0 ] && {
+                           for a in "$@"; do
+                             case $prev in --command) sh -c "$a" >/dev/null 2>&1 || true ;; esac
+                             prev=$a
+                           done
+                         }
                          [ "${CMUX_STUB_CREATE_SILENT:-0}" = 0 ] || exit 0
                          echo "OK workspace:$n"; exit 0 ;;
   "workspace list")      [ "${CMUX_STUB_LIST_FAIL:-0}" = 0 ] || exit 1
@@ -536,6 +561,67 @@ grep -q "copied test-app fixture '.claude/skills/test-app/test_creds.txt'" <<<"$
   || bad "and every copied fixture is named out loud" "$out"
 
 cd "$FX" && git worktree remove --force "$TMP/wt-fx" >/dev/null 2>&1
+cd "$REPO"
+
+echo
+echo "== a prompt is passed to the child intact, apostrophes and all =="
+# The prompt is a DOCUMENTED input and callers are told to compose free prose; prose about a
+# checklist quotes the checklist. Interpolated raw into "... '"'"'$prompt'"'"' ...", one apostrophe closes
+# the quoting and the rest is parsed as shell -- an observed spawn hit `<port>`, zsh read it as an
+# input redirection, and the child sat at a `quote>` prompt forever. Nothing caught it: a shell WAS
+# running, so `status` said live for twenty minutes and `wait` would have blocked on a sentinel
+# nobody was going to write. So both halves are asserted here -- that the prompt survives, and that
+# a child which never reaches `claude` is refused rather than reported as spawned.
+QREPO="$TMP/qrepo"; mkdir -p "$QREPO"
+git -C "$QREPO" init -q -b main; git -C "$QREPO" config user.email t@t; git -C "$QREPO" config user.name t
+printf 'a\n' > "$QREPO/todo.md"; git -C "$QREPO" add -A >/dev/null; git -C "$QREPO" commit -qm base
+QBASE=$(git -C "$QREPO" rev-parse HEAD); trust_repo "$QREPO"
+
+NASTY=$(cat <<'NASTY_EOF'
+don't drop this: open <port> and check "the box" — it's Phase 33
+NASTY_EOF
+)
+ARGV="$TMP/claude-argv"; export CMUX_CLAUDE_ARGV="$ARGV"; rm -f "$ARGV"
+out=$(cd "$QREPO" && PATH="$STUB:$PATH" "$FAN" spawn \
+        --id q1 --dir "$TMP/wt-q1" --base "$QBASE" --prompt "$NASTY" 2>&1); rc=$?
+
+[ "$rc" = 0 ] && ok "a prompt full of quotes and angle brackets spawns cleanly" \
+              || bad "a prompt full of quotes and angle brackets spawns cleanly" "rc=$rc $out"
+# The stub runs the --command through `sh -c`, so a command line broken by bad quoting fails there
+# exactly as it fails for real -- which is what makes this assertion discriminate.
+# ONE argv entry, byte-identical. A prompt that merely appears in the command string proves
+# nothing: that is true of the broken version too, which is what the observed failure looked like.
+got=$(grep -cFx "$NASTY" "$ARGV" 2>/dev/null || echo 0)
+[ "$got" = 1 ] \
+  && ok "and claude receives the prompt as ONE argument, byte for byte" \
+  || bad "and claude receives the prompt as ONE argument, byte for byte" "matched $got line(s) in $(wc -l < "$ARGV" 2>/dev/null || echo 0)-line argv"
+grep -qx -- '--permission-mode' "$ARGV" \
+  && ok "and the flags before it are still their own arguments" \
+  || bad "and the flags before it are still their own arguments" "$(cat "$ARGV" 2>/dev/null)"
+[ -f "$TMP"/cmux-fanout-*/q1.started ] \
+  && ok "and the child recorded that it actually started" \
+  || bad "and the child recorded that it actually started" "no start marker"
+
+echo
+echo "== a child that never reaches claude is NOT reported as spawned =="
+# The second defect, independent of the quoting: a workspace that CREATED is not a session that
+# STARTED, and every failure shape here (bad command line, missing binary, a shell at a continuation
+# prompt) leaves a live shell behind that `status` cannot tell from a working unit.
+out=$(cd "$QREPO" && CMUX_STUB_NO_START=1 PATH="$STUB:$PATH" "$FAN" spawn \
+        --id q2 --dir "$TMP/wt-q2" --base "$QBASE" --prompt 'plain' 2>&1); rc=$?
+[ "$rc" != 0 ] && ok "spawn fails when the child never started" \
+               || bad "spawn fails when the child never started" "rc=$rc $out"
+grep -q "never started" <<<"$out" \
+  && ok "and says so, rather than a generic error" \
+  || bad "and says so, rather than a generic error" "$out"
+[ -e "$TMP/wt-q2" ] \
+  && bad "and the worktree is cleaned up, not left behind" "$TMP/wt-q2 still exists" \
+  || ok "and the worktree is cleaned up, not left behind"
+[ -e "$(ls -d "$TMP"/cmux-fanout-*/q2.rec 2>/dev/null)" ] \
+  && bad "and no unit record is written for a unit that never ran" "q2.rec exists" \
+  || ok "and no unit record is written for a unit that never ran"
+
+cd "$QREPO" && git worktree remove --force "$TMP/wt-q1" >/dev/null 2>&1
 cd "$REPO"
 
 cd "$REPO" && git worktree remove --force "$TMP/wt-p6" >/dev/null 2>&1

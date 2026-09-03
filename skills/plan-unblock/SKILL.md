@@ -36,9 +36,10 @@ this skill reaches it that way.
 - **The sort is derived, not judged.** `scripts/resolve_scope.py` classifies each entry from the
   same patterns `check_todo.py` uses to keep this work out of a numbered phase. A model re-sorting
   the section every run would produce numbers nobody can average and a fence nobody can trust.
-- **One entry at a time, in order, each opening with why it blocks and what the options are.** A
-  batch of questions is answered as a list; a blocker briefed on its own is answered on its merits,
-  and an answer to one often changes the next.
+- **One entry at a time, in order, each opening with why it blocks and what the options are, and
+  each choice put through `AskUserQuestion`.** A batch of questions is answered as a list; a
+  blocker briefed on its own is answered on its merits, and an answer to one often changes the
+  next.
 - **Silence is not consent.** The one thing this skill must never do is tick an entry nobody
   answered.
 
@@ -142,26 +143,49 @@ part that shows your work.
 
 Then, by kind:
 
-- **A `decision`** — put the question and **wait**. Style follows reversibility
-  (`interview.md` §1 Rule 2): genuinely open where the answer reshapes the plan, a forced trade-off
-  where every option sounds free, propose-then-correct where a section gets rewritten,
-  default-and-veto where it is one line to change later. Give a recommendation with its reason — a
-  question with no lean makes the user do the analysis you just did.
+- **A `decision`** — print the brief, then put the choice through the **`AskUserQuestion` tool**,
+  one call per entry, and **wait**. The brief and the question are two halves of one turn: the
+  brief carries the reasoning, the tool carries the choice. Never ask a decision in prose — a
+  selectable option is answered in a click, and a paragraph ending in a question mark is answered
+  with "whatever you think".
+
+  The mapping is direct, and `references/resolution-format.md` §4 has it: the brief's options
+  become the tool's options, each `description` is that option's **cost**, the recommendation goes
+  **first** and is labelled `(Recommended)`, and `header` is the entry's label plus one word
+  (`R1 Debezium`), inside twelve characters. `multiSelect` is false — an entry is one decision.
+  Do not author an "Other" option; the tool always offers one, and that is where a different
+  answer or an "I don't know" arrives.
+
+  The tool takes **two to four** options, which is the same bar the brief sets: an entry with one
+  real option is a default, not a decision — say so and move on rather than calling the tool. More
+  than four means the entry is really two entries, or the tail is noise; cut to the ones a
+  reasonable engineer would weigh, and say what you cut.
+
+  Where the options are different *shapes* of code or config rather than different values, put a
+  few lines of each in the option's `preview` so they can be compared side by side.
+
+  Style follows reversibility (`interview.md` §1 Rule 2), and it decides how the options are
+  framed: genuinely open where the answer reshapes the plan, a forced trade-off where every option
+  sounds free, propose-then-correct where a section gets rewritten, default-and-veto where it is
+  one line to change later.
 
   Push back **once** on an answer that is expensive to reverse, using §8's four beats: name the
-  mechanism, the alternative with its cost, the reversibility, then hand it back. Never twice.
+  mechanism, the alternative with its cost, the reversibility, then hand it back. Never twice — and
+  a second `AskUserQuestion` on a decision they already made is exactly that, in a form they cannot
+  ignore.
 
   **"I don't know" is an answer.** Take the recommendation, record it as the resolution with the
   alternative beside it, and move on (§9). Never re-ask, never block.
 
 - **A `person`** — brief it in its place in the walk, then say plainly that nothing here can close
-  it and move on. No question, no recommendation, no probe: no amount of reading tells you whether
-  a contract was signed. It closes only when the user says it is done, and the stamp records that
-  they said so. `unclassified` is treated as one of these.
+  it and move on. **No `AskUserQuestion`**, no options, no recommendation, no probe: no amount of
+  reading tells you whether a contract was signed, and a question with options implies this session
+  could settle it. It closes only when the user says it is done, and the stamp records that they
+  said so. `unclassified` is treated as one of these.
 
-**Under `--yes`**, print each brief and take the recommendation without asking. The briefs still
-appear — they are the record of what was decided on the user's behalf. `--yes` reaches no `person`
-entry.
+**Under `--yes`**, print each brief and take the recommendation — no `AskUserQuestion` at all. The
+briefs still appear: they are the record of what was decided on the user's behalf. `--yes` reaches
+no `person` entry.
 
 **Silence is not an answer.** If there is no human in this session to answer — an unattended run, a
 container, a piped prompt — record `blocked: "no-human"`, tick nothing, and stop. The whole reason
@@ -250,6 +274,9 @@ retry it.
   names what cannot be built without the answer — read from the blocked phase, not asserted — and
   at least two options with what each costs. An entry with one option is a default, not a decision;
   say so rather than staging a choice.
+- **Every decision goes through `AskUserQuestion`, one call per entry, never prose.** The brief
+  carries the reasoning and the tool carries the choice. A `person` entry gets no call at all —
+  options imply this session could close it.
 - **A `person` entry is closed by a person saying so, and by nothing else.** Not by `--yes`, not by
   a probe, not by an inference from the repo. An `unclassified` entry is treated as one of these.
 - **The sort comes from the script.** Never decide by reading the markdown which entries are open,
