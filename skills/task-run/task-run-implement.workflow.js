@@ -878,10 +878,9 @@ ${inRepo}
       Scary wording alone does not force "full" (a copyright-year bump in a payment template is
       light); "small" wording alone does not earn "light" (a one-line auth-role change is full).
 
-      When you are unsure, answer "standard" — it keeps a real Codex read of the diff, the real
-      the security hunter, doc-drift checking, static analysis, build+tests and a Codex read of the
-      final diff, and gives up the plan review, the three find-bugs pattern hunters and the
-      polish passes. The plan review is what "full" is really for. "full" is a claim that the
+      When you are unsure, answer "standard" — it keeps a real Codex read of the diff, static
+      analysis, build+tests and a Codex read of the final diff, and gives up the plan review, the
+      find-bugs pattern hunters and the polish passes. The plan review is what "full" is really for. "full" is a claim that the
       APPROACH needs challenging before code is written, not a shrug. The one case that IS a
       shrug: if after reading the source you still cannot say roughly WHICH LINES will change,
       you have not scoped the task — answer "full" and say so in profileReason.
@@ -1168,7 +1167,7 @@ const looksLikeEvidence = (w) => typeof w === 'string' && w.trim().length >= 6 &
 // Dropping is the safer direction here on purpose. An over-fire costs a full run on every task —
 // which is how the tier collapsed to "always full" in the first place — while a missed escalation
 // costs the plan review and the pattern hunters, and standard still runs the real Codex diff read,
-// the security hunter, static analysis, build + tests and the Codex end-verify.
+// static analysis, build + tests and the Codex end-verify.
 const HEDGED = /\b(if|may|might|could|likely|possibly|potentially|perhaps|probably|suspect|assuming)\b/i
 const asserts = (w) => typeof w === 'string' && w.trim().length >= 6 && !HEDGED.test(w)
 const countedFlag = (f) => !!f && RISK_SURFACES.includes(f.surface) && looksLikeEvidence(f.where) && asserts(f.why)

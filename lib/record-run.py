@@ -65,7 +65,11 @@ DESC_CAP = 400
 #       pipeline never adjudicated). It still exists as /r:code-bugs' Agent 5, but no review row
 #       from this rev on dispatched it — and without the boundary every such row would read as an
 #       opportunity the track had and missed.
-PIPELINE_REV = 4
+#   5 — `security` folded into `logic`: the logic hunter reads security.md beside
+#       logic-and-flow.md, and standard dispatches no hunter at all. The separate track cost 79
+#       dispatches for 3 fixes and owned both recorded scope drifts. Rows from here on list no
+#       `security` track, so its rev-3/4 yield stays measured against the runs that dispatched it.
+PIPELINE_REV = 5
 
 # The two skills that identify themselves by `kind` rather than by name — every row the store held
 # before it went pack-wide, and anything still sending the older payload.

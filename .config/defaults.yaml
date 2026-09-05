@@ -54,11 +54,11 @@ steps:
     # file:LINE goes to a haiku citation check instead, and only coverage, risk, simplicity and
     # findings with no usable citation are judged here.
     #
-    # `opus` is the measured status quo, not a recommendation — 223 judge items in the store, every
-    # one of them opus/high, back when the tier was inherited instead of named. Now that it is a
-    # setting, dropping the judges to sonnet is the obvious first experiment: read `plan depth` in
-    # lib/skill-stats.py afterwards, and read the per-lane precision split beside it.
-    judgeModel: opus
+    # `sonnet` is an experiment under measurement, not a settled tier. The baseline it is read
+    # against is opus/high: 462 judge dispatches in the store, 607M tokens, holding the judge lane
+    # at 83% (coverage), 90% (risk) and 75% (simplicity) precision. Read `plan depth` and the
+    # per-lane split in lib/skill-stats.py afterwards; put it back to opus if those fall.
+    judgeModel: sonnet
     judgeEffort: high
 
   implement:

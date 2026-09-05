@@ -133,21 +133,19 @@ test('light tier skips the up-front fan-out but always end-verifies', async () =
   const { out, counts, logText } = await run({ args: { profile: 'light' } })
   assert.equal(out.profile, 'light')
   assert.equal(counts['codex'], undefined)
-  assert.equal(counts['find-bugs:security'], undefined)
+  assert.equal(counts['find-bugs:logic'], undefined)
   assert.equal(counts['code-quality'], undefined)
   assert.equal(counts['end-verify#1'], 1) // the sole review of a light change
   assert.equal(out.localScan, 'ok')       // static analysis is mandatory in EVERY tier
   assert.match(logText, /light tier/)
 })
 
-test('standard tier runs Codex --mode review + the security hunter only', async () => {
+test('standard tier runs Codex --mode review and no pattern hunter', async () => {
   const { out, counts, prompts, logText } = await run({ args: { profile: 'standard' } })
   assert.equal(out.profile, 'standard')
-  // Security is the hunter standard keeps while trading away its siblings: a missed N+1 degrades
-  // a page, a missed injection or authorization hole is exploitable and nothing later re-derives
-  // it.
-  assert.equal(counts['find-bugs:security'], 1)
-  // The pattern hunters are what standard trades for the Codex read.
+  // The pattern hunters are what standard trades for the Codex read — security included: a
+  // dedicated security hunter at this tier returned 3 fixes over 79 dispatches, and the Codex
+  // read here plus the end-verify cover the same hunks.
   assert.equal(counts['find-bugs:logic'], undefined)
   assert.equal(counts['find-bugs:runtime-and-failures'], undefined)
   assert.equal(counts['codex'], 1)               // a real Codex now reads the PRE-FIX diff
@@ -171,13 +169,21 @@ test('standard tier runs Codex --mode review + the security hunter only', async 
   // reports and send /r:code-refactor after code no reviewer flagged.
   assert.equal(counts['fix-triage-readability'], undefined)
   assert.match(prompts['fix-triage'], /codex \(review\)/)
+  // No hunter ran, and the triage must be told so rather than handed an empty clean report.
+  assert.match(prompts['fix-triage'], /find-bugs: \(not run at this tier\)/)
+  assert.deepEqual(out.tracksBlocked, [])
 })
 
 test('full tier keeps every hunter and the ADVERSARIAL codex — never the light reviewer', async () => {
   const { counts, prompts } = await run() // baseTriage is full, and no plan review is certified
-  for (const h of ['logic', 'runtime-and-failures', 'security']) {
+  for (const h of ['logic', 'runtime-and-failures']) {
     assert.equal(counts[`find-bugs:${h}`], 1, `full must dispatch the ${h} hunter`)
   }
+  // Security is hunted by the logic hunter, from its own pattern file, not by a third context.
+  assert.equal(counts['find-bugs:security'], undefined)
+  assert.match(prompts['find-bugs:logic'], /references\/security\.md/)
+  assert.match(prompts['find-bugs:logic'], /logic-and-flow\.md/)
+  assert.match(prompts['find-bugs:logic'], /single pass over the diff/)
   // The merged hunter must still own BOTH pattern files. Merging was a cost decision (two fresh
   // contexts re-reading the same diff for 0.37 fixes/run between them); dropping a pattern set
   // would make it a coverage decision, which it is not.
@@ -205,7 +211,7 @@ test('a caller that already had Codex review the PLAN gets the lighter up-front 
   assert.match(prompts['codex'], /--mode review/)
   assert.doesNotMatch(prompts['codex'], /adversarial\/challenge review/)
   assert.match(logText, /already reviewed the PLAN/)
-  for (const h of ['logic', 'runtime-and-failures', 'security']) {
+  for (const h of ['logic', 'runtime-and-failures']) {
     assert.equal(counts[`find-bugs:${h}`], 1, `the ${h} hunter is unaffected`)
   }
   assert.equal(counts['code-quality'], 1)
@@ -455,7 +461,7 @@ test('the readability refactor is NOT one of the configured fixers, on either pr
   assert.match(codex.prompts['fix-readability'], /\/r:code-refactor/)
 })
 
-test('every pattern hunter runs below the top tier, security included', async () => {
+test('every pattern hunter runs below the top tier', async () => {
   // A pattern hunter is asked whether the diff matches shapes in the one reference file it was
   // handed — real judgement, but bounded by that file, unlike fix-triage (what is a false
   // positive?) or code-quality (what reads well?). Yield says the same: 0.71 / 0.31 fixes per run
@@ -467,7 +473,6 @@ test('every pattern hunter runs below the top tier, security included', async ()
   // `high`, so an unpinned row would land at the right depth for the wrong reason and this
   // assertion would stay green on it. The pin is what makes the claim and the run agree — and what
   // holds this row still the day the agent's own frontmatter moves.
-  assert.equal(opts['find-bugs:security'].effort, 'high')
 })
 
 test('every hunter keeps the inherited top model — each one decides what is broken', async () => {
@@ -476,7 +481,7 @@ test('every hunter keeps the inherited top model — each one decides what is br
   // the tier. A cheaper model belongs to a track that MATCHES rather than decides — this pipeline
   // no longer has one, and a pin appearing here means somebody added one without saying so.
   const { opts } = await run()
-  for (const h of ['logic', 'runtime-and-failures', 'security']) {
+  for (const h of ['logic', 'runtime-and-failures']) {
     assert.equal(opts[`find-bugs:${h}`].model, undefined, `the ${h} hunter keeps the inherited model`)
   }
 })
@@ -486,22 +491,29 @@ test('the pattern hunters use the lean sweep agent, never the single-bug investi
   // and it fights this job: under it the median `logic` run reads twelve whole files before it
   // ever runs git diff. These hunters do a sweep, and the agent has to agree with the prompt.
   const { opts } = await run()
-  for (const h of ['logic', 'runtime-and-failures', 'security']) {
+  for (const h of ['logic', 'runtime-and-failures']) {
     assert.equal(opts[`find-bugs:${h}`].agentType, 'r:bug-hunter-pattern',
       `the ${h} hunter must sweep, not investigate`)
   }
 })
 
-test('the security hunter reads its own pattern file, not a bundled skill', async () => {
-  // The failure this replaced: the track used to hand the bundled /security-review skill a scope
-  // argument. That skill builds its diff from four bash commands substituted into its prompt
-  // before the model ever runs, all pinned to `git diff origin/HEAD...`, and its body carries no
-  // argument placeholder at all — so the argument was discarded and the track judged the branch
-  // commits instead of this diff. 49 dispatches, 0 findings. Nothing may reach for it again.
+test('security is hunted from its own pattern file, never from a bundled skill', async () => {
+  // Nothing may reach for the bundled /security-review skill: it builds its diff from four bash
+  // commands substituted into its prompt before the model ever runs, all pinned to
+  // `git diff origin/HEAD...`, and its body carries no argument placeholder at all — so a scope
+  // handed to it is discarded and it judges the branch commits instead of this diff. 49
+  // dispatches, 0 findings. The security categories ride in the logic hunter's brief, read from
+  // security.md, and the coverage boundary that file's "What NOT to report" draws rides with them.
   const { prompts } = await run()
-  assert.match(prompts['find-bugs:security'], /references\/security\.md/)
-  assert.match(prompts['find-bugs:security'], /Your categories: Injection & Untrusted Input/)
-  assert.doesNotMatch(prompts['find-bugs:security'], /security-review/)
+  const p = prompts['find-bugs:logic']
+  assert.match(p, /references\/security\.md/)
+  assert.match(p, /Injection & Untrusted Input/)
+  assert.match(p, /Wrong Business Logic/)
+  assert.doesNotMatch(p, /security-review/)
+  assert.match(p, /'coverage' MUST name what you did NOT look for/)
+  for (const excluded of [/denial of service/i, /rate limiting/i, /not a clean bill of health/i]) {
+    assert.match(p, excluded)
+  }
 })
 
 // ------------------------------------------------------ the shared diff pack ---
@@ -519,7 +531,7 @@ test('the diff is captured once, after triage, and every hunter is pointed at th
   assert.ok(order.indexOf('diff-pack') < order.indexOf('find-bugs:logic'))
   // Cheapest tier: it runs one fixed command and reports a path. It decides nothing.
   assert.equal(opts['diff-pack'].model, 'haiku')
-  for (const h of ['security', 'logic', 'runtime-and-failures']) {
+  for (const h of ['logic', 'runtime-and-failures']) {
     assert.match(prompts[`find-bugs:${h}`], /\/tmp\/review\.patch/,
       `the ${h} hunter must read the shared capture`)
     assert.match(prompts[`find-bugs:${h}`], /Do NOT re-derive it/)
@@ -559,24 +571,24 @@ test('the codex wrapper is told not to re-review the diff itself', async () => {
 
 test('a hunter that stops short is heard — its coverage note survives the merge', async () => {
   // The budget is only safe because a hunter must SAY when it ran out with something unconfirmed.
-  // If the merge keeps only the security note, that admission vanishes, and silence from a finding
-  // track reads as "looked, found nothing" — the one claim this pipeline must never manufacture.
+  // If the merge drops a note, that admission vanishes, and silence from a finding track reads as
+  // "looked, found nothing" — the one claim this pipeline must never manufacture.
   const { prompts } = await run({
     overrides: {
-      'find-bugs:logic': { ran: true, findings: [], coverage: 'possible N+1 at OrderRepo:88, not confirmed' },
-      'find-bugs:security': { ran: true, findings: [], coverage: 'read the captured diff; excludes DoS and capacity rate limiting' },
+      'find-bugs:logic': { ran: true, findings: [], coverage: 'read the captured diff; excludes DoS and capacity rate limiting' },
+      'find-bugs:runtime-and-failures': { ran: true, findings: [], coverage: 'possible N+1 at OrderRepo:88, not confirmed' },
     },
   })
-  // Both reach triage, and the security note still leads (skipped() tests it with an anchored ^).
-  assert.match(prompts['fix-triage'], /excludes DoS/)
-  assert.match(prompts['fix-triage'], /logic: possible N\+1 at OrderRepo:88/)
+  // Both reach triage, each under the hunter that wrote it.
+  assert.match(prompts['fix-triage'], /logic: read the captured diff; excludes DoS/)
+  assert.match(prompts['fix-triage'], /runtime-and-failures: possible N\+1 at OrderRepo:88/)
 })
 
 test('the hunt is ordered and bounded — diff first, then a budget', async () => {
   // The clauses that pay for themselves: cost here is turns × context, and the stored runs spent
   // both on orientation before the change was ever opened.
   const { prompts } = await run()
-  for (const h of ['security', 'logic', 'runtime-and-failures']) {
+  for (const h of ['logic', 'runtime-and-failures']) {
     const p = prompts[`find-bugs:${h}`]
     assert.match(p, /Read the change FIRST/)
     assert.match(p, /about 12 tool calls/)
@@ -587,13 +599,12 @@ test('the hunt is ordered and bounded — diff first, then a budget', async () =
 })
 
 test('no runtime surface in the diff means the runtime-and-failures hunter is not dispatched', async () => {
-  // The same per-DIFF gate the security hunter carries, on a hunter that costs 2.70M tokens and
-  // 326s per dispatch for 0.42 fixes/run: on a diff with no threading, shared state, IO, query or
-  // error handling, its two pattern files have nothing to match.
+  // A per-DIFF gate on a hunter that costs 2.70M tokens and 326s per dispatch for 0.42
+  // fixes/run: on a diff with no threading, shared state, IO, query or error handling, its two
+  // pattern files have nothing to match.
   const { counts, out, logText } = await run({ triage: baseTriage({ runtimeSurface: false }) })
   assert.equal(counts['find-bugs:runtime-and-failures'], undefined)
-  assert.equal(counts['find-bugs:logic'], 1)       // the other hunters are untouched
-  assert.equal(counts['find-bugs:security'], 1)
+  assert.equal(counts['find-bugs:logic'], 1)       // the other hunter is untouched
   assert.match(logText, /runtime-and-failures hunter SKIPPED/)
   // Recorded, not merely logged: the stats report derives this track's denominator from the tier,
   // so a run that never dispatched it must not count as an opportunity it had and missed.
@@ -602,8 +613,8 @@ test('no runtime surface in the diff means the runtime-and-failures hunter is no
 })
 
 test('the runtime gate is fail-open — only an explicit false skips the hunter', async () => {
-  // An unanswered field is a triage that did not check, never a licence to skip. Same shape as
-  // securitySurface: every hunk it never reads is a hunk nothing looked at.
+  // An unanswered field is a triage that did not check, never a licence to skip: every hunk it
+  // never reads is a hunk nothing looked at.
   for (const v of [undefined, true, 'no', 0]) {
     const t = baseTriage()
     if (v === undefined) delete t.runtimeSurface
@@ -751,44 +762,45 @@ test('an unrecognized profile falls back to full — nothing classified the diff
 })
 
 test('a blocked hunter marks find-bugs incomplete instead of clean', async () => {
-  const { out, logText } = await run({ overrides: { 'find-bugs:security': null } })
+  const { out, logText, prompts } = await run({ overrides: { 'find-bugs:logic': null } })
   assert.ok(out.tracksBlocked.includes('find-bugs'))
-  assert.match(logText, /hunter\(s\) BLOCKED — security/)
+  assert.match(logText, /hunter\(s\) BLOCKED — logic/)
+  // The gap reaches triage by name, not as an empty list that reads as clean.
+  assert.match(prompts['fix-triage'], /logic: BLOCKED/)
 })
 
-test('at standard the blocked track is named for what actually ran, not "find-bugs"', async () => {
+test('at standard nothing is dispatched as find-bugs, so nothing can report it blocked', async () => {
   // Reporting `r:code-bugs` blocked for a tier that never dispatched find-bugs tells the caller a
   // tool died when nothing did — and sends whoever reads the summary after the wrong failure.
-  const { out, logText } = await run({
-    args: { profile: 'standard' }, overrides: { 'find-bugs:security': null },
+  const { out, counts } = await run({
+    args: { profile: 'standard' }, overrides: { 'find-bugs:': null },
   })
-  assert.ok(out.tracksBlocked.includes('security hunter'))
-  assert.ok(!out.tracksBlocked.includes('find-bugs'))
-  assert.match(logText, /security hunter: hunter\(s\) BLOCKED — security/)
+  assert.equal(counts['find-bugs:logic'], undefined)
+  assert.deepEqual(out.tracksBlocked, [])
+  assert.deepEqual(out.tracksDrifted, [])
 })
 
-test('a security hunter that read a DIFFERENT changeset is not a clean bill', async () => {
+test('a hunter that read a DIFFERENT changeset is not a clean bill', async () => {
   // The failure this locks down: a hunter whose prepared capture was missing derives the change
   // itself, lands on a different changeset, and comes back real, complete, ran=true and
   // findings:[] — about code this review is not certifying. Alive is not the same as on-scope,
   // and only `scopeMatched` can tell them apart.
   const { out, logText } = await run({
     overrides: {
-      'find-bugs:security': {
+      'find-bugs:logic': {
         ran: true, scopeMatched: false, findings: [],
         coverage: 'was handed the working-tree capture; judged the 8 unpushed branch commits instead',
       },
     },
   })
-  assert.equal(out.security, 'scope-mismatch')
-  assert.match(logText, /reviewed a DIFFERENT changeset than the one they were given — security/)
+  assert.match(logText, /reviewed a DIFFERENT changeset than the one they were given — logic/)
   // Distinct from BLOCKED on purpose: a dead tool has to be made to run, a drifted one has to be
   // made to read the right thing, and one log line for both sends the reader after the wrong fix.
-  assert.ok(!/hunter\(s\) BLOCKED — security/.test(logText))
+  assert.ok(!/hunter\(s\) BLOCKED — logic/.test(logText))
   // The RECORD has to make that same distinction, not just the log. Collapsed into tracksBlocked
   // this reads as "the bug scan failed" — sending a reader after a tool that is not broken, while
-  // hiding that the pattern hunters completed and produced findings.
-  assert.deepEqual(out.tracksDrifted, ['find-bugs (security)'])
+  // hiding that the other hunter completed and produced findings.
+  assert.deepEqual(out.tracksDrifted, ['find-bugs (logic)'])
   assert.ok(!out.tracksBlocked.includes('find-bugs'))
 })
 
@@ -797,7 +809,7 @@ test('a drifted track is still disqualifying — it just says so in its own fiel
   // looked at, and issues-fix's merge gate reads both; only the fix each one asks for differs.
   const { out } = await run({
     overrides: {
-      'find-bugs:security': { ran: true, scopeMatched: false, findings: [], coverage: 'read the branch commits' },
+      'find-bugs:logic': { ran: true, scopeMatched: false, findings: [], coverage: 'read the branch commits' },
     },
   })
   assert.equal(out.reviewed, true)
@@ -809,23 +821,12 @@ test('a track that is BOTH blocked and drifted is named in both lists', async ()
   // leave the other unfixed, and they need opposite fixes.
   const { out } = await run({
     overrides: {
-      'find-bugs:security': { ran: true, scopeMatched: false, findings: [], coverage: 'wrong changeset' },
-      'find-bugs:logic': null,
+      'find-bugs:logic': { ran: true, scopeMatched: false, findings: [], coverage: 'wrong changeset' },
+      'find-bugs:runtime-and-failures': null,
     },
   })
   assert.ok(out.tracksBlocked.includes('find-bugs'), 'the dead hunter still blocks the track')
-  assert.deepEqual(out.tracksDrifted, ['find-bugs (security)'])
-})
-
-test('below full tier the drifted entry does not repeat the hunter it is already named for', async () => {
-  const { out } = await run({
-    args: { profile: 'standard' },
-    overrides: {
-      'find-bugs:security': { ran: true, scopeMatched: false, findings: [], coverage: 'wrong changeset' },
-    },
-  })
-  assert.deepEqual(out.tracksDrifted, ['security hunter'])
-  assert.ok(!out.tracksBlocked.includes('security hunter'))
+  assert.deepEqual(out.tracksDrifted, ['find-bugs (logic)'])
 })
 
 test('a track with no hunter fan-out keeps landing in tracksBlocked', async () => {
@@ -837,25 +838,13 @@ test('a track with no hunter fan-out keeps landing in tracksBlocked', async () =
 })
 
 test('scopeMatched absent leaves the track clean — an unanswered field invents no mismatch', async () => {
-  // Fail-open, the same rule securitySurface uses. A hunter that did not check is a gap in the
+  // Fail-open, the same rule runtimeSurface uses. A hunter that did not check is a gap in the
   // record; reading it as a mismatch would block every run made before the field existed.
   const { out } = await run({
-    overrides: { 'find-bugs:security': { ran: true, findings: [], coverage: 'reviewed the working-tree diff' } },
+    overrides: { 'find-bugs:logic': { ran: true, findings: [], coverage: 'reviewed the working-tree diff' } },
   })
   assert.ok(!out.tracksBlocked.includes('find-bugs'))
-  assert.equal(out.security, 'clean')
-})
-
-test('the four security outcomes are distinguishable in the summary', async () => {
-  // All four leave findings:[] behind. Collapsed, a run of dispatches that each returned nothing
-  // cannot say whether the diffs were clean or the track never reports anything at all — the
-  // question 49 dispatches of the previous tool could not answer.
-  const gated = await run({ triage: baseTriage({ securitySurface: false }) })
-  assert.equal(gated.out.security, 'not-dispatched')
-  const dead = await run({ overrides: { 'find-bugs:security': null } })
-  assert.equal(dead.out.security, 'blocked')
-  const light = await run({ args: { profile: 'light' } })
-  assert.equal(light.out.security, 'not-dispatched')
+  assert.deepEqual(out.tracksDrifted, [])
 })
 
 test('REGRESSION: no docs hunter is dispatched, at any tier', async () => {
@@ -871,81 +860,6 @@ test('REGRESSION: no docs hunter is dispatched, at any tier', async () => {
   }
 })
 
-// --------------------------------------------- the security hunter's own gate ---
-// The hunt is a full parallel subagent — 1.53M cache tokens and about 200s — matching a diff
-// against injection sinks, authorization checks, credential handling and data exposure. On a CSS
-// or copy diff there is no hunk any of those patterns can apply to, so the gate saves the whole
-// dispatch. It fails OPEN, which matters more now that this track can actually return findings.
-
-test('no security surface in the diff means the security hunter is not dispatched', async () => {
-  const { counts, logText } = await run({ triage: baseTriage({ securitySurface: false }) })
-  assert.equal(counts['find-bugs:security'], undefined)
-  assert.equal(counts['find-bugs:logic'], 1)     // the other hunters are untouched
-  assert.equal(counts['find-bugs:runtime-and-failures'], 1)
-  assert.match(logText, /security hunter SKIPPED/)
-  assert.match(logText, /this is a skip, not a clean bill/)
-})
-
-test('REGRESSION: the gate FAILS OPEN — an unanswered question runs the hunter', async () => {
-  // securitySurface is optional on purpose. A model that forgets the field, or an older caller
-  // that never knew about it, must not be the reason a security review silently stopped running.
-  for (const t of [baseTriage(), baseTriage({ securitySurface: undefined }),
-                   baseTriage({ securitySurface: true })]) {
-    const { counts } = await run({ triage: t })
-    assert.equal(counts['find-bugs:security'], 1)
-  }
-})
-
-test('a skipped security hunter is reported as a SKIP, never as coverage', async () => {
-  // findings:[] has three meanings — reviewed and clean, blocked, never asked. They must not
-  // collapse into one, because only the first is a reason to merge.
-  const { prompts } = await run({
-    triage: baseTriage({ securitySurface: false }),
-    overrides: { 'fix-triage': { correctness: [], readability: [] } },
-  })
-  assert.match(prompts['fix-triage'], /NOT DISPATCHED/)
-  assert.match(prompts['fix-triage'], /skip, not a clean bill/)
-})
-
-test('a security hunter closed by its per-diff gate is RECORDED as skipped', async () => {
-  // Not cosmetic. The stats report derives a track's denominator from the TIER, so a skip it
-  // cannot see counts as a run the hunter had a chance on and produced nothing — which is the
-  // number that puts a track on the retirement list. `securitySurface` is the one gate that is
-  // per-diff rather than per-tier, so it is the one the tier cannot account for.
-  const { out } = await run({ triage: baseTriage({ securitySurface: false }) })
-  assert.ok(out.tracksSkipped.includes('security'))
-  assert.ok(!out.tracksBlocked.includes('security'), 'a closed gate is not a tool failure')
-
-  // The other direction: a hunter that RAN must never be recorded as skipped, or the denominator
-  // shrinks below what the track was actually asked to do and its fixes/run reads too high.
-  const ran = await run({ triage: baseTriage({ securitySurface: true }) })
-  assert.ok(!ran.out.tracksSkipped.includes('security'))
-})
-
-test('at standard with no security surface, no hunter is dispatched at all', async () => {
-  // Standard's only hunter is gone, closed by its own per-diff gate. The run has to say that
-  // plainly rather than report a tool failure over a track nothing dispatched.
-  const { out, counts, logText } = await run({
-    args: { profile: 'standard' },
-    triage: baseTriage({ securitySurface: false }),
-  })
-  assert.equal(counts['find-bugs:security'], undefined)
-  assert.deepEqual(out.tracksBlocked, [])
-  assert.match(logText, /security hunter SKIPPED/)
-})
-
-test('the security hunter must report what it did NOT look for', async () => {
-  // This track's empty result is the one that gets read as a verdict on the whole change, so its
-  // brief has to name the boundary and not just the scope. The categories after "What NOT to
-  // report" in security.md are real risks other tracks own; nobody may read findings:[] here as
-  // "this change is secure".
-  const p = (await run()).prompts['find-bugs:security']
-  assert.match(p, /'coverage' MUST name what you did NOT look for/)
-  for (const excluded of [/denial of service/i, /rate limiting/i, /not a clean bill of health/i]) {
-    assert.match(p, excluded)
-  }
-})
-
 // ------------------------------------------------- stats sink + attribution ---
 
 test('correctness fixes are attributed to the track that found them', async () => {
@@ -953,13 +867,13 @@ test('correctness fixes are attributed to the track that found them', async () =
     overrides: {
       'fix-triage': {
         correctness: [{ item: 'A.java:10 off-by-one', source: 'codex' },
-                      { item: 'B.java:20 missing authz check', source: 'security' },
+                      { item: 'B.java:20 missing authz check', source: 'logic' },
                       { item: 'C.java:30 unbounded fetch', source: 'concurrency' }],
         readability: [],
       },
     },
   })
-  assert.deepEqual(out.fixedBySource, { codex: 1, security: 1, concurrency: 1 })
+  assert.deepEqual(out.fixedBySource, { codex: 1, logic: 1, concurrency: 1 })
   assert.equal(out.fixed.correctness, 3)
   // The fixer must see the item and NOT the source — knowing which track flagged something
   // should not colour how it gets fixed.
@@ -968,12 +882,12 @@ test('correctness fixes are attributed to the track that found them', async () =
 })
 
 test('the hunters stamp their own label onto every finding they merge', async () => {
-  // After the dedup merge, a security finding and a logic finding are otherwise identical in
+  // After the dedup merge, a logic finding and a runtime finding are otherwise identical in
   // shape — this stamp is the only thing that survives into the attribution.
   const { prompts } = await run({
-    overrides: { 'find-bugs:security': { ran: true, findings: [finding('leaks a token')] } },
+    overrides: { 'find-bugs:runtime-and-failures': { ran: true, findings: [finding('leaks a connection')] } },
   })
-  assert.match(prompts['fix-triage'], /"source":"security"/)
+  assert.match(prompts['fix-triage'], /"source":"runtime-and-failures"/)
 })
 
 test('a triage that returns bare strings still yields a fixable list', async () => {
@@ -1168,7 +1082,7 @@ test('what triage REJECTED reaches the stats row, and never the fixer', async ()
       'fix-triage-readability': { readability: [], dismissed: [] },
       'fix-triage': {
         correctness: [{ item: 'RateSheetImporter:42 guard the last row', source: 'logic' }],
-        dismissed: [{ item: 'RateSheetImporter:88 unreachable branch', source: 'security' }],
+        dismissed: [{ item: 'RateSheetImporter:88 unreachable branch', source: 'runtime-and-failures' }],
         readability: [],
       },
     },
@@ -1177,7 +1091,7 @@ test('what triage REJECTED reaches the stats row, and never the fixer', async ()
   const kept = row.findings.filter((f) => f.verdict === 'confirmed')
   const dropped = row.findings.filter((f) => f.verdict === 'dismissed')
   assert.equal(dropped.length, 1)
-  assert.equal(dropped[0].track, 'security')
+  assert.equal(dropped[0].track, 'runtime-and-failures')
   assert.equal(dropped[0].fixed, false)
   assert.ok(kept.some((f) => f.track === 'logic' && f.fixed === true))
   // A rejected finding must not reach the agent that applies fixes — it was judged NOT real.
@@ -1195,7 +1109,7 @@ test('appliedFindings returns the real findings for the plan, dismissed ones fil
       'fix-triage-readability': { readability: [], dismissed: [] },
       'fix-triage': {
         correctness: [{ item: 'RateSheetImporter:42 guard the last row', source: 'logic' }],
-        dismissed: [{ item: 'RateSheetImporter:88 unreachable branch', source: 'security' }],
+        dismissed: [{ item: 'RateSheetImporter:88 unreachable branch', source: 'runtime-and-failures' }],
         readability: [],
       },
     },
@@ -2111,7 +2025,7 @@ test('every judging track still inherits the session model', async () => {
       'fix-triage-readability': { readability: ['extract a method'] },
     },
   })
-  for (const l of ['find-bugs:logic', 'find-bugs:security', 'code-quality', 'fix-triage',
+  for (const l of ['find-bugs:logic', 'find-bugs:runtime-and-failures', 'code-quality', 'fix-triage',
                    'fix-triage-readability', 'local-scan']) {
     assert.equal(opts[l].model, undefined, `${l} forms an opinion — it must not be down-tiered`)
   }

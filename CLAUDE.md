@@ -111,9 +111,12 @@ a single context and still reports success. A `Workflow` script runs in the main
 every agent itself, so the caller keeps the real fan-out and a clean context. Both scripts document
 this at the top; keep it true.
 
-`task-run-implement.workflow.js` is the **single encoding** of Steps 0–4 — `SKILL.md` delegates to
-it and must not restate the graph. `task-review` deliberately carries two engines (the script plus
-`references/prose-pipeline.md`) and pays a lockstep tax; changing one means changing the other.
+`task-run-implement.workflow.js` is the **single encoding** of Steps 0–4 and
+`task-review.workflow.js` the single encoding of the review — each `SKILL.md` delegates to its
+script and must not restate the graph. Neither has a prose fallback engine: the store recorded 65
+workflow invocations of the review against 0 prose runs, and a second encoding of a 3,000-line
+graph is a lockstep tax paid on every edit for an engine nothing chose. A context with no
+`Workflow` tool stops and says so rather than running the graph by hand.
 
 `task-quick` is the third pipeline and is deliberately **not** code: implement → review → verify →
 fix, run inline in the main thread with no `Workflow` and no subagents. There is no fan-out to lose,
@@ -480,12 +483,13 @@ reader owned by one skill stays that skill's reader. Rules that are load-bearing
   no `provider` key, and that is not an oversight — the planner returns markdown the pipeline copies
   to disk verbatim and the explorers and judges return schema'd objects it branches on, so nothing
   here survives a hand-off to a CLI; `resolve()` skips its codex branch on a provider-less row, and
-  the `model` keys carry their own enum instead. The shipped `judgeModel: opus` is the **measured
-  status quo**, not a recommendation: 223 judge items in the store, every one opus/high, from when
-  the tier was inherited rather than named. A config row cannot express "whatever the caller was
-  running", so naming it is what keeps a run that never reached the config indistinguishable from
-  one that read the file. Dropping the judges to sonnet is the obvious first experiment, and
-  `plan depth` is where its answer shows up.
+  the `model` keys carry their own enum instead. The shipped `judgeModel: sonnet` is an
+  **experiment under measurement** against an opus baseline: 462 judge dispatches in the store,
+  every one opus/high, cost 607M tokens at 125s each to hold coverage at 83%, risk at 90% and
+  simplicity at 75% precision — while the citation lane answers grounding and test-adequacy at
+  95–100% on haiku. `JUDGE_RUN` in the workflow stays opus/high, so a run that never reached the
+  config is distinguishable from one that read the file. `plan depth` is where the answer shows
+  up: put it back to opus if the judge-lane precision on those three rubrics falls materially.
 - **Workflow scripts cannot read it themselves** — no filesystem access — so the pipeline dispatches
   a haiku/low agent that runs the reader and returns its JSON under a schema. That read happens
   **inside** `task-run-implement.workflow.js` and `task-review.workflow.js`, not in either
@@ -532,8 +536,13 @@ prompt whose diff comes from four bash commands substituted in before the model 
 to `git diff origin/HEAD...`, with no argument placeholder anywhere in its body: a scope handed to
 it is discarded, and it never sees uncommitted work at all. Measured over 49 dispatches: 47
 reports, **0 findings**, and 5 of the 6 that checked reported reviewing a different changeset.
-`security` is a `r:bug-hunter-pattern` over `code-bugs/references/security.md`, reading the same
-captured diff as every other hunter. Reinstating the skill would re-open the hole, not close one.
+Security is hunted by the `logic` `r:bug-hunter-pattern`, which reads
+`code-bugs/references/security.md` beside its own pattern file from the same captured diff as
+every other hunter. It has no context of its own: a separate security hunter measured 3 fixes over
+79 dispatches (0.04 fixes/run, 43% precision on the 7 findings that reached triage) and owned both
+recorded scope drifts, for a pattern file the logic hunter already overlaps at every
+boundary-validation hunk. Standard therefore dispatches no hunter at all — its Codex read and the
+end-verify cover the same hunks. Reinstating the skill would re-open the hole, not close one.
 
 ## Rules `validate.sh` enforces (edit within them)
 

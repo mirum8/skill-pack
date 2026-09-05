@@ -2,8 +2,8 @@
 // post-task-review — PROTOTYPE Workflow (deterministic orchestration)
 //
 // This encodes the /r:task-review pipeline as a hardcoded subagent graph.
-// The reliability properties we hardened in the prose skill become STRUCTURAL
-// here, because the control flow is real code the runtime executes:
+// The reliability properties the skill promises are STRUCTURAL here, because the
+// control flow is real code the runtime executes:
 //
 //   * "never wait on a completed subagent / never poll an output-file"
 //        -> agent() is awaited; the resolved promise IS completion. Nothing to poll.
@@ -20,19 +20,14 @@
 // step that touches the repo (git, build, scan, codex, test-app) is done BY an
 // agent whose prompt runs the commands and returns a schema-validated object.
 //
-// LOCKSTEP: this script is only ONE of two engines for this pipeline. The `Workflow`
-//   tool is main-thread-only, so where it can't be reached the pipeline runs from the
-//   PROSE Steps 0-9 in SKILL.md instead. The two encode the SAME graph and must be
-//   edited TOGETHER - change one without the other and the two runs silently diverge.
-//   As of Claude Code 2.1.217 subagents lost the `Agent` tool, so the prose engine is
-//   only viable in a main thread that has `Agent` but no `Workflow` (headless/cron); a
-//   context with NEITHER must STOP rather than improvise - SKILL.md states that floor.
-//   BOTH engines spawn the hunters directly - this script from the workflow, the prose
-//   engine from the main thread. Neither may nest them under a single find-bugs subagent,
-//   because nothing below the orchestrator can fan out. Keep the engines agreeing here,
-//   including WHICH hunters each tier dispatches and the per-diff gates that thin that set
-//   (full: logic, plus security and runtime-and-failures when the diff has their surface;
-//   standard: security only, and only when the diff has security surface).
+// THE ONLY ENGINE: this script is the single encoding of the pipeline. The `Workflow`
+//   tool is main-thread-only, and a context that cannot reach it must STOP rather than
+//   improvise a single-context skim - SKILL.md states that floor. There is deliberately
+//   no prose fallback: the store recorded 65 workflow invocations against 0 prose runs,
+//   and a second encoding of a 3,000-line graph is a lockstep tax paid on every edit for
+//   an engine nothing ever chose. The hunters are spawned directly by this script; nothing
+//   nests them under a single find-bugs subagent, because nothing below the orchestrator
+//   can fan out.
 //
 // TESTS: tests/control-flow.test.mjs executes this script with agent()/parallel() stubbed and
 //   asserts the branches — what halts, what is retried, what reaches the summary. Run it after
@@ -147,7 +142,7 @@ const TRIAGE = {
     // WHY that tier, in one line. `profile` says which one and `profileForced` says who picked
     // it; neither says what decided it, so an over-rated run and a correctly rated one are the
     // same row and the distribution can be read but never audited. Deliberately NOT required,
-    // like `securitySurface` above: an unanswered note is a gap in the record, never a reason to
+    // like `runtimeSurface` below: an unanswered note is a gap in the record, never a reason to
     // fail a triage that answered everything else.
     profileReason: { type: 'string' },
     uiTouched: { type: 'boolean' },         // any frontend file changed -> the UI gate, in EVERY tier
@@ -171,25 +166,22 @@ const TRIAGE = {
     // from this repo's file extensions. It selects the DEFINITION of uiTouched below and the
     // mechanism 7a deploys through; it is not a second gate, and it is not caller-forceable,
     // because a caller cannot know better than the file on disk and a forced surface is a way to
-    // start the wrong thing. Deliberately NOT required, like `securitySurface`: the authoritative
+    // start the wrong thing. Deliberately NOT required, like `runtimeSurface`: the authoritative
     // read happens again in 7a, where the step that needs the answer looks for it itself.
     testAppSurface: { type: 'string', enum: ['web', 'tui', 'cli', 'unknown'] },
-    // Does the diff touch anything the security patterns could match? Deliberately NOT required,
-    // and read as `!== false` below: an unanswered gate runs the hunter. A missing field must
-    // never be the reason a security review was skipped.
-    securitySurface: { type: 'boolean' },
-    // The same shape of gate for the runtime-and-failures hunter: does the diff touch shared
-    // state, threading, IO, a query or a swallowed error at all? Its pattern files are
+    // A per-DIFF gate on the runtime-and-failures hunter: does the diff touch shared state,
+    // threading, IO, a query or a swallowed error at all? Its pattern files are
     // concurrency/data/performance and silent failures, and a copy or CSS change offers them no
-    // hunk to match — a 2.70M-token, 326s subagent for nothing. Optional and read as `!== false`
-    // for the same reason as above: an unanswered gate runs the hunter.
+    // hunk to match — a 2.70M-token, 326s subagent for nothing. Deliberately NOT required, and
+    // read as `!== false` below: an unanswered gate runs the hunter. A missing field must never
+    // be the reason a hunt was skipped.
     runtimeSurface: { type: 'boolean' },
   },
 }
 // Sources a correctness item can be attributed to. An ENUM, not free text: triage is labelling
 // reports it was handed already keyed by track, not inferring, and an open string field would
 // fill the stats sink with near-miss spellings that never aggregate.
-const FIX_SOURCES = ['codex', 'security', 'logic', 'runtime-and-failures']
+const FIX_SOURCES = ['codex', 'logic', 'runtime-and-failures']
 // Triage is SPLIT by bucket — one agent per bucket, in parallel — so each returns only its own.
 // The buckets never shared an input: correctness reads the hunter + codex reports, readability
 // reads only code-quality.
@@ -472,9 +464,8 @@ ${pad}ended minutes ago. The pid is the liveness check; "status" only ever confi
 
 // ------------------------------------------------------- find-bugs hunters ---
 // The pattern hunters of /r:code-bugs Phase 2, spawned by THIS SCRIPT instead of beneath a single
-// "run /r:code-bugs" subagent. Only the FULL tier dispatches the whole list: standard takes the
-// one a Codex diff review cannot stand in for (see HUNTER_SET below), and light dispatches none.
-// Two of the three carry a per-DIFF gate on top of the tier — see `securitySurface` and
+// "run /r:code-bugs" subagent. Only the FULL tier dispatches them; standard and light dispatch
+// none (see HUNTER_SET below). One of the two carries a per-DIFF gate on top of the tier — see
 // `runtimeSurface` at HUNTER_SET.
 //
 // Why the shape differs from SKILL.md: workflow-spawned agents have no `Agent` tool. That is
@@ -487,9 +478,8 @@ ${pad}ended minutes ago. The pid is the liveness check; "status" only ever confi
 //
 // The script itself can spawn agents, so the fan-out lives one level up and the workflow plays
 // the coordinator role that find-bugs' Phase 2 describes. As of Claude Code 2.1.217 ordinary
-// subagents have no `Agent` tool either, so the prose engine in SKILL.md spawns these same
-// hunters directly as well — the engines AGREE here. Keep them agreeing: whoever is
-// orchestrating owns the fan-out, because no level below it can perform one.
+// subagents have no `Agent` tool either: whoever is orchestrating owns the fan-out, because no
+// level below it can perform one.
 //
 // `refs` is where each hunter's pattern file lives; hunters read only their own file, which is
 // what keeps the parallel reads cheap. r:bug-hunter-pattern has Bash/Glob/Grep/Read — enough to
@@ -560,27 +550,27 @@ const refsDir = () => `${PACK}/skills/code-bugs/references`
 // the best-yielding pattern track (0.92 fixes/run) for another ~15%. The levers that actually pay
 // are the ones below: a leaner agent, a hunt that reads the diff first and stops, and one shared
 // diff so N hunters don't each orient themselves from scratch.
-// `security` leads the list, and the position is load-bearing: the dedup below is
-// first-hunter-wins by array order, three hunters now read the SAME diff against pattern files
-// written in the same house style, and a boundary-validation hunk matches both `security.md` and
-// logic-and-flow.md's boundary patterns. Whoever is listed first takes the attribution — and
-// `fixedBySource.security` is the exact counter the retirement list reads, so losing those ties
-// would keep scoring the track at zero for findings it actually made.
+// Two hunters, not three: `security.md` is read by the `logic` hunter rather than by a hunter of
+// its own. A separate security hunter cost 79 dispatches for 3 fixes (0.04 fixes/run, 43%
+// precision over the 7 findings that reached triage) and owned both recorded scope drifts — a
+// whole context re-reading the same diff for one pattern file that logic-and-flow.md already
+// overlaps at every boundary-validation hunk. Merged, the security categories are still hunted
+// on every full-tier diff; what is gone is the second cold context. The same shape as
+// runtime-and-failures, which carries two files for the same reason.
 const HUNTERS = [
-  { label: 'security', agentType: 'r:bug-hunter-pattern', ref: 'security.md',
-    focus: 'Injection & Untrusted Input, Authentication & Authorization (including auth-relevant rate limiting), Secrets & Credentials, Sensitive Data Exposure — newly introduced and high-confidence exploitable only',
-    // The one hunter whose empty result gets read as a verdict on the whole change, so its
-    // 'coverage' has to state the boundary and not just the scope. Everything after "What NOT to
-    // report" in security.md is a real risk this track does not own; the summary must be able to
-    // say so, or findings:[] reads as "this change is secure".
-    note: `'coverage' MUST name what you did NOT look for, not only what you read: this hunt is
-     newly-introduced, high-confidence-exploitable issues only, and denial of service, resource
-     exhaustion, capacity rate limiting, missing hardening and dependency CVEs are out of scope
-     here (codex, the runtime-and-failures hunter and /r:code-scan cover those). An empty findings
-     list is not a clean bill of health, and it has been read as one.`,
+  { label: 'logic', agentType: 'r:bug-hunter-pattern', ref: ['logic-and-flow.md', 'security.md'],
+    focus: 'Wrong Business Logic, Implementation Mistakes, Broken Flows; and Injection & Untrusted Input, Authentication & Authorization (including auth-relevant rate limiting), Secrets & Credentials, Sensitive Data Exposure — the security ones newly introduced and high-confidence exploitable only',
+    // The security half of this hunt is the one whose empty result gets read as a verdict on the
+    // whole change, so 'coverage' has to state the boundary and not just the scope. Everything
+    // after "What NOT to report" in security.md is a real risk this track does not own; the
+    // summary must be able to say so, or findings:[] reads as "this change is secure".
+    note: `'coverage' MUST name what you did NOT look for, not only what you read: the security
+     half of this hunt is newly-introduced, high-confidence-exploitable issues only, and
+     denial of service, resource exhaustion, capacity rate limiting, missing hardening and
+     dependency CVEs are out of scope here (codex, the runtime-and-failures hunter and
+     /r:code-scan cover those). An empty findings list is not a clean bill of health, and it has
+     been read as one.`,
     ...PATTERN_HUNT },
-  { label: 'logic', agentType: 'r:bug-hunter-pattern', ref: 'logic-and-flow.md',
-    focus: 'Wrong Business Logic, Implementation Mistakes, Broken Flows', ...PATTERN_HUNT },
   { label: 'runtime-and-failures', agentType: 'r:bug-hunter-pattern',
     ref: ['concurrency-data-and-performance.md', 'silent-failures-and-java.md'],
     focus: 'Data Corruption, Concurrency Issues, Resource & Connection Issues, Performance & Scalability (N+1, unbounded fetches, pool exhaustion), Silent Failures, Language-Specific Patterns',
@@ -693,29 +683,19 @@ async function hunterFanOut(scope, hunters, trackName) {
       findings.push({ ...f, source: hunters[i].label })
     }
   })
-  const secIdx = hunters.findIndex((h) => h.label === 'security')
-  const sec = secIdx >= 0 ? hunts[secIdx] : null
-  // Three different states share one empty findings list, and they mean opposite things.
-  // Whoever reads this summary must be able to tell them apart without the transcript.
-  // Never in front of a SKIPPED marker: skipped() tests this string with an anchored ^SKIPPED,
-  // and a prefix there would turn "the hunter was never dispatched" into "the track ran".
-  const secCov = (sec && typeof sec.coverage === 'string') ? sec.coverage : ''
-  const secDrift = drifted.includes('security') && !/^SKIPPED\b/.test(secCov)
-  const securityNote = secIdx < 0
-    ? 'security hunter NOT DISPATCHED — no security surface in this diff. Nothing was ' +
-      'security-reviewed. This is a skip, not a clean bill.'
-    : (secDrift ? 'security hunter SCOPE MISMATCH — it judged a different changeset than this ' +
-                  'diff; nothing security-reviewed THIS change. ' : '') +
-      (secCov ||
-       (missing.includes('security') ? 'security hunter BLOCKED — nothing was security-reviewed' : ''))
-  // Every hunter's coverage note survives the merge, not just the security one. The hunt is
-  // budgeted, and a hunter that runs out with a candidate still unconfirmed says so here. Dropping
-  // that turns "I could not confirm the N+1 at OrderRepo:88" into silence, and silence from a
-  // finding track reads as "looked, found nothing" — the one thing this pipeline must never
-  // manufacture. The security note leads, so skipped()'s ^SKIPPED test still sees what it needs.
+  // Every hunter's coverage note survives the merge. The hunt is budgeted, and a hunter that runs
+  // out with a candidate still unconfirmed says so here. Dropping that turns "I could not confirm
+  // the N+1 at OrderRepo:88" into silence, and silence from a finding track reads as "looked,
+  // found nothing" — the one thing this pipeline must never manufacture. A drifted or dead hunter
+  // is named here too, so the fix-triage prompt sees the gap and not just an empty list.
   const notes = hunts.map((h, i) =>
-    (hunters[i].label !== 'security' && h && typeof h.coverage === 'string' && h.coverage.trim())
-      ? `${hunters[i].label}: ${h.coverage.trim()}` : '').filter(Boolean)
+    (h && typeof h.coverage === 'string' && h.coverage.trim())
+      ? `${hunters[i].label}: ${h.coverage.trim()}`
+      : drifted.includes(hunters[i].label)
+        ? `${hunters[i].label}: SCOPE MISMATCH — judged a different changeset; nothing checked THIS change`
+        : missing.includes(hunters[i].label)
+          ? `${hunters[i].label}: BLOCKED — the hunter died; nothing checked`
+          : '').filter(Boolean)
   return {
     ran: missing.length === 0 && drifted.length === 0,
     // Which hunters produced that `ran`, and by which of the two failures. `ran` deliberately
@@ -728,14 +708,7 @@ async function hunterFanOut(scope, hunters, trackName) {
     blockedHunters: missing,
     driftedHunters: drifted,
     findings,
-    coverage: [securityNote, ...notes].filter(Boolean).join(' | '),
-    // The security half's own outcome, carried out separately because the merged `ran` and
-    // `coverage` cannot separate the four states that all leave findings:[] behind. Without it a
-    // run of empty security results cannot say whether the diffs were clean or the track never
-    // reports anything — the question 49 recorded dispatches of the previous tool could not answer.
-    security: secIdx < 0 ? 'not-dispatched'
-      : missing.includes('security') ? 'blocked'
-      : drifted.includes('security') ? 'scope-mismatch' : 'clean',
+    coverage: notes.join(' | '),
   }
 }
 
@@ -1001,9 +974,8 @@ const triage = await reliable('triage', 'Triage', () => agent(
       seams is 'full'. Scary wording alone doesn't force 'full' (a copyright-year bump in a
       template is light); "small" wording alone doesn't earn 'light' (a one-line auth-role change
       is full). When you are unsure, answer 'standard': it keeps a real Codex read of the diff
-      (--mode review), the security hunter,
-      static analysis and build+tests, and only gives up the other pattern hunters plus
-      the up-front adversarial + readability passes. A caller-provided profile OVERRIDES your call
+      (--mode review), static analysis and build+tests, and only gives up the pattern hunters
+      plus the up-front adversarial + readability passes. A caller-provided profile OVERRIDES your call
       — echo it if given. Caller-provided profile: ${TIERS.includes(opts.profile) ? opts.profile : '(none — classify it)'}
       Then set profileReason: ONE line naming what actually decided it — the file, seam or
       operation you weighed, not a restatement of the tier. "it is a full change" is not a reason;
@@ -1026,20 +998,7 @@ const triage = await reliable('triage', 'Triage', () => agent(
       a false 'true' boots the whole stack and drives a browser for nothing, a false 'false'
       ships a rendered change that nothing looked at.
       Caller-provided uiTouched: ${typeof opts.uiTouched === 'boolean' ? opts.uiTouched : '(none — determine it)'}
-   8. securitySurface — does this diff touch anything the security patterns could match?
-      true if ANY of: auth / permissions / session / CSRF, a new or changed HTTP endpoint
-      or controller mapping, upload or file/path IO, SQL/JPQL/native queries or a migration,
-      crypto / secrets / tokens / credentials, deserialization or parsing of untrusted input,
-      raw/unescaped template output (th:utext, innerHTML, eval), outbound network calls, or
-      security/framework configuration. false only when the change is plainly none of those —
-      copy and CSS, a log message, a rename, a badge count, a test-only edit.
-      This gate exists because the security hunt is a full parallel subagent — 1.53M cache
-      tokens and about 200s — and on a diff of text wrapping and notification counts there is
-      nothing in its pattern file to match. Answer conservatively — when in doubt say true.
-      Every hunk it never reads is a hunk nothing looked at. A skipped security review is a
-      coverage hole, so it must be earned by a diff that genuinely has no security surface, not
-      by a guess. If you cannot tell, omit the field: an unanswered gate runs the hunter.
-   9. runtimeSurface — does this diff touch anything the runtime/failure patterns could match?
+   8. runtimeSurface — does this diff touch anything the runtime/failure patterns could match?
       true if ANY of: threads, async/executors, schedulers or shared mutable state; locking or
       transaction boundaries; a read-modify-write; caching or connection/resource pools; file,
       network or stream IO; a query or a loop over one (the N+1 shape) or any unbounded fetch;
@@ -1047,10 +1006,12 @@ const triage = await reliable('triage', 'Triage', () => agent(
       date/time, numeric or collection handling where the language has known traps. false only
       when the change is plainly none of those — copy and CSS, a rename, a constant tweak, a log
       message, a comment, a static template edit.
-      Same reasoning as 8 and the same cost: this hunt is a full parallel subagent measured at
-      2.70M tokens and 326s per dispatch, and on a diff of markup and wording its two pattern
-      files have nothing to match. Answer conservatively — when in doubt say true, and if you
-      cannot tell, omit the field: an unanswered gate runs the hunter.
+      This gate exists because the hunt is a full parallel subagent measured at 2.70M tokens and
+      326s per dispatch, and on a diff of markup and wording its two pattern files have nothing
+      to match. Every hunk it never reads is a hunk nothing looked at, so a skip must be earned
+      by a diff that genuinely has none of that surface, not by a guess. Answer conservatively —
+      when in doubt say true, and if you cannot tell, omit the field: an unanswered gate runs the
+      hunter.
    Return the structured result.`,
   { label: 'triage', schema: TRIAGE, ...GP, ...TRIAGE_RUN }
 ))
@@ -1375,20 +1336,16 @@ const noFullBuild = !hasBuild ? ''
 // Light: skip the fan-out entirely — the change cannot alter behavior, and a single Codex
 // --mode review pass over the final diff (Phase 6) is the review.
 // Standard: a real Codex read of the PRE-FIX diff (the lighter built-in reviewer, --mode review)
-// plus the security hunter. Security stays at this tier while its sibling pattern hunters do not,
-// and the reason is the shape of a miss rather than the yield: a missed N+1 degrades a page, a
-// missed injection or missing authorization check is exploitable in production and is the one
-// class of defect nothing later in the pipeline re-derives. The track is also self-limiting —
-// `securitySurface` closes it on any diff whose hunks have no security surface — so it is not a
-// blanket extra hunter on every standard run. What standard trades away are the other PATTERN
-// hunters (logic, and runtime-and-failures = concurrency/performance + silent failures) and the
-// code-quality pass, a polish concern rather than a correctness one. The trade is an independent tool over the
-// LLM pattern-matchers; the coverage it costs is the performance-at-scale lens (N+1, unbounded
-// fetches, pool exhaustion), which /r:code-scan partly picks up and which a diff-scoped reviewer
-// is least likely to flag — worth knowing when reading a clean standard run.
+// and no pattern hunter. Do not add a dedicated security hunter back at this tier on the shape
+// of a miss alone: measured, one returned 3 fixes over 79 dispatches, and the Codex read at this
+// tier plus the Codex end-verify cover the same hunks. What standard trades away are the PATTERN hunters (logic + security, and runtime-and-failures =
+// concurrency/performance + silent failures) and the code-quality pass, a polish concern rather
+// than a correctness one. The trade is an independent tool over the LLM pattern-matchers; the
+// coverage it costs is the performance-at-scale lens (N+1, unbounded fetches, pool exhaustion),
+// which /r:code-scan partly picks up and which a diff-scoped reviewer is least likely to flag —
+// worth knowing when reading a clean standard run.
 // Full: the strict ADVERSARIAL Codex review (it challenges the approach, not just the code) plus
-// the three blocking hunters plus code-quality, so triage in Phase 2 sees the whole field.
-// The DOCS hunter runs in both tiers but outside this barrier — see HUNTER_SET.
+// the two blocking hunters plus code-quality, so triage in Phase 2 sees the whole field.
 // Build (Phase 4) and static analysis (Phase 5) run in EVERY tier.
 //
 // The two Codex modes are different machines, not two settings of one dial: `r:code-adversarial`
@@ -1415,40 +1372,23 @@ if (profile === 'full' && planReviewed) {
 }
 const wantCodexUpfront = !!codexMode
 const wantQuality = profile === 'full'
-// Which hunters this tier dispatches, and what to CALL that track. At standard the track is not
-// find-bugs and must not be reported as it — a caller reading `tracksBlocked: ['find-bugs']` for
-// a tier that never ran find-bugs is being told a tool failed when nothing did.
+// Which hunters this tier dispatches. Only full dispatches any; the track is always find-bugs.
 //
-// The security hunter has a SECOND gate on top of the tier: the diff has to have security surface
-// at all. The hunt is a pattern match against security.md — injection sinks, authorization checks,
-// credential handling, data exposure — so on a CSS or copy change there is no hunk any of those
-// patterns can apply to, and a full subagent (1.53M cache tokens, ~200s) buys nothing. `!== false`
-// is the fail-open, and it matters MORE now that this track can actually return findings: only an
-// explicit "no security surface" from triage skips it, never a missing field.
-const securitySurface = triage.securitySurface !== false
-// The runtime-and-failures hunter carries the SAME shape of gate, for the same reason and on
-// stronger numbers. It owns concurrency-data-and-performance.md and silent-failures-and-java.md
-// and costs 2.70M tokens and 326s per dispatch, measured over 47 runs, for 0.42 fixes per run —
-// half of what `logic` returns. Its own prompt already tells it to weight the patterns by what
-// the change does ("a diff with no shared state or threading has little for the concurrency
-// patterns"); this gate is that sentence made structural, so a diff with none of that surface
-// stops paying for the hunt rather than paying for it and being told there was nothing to find.
-// `!== false` fail-open, exactly like securitySurface: an unanswered field runs the hunter, and
-// only an explicit "no runtime surface" from triage skips it. The track keeps its 70% precision
-// and its 16 confirmed findings on the diffs where those patterns can actually match.
+// The runtime-and-failures hunter has a SECOND gate on top of the tier: the diff has to have
+// runtime surface at all. It owns concurrency-data-and-performance.md and
+// silent-failures-and-java.md and costs 2.70M tokens and 326s per dispatch, measured over 47
+// runs, for 0.42 fixes per run — half of what `logic` returns. Its own prompt already tells it to
+// weight the patterns by what the change does ("a diff with no shared state or threading has
+// little for the concurrency patterns"); this gate is that sentence made structural, so a diff
+// with none of that surface stops paying for the hunt rather than paying for it and being told
+// there was nothing to find. `!== false` is the fail-open: an unanswered field runs the hunter,
+// and only an explicit "no runtime surface" from triage skips it. The track keeps its 70%
+// precision and its 16 confirmed findings on the diffs where those patterns can actually match.
 const runtimeSurface = triage.runtimeSurface !== false
-const HUNTER_SET = (profile === 'full'
-  ? HUNTERS
-  : HUNTERS.filter((h) => h.label === 'security')
-).filter((h) => h.label !== 'security' || securitySurface)
- .filter((h) => h.label !== 'runtime-and-failures' || runtimeSurface)
-const hunterTrack = profile === 'full' ? 'find-bugs'
-  : securitySurface ? 'security hunter' : 'no hunters'
-if (!securitySurface && profile !== 'light') {
-  log('post-task-review: security hunter SKIPPED — triage found no security surface in this diff ' +
-      '(no auth/session, upload or file IO, new endpoint, SQL, crypto/secrets, untrusted parsing, ' +
-      'raw template output or security config). Nothing was security-reviewed; this is a skip, not a clean bill.')
-}
+const wantHunters = profile === 'full'
+const HUNTER_SET = (wantHunters ? HUNTERS : [])
+  .filter((h) => h.label !== 'runtime-and-failures' || runtimeSurface)
+const hunterTrack = 'find-bugs'
 if (!runtimeSurface && profile === 'full') {
   log('post-task-review: runtime-and-failures hunter SKIPPED — triage found no concurrency, shared ' +
       'state, IO, query or error-handling surface in this diff. Nothing was checked for data ' +
@@ -1502,7 +1442,7 @@ phase('Review')
   // hunter, so a single dead hunter is re-dispatched on its own instead of re-running the
   // whole set. Report-only: no failing tests, no plan mode (a subagent can't reach
   // AskUserQuestion/EnterPlanMode anyway, so find-bugs' Phases 4–5 can't fire by accident).
-  () => hunterFanOut(scope, HUNTER_SET, hunterTrack),
+  !wantHunters ? (() => undefined) : () => hunterFanOut(scope, HUNTER_SET, hunterTrack),
   !wantQuality ? (() => undefined) : () => reliable('code-quality', 'Review', () => agent(
     `Invoke the /r:code-quality skill (Skill tool) over ${scope}; report-only. Return the
      "worth fixing" readability/idiom findings as file:line + one line each.${RAN_CLAUSE}${BATCH_CLAUSE}`,
@@ -1516,7 +1456,7 @@ if (codex && Array.isArray(codex.findings)) {
 // Only tracks this tier actually ran can be "blocked" — a track that was never dispatched is a
 // tier decision, and logging it as blocked would read as a tool failure in the transcript.
 for (const [name, r, ran] of [['codex', codex, wantCodexUpfront],
-                              [hunterTrack, bugs, true],
+                              [hunterTrack, bugs, wantHunters],
                               ['code-quality', quality, wantQuality]]) {
   if (ran && skipped(r)) log(`post-task-review: ${name} SKIPPED — the OpenAI Codex plugin is not ` +
     `installed, so no Codex review ran; every other track proceeded. Add it with ` +
@@ -1524,11 +1464,11 @@ for (const [name, r, ran] of [['codex', codex, wantCodexUpfront],
   else if (ran && blocked(r)) log(`post-task-review: ${name} track BLOCKED — proceeding with the others (not faked)`)
 }
 if (profile === 'standard') {
-  log('post-task-review: standard tier — a Codex --mode review pass read the diff, alongside the ' +
-      'security hunter. Skipped at this tier: the ' +
-      'other /r:code-bugs pattern hunters (logic; runtime-and-failures = concurrency/performance + silent failures), the ' +
-      'up-front codex ADVERSARIAL pass and /r:code-quality. A second Codex --mode review over the ' +
-      'FINAL diff always runs below, and build/tests + local-scan are unchanged.')
+  log('post-task-review: standard tier — a Codex --mode review pass read the diff. Skipped at this ' +
+      'tier: the /r:code-bugs pattern hunters (logic + security; runtime-and-failures = ' +
+      'concurrency/performance + silent failures), the up-front codex ADVERSARIAL pass and ' +
+      '/r:code-quality. A second Codex --mode review over the FINAL diff always runs below, and ' +
+      'build/tests + local-scan are unchanged.')
 }
 
 // --- Phase 2: triage into a bucketed fix-list, SPLIT by bucket ---------------
@@ -1565,7 +1505,7 @@ const [correctnessList, readabilityList] = await parallel([
    Do NOT include readability or doc-drift items: another agent owns readability, and doc drift is
    a user decision that must stay out of correctness so nobody "fixes" a doc mismatch by changing
    the code.
-   ${hunterTrack}: ${JSON.stringify(bugs)}
+   ${hunterTrack}: ${wantHunters ? JSON.stringify(bugs) : '(not run at this tier)'}
    codex (${codexMode || 'not run at this tier'}): ${wantCodexUpfront ? JSON.stringify(codex) : '(not run at this tier)'}${intentBlock}`,
     { label: 'fix-triage', schema: CORRECTNESS_LIST, agentType: 'Explore' })), // read-only: no Edit/Write
   !wantQuality ? (() => undefined) : () => reliable('fix-triage-readability', 'Fix-triage', () => agent(
@@ -2014,14 +1954,15 @@ const endVerifyTrack = async () => {
       ? `This end-verify is regression-only — do NOT re-challenge the approach. Skip anything already
        triaged; flag only NEW correctness/equivalence breaks the fixes/refactor/scan introduced.`
       : profile === 'standard'
-      ? `A Codex --mode review pass already read the PRE-FIX diff, and the security hunter
-       went over it too; their findings were triaged and fixed. You are reading the FINAL diff — the
+      ? `A Codex --mode review pass already read the PRE-FIX diff; its findings were triaged
+       and fixed. You are reading the FINAL diff — the
        fixes, the refactor and /r:code-scan's self-fixes are all in it now. So don't re-report what
        was already triaged and fixed: spend this pass on what those later changes introduced, and on
-       what a diff review of the earlier state would have missed. Note that the three /r:code-bugs
-       pattern hunters did NOT run at this tier, so performance-at-scale problems (N+1 queries,
-       unbounded fetches, connection-pool exhaustion) have had no dedicated reader — they are worth
-       your attention here.`
+       what a diff review of the earlier state would have missed. Note that the /r:code-bugs
+       pattern hunters did NOT run at this tier, so security shapes (injection, missing
+       authorization, exposed secrets) and performance-at-scale problems (N+1 queries, unbounded
+       fetches, connection-pool exhaustion) have had no dedicated reader — they are worth your
+       attention here.`
       : `No Codex has read this change yet, so this is its ONLY Codex review — review the WHOLE
        change: correctness, edge cases, and anything the change introduced (not just regressions).`
     // Hand pass 1's verdict to pass 2. Two things it can't otherwise know: which findings were
@@ -2839,7 +2780,7 @@ if (planBookkeepingWritten.length) {
 }
 
 const TRACKS = [['codex', codex, wantCodexUpfront],
-                [hunterTrack, bugs, profile !== 'light'],
+                [hunterTrack, bugs, wantHunters],
                 ['code-quality', quality, wantQuality]]
 // A track fails to certify in two ways, and `blocked()` cannot tell them apart because `ran`
 // deliberately collapses both. Split them HERE, at the only point that still knows which hunter
@@ -2855,8 +2796,7 @@ const tracksBlocked = TRACKS.filter(([, r, ran]) =>
   ran && blocked(r) && (!hunterDetail(r) || blockedOf(r).length)).map(([n]) => n)
 // Named per TRACK, like tracksBlocked, but carrying the hunter too: "find-bugs (security)" is
 // the whole diagnosis, and without the hunter name a reader has to open the transcript to learn
-// which of three or four hunters read the wrong thing. Below full tier the track is already named
-// for its single hunter ('security hunter'), so the suffix would only repeat it.
+// which of the hunters read the wrong thing.
 const tracksDrifted = TRACKS.filter(([, r, ran]) => ran && driftedOf(r).length)
   .map(([n, r]) => {
     const who = driftedOf(r).filter((h) => !n.includes(h))
@@ -2865,16 +2805,15 @@ const tracksDrifted = TRACKS.filter(([, r, ran]) => ran && driftedOf(r).length)
 // Named separately from tracksBlocked so a caller can tell an absent optional prerequisite
 // from a tool that failed. Both mean the step did not run; only one is anybody's fault.
 //
-// The two per-DIFF-gated hunters are appended by hand because their gates are not like the others':
-// `securitySurface` and `runtimeSurface` are decisions taken above about THIS diff, not tier
-// decisions, so nothing in TRACKS can see them — the hunter simply drops out of HUNTER_SET while
-// `hunterTrack` still reports as having run.
+// The per-DIFF-gated hunter is appended by hand because its gate is not like the others':
+// `runtimeSurface` is a decision taken above about THIS diff, not a tier decision, so nothing in
+// TRACKS can see it — the hunter simply drops out of HUNTER_SET while `hunterTrack` still reports
+// as having run.
 // Recording it matters beyond this payload: the stats report derives a track's denominator from the
 // TIER, so without these lines every standard/full run counts as an opportunity the gated hunter
 // had, whether or not it dispatched, and its fixes-per-run reads lower than it earned — which is
 // the number the retirement list reads. Logging the skip to the user is not recording it.
 const tracksSkipped = TRACKS.filter(([, r, ran]) => ran && skipped(r)).map(([n]) => n)
-  .concat(!securitySurface && profile !== 'light' ? ['security'] : [])
   .concat(!runtimeSurface && profile === 'full' ? ['runtime-and-failures'] : [])
 // Everything this phase leaves on the table: what a pass raised and nothing re-read clean, plus
 // every major finding the size gate withheld from the fixer. Both are outstanding defects — a
@@ -2996,13 +2935,6 @@ const statsRow = {
   // phase will produce it again. Zero and absent are different: absent is a row written before
   // the gate existed, when every finding went to a fixer regardless of size.
   endVerifyMajor: endVerifyMajor.length,
-  // Four outcomes that leave the same trace in the store today: a clean review, a review of a
-  // DIFFERENT changeset, a tool that died, and a gate that never dispatched it. All 47 recorded
-  // dispatches returned findings:[], and with the four collapsed that number cannot tell a clean
-  // diff from a track that never reports anything. `tracksBlocked`/`tracksSkipped` carry the
-  // MERGED hunter track, never this half of it on its own.
-  security: profile === 'light' ? 'not-dispatched'
-    : (bugs && bugs.security) ? bugs.security : 'blocked',
   localScan,
   // Whether the scan REWROTE the code, which `localScan` alone cannot say: 'ok' covers both a scan
   // that found nothing and one that self-fixed — and only the second owes a rebuild and forces an
@@ -3196,13 +3128,6 @@ return {
   // ok | skipped (nothing JVM changed) | blocked (scan died/errored — NOT scanned) | n/a (no build tool).
   // Reported because /r:code-scan is mandatory in every tier: a caller has to be able to see that
   // the static pass did not actually happen, rather than infer it from a silent success.
-  // Four outcomes that leave the same trace in the store today: a clean review, a review of a
-  // DIFFERENT changeset, a tool that died, and a gate that never dispatched it. All 47 recorded
-  // dispatches returned findings:[], and with the four collapsed that number cannot tell a clean
-  // diff from a track that never reports anything. `tracksBlocked`/`tracksSkipped` carry the
-  // MERGED hunter track, never this half of it on its own.
-  security: profile === 'light' ? 'not-dispatched'
-    : (bugs && bugs.security) ? bugs.security : 'blocked',
   localScan,
   // true when the scan applied its own fixes, so the final diff contains machine-written code the
   // caller never saw in the fix-list; null when no scan completed. Same three states as the stats

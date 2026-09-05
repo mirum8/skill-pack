@@ -104,6 +104,10 @@ KIND_SKILL = {"review": "r:task-review", "implement": "r:task-run"}
 # rev 4 — `docs` retired from this pipeline. It is still /r:code-bugs' Agent 5, so the track name
 #         survives in the store and in SURFACED_ONLY below; what changed is that a review no
 #         longer dispatches it, and rows from here on must not count as opportunities it had.
+# rev 5 — `security` folded into `logic` (the logic hunter reads security.md as a second pattern
+#         file) and standard dispatches no hunter. The separate track measured 3 fixes over 79
+#         dispatches and both recorded scope drifts; its findings now land under `logic`, and a
+#         rev-5 row lists no `security` track for the denominator to count.
 TRACK_REVS = {
     1: {
         "light":    set(),
@@ -125,6 +129,11 @@ TRACK_REVS = {
         "standard": {"codex", "security"},
         "full":     {"codex", "security", "logic", "runtime-and-failures"},
     },
+    5: {
+        "light":    set(),
+        "standard": {"codex"},
+        "full":     {"codex", "logic", "runtime-and-failures"},
+    },
 }
 LATEST_REV = max(TRACK_REVS)
 
@@ -139,9 +148,8 @@ LATEST_REV = max(TRACK_REVS)
 SURFACED_ONLY = {"docs": "docDriftCount"}
 
 # A review names a dead track in the CALLER's vocabulary, which is not this table's. The hunter
-# fan-out is reported under ONE name — the scan's, or the security hunter's alone at a tier where
-# that hunter is all the scan has left — while the tier dispatches its members separately and
-# scores them separately. Expanding the alias is what makes a scan that never ran subtract from
+# fan-out is reported under ONE name — the scan's — while the tier dispatches its members
+# separately and scores them separately. Expanding the alias is what makes a scan that never ran subtract from
 # every hunter it stood for; without it the subtraction quietly covers only `codex` and `docs` and
 # misses the most expensive thing that can fail here. Which hunters a name stood for is a TIER
 # question, so these are intersected with the row's own tier rather than applied whole. Both
@@ -152,8 +160,15 @@ SURFACED_ONLY = {"docs": "docDriftCount"}
 # rename there would otherwise stop the subtraction silently, with no error and no empty column.
 HUNTER_ALIASES = {
     "find-bugs": {"logic", "runtime-and-failures", "concurrency", "silent-failures", "security"},
+}
+# Names the review emitted under an earlier revision and no longer does. They stay resolvable
+# because the rows that carry them are still in the store, but they are kept apart so the test
+# that checks every live key against the script does not have to know which are historical.
+#   'security hunter' — rev 3/4 standard tier, where the security hunter was the whole scan.
+RETIRED_ALIASES = {
     "security hunter": {"security"},
 }
+ALL_ALIASES = {**RETIRED_ALIASES, **HUNTER_ALIASES}
 
 
 def drifted_names(row):
@@ -197,7 +212,7 @@ def missed_tracks(row):
         if name in tier:
             out.add(name)
         else:
-            out |= HUNTER_ALIASES.get(name, set()) & tier
+            out |= ALL_ALIASES.get(name, set()) & tier
     return out
 
 
@@ -548,7 +563,7 @@ def summarize_reviews(rows):
                 hits[k] += v
         # A track can only score on a run that dispatched it. The tier says which tracks were in
         # play; missed_tracks() says which of those never actually ran on THIS diff — a per-diff
-        # gate closed it (the security hunter's `securitySurface`) or its tool failed. Count either
+        # gate closed it (the runtime-and-failures hunter's `runtimeSurface`) or its tool failed. Count either
         # as an opportunity and the track's fixes-per-run is divided by runs it never saw.
         opps = collections.Counter()
         for r in live:

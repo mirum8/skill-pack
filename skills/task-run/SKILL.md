@@ -114,9 +114,7 @@ Three tiers, chosen by what the change *does*. The workflow classifies from the 
 | Plan | brief | full Opus plan | full Opus plan |
 | Codex **plan** review | – | – | ✅ + 1 bounded re-review |
 | up-front Codex over the diff | – | `--mode review` | adversarial |
-| security hunter (injection, authz, secrets, data exposure) | – | ✅ | ✅ |
-| docs-consistency hunter | – | ✅ | ✅ |
-| `/r:code-bugs` pattern hunters (`logic`, `runtime-and-failures`) | – | – | ✅ |
+| `/r:code-bugs` pattern hunters (`logic` + security, `runtime-and-failures`) | – | – | ✅ |
 | `/r:code-quality` → `/r:code-refactor` | – | – | ✅ |
 | build + tests, `/r:code-scan` | ✅ | ✅ | ✅ |
 | Codex `--mode review` on final diff | ✅ | ✅ | ✅ |
@@ -130,7 +128,7 @@ The classifier answers three questions in order: *can this alter behavior for an
 
 **The design phase is gated on `uiVisualChange`, which is a different question.** `uiTouched` asks whether a frontend *file* changes — the right question for the UI verifier, since a change meant to render identically is one worth looking at. The design phase can only produce a *decision about what the user sees*, so it asks whether anything renders differently. Self-hosting a font, a CSP header, a class rename, a build-pipeline change — all edit `.html`/`.css` and decide nothing, and an acceptance criterion reading *"the appearance does not change"* is the giveaway. One exception, the case the phase exists for: when the **explorers** turned `uiTouched` on, the description hid the frontend entirely, so Phase 0 never judged the visuals — that counts as unanswered and the design phase runs.
 
-**Unclear calls land on standard, not full.** Standard still gets a real Codex read of the diff, the security hunter, doc-drift checking, static analysis and a green build, so `full` can mean the one narrow thing it should — *this approach needs challenging before code is written*. What standard trades away is the other `/r:code-bugs` pattern hunters (their performance-at-scale lens has no dedicated reader below full), the up-front adversarial pass and `/r:code-quality`. A tier that absorbs every uncertainty ends up meaning nothing, which is what a two-tier light/full system produces.
+**Unclear calls land on standard, not full.** Standard still gets a real Codex read of the diff, static analysis and a green build, so `full` can mean the one narrow thing it should — *this approach needs challenging before code is written*. What standard trades away is the other `/r:code-bugs` pattern hunters (their performance-at-scale lens has no dedicated reader below full), the up-front adversarial pass and `/r:code-quality`. A tier that absorbs every uncertainty ends up meaning nothing, which is what a two-tier light/full system produces.
 
 ### When the workflow stops
 
