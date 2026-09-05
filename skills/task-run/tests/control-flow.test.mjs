@@ -38,7 +38,7 @@ const DEFAULT_CONFIG = { provider: 'claude', model: 'opus', effort: 'medium',
                          sources: ['/pack/.config/defaults.yaml'], notes: [] }
 // And what it resolves for `steps.plan` — the planner, its explorers, and the judges that triage
 // the plan review. Same rule: the default this suite asserts against is the default that ships.
-const DEFAULT_PLAN_CONFIG = { model: 'opus', effort: 'high', exploreModel: 'sonnet',
+const DEFAULT_PLAN_CONFIG = { model: 'fable', effort: 'medium', exploreModel: 'sonnet',
   exploreEffort: 'medium', judgeModel: 'opus', judgeEffort: 'high', sources: [], notes: [] }
 // The codex row, which the shipped file no longer carries for THIS step — /r:task-review's fixers
 // do. Named explicitly by the tests below so the codex branch keeps its coverage whichever
@@ -462,7 +462,7 @@ test('the resolved planning row is RECORDED, not left to be mined off the items'
     planConfig: { ...DEFAULT_PLAN_CONFIG, effort: 'xhigh', judgeModel: 'sonnet' },
   })
   const row = JSON.parse(prompts['stats'].match(/\{"kind":"implement".*\}/)[0])
-  assert.equal(row.planModel, 'opus')
+  assert.equal(row.planModel, 'fable')
   assert.equal(row.planEffort, 'xhigh')
   assert.equal(row.exploreModel, 'sonnet')
   assert.equal(row.judgeModel, 'sonnet')
@@ -503,8 +503,8 @@ test('a dead plan-config agent falls back to the constants and SAYS so', async (
   const { optsBy, logText } = await run({
     review: OK_REVIEW, planfix: OK_FIX, planConfig: null,
   })
-  assert.equal(optsBy['planner'].model, 'opus')
-  assert.equal(optsBy['planner'].effort, 'high')
+  assert.equal(optsBy['planner'].model, 'fable')
+  assert.equal(optsBy['planner'].effort, 'medium')
   assert.equal(optsBy['judge#1.1:coverage'].model, 'opus')
   assert.match(logText, /the plan config could not be read/)
 })
@@ -892,8 +892,8 @@ test('the light-tier planner keeps the model but not the top effort', async () =
   // MODEL is the only thing separating the two planners — they share a tier, and the brief-vs-full
   // contract lives in the prompt. So assert both halves: a plan-light that drifted onto the full
   // planner's model would otherwise pass on the effort alone.
-  assert.equal(optsBy['plan-light'].model, 'opus')
-  assert.equal(optsBy['plan-light'].effort, 'high')
+  assert.equal(optsBy['plan-light'].model, 'fable')
+  assert.equal(optsBy['plan-light'].effort, 'medium')
   assert.equal(optsBy['planner'], undefined)   // the full planner is untouched; it just didn't run
 })
 
@@ -1060,7 +1060,7 @@ test('standard tier: full planner, but no Codex plan review', async () => {
     args: { source: '#81', profile: 'standard' },
   })
   assert.equal(out.profile, 'standard')
-  assert.equal(counts['planner'], 1)          // the full Opus planner, not the brief one
+  assert.equal(counts['planner'], 1)          // the full planner, not the brief one
   assert.equal(counts['plan-light'], undefined)
   assert.equal(counts['codex-plan-review#1'], undefined)
   assert.equal(out.planReview.ran, false)
@@ -1145,7 +1145,7 @@ test('a design phase that no explorer voted for still gets the whole code map', 
 })
 
 test('the explorers are held to a size bound, because their briefs are re-paid downstream', async () => {
-  // Each brief is carried whole into the Opus planner and, on a UI task, into the design agent as
+  // Each brief is carried whole into the planner and, on a UI task, into the design agent as
   // well. An unbounded "focused brief" is billed twice at the most expensive tier in the run.
   const { prompts } = await run({ review: OK_REVIEW, planfix: OK_FIX })
   const explore = prompts['explore#1:controller + templates']
@@ -2465,8 +2465,8 @@ test('the plan scribe stays sonnet/medium — it transcribes a document verbatim
 
 test('every judging track still keeps its own model and depth', async () => {
   const { optsBy } = await run({ review: OK_REVIEW, planfix: OK_FIX, verdict: MIXED })
-  assert.equal(optsBy['planner'].model, 'opus')
-  assert.equal(optsBy['planner'].effort, 'high')
+  assert.equal(optsBy['planner'].model, 'fable')
+  assert.equal(optsBy['planner'].effort, 'medium')
   // The judges NAME opus rather than inheriting it, and the value is the measured status quo —
   // 223 judge items in the store, every one of them opus/high. A config row cannot express
   // "whatever the caller was running", so naming it is what makes a run that never reached the

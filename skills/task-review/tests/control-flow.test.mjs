@@ -2582,3 +2582,52 @@ test('a clean pass 2 does NOT clear findings whose fix never reached the tree', 
   assert.notEqual(out.endVerify, 'passed')
   assert.ok((out.endVerifyFindings || []).length, 'the finding stays outstanding')
 })
+
+// --- the plan's bookkeeping is the caller's -----------------------------------
+// /r:plan-run Step 3.6 ticks AFTER this review and the done-check and BEFORE the commit,
+// deliberately in that order. Observed on a review that ended `findings-unresolved` with four
+// confirmed findings at fixed=false, two of them P1: its fix phase had ticked all ten of the
+// phase's checklist items and written the `built:` marker onto the phase heading. That marker is
+// what `--land` keys on to map a branch to a finished phase, so a review whose own verdict was
+// "outstanding findings" had produced the artifact certifying the phase complete. The only thing
+// between that and a merge was a unit re-reading a file it had never edited.
+test('every fixer is forbidden to tick a plan or write a completion marker', async () => {
+  const { prompts } = await run({
+    triage: baseTriage({ uiTouched: true, hasTestApp: true }),
+    overrides: {
+      'fix-triage': { correctness: ['fix the importer'], readability: ['rename the helper'] },
+      'build#': (n) => (n === 1 ? { green: false, inScopeFailures: 'ImporterTest fails' } : { green: true }),
+      'ui-functional': { ran: true, findings: [{ title: 'x', where: 'a.go:1', fixSize: 'minor', suggestedFix: 'y' }] },
+    },
+  })
+  for (const label of ['fix-correctness', 'fix-readability', 'build-fix#1', 'ui-fix-minor']) {
+    const p = prompts[label]
+    if (!p) continue
+    assert.match(p, /NEVER WRITE THE PLAN'S BOOKKEEPING/, `${label} must carry the rule`)
+    assert.match(p, /built:/, `${label} must name the completion marker`)
+    // The marker is doubly not a fixer's to write: it names a BRANCH, and no agent in here knows
+    // which branch it is on. The observed one synthesised a slug from the phase title that matched
+    // no branch in the repo, so even a phase that HAD passed would have been mapped wrong.
+    assert.match(p, /you do not know which\s+branch you are on/, `${label} must say why the marker is never its to write`)
+  }
+})
+
+test('a diff that ticks completion is reported, whatever the verdict', async () => {
+  // A prompt rule is obeyed by a model. This is the one place where disobeying it merges an
+  // uncertified phase, so it is observed as well as forbidden.
+  const { out, logText } = await run({
+    overrides: { 'bookkeeping-check': { files: ['docs/fyl/todo.md'], detail: 'ten items flipped, built: marker added' } },
+  })
+  assert.deepEqual(out.planBookkeepingWritten, ['docs/fyl/todo.md'])
+  assert.match(logText, /TICKS COMPLETION or writes a built: marker/)
+  assert.match(logText, /git checkout -- docs\/fyl\/todo\.md/, 'and names the repair')
+})
+
+test('a clean run reports no bookkeeping, and a dead check is not a clean one', async () => {
+  const clean = await run()
+  assert.deepEqual(clean.out.planBookkeepingWritten, [])
+  const dead = await run({ overrides: { 'bookkeeping-check': null } })
+  assert.deepEqual(dead.out.planBookkeepingWritten, [], 'a dead check must not manufacture a blockage')
+  assert.match(dead.logText, /could not check whether the diff writes plan bookkeeping/,
+    'but it must say the check did not run, rather than passing silently')
+})

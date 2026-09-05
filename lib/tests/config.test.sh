@@ -383,13 +383,13 @@ steps:
     judgeEffort: turbo
     provider: codex
 YAML
-ok  "plan: a codex model falls back"     "$(read_cfg "$NOCODEX" "$PLANPACK" "$PLANBAD" model plan)"       opus
+ok  "plan: a codex model falls back"     "$(read_cfg "$NOCODEX" "$PLANPACK" "$PLANBAD" model plan)"       fable
 has "plan: and the substitution is named" "$(read_cfg "$NOCODEX" "$PLANPACK" "$PLANBAD" notes plan)"      "steps.plan.model"
 ok  "plan: a bad judge effort falls back" "$(read_cfg "$NOCODEX" "$PLANPACK" "$PLANBAD" judgeEffort plan)" high
 ok  "plan: a good judge model is kept"   "$(read_cfg "$NOCODEX" "$PLANPACK" "$PLANBAD" judgeModel plan)"  haiku
 has "plan: a provider key is not read here" "$(read_cfg "$NOCODEX" "$PLANPACK" "$PLANBAD" notes plan)"   "steps.plan.provider"
 # Having the plugin present must change nothing, since there is no provider to honour.
-ok  "plan: the codex plugin changes nothing" "$(read_cfg "$HASCODEX" "$PLANPACK" "$PLANBAD" model plan)"  opus
+ok  "plan: the codex plugin changes nothing" "$(read_cfg "$HASCODEX" "$PLANPACK" "$PLANBAD" model plan)"  fable
 
 # --- the exit-0 promise -----------------------------------------------------
 for dir in "$EMPTY" "$BROKEN" "$BADENUM" "$UNKNOWN" "$CODEX"; do

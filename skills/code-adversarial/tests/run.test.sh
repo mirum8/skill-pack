@@ -138,6 +138,26 @@ rc=$(go)
 grep -q "BLOCKED" "$TMP/out" && ok "and stdout carries the greppable BLOCKED trailer" \
                              || bad "and stdout carries the greppable BLOCKED trailer" "$(tail -3 "$TMP/out")"
 
+# The generic backup clause is anchored to the review as its subject. Codex's read-only sandbox
+# denies the Go build cache on every Go repo, so a review-mode pass there reads the diff, finds
+# what it finds, and then says the TESTS could not run — a bare `could not run` turned each of
+# those into three attempts and a BLOCKED end-verify over a diff that had been read.
+companion <<'JS'
+console.log("# Codex Review\n\nTarget: working tree diff\n\nNo actionable bugs were found in the current changes. Tests could not run because the read-only sandbox prevented Go from creating its build directory.");
+JS
+rc=$(go --mode review)
+[[ "$rc" == "0" ]] && ok "a review whose TESTS could not run is still a review" \
+                   || bad "a review whose TESTS could not run is still a review" "exit $rc: $(tail -3 "$TMP/err")"
+grep -q "No actionable bugs" "$TMP/out" && ok "and its verdict reaches stdout" \
+                                        || bad "and its verdict reaches stdout" "$(cat "$TMP/out")"
+
+companion <<'JS'
+console.log("# Codex Review\n\nThe review could not run in this environment.");
+JS
+rc=$(go --mode review)
+[[ "$rc" == "4" ]] && ok "a REVIEW that could not run is still blocked" \
+                   || bad "a REVIEW that could not run is still blocked" "exit $rc"
+
 companion <<'JS'
 console.log("# Codex adversarial review\n\nAll good.");
 console.error("mktemp: failed to create file");

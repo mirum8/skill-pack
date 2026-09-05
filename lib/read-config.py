@@ -105,8 +105,8 @@ SPEC = {
     # way it is for a writer or a fixer. `resolve()` skips its codex branch on a row with no
     # provider, so the `model` keys carry their own enum instead.
     "plan": {
-        "model": {"default": "opus", "enum": CLAUDE_MODELS},
-        "effort": {"default": "high", "enum": EFFORTS},
+        "model": {"default": "fable", "enum": CLAUDE_MODELS},
+        "effort": {"default": "medium", "enum": EFFORTS},
         # The explorers, which map the code BEFORE the plan is written. Cheaper than the planner by
         # design: this is read-and-map work, not judgement. `medium` rather than `low` because the
         # one consequential call an explorer makes is riskFlags, which gates the light->full

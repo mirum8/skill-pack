@@ -94,7 +94,14 @@ BLOCKED_RE='Review blocked|could not be inspected|rejected tool calls|execution 
 BLOCKED_RE="$BLOCKED_RE"'|completed without any stdout output|Codex review failed|did not return valid structured JSON|unexpected review shape'
 # Generic "it didn't happen" phrasing, as backup. This is a blacklist, so it is the
 # LAST line of defence, not the mechanism — REVIEW_RE below is what actually decides.
-BLOCKED_RE="$BLOCKED_RE"'|unable to (run|inspect|complete)|could not (run|complete|inspect)'
+# The subject is anchored to the REVIEW on purpose: a bare `could not run` also matches
+# "Tests could not run because the read-only sandbox prevented Go from creating its build
+# directory", which is a review that DID read the diff and says so — Codex's sandbox denies
+# the Go build cache on every Go repo, so that sentence is the normal shape of a review-mode
+# pass there, and a bare match turns each one into three attempts and a BLOCKED end-verify
+# over a diff that was in fact read. `inspect` stays unanchored: nothing but the review
+# inspects anything.
+BLOCKED_RE="$BLOCKED_RE"'|(^|[^a-z])(the )?(review|reviewer|codex|diff|changes?) (was |were |is |are )?(unable to|could not) (be )?(run|completed?|inspected?)|(unable to|could not) inspect'
 
 # The positive marker. Every render path in the companion opens with `# Codex <label>`
 # (render.mjs: renderReviewResult x3, renderNativeReviewResult). Its ABSENCE proves the

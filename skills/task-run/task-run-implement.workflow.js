@@ -12,7 +12,7 @@
 //   Claude Code 2.1.217 removed the `Agent` tool from subagents (verified: a
 //   general-purpose subagent's tool list is Agent,Bash,Edit,Read,Skill,ToolSearch,
 //   Write on 2.1.216 and loses `Agent` on 2.1.217+). run-task IS its subagents —
-//   the explorers, the Opus planner, the Codex plan reviewer, the domain
+//   the explorers, the planner, the Codex plan reviewer, the domain
 //   implementers, the build runner — so run-task nested inside a subagent can no
 //   longer fan out at all. It would degrade to one context and still report success.
 //   A Workflow script runs in the main thread and spawns every agent ITSELF, so the
@@ -78,7 +78,7 @@ export const meta = {
     { title: 'Source',      detail: 'resolve task + criteria + tier + build tool' },
     { title: 'Explore',     detail: 'read-only fan-out over the change surface', model: 'sonnet' },
     { title: 'Design',      detail: 'UI/UX spec via frontend-design, iff the visuals change', model: 'opus' },
-    { title: 'Plan',        detail: 'Opus planner, written to .task-plans/', model: 'opus' },
+    { title: 'Plan',        detail: 'Fable planner, written to .task-plans/', model: 'fable' },
     { title: 'Plan-review', detail: 'Codex challenge + one bounded re-review' },
     { title: 'Implement',   detail: 'branch + test-first domain subagents' },
     { title: 'Build',       detail: 'build with tests, bounded retry' },
@@ -601,14 +601,14 @@ const EXPLORE_RUN = { model: 'sonnet', effort: 'medium' }
 // what says whether moving them cost anything: it buckets runs by the recorded row and prints the
 // paired review's correctness fixes beside it, because a cheaper planner that pushes work into
 // fix-correctness has moved cost rather than saved it.
-const PLAN_RUN = { model: 'opus', effort: 'high' }
+const PLAN_RUN = { model: 'fable', effort: 'medium' }
 // The LIGHT-tier planner writes a BRIEF for a change that, by the tier's own definition, cannot
 // alter behavior — and that contract, not the depth, is what separates it from PLAN_RUN: the two
 // share a model and a tier, and the split lives in the prompt. Its own constant exists so the brief can be
 // costed separately from the full plan. The tier is not load-bearing on its own either: the
 // explorers' risk flags escalate light->FULL the moment they see auth, money, migrations or
 // concurrency, so a misclassified task never actually gets planned here.
-const PLAN_LIGHT_RUN = { model: 'opus', effort: 'high' }
+const PLAN_LIGHT_RUN = { model: 'fable', effort: 'medium' }
 // The UI/UX design agent. Opus because this is judgement — what the screen should be, which of the
 // app's existing components it is built from, which states it owes the user — and a cheaper model
 // reliably produces the generic layout `frontend-design` exists to rule out. It is pinned, not
@@ -1056,7 +1056,7 @@ ${inRepo}
      so there is no JSON to escape and no wrapper to fill in. Your reply IS the brief.
 
      KEEP IT UNDER 200 LINES, and cite \`path:LINE\` with a sentence on what the code there does
-     rather than pasting the code itself. This brief is carried whole into the Opus planner and,
+     rather than pasting the code itself. This brief is carried whole into the planner and,
      on a UI task, into the design agent as well — so every line of padding is paid twice at the
      most expensive tier in the run, and it competes for the planner's attention with the files it
      actually has to reason about. A slice that genuinely cannot be mapped in 200 lines is a sign

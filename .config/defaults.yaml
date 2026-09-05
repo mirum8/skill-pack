@@ -39,8 +39,8 @@ steps:
   # to disk verbatim, and the explorers and judges return schema'd objects it branches on. None of
   # that survives a hand-off to a CLI, so codex is not an option for this row.
   plan:
-    model: opus           # the planner — fable | opus | sonnet | haiku
-    effort: high          # low | medium | high | xhigh | max
+    model: fable          # the planner — fable | opus | sonnet | haiku
+    effort: medium        # low | medium | high | xhigh | max
 
     # The explorers that map the code before the plan is written. Cheaper than the planner by
     # design — read-and-map work, not judgement. `medium` rather than `low` because the one

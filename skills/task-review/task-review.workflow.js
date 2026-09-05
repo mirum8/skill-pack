@@ -1166,6 +1166,35 @@ const movedFiles = (before, after) => {
   return moved
 }
 
+// The plan's bookkeeping is the CALLER's, and a fixer writing it forges the certificate this
+// pipeline exists to withhold. /r:plan-run Step 3.6 ticks AFTER the review and the done-check and
+// BEFORE the commit, deliberately in that order: the reviewer's diff is then the code change
+// rather than a bookkeeping edit its own doc-consistency hunter has to rule on, and only what was
+// actually verified gets ticked.
+//
+// Observed on a review that ended `findings-unresolved` with four confirmed findings at
+// fixed=false, two of them P1: its fix phase had ticked all ten of the phase's checklist items and
+// written the `built:` marker onto the phase heading. The marker is what `--land` keys on to map a
+// branch to a finished phase, so a review whose own verdict was "outstanding findings" had
+// produced the artifact that certifies the phase complete. The only thing between that and a merge
+// was a unit choosing to re-read a file it had never edited.
+//
+// The marker is doubly not a fixer's to write: it names a BRANCH, and no agent in here knows which
+// branch it is on — the observed one synthesised a slug from the phase title
+// (`phase-33-forward-reconnection-forwards-view-copyable-url`) that matched no branch in the repo,
+// so even on a phase that HAD passed, `--land` would have mapped it wrong. One rule covers both:
+// never write it, under any verdict.
+const NOT_YOUR_BOOKKEEPING = `
+
+   NEVER WRITE THE PLAN'S BOOKKEEPING. Do not tick or untick a checkbox in any plan, backlog, todo
+   or spec document (\`- [ ]\` -> \`- [x]\`), do not add or edit a \`built:\` marker or any other
+   completion stamp, and do not mark a phase, milestone or item done. That is the CALLER's step and
+   it happens after this review returns, from the criteria the review actually verified — a tick
+   written here is a claim about work nothing has certified, and this review may be about to report
+   outstanding findings. The completion marker is worse: it names a branch, you do not know which
+   branch you are on, and it is what the merge step keys on to treat a branch as a finished phase.
+   If a finding is genuinely about a plan document, describe it in your summary and change nothing.`
+
 // Resolve the review tier. A caller (e.g. /r:task-run) may pass { profile, uiTouched }; otherwise
 // use what triage classified from the diff. Two different defaults are at work and they must not
 // be confused: 'standard' is where an UNSURE CLASSIFIER lands (see the tree above), while 'full'
@@ -1635,7 +1664,7 @@ if (!nothingToFix) {
        - Respect project conventions: no new comments or Javadocs, @Builder on data classes with
          more than 3 fields, match the surrounding code.
        - ${selfCheckClause}${noFullBuild}
-       - Return a short summary (files + one line each).${intentBlock}${NO_WEAKENING}`,
+       - Return a short summary (files + one line each).${intentBlock}${NO_WEAKENING}${NOT_YOUR_BOOKKEEPING}`,
       { label: 'fix-correctness', phase: 'Fix', ...fixAgentType({ agentType: persona }), ...fixRun })
     // Same rule the end-verify fixer follows: only count what a live fixer took. Counting a dead
     // one leaves `fixed.correctness` reporting the full triaged list — the same false-confidence
@@ -1658,7 +1687,7 @@ if (!nothingToFix) {
     // Only now, and only into a tree the correctness fixer has finished writing.
     const fr = await fix(
       `Invoke the /r:code-refactor skill on the changed files ONLY, applying these readability
-       wins ${commitClause}:\n${fixList.readability.join('\n')}${intentBlock}${NO_WEAKENING}${BATCH_CLAUSE}`,
+       wins ${commitClause}:\n${fixList.readability.join('\n')}${intentBlock}${NO_WEAKENING}${NOT_YOUR_BOOKKEEPING}${BATCH_CLAUSE}`,
       { label: 'fix-readability', phase: 'Fix', ...GP })
     if (blocked(fr)) {
       readabilityFixed = false
@@ -1768,7 +1797,7 @@ if (hasBuild) {
        rules) and do NOT touch any pre-existing / out-of-scope test or class to force a
        pass:\n${inScope}
        ${selfCheckClause}${noFullBuild} (This loop rebuilds and re-runs the suite as soon as
-       you return — that is what proves the failures are gone.)${intentBlock}${NO_WEAKENING}`,
+       you return — that is what proves the failures are gone.)${intentBlock}${NO_WEAKENING}${NOT_YOUR_BOOKKEEPING}`,
       { label: `build-fix#${i}`, phase: 'Build', agentType: buildFixAgent() })
   }
   if (!buildGreen) {
@@ -1863,7 +1892,7 @@ if (isJvm) {
           these (surgical-fixer rules) and do NOT touch any pre-existing / out-of-scope test or
           class to force a pass:\n${failed}
           ${selfCheckClause}${noFullBuild} (This loop rebuilds and re-runs the suite as soon as you
-          return — that is what proves the failures are gone.)${intentBlock}${NO_WEAKENING}`,
+          return — that is what proves the failures are gone.)${intentBlock}${NO_WEAKENING}${NOT_YOUR_BOOKKEEPING}`,
           { label: `rebuild-fix#${i}`, phase: 'Local-scan', agentType: buildFixAgent() })
       }
       if (!rebuildGreen) {
@@ -2118,7 +2147,7 @@ ${priorPass.findings.map(f => `         - ${f.file}:${f.line} [${f.category}] ${
       force a pass (the green bar is never relaxed). Every item below was sized as a SMALL, LOW-RISK
       fix by the reviewer that raised it — if applying one turns out to need more than that, STOP
       and report it back rather than widening the change:
-      ${minor.map(f => `${f.file}:${f.line} ${f.what}`).join('\n')}${intentBlock}${NO_WEAKENING}`,
+      ${minor.map(f => `${f.file}:${f.line} ${f.what}`).join('\n')}${intentBlock}${NO_WEAKENING}${NOT_YOUR_BOOKKEEPING}`,
       { label: `end-verify-fix#${pass}`, phase: 'End-verify', ...fixAgentOpts, ...fixRun })
     // Only count what a live fixer took. A dead fixer must not inflate `fixed.correctness` — the
     // whole point of that number is that a caller can trust it. The findings stay in
@@ -2628,7 +2657,7 @@ try {
   const uiCited = minor.map((f) => String(f.where || '').split(':')[0].trim()).filter((f) => /\.[A-Za-z0-9]+$/.test(f))
   const uiBefore = uiCited.length ? await hashCited(uiCited, 'ui-fix-pre') : new Map()
   if (minor.length) minorFixer = await agent(`${fixProvider === 'codex' ? codexFixPreamble : ''}Fix these minor UI/runtime defects (surgical), ${rebuildClause}
-    Then redeploy and re-verify once:\n${minor.map(f => `${f.where}: ${f.title} — ${f.suggestedFix}`).join('\n')}${intentBlock}${NO_WEAKENING}`,
+    Then redeploy and re-verify once:\n${minor.map(f => `${f.where}: ${f.title} — ${f.suggestedFix}`).join('\n')}${intentBlock}${NO_WEAKENING}${NOT_YOUR_BOOKKEEPING}`,
     { label: 'ui-fix-minor', phase: 'UI', ...domainFixer, ...fixRun })
   // Same rule as the fixer above, for the same reason: whether the FILER came back, not whether
   // findings were TAGGED major. A filer that died wrote nothing, and a summary still reporting
@@ -2777,6 +2806,38 @@ try {
 // that forgot it would silently lose the run, which is the failure the sink exists to avoid.
 
 // ------------------------------------------------------------- consolidate ---
+// A prohibition in a prompt is obeyed by a model; this is the one place where it being disobeyed
+// merges an uncertified phase, so it is also OBSERVED. The invariant is clean and needs nothing
+// from the caller: /r:plan-run ticks after this review returns, so a completion tick or a `built:`
+// marker appearing in the diff NOW is always premature — there is no run in which it is correct
+// for one to be here. Reported, never repaired: the fix is `git checkout -- <the plan file>`, and
+// only the caller knows which edits in that file were its own.
+const bookkeeping = await agent(
+  `Read only — change nothing, stage nothing, commit nothing.
+   Run \`git diff\` (plus \`git diff --cached\`) and look ONLY at markdown files for two things:
+     1. a checklist item flipped to done — a removed \`- [ ]\` line paired with an added \`- [x]\`
+     2. an added line introducing a completion stamp — \`built:\` on a heading, or similar
+   Return files=[] when there are none, which is the normal answer. Do NOT report an item that was
+   already \`- [x]\` and merely moved, and do NOT report a NEW unticked \`- [ ]\` — writing new
+   checklist items is ordinary. Only the flip to done, and only a stamp being ADDED.`,
+  { label: 'bookkeeping-check', phase: 'End-verify', schema: {
+      type: 'object', additionalProperties: false, required: ['files'],
+      properties: {
+        files: { type: 'array', items: { type: 'string' } },
+        detail: { type: 'string' },
+      } }, ...GP, ...ECHO }).catch(() => null)
+// A dead check is NOT a clean one, but it must not manufacture a blockage either: report the gap.
+const planBookkeepingWritten = (bookkeeping && Array.isArray(bookkeeping.files) && bookkeeping.files.length)
+  ? bookkeeping.files : []
+if (planBookkeepingWritten.length) {
+  log(`post-task-review: this run's diff TICKS COMPLETION or writes a built: marker in ${planBookkeepingWritten.join(', ')} — ` +
+      `no fixer may do that and the caller ticks after this review returns, so it is premature whatever this verdict says. ` +
+      `Revert those files before committing: \`git checkout -- ${planBookkeepingWritten.join(' ')}\`.` +
+      (bookkeeping.detail ? ` (${bookkeeping.detail})` : ''))
+} else if (!bookkeeping) {
+  log('post-task-review: could not check whether the diff writes plan bookkeeping — re-read the plan file yourself before committing')
+}
+
 const TRACKS = [['codex', codex, wantCodexUpfront],
                 [hunterTrack, bugs, profile !== 'light'],
                 ['code-quality', quality, wantQuality]]
@@ -2920,6 +2981,10 @@ const statsRow = {
   tracksBlocked,
   tracksDrifted,
   tracksSkipped,
+  // Non-empty => the diff ticks a plan's completion or writes a `built:` marker. Never correct at
+  // this point in the run whatever the verdict is, because the caller ticks AFTER this returns —
+  // and the marker is what the merge step keys on to treat a branch as a finished phase.
+  planBookkeepingWritten,
   fixedBySource,
   fixedCorrectness: fixed.correctness.length + endVerifyFixed,
   fixedReadability: fixed.readability.length,
@@ -3108,6 +3173,10 @@ return {
   tracksBlocked,
   tracksDrifted,
   tracksSkipped,
+  // Non-empty => the diff ticks a plan's completion or writes a `built:` marker. Never correct at
+  // this point in the run whatever the verdict is, because the caller ticks AFTER this returns —
+  // and the marker is what the merge step keys on to treat a branch as a finished phase.
+  planBookkeepingWritten,
   // What each finding track actually bought: correctness items that survived triage, keyed by the
   // track that found them. This is the number that can retire a track on evidence instead of
   // argument; it is also written to ~/.claude/skill-stats.jsonl for accumulation across runs.

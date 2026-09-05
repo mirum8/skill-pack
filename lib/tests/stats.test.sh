@@ -321,6 +321,31 @@ PYX
 ok "a regex literal does not swallow later prompts" \
    "$(rex 'Deploy the app and wait until it answers, then report the URL you reached it on.')" deploy
 
+# One dispatch, one label, two LITERALS: `agent(cond ? `…` : `…`, { label })`. The first literal
+# is followed by the ternary's `:` rather than by the opts object, so a read that only looks past
+# each literal for `{ label` finds the second branch and drops the first — the UI teardown's tmux
+# half recorded nothing under that shape while its docker half was labelled every run.
+LITTERN="$TMP/littern.workflow.js"
+cat > "$LITTERN" <<'JS'
+export const meta = { name: 'fixture' }
+const td = await agent(
+  tui
+    ? `Stop every terminal session this run started, unconditionally, and report what you did.`
+    : `Tear the ephemeral container stack down unconditionally and report what you did.`,
+  { label: 'teardown', phase: 'UI' })
+JS
+littern() { python3 - "$LITTERN" "$1" <<'PYX'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("ss", "lib/skill-stats.py")
+ss = importlib.util.module_from_spec(spec); spec.loader.exec_module(ss)
+print(ss.classify(sys.argv[2], ss.label_signatures([sys.argv[1]])) or "<none>")
+PYX
+}
+ok "a ternary between two literals labels its first branch" \
+   "$(littern 'Stop every terminal session this run started, unconditionally, and report what you did.')" teardown
+ok "and its second" \
+   "$(littern 'Tear the ephemeral container stack down unconditionally and report what you did.')" teardown
+
 # Division must still divide: reading `a / b` as an opening bracket loses everything up to the next
 # slash, which is the same blindness arrived at from the opposite mistake.
 DIVIDE="$TMP/divide.workflow.js"

@@ -1333,10 +1333,11 @@ def _builder_spans(src, lits):
 def label_signatures(paths):
     """[(normalised literal chunk, label)] for every prompt a pipeline dispatches, longest first.
 
-    A prompt reaches its agent in one of three shapes, and all three are read here: the literal
-    handed straight to the call (`agent(`…`, { label })`), the literal held as a `prompt:` beside
+    A prompt reaches its agent in one of four shapes, and all four are read here: the literal
+    handed straight to the call (`agent(`…`, { label })`), a ternary choosing between two literals
+    under one label (`agent(cond ? `…` : `…`, { label })`), the literal held as a `prompt:` beside
     its own `label:` in a table of tracks, and the literal under a named builder that the call
-    passes by name. A shape none of the three recognise contributes no signature, and its runs stay
+    passes by name. A shape none of the four recognise contributes no signature, and its runs stay
     unlabelled — which the report counts and prints.
 
     A chunk two steps share is dropped rather than awarded to whichever sorted first.
@@ -1351,8 +1352,14 @@ def label_signatures(paths):
         spans = _builder_spans(src, lits)
         for k, (start, end, text) in enumerate(lits):
             label = _label_after(src[end:])
+            head = src[lits[k - 1][1] if k else 0:start]
+            if (not label and k + 1 < len(lits) and re.search(r"\?\s*$", head)
+                    and re.fullmatch(r"\s*:\s*", src[end:lits[k + 1][0]])):
+                # `agent(cond ? `…` : `…`, { label })`: one dispatch, one label, two literals. The
+                # first literal is followed by the ternary's `:`, not by the opts object, so its
+                # label sits after the SECOND literal — the one the plain read above already finds.
+                label = _label_after(src[lits[k + 1][1]:])
             if not label:
-                head = src[lits[k - 1][1] if k else 0:start]
                 if re.search(r"\bprompt:\s*$", head):
                     # A track table pairs the two the other way round: `{ label: …, prompt: `…` }`.
                     # The LAST `label:` before this prompt is its own; earlier ones belong to the
