@@ -383,7 +383,14 @@ do_preflight() {
   # and without it the sidebar shows units without saying what they are doing. Completion is decided
   # by the sentinel and the branch marker and never by agent_status, so a missing hook costs
   # legibility and nothing else -- which is exactly the case for saying so and continuing.
-  herdr integration status 2>/dev/null | grep -q '^claude: current' \
+  # Captured first and matched from a here-string, never piped into `grep -q`. Under `pipefail` that
+  # pipe reports the WRITER's death, and `grep -q` exits the moment it matches: herdr lists a dozen
+  # integrations, `claude` sits third, so the remaining lines hit a closed pipe, herdr dies of
+  # SIGPIPE (141), and the pipeline fails ON A MATCH. The skip then fires on every single run,
+  # telling the user to install something already installed -- the kind of false alarm that trains a
+  # reader to ignore the line that will one day be real.
+  local integ; integ=$(herdr integration status 2>/dev/null) || integ=
+  grep -q '^claude: current' <<<"$integ" \
     || say "preflight: herdr's claude integration is not installed, so the sidebar will not show unit agent state. Units still spawn, are waited on and are closed normally — completion rests on the sentinel and the branch marker. \`herdr integration install claude\` fixes the display."
   echo "preflight ok (primary tree, clean, herdr reachable at ${HERDR_SOCKET_PATH:-the default session socket}, $(live_count)/$MAX_UNITS units live)"
 }
@@ -406,6 +413,22 @@ do_spawn() {
   [ -n "$id" ] && [ -n "$dir" ] && [ -n "$base" ] && [ -n "$prompt" ] \
     || die "spawn: --id, --dir, --base and --prompt are all required"
   case $id in *[!A-Za-z0-9._-]*) die "spawn: --id may only contain [A-Za-z0-9._-]" ;; esac
+
+  # --dir is canonicalised ONCE, here, before anything consumes it, because its three consumers
+  # resolve a relative path against three different directories. `git worktree add` and
+  # `trust_worktree` resolve against this script's cwd; herdr resolves `workspace create --cwd`
+  # against the SERVER's. So `--dir ../repo-g1` builds and trusts the worktree at the right path
+  # while the workspace opens at the server's cwd -- a path Claude Code has no trust decision for,
+  # so the session lands on the trust dialog, never reaches its prompt, and `agent start` times out
+  # as agent_not_ready. Every diagnostic upstream reads healthy, which makes it look like a herdr
+  # fault rather than an argument-handling one. An absolute value also keeps the recorded `dir=`
+  # meaningful for `cleanup` and `--land`, which run later and may run from elsewhere.
+  # The PARENT is resolved physically because it exists and the unit's own directory does not yet;
+  # a lexical collapse of `..` would be wrong wherever the caller's cwd runs through a symlink.
+  local dparent
+  dparent=$(cd "$(dirname "$dir")" 2>/dev/null && pwd -P) || dparent=
+  [ -n "$dparent" ] || die "spawn: --dir '$dir' has no existing parent directory to hold the worktree"
+  dir="$dparent/$(basename "$dir")"
   [ -e "$(rec "$id")" ] && die "spawn: unit '$id' already exists — cleanup first"
 
   local n; n=$(live_count)
@@ -537,10 +560,15 @@ sys.exit(0 if sp and not fg else 1)' 2>/dev/null && break
   # NAMED, not enforced: herdr's readiness contract reads a terminal, while a foreground process
   # called claude is a fact about the machine. A shim or a wrapper is not proof of failure, but
   # silence about the disagreement would be.
+  #
+  # Read `argv0`, not `name`. herdr's `name` is the process's own TITLE, and Claude Code sets that
+  # to its bare version string -- a healthy unit reports {"argv0":"claude","name":"2.1.263"}, so a
+  # test on `name` alone fires this warning on every spawn of every wave. `name` is kept as the
+  # second half of an `or` because a build that does not retitle itself still answers there.
   hd pane process-info --pane "$pane" \
     && printf '%s' "$HD_OUT" | python3 -c 'import sys,json
 p=json.load(sys.stdin)["result"]["process_info"]
-sys.exit(0 if any(x.get("name")=="claude" for x in p.get("foreground_processes",[])) else 1)' 2>/dev/null \
+sys.exit(0 if any(x.get("argv0")=="claude" or x.get("name")=="claude" for x in p.get("foreground_processes",[])) else 1)' 2>/dev/null \
     || say "spawn: '$id' started per herdr, but no claude process holds $pane's foreground — watch this unit"
 
   # The prompt, as text typed into a running agent. Never retried: herdr documents that a timeout or

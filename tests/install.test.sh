@@ -107,8 +107,13 @@ has  "the config reader lands"                     "$D/lib/read-config.py"
 has  "the shipped defaults land"                   "$D/.config/defaults.yaml"
 has  "check-prereqs.sh lands"                      "$D/check-prereqs.sh"
 is   "it says a restart is needed"                 "$(grep -c 'NEXT session' <<<"$out")" 1
+# __pycache__ is excluded on BOTH sides because install.sh deliberately drops it: running any packed
+# python leaves one in the repo, and shipping it would ship a build artefact the repo itself
+# gitignores. Demanding byte-identity including it makes this case fail whenever a packed script has
+# been imported — which `validate.sh` guarantees, since the suites it runs before this one do
+# exactly that. A gate that fails on its own earlier steps is a gate people learn to disbelieve.
 is   "the payload is byte-identical to the repo" \
-     "$(diff -r "$REPO/skills" "$D/skills" >/dev/null && echo same)" same
+     "$(diff -r -x __pycache__ "$REPO/skills" "$D/skills" >/dev/null && echo same)" same
 
 # --- 3. the payload is the payload, not the repo ----------------------------
 hasnt "docs/ is not shipped"                       "$D/docs"

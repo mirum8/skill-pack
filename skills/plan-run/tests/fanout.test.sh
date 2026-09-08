@@ -81,8 +81,16 @@ S=$HERDR_STUB_STATE; mkdir -p "$S"
 err() { printf '{"error":{"code":"%s","message":"%s"},"id":"stub"}\n' "$1" "${2:-stub error}" >&2; exit 1; }
 case "$1 $2" in
   "status "*|"status")   echo "server:"; echo "  status: running"; exit 0 ;;
-  "integration status")  [ "${HERDR_STUB_NO_INTEGRATION:-0}" = 0 ] || { echo "claude: not installed"; exit 0; }
-                         echo "claude: current (v9)"; exit 0 ;;
+  # The REAL listing: a dozen-odd integrations, `claude` third, most of them after it. That shape is
+  # the whole point -- a one-line stub cannot reproduce a reader that stops at the match and kills
+  # the writer with SIGPIPE, which is exactly how this check silently inverted once.
+  "integration status")  echo "pi: current (v8)"; echo "omp: not installed"
+                         if [ "${HERDR_STUB_NO_INTEGRATION:-0}" = 0 ]
+                           then echo "claude: current (v9) (/h/.claude/hooks/herdr-agent-state.sh)"
+                           else echo "claude: not installed (/h/.claude/hooks/herdr-agent-state.sh)"; fi
+                         for k in codex copilot devin droid kimi opencode kilo hermes qwen cursor grok
+                           do echo "$k: not installed"; done
+                         exit 0 ;;
   "workspace list")      [ "${HERDR_STUB_LIST_FAIL:-0}" = 0 ] || err server_not_running "no server"
                          [ "${HERDR_STUB_LIST_GARBAGE:-0}" = 0 ] || { echo "not json at all"; exit 0; }
                          out=""; for f in "$S"/ws.*; do
@@ -119,8 +127,11 @@ case "$1 $2" in
   "pane process-info")   p=$4
                          fg='{"pid":100,"name":"bash","argv":["/bin/bash"]}'
                          [ "${HERDR_STUB_NEVER_IDLE:-0}" = 0 ] || fg='{"pid":100,"name":"bash"},{"pid":200,"name":"vim"}'
+                         # A live claude reports its TITLE in `name` -- its bare version string --
+                         # and the binary only in `argv0`. Anything asserting on `name` is asserting
+                         # on a field a healthy unit never fills with "claude".
                          [ -e "$S/agentpane.$p" ] && [ "${HERDR_STUB_NO_CLAUDE:-0}" = 0 ] \
-                           && fg='{"pid":100,"name":"bash"},{"pid":300,"name":"claude"}'
+                           && fg='{"pid":100,"name":"bash","argv0":"bash"},{"pid":300,"name":"2.1.263","argv0":"claude"}'
                          printf '{"result":{"type":"pane_process_info","process_info":{"pane_id":"%s","shell_pid":100,"foreground_processes":[%s]}}}\n' "$p" "$fg"
                          exit 0 ;;
   "pane run")            [ "${HERDR_STUB_NO_START:-0}" = 0 ] && sh -c "$4" >/dev/null 2>&1
@@ -202,6 +213,13 @@ trust_repo "$REPO"
 out=$("$FAN" preflight 2>&1); rc=$?
 [[ $rc == 0 ]] && ok "a clean primary tree with herdr reachable passes preflight" \
                || bad "a clean primary tree with herdr reachable passes preflight" "exit $rc: $out"
+# The other half of the named skip, and the half that inverts silently. `grep -q` stops at the match
+# and the writer dies of SIGPIPE, which under `pipefail` fails the pipeline ON A MATCH -- so an
+# INSTALLED integration reported itself missing on every run. A skip that fires when nothing was
+# skipped tells the user to install what they already have, and trains them past the real warning.
+grep -q "integration is not installed" <<<"$out" \
+  && bad "an installed integration is silent — the skip does not fire on a match" "$out" \
+  || ok "an installed integration is silent — the skip does not fire on a match"
 
 # A PATH holding neither the stub nor a real installation — the machine running this suite may
 # well have herdr, and the case under test is a machine that does not.
@@ -275,6 +293,11 @@ argv_has "-p" \
 grep -q "FANOUT_SENTINEL=" "$HERDR_STUB_LOG" \
   && ok "and is handed the sentinel path it must write" \
   || bad "and is handed the sentinel path it must write" "$(cat "$HERDR_STUB_LOG")"
+# herdr reports a live claude's TITLE in `name` -- its version string -- and the binary in `argv0`.
+# A check on `name` fires "watch this unit" on every spawn of every healthy wave.
+grep -q "watch this unit" <<<"$out" \
+  && bad "a healthy claude in the pane raises no warning" "$out" \
+  || ok "a healthy claude in the pane raises no warning"
 # Without this the unit reaches its implement step and is refused the canonical pipeline, because
 # the Workflow tool only accepts a scriptPath under the cwd or a directory the session was given.
 # It fails late and quietly: the worktree is clean, so the wave looks merely unproductive.
@@ -307,6 +330,39 @@ grep -q "FANOUT_ORCHESTRATOR" "$HERDR_STUB_LOG" \
   && bad "omitting --orchestrator leaves the variable unset, never empty" "$(cat "$HERDR_STUB_LOG")" \
   || ok "omitting --orchestrator leaves the variable unset, never empty"
 "$FAN" cleanup --id pnoorch >/dev/null 2>&1
+
+out=$(HERDR_STUB_NO_CLAUDE=1 "$FAN" spawn --id pfg --dir "$TMP/wt-pfg" --base main --prompt x 2>&1)
+grep -q "watch this unit" <<<"$out" \
+  && ok "and a pane with no claude in it still says so — the check is weakened, not removed" \
+  || bad "and a pane with no claude in it still says so — the check is weakened, not removed" "$out"
+"$FAN" cleanup --id pfg >/dev/null 2>&1
+
+# A relative --dir is resolved against three different directories by its three consumers: `git
+# worktree add` and `trust_worktree` use this script's cwd, herdr resolves `workspace create --cwd`
+# SERVER-side. Unresolved, the worktree is built and trusted in the right place while the workspace
+# opens somewhere Claude Code has no trust decision for, so the unit sits on the trust dialog and
+# `agent start` times out as agent_not_ready with every upstream diagnostic healthy. Both documented
+# recipes pass `--dir "../<repo>-g<n>"`, so this is the shape callers actually use.
+: > "$HERDR_STUB_LOG"
+out=$(cd "$REPO" && "$FAN" spawn --id prel --dir "../wt-prel" --base main --prompt x 2>&1); rc=$?
+[[ $rc == 0 ]] && ok "a relative --dir spawns" || bad "a relative --dir spawns" "exit $rc: $out"
+relcwd=$(sed -n 's/.*workspace create --cwd \([^ ]*\).*/\1/p' "$HERDR_STUB_LOG" | head -1)
+[[ $relcwd == /*/wt-prel ]] \
+  && ok "and herdr is handed an absolute path, which is the only one it resolves the same way" \
+  || bad "and herdr is handed an absolute path, which is the only one it resolves the same way" \
+         "--cwd '$relcwd'"
+[[ -d "$TMP/wt-prel" ]] && [[ $relcwd -ef "$TMP/wt-prel" ]] \
+  && ok "and it is the same directory the worktree was actually built in" \
+  || bad "and it is the same directory the worktree was actually built in" "'$relcwd' vs $TMP/wt-prel"
+grep -q "^dir=/" "$TMP"/fanout-*/prel.rec \
+  && ok "and the rec records it absolute, for a cleanup that runs from anywhere" \
+  || bad "and the rec records it absolute, for a cleanup that runs from anywhere" \
+         "$(cat "$TMP"/fanout-*/prel.rec)"
+out=$(cd "$REPO" && "$FAN" spawn --id pnodir --dir "no/such/parent/wt" --base main --prompt x 2>&1); rc=$?
+[[ $rc != 0 ]] && grep -q "no existing parent" <<<"$out" \
+  && ok "a --dir with no existing parent is refused by name, not by a worktree failure" \
+  || bad "a --dir with no existing parent is refused by name, not by a worktree failure" "exit $rc: $out"
+"$FAN" cleanup --id prel >/dev/null 2>&1
 
 # A pack reached through a symlink — the shipped layout, where ~/.claude is one — passes the tool's
 # pre-resolution check under the name it was called by and fails the post-resolution one under its
