@@ -175,6 +175,48 @@ is "the new citation is noticed"  "d['countChanged'][0]['was'], d['countChanged'
 is "and changed flips to true"    "d['changed']" "True"
 
 echo
+echo "== a count over a shared basename is disclosed as an upper bound =="
+# The corpus elides anchors, so the basename is the only key that reliably joins -- which means
+# every plan citing ANY file of that name lands in one bucket. The count is then an upper bound on
+# the pattern's attestation, not a measurement of it, and nothing here can disaggregate the two.
+# So it is disclosed. Without a number to disclose it WITH, the doc publishes a bare figure that
+# reads as exact and a reader has no way to tell.
+fresh
+mkdir -p "$TMP/repo/web-adapter/src/main/resources/templates/admin" \
+         "$TMP/repo/web-adapter/src/main/resources/templates/calculator"
+printf '<div th:fragment="adminRow">a</div>\n' \
+  > "$TMP/repo/web-adapter/src/main/resources/templates/admin/page.html"
+printf '<div th:fragment="calcRow">c</div>\n' \
+  > "$TMP/repo/web-adapter/src/main/resources/templates/calculator/page.html"
+plan a <<'EOF'
+| admin table row | `templates/admin/page.html` — `adminRow` |
+EOF
+plan b <<'EOF'
+| calculator row | `templates/calculator/page.html` — `calcRow` |
+EOF
+RUN_ARGS=()
+is "two plans citing two DIFFERENT files of one name still make one candidate" \
+   "len(d['candidates'])" 1
+is "and its count aggregates both, which is the whole reason to disclose it" \
+   "d['candidates'][0]['cited']" 2
+is "sharesName names how many repo files that count covers" \
+   "d['candidates'][0]['sharesName']" 2
+# An unambiguous exemplar must NOT be marked, or the marker means nothing: a `≤` on every row is a
+# `≤` on none, and the doc goes back to publishing one undifferentiated number.
+fresh
+plan a <<'EOF'
+| service | `core/.../deal/DealService.java` — `createDeal` |
+EOF
+plan b <<'EOF'
+| service | `core/.../deal/DealService.java` — `createDeal` |
+EOF
+RUN_ARGS=()
+is "a basename with exactly one file in the repo reports sharesName 1" \
+   "d['candidates'][0]['sharesName']" 1
+is "and an exemplar the repo does not hold at all reports 0, never a phantom file" \
+   "sum(c['sharesName'] for c in d['candidates'] if not c['resolved'])" 0
+
+echo
 echo "== an exemplar the doc names but does not tabulate is still 'known' =="
 # Otherwise every deliberate omission is re-proposed on every future refresh and `changed`
 # is never false again.

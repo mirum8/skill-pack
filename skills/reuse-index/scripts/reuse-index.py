@@ -94,6 +94,14 @@ def repo_index(repo):
     idx = {}
     for root, dirs, files in os.walk(repo):
         depth = 0 if root == repo else root[len(repo):].strip(os.sep).count(os.sep) + 1
+        # Anything `.claude*` is pruned at EVERY depth, which is what keeps linked worktrees out:
+        # `.claude/worktrees/<u>/` holds a near-complete second copy of the repo, and indexing it
+        # would give almost every basename a twin and make every count read as an upper bound.
+        # That is a rule rather than a resolver preference winning on path length -- a tie broken by
+        # ordering is a tie that breaks the other way on somebody else's tree. The cost is that a
+        # project doc living under `.claude/docs/` never resolves as an anchor. That is correct
+        # here: docs are not reuse exemplars and are dismissed either way, and widening the walk to
+        # reach them would pull the worktrees, the plugin caches and the transcripts back in.
         dirs[:] = [d for d in dirs
                    if d not in SKIP_DIRS
                    and not d.startswith('.claude')
@@ -150,6 +158,17 @@ def candidates(corpus, repo, idx, min_cited):
             'exemplar': base,
             'path': paths[0] if paths else None,
             'alsoAt': paths[1:6],
+            # How many repo files carry this basename. Above 1, `cited` is an UPPER BOUND on the
+            # pattern's attestation rather than a measurement of it: the corpus elides anchors, so
+            # the basename is the only key that reliably joins, and every plan that cited any file
+            # of this name lands in the same bucket. `page.html` resolving to three templates
+            # counts the calculator's plans toward an admin fragment's entry. `citedBy` is
+            # over-broad the same way and by the same rows, which is why the doc's `Cited`/`Plan`
+            # agreement holds while both describe more files than the entry's anchor. Nothing here
+            # can disaggregate them -- the elision is what makes the join possible at all -- so
+            # this is DISCLOSED rather than corrected, and `alsoAt` is truncated for display while
+            # this is the real count.
+            'sharesName': len(paths),
             'resolved': bool(paths),
             'cited': cited,
             'citedBy': sorted(hit['plans']),
@@ -284,10 +303,17 @@ def main():
             # An entry may name several exemplars, so its count is the MAX across them, never the
             # first one that happens to match: a pattern is as well attested as its best-attested
             # exemplar, and picking arbitrarily makes the number depend on anchor order.
-            seen = [by_base[os.path.basename(p)]['cited'] for p in e['paths']
+            hits = [by_base[os.path.basename(p)] for p in e['paths']
                     if os.path.basename(p) in by_base]
+            seen = [c['cited'] for c in hits]
             if seen and max(seen) != e['cited']:
-                counts.append({'pattern': e['pattern'], 'was': e['cited'], 'now': max(seen)})
+                # A shared basename is reported WITH the move, because it is the only thing that
+                # explains a count going DOWN while the corpus grew. The max is over buckets that
+                # each aggregate every file of their name, so which bucket wins can change without
+                # the pattern's own standing changing at all -- and a reader watching a number fall
+                # cannot otherwise tell that from a convention falling out of favour.
+                counts.append({'pattern': e['pattern'], 'was': e['cited'], 'now': max(seen),
+                               'sharesName': max(c['sharesName'] for c in hits)})
 
     print(json.dumps({
         'corpus': {'dir': args.plans, 'plans': len(plan_files), 'withReuseMap': with_map,

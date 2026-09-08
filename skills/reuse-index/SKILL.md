@@ -94,7 +94,8 @@ several distinct shapes. Group by layer, from the resolved paths.
 file if one is there. A rebuild is a fresh clustering pass — it keeps no prose from the old doc.
 
 **Existing index:** merge — existing entries keep their prose and only their `Cited` and `Plan`
-cells refresh (both rebuilt from the candidate's `citedBy`); `new` entries are added into their
+cells refresh (both rebuilt from the candidate's `citedBy`, and written `≤N` where the candidate's
+`sharesName` is above 1); `new` entries are added into their
 section; `stale` anchors are re-resolved from the script's `candidates` list where that is
 unambiguous, and otherwise marked and reported. Never delete an entry silently: a pattern that
 moved and a pattern that died need opposite responses, and only the reader can tell which happened.
@@ -125,7 +126,11 @@ Verify the path you wrote resolves before finishing — a broken pointer is wors
 ## Step 5 — Report
 
 - corpus size, how many plans carried a reuse map, how many candidates met the threshold
-- entries written, entries merged, `Cited` counts (and their `Plan` links) that moved
+- entries written, entries merged, `Cited` counts (and their `Plan` links) that moved — and for a
+  move whose `countChanged` row carries `sharesName` above 1, say so, because that is the only
+  thing that explains a count going **down** while the corpus grew. Several repo files of one name
+  share a bucket, so which bucket wins can change without the pattern's own standing changing at
+  all, and a reader watching a number fall cannot otherwise tell that from a convention dying.
 - **every candidate that did not make it, and why** — below threshold, file gone, pattern gone,
   or folded into another entry. A silent drop is how an index starts lying about its coverage.
 - stale anchors re-resolved, and the ones needing a human

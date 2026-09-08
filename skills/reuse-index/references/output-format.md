@@ -64,13 +64,21 @@ alphabetically by pattern.
 - **Reach for it when** — the situation, not a restatement of the pattern. This is the column a
   reader scans.
 - **Cited** — how many distinct plans independently reached for this exemplar: the evidence for
-  the entry's presence, and what tells a future editor which lines are load-bearing.
+  the entry's presence, and what tells a future editor which lines are load-bearing. Write it
+  `≤N` when the script reports `sharesName` above 1 for the exemplar the count came from. Plans
+  cite files by name and elide the path, so several repo files of one name share a bucket, and
+  `page.html` resolving to three templates counts the calculator's plans toward an admin
+  fragment's entry. The number is then an upper bound and the `≤` says so — a bare `17` that is
+  really "at most 17" is the doc asserting something it cannot support, and the reader has no
+  other way to tell.
 - **Plan** — a link to every plan that cited the exemplar, one markdown link per plan
   (`[<slug>](.task-plans/<slug>.md)`), comma-separated. The trail back from a distilled convention
   to the full task context — the reasoning, the tradeoffs, the single-cited exemplars this doc
   filtered out. It is `Cited` itemized, so the two always agree, and like `Cited` it is
   **derived, not authored**: rebuilt from the exemplar's citing plans on every write, never
-  hand-edited.
+  hand-edited. Under a `≤` count it is over-broad in exactly the same way and by exactly the same
+  rows, which is why the two still agree — the links are what let a reader check which plans
+  really meant this file.
 
 **Entries are patterns, not files.** One file often carries several: a controller can supply the
 download plumbing, the logging style, and the repopulate-the-view-after-catch shape as three
