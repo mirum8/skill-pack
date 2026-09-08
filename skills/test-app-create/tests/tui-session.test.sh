@@ -87,26 +87,46 @@ start() {  # start <fixture> [driver opts...] -> echoes the handle, records it f
 # from every other code in the table.
 
 echo "== with tmux masked off PATH =="
+# Masking tmux means exactly one thing: no executable named `tmux` anywhere in PATH, because the
+# script probes with `command -v tmux`. So the mask names the binaries it wants and NEVER appends a
+# system bin dir — Debian, Ubuntu and Fedora all ship tmux in /usr/bin, and a PATH ending in
+# ":/usr/bin:/bin" leaves it fully reachable. That mistake is silent in the worst direction: start
+# finds tmux, opens a REAL session and exits 0 with a handle, so the suite reports the fail-closed
+# contract as broken while never once testing it.
+#
+# Hence a farm — symlinks to what the script needs, tmux deliberately absent — with PATH set to the
+# farm ALONE, the same shape code-scan/tests/local-scan.test.sh uses. The list is generous because
+# an extra symlink costs nothing while a missing one changes what is under test, and the
+# completeness assertion below is what keeps a gap loud rather than quiet.
 NOTMUX="$TMP/notmux"; mkdir -p "$NOTMUX"
-printf '#!/bin/sh\nexit 0\n' > "$NOTMUX/git-shim"; chmod +x "$NOTMUX/git-shim"
-GITBIN=$(command -v git)
-ln -sf "$GITBIN" "$NOTMUX/git"
+for b in bash sh awk basename cat chmod cksum cp cut date dirname env expr git grep head kill \
+         ln ls mkdir mktemp nohup od printf pwd rm sed sha256sum shasum sleep sort stty tail \
+         touch tr uname wc; do
+  bp=$(command -v "$b" 2>/dev/null) && ln -sf "$bp" "$NOTMUX/$b"
+done
+rm -f "$NOTMUX/tmux"   # the one binary the farm must never hold
 
-out=$(cd "$REPO" && PATH="$NOTMUX:/usr/bin:/bin" bash "$TUI" start -- ./fake-tui.sh 2>&1); rc=$?
+out=$(cd "$REPO" && PATH="$NOTMUX" bash "$TUI" start -- ./fake-tui.sh 2>&1); rc=$?
 [[ $rc == 127 ]] && ok "start exits exactly 127 when tmux is absent" \
                  || bad "start exits exactly 127 when tmux is absent" "exit $rc: $out"
 grep -qi 'tmux' <<<"$out" && grep -qi 'never report a TUI as verified' <<<"$out" \
   && ok "and names tmux and refuses to be read as a pass" \
   || bad "and names tmux and refuses to be read as a pass" "$out"
+# The farm stands in for a machine that has no tmux, so any OTHER binary missing from it is a
+# second fault wearing the same clothes — the script erroring for a reason that is not the one
+# under test, while the 127 above still reads as a pass.
+grep -qi 'command not found' <<<"$out" \
+  && bad "the mask isolates tmux and nothing else" "a binary is missing from the farm: $out" \
+  || ok "the mask isolates tmux and nothing else"
 
-out=$(cd "$REPO" && PATH="$NOTMUX:/usr/bin:/bin" bash "$TUI" stop ta-deadbeef 2>&1); rc=$?
+out=$(cd "$REPO" && PATH="$NOTMUX" bash "$TUI" stop ta-deadbeef 2>&1); rc=$?
 [[ $rc == 127 ]] && ok "so does stop — everything that touches a pane fails closed, not just start" \
                  || bad "so does stop — everything that touches a pane fails closed, not just start" "exit $rc"
 
 # ...but `mode` answers from git alone, so it must keep answering. The failure this locks out is
 # worktree-deploy.sh's: a require_bin ahead of the subcommand makes a machine without the tool
 # unable to say even where it is, and a caller retrying that burns agents on a no-op.
-got=$(cd "$REPO" && PATH="$NOTMUX:/usr/bin:/bin" bash "$TUI" mode 2>&1); rc=$?
+got=$(cd "$REPO" && PATH="$NOTMUX" bash "$TUI" mode 2>&1); rc=$?
 [[ $rc == 0 && "$got" == main ]] && ok "but mode still answers without tmux — it only needs git" \
                                  || bad "but mode still answers without tmux — it only needs git" "exit $rc: $got"
 
