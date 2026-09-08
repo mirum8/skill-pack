@@ -9,8 +9,8 @@ description: >-
   reviewed at the depth its `Risk:` line asks for, and merged into the base as one commit carrying
   its ticks. Phases the dependency graph puts in one wave (no shared dependency, no shared file) can
   be built at the same time in separate sessions — `--no-merge` in a detached worktree each, then
-  `--land` to merge them in order — by hand, or driven with `--cmux`, one interactive session per
-  leaf in its own cmux workspace. Use on "/r:plan-run", "work through todo.md", "build the whole
+  `--land` to merge them in order — by hand, or driven with `--herdr`, one interactive session per
+  leaf in its own herdr workspace. Use on "/r:plan-run", "work through todo.md", "build the whole
   plan", "run all the remaining phases", "implement the plan end to end", "carry on with the plan
   from phase 4", "build these phases in parallel". NOT for: a single phase on its own
   (`/r:task-run "todo.md / Phase 3"`), a flat backlog of issues or bugs with no ordering between
@@ -48,7 +48,7 @@ Four things shape the design:
 
 ## Invocation
 
-`/r:plan-run [<plan>] [--from <n>] [--to <n>] [--phases <n,n>] [--cmux] [--no-merge] [--land] [--auto-resolve] [--unattended] [--ask <session>] [--no-reports] [--yes] [--dry-run]`
+`/r:plan-run [<plan>] [--from <n>] [--to <n>] [--phases <n,n>] [--herdr] [--no-merge] [--land] [--auto-resolve] [--unattended] [--ask <session>] [--no-reports] [--yes] [--dry-run]`
 
 **`<plan>`** is the path to the plan file. Strip a leading `@` and any trailing `/` (Claude Code's
 `@todo.md` arrives verbatim). With no argument, look for one and **name what you found before using
@@ -63,19 +63,19 @@ between them: **ask** — the one place the run stops for input that isn't the g
   plan's `v1 (MVP)` block and leave `Advanced` for later.
 - **`--phases <n,n>`** → run exactly these phases, whatever their position — the primitive `--from`
   and `--to` are sugar over, and how one session takes a single leaf out of a wave.
-- **`--cmux`** → build every leaf in a session of its own: a detached worktree and a cmux workspace
+- **`--herdr`** → build every leaf in a session of its own: a detached worktree and a herdr workspace
   per leaf, each holding a real interactive `claude` session, then land from here — the executor for
   the command block `--dry-run` prints ([Running phases
   concurrently](#running-phases-concurrently)). The wave decides only **how many run at once**; a
   wave of one still gets its own workspace, and you build nothing yourself.
   **Without it nothing about this skill changes**:
-  the run is the serial one below, and no worktree is created. `--cmux` with `--no-merge` or
+  the run is the serial one below, and no worktree is created. `--herdr` with `--no-merge` or
   `--land` is a contradiction — those two *are* the halves it drives — so refuse and name which one
   clashed.
 - **`--no-merge`** → build, review, run `Done when:`, tick and commit on the phase branch — then
   stop, leaving it unmerged. This is the concurrent-session mode ([Running phases
   concurrently](#running-phases-concurrently)) — read [Being a unit](#being-a-unit) when
-  `CMUX_FANOUT_ORCHESTRATOR` is set. It changes nothing before the merge.
+  `FANOUT_ORCHESTRATOR` is set. It changes nothing before the merge.
 - **`--land`** → merge the phase branches finished by concurrent sessions into the base, in phase
   order. Runs only from the primary working tree; it builds after each merge and nothing else.
 - **`--auto-resolve`** → with `--land`, resolve the conflicts that are **provably** additive instead
@@ -199,7 +199,7 @@ Resolve first: 2 outstanding
 **The offer is terminal, not a dispatch.** This step parsed the plan once; resuming after the
 entries were closed would build from a run list that predates them. And offer it **only** from an
 attended run in the primary tree — never under `--unattended`, `--no-merge` or `--dry-run`. A
-`--cmux` unit is a full session that reaches this same gate with nobody in front of it, and
+`--herdr` unit is a full session that reaches this same gate with nobody in front of it, and
 `/r:plan-unblock` closes entries by asking a person; offered there it would interview an empty
 room and write the answers into the plan as settled.
 
@@ -251,7 +251,7 @@ Resolve first: none outstanding for these phases (1 open, blocks Phase 11, out o
   would finish — that is where a report will be written, and the gate is the place to say so
   (`--no-reports` if the user does not want them). A run that finishes no milestone says that too:
   "no milestone completes in this range, so no report is due."
-- **Under `--cmux` only**, add the wave as a column — from the `check_todo.py` run Step 0 made,
+- **Under `--herdr` only**, add the wave as a column — from the `check_todo.py` run Step 0 made,
   nothing new is computed — and say how many leaves will be built at once and how many at a time
   (the cap is three). Say plainly that **every** leaf gets a workspace, a wave of one included: a
   run whose waves are all single-leaf still opens a session per phase, one at a time, and a user
@@ -267,9 +267,9 @@ indexed) and only a real call is evidence; nested spawning may return in a later
 can reach neither `Workflow` nor `Agent`, you are nested inside a subagent: stop and tell the user
 to re-run from a top-level session. Never re-run the fan-out inline and report success.
 
-This is the whole of Step 3 unless `--cmux` was passed. With it, **every** leaf is handed to a
+This is the whole of Step 3 unless `--herdr` was passed. With it, **every** leaf is handed to a
 session of its own — a wave of one included — and you orchestrate rather than build any of them
-([`--cmux`, the driven form](#--cmux--the-driven-form)), but every phase still runs exactly the loop
+([`--herdr`, the driven form](#--herdr--the-driven-form)), but every phase still runs exactly the loop
 below inside its own session. For each phase:
 
 1. **Start from a clean base.** `git checkout <base>` and confirm `git status --porcelain` is empty.
@@ -483,9 +483,9 @@ below inside its own session. For each phase:
      the last unticked leaf of its milestone, write that milestone's report — [The milestone
      boundary](#the-milestone-boundary). Skipped entirely under `--no-merge`, where the phase never
      merged and this session cannot see its wave-mates.
-   - **If `CMUX_FANOUT_SENTINEL` is set in the environment, write the outcome there as the very last
+   - **If `FANOUT_SENTINEL` is set in the environment, write the outcome there as the very last
      thing you do** — two lines, `status=ok` and `branch=<pb>`. That variable means this session is
-     one unit of a `--cmux` fan-out; an interactive session never exits and yields no status, so this
+     one unit of a `--herdr` fan-out; an interactive session never exits and yields no status, so this
      file is the only way the orchestrator learns the run ended rather than stalled. It is the *last*
      action because a sentinel written before the commit would announce work not yet on the branch.
    - **A plan file outside the repo, or untracked, has no commit to ride in.** Tick it anyway and
@@ -505,7 +505,7 @@ below inside its own session. For each phase:
    - **Never tick a phase that halted**, and never tick past it.
    - Report which phase stopped it, why, and the exact resume command:
      `/r:plan-run <plan> --from <n>`.
-   - **If `CMUX_FANOUT_SENTINEL` is set, write a failure sentinel there** — `status=halted`, the
+   - **If `FANOUT_SENTINEL` is set, write a failure sentinel there** — `status=halted`, the
      branch if there is one, and `reason=<the halt>`. A halt that writes nothing is
      indistinguishable from a session still thinking, and the orchestrator would sit on it until the
      timeout.
@@ -572,7 +572,7 @@ milestone headings (Step 0 already said so), or when this session is a `--no-mer
    tools, or a named skip" rule, and the terminal-UI exception does not apply — nothing in the plan
    *declared* a report the way a `/test-app` declares a terminal surface.
 
-**Under `--cmux` and `--land` the check runs once, after the wave, not per phase** — a milestone can
+**Under `--herdr` and `--land` the check runs once, after the wave, not per phase** — a milestone can
 straddle waves, so a per-unit check would fire on a milestone whose remaining leaves are still being
 built elsewhere. It sits after the last merge and its green build, and **before** the stats row.
 Everything else above is unchanged: same script, same subagent, same own-commit, same named skip.
@@ -611,7 +611,7 @@ try, so it is a preflight refusal rather than a warning.
    enough here.
 
    **Under `--unattended` a refusal degrades rather than stops**: run that wave's leaves **one unit
-   at a time** — under `--cmux` still one spawned workspace each, landed before the next is cut, and
+   at a time** — under `--herdr` still one spawned workspace each, landed before the next is cut, and
    in numeric order — and name the refusal in the report. The refusal is about *concurrency* only,
    and every leaf is still buildable. What degrades is the schedule, never where the work happens.
    A missing checker is still a stop, unattended or not: not knowing whether the slice is safe is a
@@ -629,8 +629,8 @@ try, so it is a preflight refusal rather than a warning.
    packages these land in: a fact in git rather than a prediction.
 
    **Exit 2 is a risk, not an error.** Serially, print it and carry on: the cost of being wrong is
-   one merge conflict. Under `--cmux`, **stop** — there the cost is the whole wave, built over hours
-   before anything discovers it. Under `--cmux --unattended`, run that wave one unit at a time
+   one merge conflict. Under `--herdr`, **stop** — there the cost is the whole wave, built over hours
+   before anything discovers it. Under `--herdr --unattended`, run that wave one unit at a time
    instead of stopping — a workspace each, landed between — and name it. Exit 0 covers both "looks clean" and "not enough history to judge", and it
    says which; exit 1 is usage or git trouble and is a named skip, because this check improves the
    preflight rather than being it.
@@ -657,19 +657,19 @@ only for a wave with **more than one unbuilt leaf**. This block is a recipe for 
 hand in a second terminal, and a wave of one has nothing to parallelise: a table of hopeful commands
 over single-leaf waves buries the waves where it pays.
 
-Under `--dry-run --cmux`, print the same block as the `spawn` calls that would be made instead, and
+Under `--dry-run --herdr`, print the same block as the `spawn` calls that would be made instead, and
 **stop**: no worktree, no workspace, nothing on screen. **Print one for every wave**, single-leaf
 waves included — under the flag those are spawned too, so leaving them out would show a run smaller
 than the one about to happen.
 
-### `--cmux` — the driven form
+### `--herdr` — the driven form
 
-`--cmux` runs the block above instead of printing it. Everything that makes concurrency *safe* is
+`--herdr` runs the block above instead of printing it. Everything that makes concurrency *safe* is
 unchanged — the waves, the `--slice` preflight, `--no-merge` in a detached worktree, `--land` from
 the primary tree.
 
 Each leaf gets a **full interactive `claude` session**, not a headless one — the point of routing
-this through cmux: the work is visible in a workspace the user can open, answer a question in, or
+this through herdr: the work is visible in a workspace the user can open, answer a question in, or
 take over, none of which a `-p` run allows.
 
 You are the orchestrator and you **build no phase yourself** — not merely none while a wave is in
@@ -677,7 +677,7 @@ flight. You hold the primary tree at `<base>` for the whole run, the only tree t
 `<base>` to land what the units produce, and it stays clean throughout, so `preflight`'s clean-tree
 check holds for the run rather than only between waves.
 
-The mechanics are `${CLAUDE_PLUGIN_ROOT}/skills/plan-run/scripts/cmux-fanout.sh`, a script rather
+The mechanics are `${CLAUDE_PLUGIN_ROOT}/skills/plan-run/scripts/fanout.sh`, a script rather
 than prose because it decides two things a model must never decide by reading a screen — whether
 the tooling is there, and whether a unit is finished — and both fail by returning a confident wrong
 answer.
@@ -699,7 +699,7 @@ For each wave, in wave order:
    the next is created**, never *spawned in order*. Step 7 then runs per unit rather than per wave.
 2. **`check_todo.py --slice <n,n>`** over the wave's unbuilt leaves — the same preflight, with the
    same three refusals, and a missing checker is still a **stop**. Nothing else verifies the slice.
-3. **`cmux-fanout.sh preflight`.** It checks four things: cmux is reachable, this is the primary
+3. **`fanout.sh preflight`.** It checks four things: herdr is reachable, this is the primary
    tree, the tree is clean, and **the repo has been trusted in Claude Code**. Workspace trust is per
    *path*, and a worktree is a new path — a session started in one opens on the trust dialog and
    never reads its prompt. `spawn` copies the repo's own trust decision onto each worktree it makes,
@@ -707,13 +707,13 @@ For each wave, in wave order:
    never invent one.
 
    A non-zero exit is a **stop**, deliberately: elsewhere a missing tool is a named skip, but
-   `--cmux` was typed on purpose, and quietly running serially instead would hand back something
+   `--herdr` was typed on purpose, and quietly running serially instead would hand back something
    other than what was asked for. Say what was missing and offer the serial run as the user's
    choice, not yours.
 4. **One `spawn` per leaf**, up to three live at once:
 
    ```sh
-   FAN="${CLAUDE_PLUGIN_ROOT}/skills/plan-run/scripts/cmux-fanout.sh"
+   FAN="${CLAUDE_PLUGIN_ROOT}/skills/plan-run/scripts/fanout.sh"
    "$FAN" spawn --id "phase-<n>" --dir "../<repo>-p<n>" --base "<base>" \
           --marker-file "<plan>" --marker-prefix 'built: ' \
           --prompt "/r:plan-run <plan> --phases <n> --no-merge --yes [--ask <session>]"
@@ -773,7 +773,7 @@ uncapped. A wave that spawned eight would thrash rather than finish sooner.
 
 Get your own session name from `ListAgents` — its first line names this session — and pass it to
 every `spawn` as `--orchestrator <name>`. Each unit then arrives holding
-`CMUX_FANOUT_ORCHESTRATOR`, and can `SendMessage` **up** to you. Only that direction is wired,
+`FANOUT_ORCHESTRATOR`, and can `SendMessage` **up** to you. Only that direction is wired,
 because only it needs no discovery: a unit knows who spawned it, while finding a unit from here
 means prefix-matching an unpredictable session name against every session on the machine.
 
@@ -802,15 +802,21 @@ so the answer is "recorded, continue" — refusing it would refuse correct work.
 arriving from a **second** unit is the collision the preflight exists to prevent: stop spawning,
 let the units in flight finish or stop them, and fix the plan's edges before re-running.
 
-**You can reach a unit, for two things only.** You chose its `--id`, and that is the name it is
-addressable by — so a `SendMessage` down carries either **stop**, or the answer to a question that
-unit asked. Never work, and never a correction to what it is building: "ask, never drive" binds this
-direction harder, because a message from the orchestrator reads as authority. Downward exists so a
-unit that has lost a collision learns it in a minute rather than at the merge.
+**You can reach a unit only after it has spoken to you, and then for two things only.** There is no
+address the fan-out can hand you at spawn: `SendMessage` reaches a session by Claude Code's own name
+for it, which is unrelated to the `--id` you chose and to every handle herdr owns — label, workspace,
+pane, agent name alike. A unit's first upward message carries its own `ListAgents` name, and that is
+what makes it addressable. From then a `SendMessage` down carries either **stop**, or the answer to a
+question that unit asked. Never work, and never a correction to what it is building: "ask, never
+drive" binds this direction harder, because a message from the orchestrator reads as authority.
+
+**A unit that has not spoken is reachable by a person and nobody else** — so a collision it needs to
+hear about is a **stop**, not a message: stop spawning, name the unit and the `workspace=` id
+`status` prints beside it, and open it with `herdr workspace focus <id>`.
 
 ### Being a unit
 
-You are one when `CMUX_FANOUT_ORCHESTRATOR` is set. Alongside writing your sentinel at the end,
+You are one when `FANOUT_ORCHESTRATOR` is set. Alongside writing your sentinel at the end,
 `SendMessage` to that name **immediately** in exactly these cases:
 
 - **You are about to write a file your `Files:` line does not name** — or base already holds
@@ -881,7 +887,7 @@ checked out there). It builds after every merge, and nothing else.
 
 Then, before the stats row, **check the milestone boundary** — [The milestone
 boundary](#the-milestone-boundary) — and write one report per milestone this landing finished, in
-ascending order. A landing pass is where a `--cmux` or hand-driven wave's milestones actually
+ascending order. A landing pass is where a `--herdr` or hand-driven wave's milestones actually
 complete, so skipping it here means they are never reported at all.
 
 Then **record the run** — Step 4's stats line with `mode: "land"`, `landed` set to what merged, and
@@ -928,7 +934,7 @@ hub files every wave touches, so a resolution made once replays in the next wave
 ## Running unattended
 
 `--unattended` is for a run nobody is watching: a twelve-phase plan started before dinner, or a
-`--cmux` wave that will take hours. It changes one thing only — **what counts as a reason to stop**
+`--herdr` wave that will take hours. It changes one thing only — **what counts as a reason to stop**
 — and does not touch what counts as a reason to fail.
 
 **The rule it must not weaken.** Phase 5 is written against what Phase 4 produced, so a phase that
@@ -947,7 +953,7 @@ building on one that is not true. This is the list of which is which:
 | the base tree is dirty | no | snapshot to `refs/wip/pre-phase-<n>`, clean, continue |
 | `.git/MERGE_HEAD` — another session holds the repo | no | wait one poll, retry, then halt |
 | `--slice` refused the slice | no | run that wave **one unit at a time**, landed between |
-| `footprint-warn` returned 2 under `--cmux` | no | run that wave **one unit at a time**, landed between |
+| `footprint-warn` returned 2 under `--herdr` | no | run that wave **one unit at a time**, landed between |
 
 The last two are the ones that pay for the flag: both are facts about *scheduling* with an obvious
 local response, and stopping a four-hour run over one is the pipeline refusing to do what a person
@@ -992,7 +998,7 @@ the full test suite and is discarded on red, and a halted phase is never ticked 
 ## `--ask <session>` — reporting a defect in the pack
 
 `--ask <session>` means a pack maintainer session is watching the **tooling** at that address:
-report defects in the pack there and keep working. It works with or without `--cmux` — a serial run
+report defects in the pack there and keep working. It works with or without `--herdr` — a serial run
 hits pack defects too — and it changes nothing else about the run.
 
 **What belongs there is a defect in the TOOLING, never in the project being built.** Three
@@ -1028,13 +1034,13 @@ Five rules, and the first is what makes this safe to switch on:
 - **The maintainer does not touch this repo.** It fixes the pack, in the pack's repo, and replies.
   Nothing it does lands in this working tree, so nothing about `--ask` can change this run's diff.
 
-**Under `--cmux`, pass `--ask <session>` through to every unit's own command line**, exactly as the
+**Under `--herdr`, pass `--ask <session>` through to every unit's own command line**, exactly as the
 spawn prompt already carries `--phases` and `--no-merge`. The unit is the first thing that touches
 the pipeline, so it is where a pack defect is seen first, and a report relayed through the
 orchestrator loses the detail that made it actionable.
 
-`cmux-fanout.sh` needs no change and no new environment variable: the address rides in the child's
-own command line, which is also why it works on serial runs. `CMUX_FANOUT_ORCHESTRATOR` stays what
+`fanout.sh` needs no change and no new environment variable: the address rides in the child's
+own command line, which is also why it works on serial runs. `FANOUT_ORCHESTRATOR` stays what
 it is — a different address for a different kind of message.
 
 
@@ -1106,7 +1112,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
 STATS_JSON
 ```
 
-**`mode` is what makes every other number readable**, and it is `serial` | `cmux` | `no-merge` |
+**`mode` is what makes every other number readable**, and it is `serial` | `herdr` | `no-merge` |
 `land` | `dry-run`. Without it a `--no-merge` session's `merged: 0` — it is *supposed* not to merge
 — is indistinguishable from a run whose merge failed; absence of an action is not a failed action,
 and only the row itself can say which this was.
@@ -1131,7 +1137,7 @@ merged, landed or ticked. Never retry it.
   each in its own detached worktree, with `--no-merge`, verified by the checker's `--slice` preflight
   first. Two runs sharing a working tree or a base ref destroy each other, so the preflight enforces
   the separation: a slice run in one directory is a **stop**, and one the graph refuses is a stop
-  too — or, under `--unattended`, that wave run one unit at a time. `--cmux` drives that same
+  too — or, under `--unattended`, that wave run one unit at a time. `--herdr` drives that same
   protocol and nothing else — the sessions it spawns are real separate sessions, **every** leaf gets
   one including a wave of one, and the orchestrator builds no phase of its own at any point in the
   run.

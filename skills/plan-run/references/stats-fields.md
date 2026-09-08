@@ -20,7 +20,7 @@ builds nothing; a `dry-run` sets `phasesInPlan` and nothing else.
 
 **So read the concurrent flow across rows, never within one.** A wave built in three sessions and
 landed from the primary tree is *four* rows — three `no-merge` and one `land` — and no single one of
-them holds both halves. A `cmux` row is that same shape seen from the orchestrator: it spawned the
+them holds both halves. A `herdr` row is that same shape seen from the orchestrator: it spawned the
 sessions and landed what they built, so it sets `landed` and leaves `phasesInRun` at zero, while
 the units write their own `no-merge` rows through the hook; counting the orchestrator's wave *and*
 its units would double every phase in it. The question "how far does a plan survive contact with
@@ -66,7 +66,7 @@ indistinguishable from a pack full of plans with no milestones, which is exactly
 `milestonesInPlan` is recorded rather than inferred from the other two.
 
 A `no-merge` unit leaves all three at zero: it never merges, so it never reaches the boundary. A
-`cmux` or `land` row is where a concurrent wave's reports appear, for the same reason `landed`
+`herdr` or `land` row is where a concurrent wave's reports appear, for the same reason `landed`
 does — the orchestrator owns the merge, and the boundary sits behind it.
 
 **`resolveFirstOutstanding` is how often the gate actually fires.** It is the count of unresolved

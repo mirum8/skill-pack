@@ -57,7 +57,7 @@ PY
 }
 mkcfg() { mkdir -p "$(dirname "$1")"; cat > "$1"; }
 
-# The bare-scalar mode shell callers use — cmux-fanout.sh resolves its cap through it, and a JSON
+# The bare-scalar mode shell callers use — fanout.sh resolves its cap through it, and a JSON
 # document would need a parser the script cannot assume is installed.
 field() {  # <home> <pack> <repo> <step> <field>
   HOME="$1" python3 "$READER" --pack "$2" --repo "$3" --step "$4" --field "$5" 2>/dev/null

@@ -79,7 +79,7 @@
       "kind": "behaviour",
       "name": "phases-run-in-the-plan-order-never-regrouped",
       "prompt": "/r:plan-run docs/billing/todo.md --from 3",
-      "expected_output": "Every unticked phase runs in its written order, one at a time. Phases are never reordered, folded together or re-derived — the plan already carries each phase's Files:, Risk: and runnable Done when:, and each is re-checked against the current code just before it runs. --cmux does not change this: it batches by a wave the plan itself declares through its Depends on: edges, and lands each wave in ascending phase order, so no phase is reordered against another it depends on and no two phases are ever folded into one run.",
+      "expected_output": "Every unticked phase runs in its written order, one at a time. Phases are never reordered, folded together or re-derived — the plan already carries each phase's Files:, Risk: and runnable Done when:, and each is re-checked against the current code just before it runs. --herdr does not change this: it batches by a wave the plan itself declares through its Depends on: edges, and lands each wave in ascending phase order, so no phase is reordered against another it depends on and no two phases are ever folded into one run.",
       "files": [],
       "fixture": null,
       "assertions": []
@@ -87,9 +87,9 @@
     {
       "id": 8,
       "kind": "behaviour",
-      "name": "cmux-drives-the-existing-protocol-and-never-invents-parallelism",
-      "prompt": "/r:plan-run docs/billing/todo.md --cmux",
-      "expected_output": "Only leaves the plan's own dependency graph puts in the same wave are built at once, and only after check_todo.py --slice clears them. Every leaf gets a full interactive claude session in its own detached worktree and cmux workspace, a wave of one included — the wave decides how many run at once, never whether a workspace is opened, and nothing is built inline in the orchestrator's tree. A solo leaf is landed before the next worktree is cut, since a detached worktree is pinned to the base it was created from. At most steps.fanout.maxUnits are live at a time (default 3), and each one's workspace and worktree are taken down the moment it comes back ok — freeing the slot for the next leaf. A unit that failed or stalled is left standing and named. The wave is landed from the primary tree in ascending phase order. Without --cmux none of this happens: the run is the serial one, phase by phase.",
+      "name": "herdr-drives-the-existing-protocol-and-never-invents-parallelism",
+      "prompt": "/r:plan-run docs/billing/todo.md --herdr",
+      "expected_output": "Only leaves the plan's own dependency graph puts in the same wave are built at once, and only after check_todo.py --slice clears them. Every leaf gets a full interactive claude session in its own detached worktree and herdr workspace, a wave of one included — the wave decides how many run at once, never whether a workspace is opened, and nothing is built inline in the orchestrator's tree. A solo leaf is landed before the next worktree is cut, since a detached worktree is pinned to the base it was created from. At most steps.fanout.maxUnits are live at a time (default 3), and each one's workspace and worktree are taken down the moment it comes back ok — freeing the slot for the next leaf. A unit that failed or stalled is left standing and named. The wave is landed from the primary tree in ascending phase order. Without --herdr none of this happens: the run is the serial one, phase by phase.",
       "files": [],
       "fixture": null,
       "assertions": []
@@ -98,7 +98,7 @@
       "id": 9,
       "kind": "behaviour",
       "name": "messages-raise-alarms-but-never-close-a-unit",
-      "prompt": "/r:plan-run docs/billing/todo.md --cmux",
+      "prompt": "/r:plan-run docs/billing/todo.md --herdr",
       "expected_output": "Units are spawned with --orchestrator so they can message up to the orchestrator, and they send only in four cases: they are about to write a file their Files: line does not name, they are blocked on something the plan can answer, a test they did not write is failing, or they are halting. A unit reporting an undeclared file is recorded against its phase and told to continue — Files: is written before the code exists — and only a second unit claiming the same file halts the wave. Nothing lands on a message: wait still blocks on the sentinel and landing still requires the branch marker, because a session can go idle having declined its work. The orchestrator may answer questions and ask read-only checks, but never drives a unit and never polls it in place of wait. The concurrency cap comes from steps.fanout.maxUnits in the config (default 3), resolved by the fan-out script.",
       "files": [],
       "fixture": null,

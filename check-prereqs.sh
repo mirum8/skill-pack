@@ -50,11 +50,14 @@ report agent-browser agent-browser "npm i -g agent-browser && agent-browser inst
 # stdout/stderr separation, piping and signals are plain shell and deterministic without a
 # terminal. Only two checks go with it — --help wrapping, and any isatty-dependent branch.
 report tmux          tmux          "brew install tmux"                optional
-# cmux is optional because it buys wall-clock, never coverage: --cmux drives the fan-out that
+# herdr is optional because it buys wall-clock, never coverage: --herdr drives the fan-out that
 # /r:plan-run and /r:issues-fix already describe, and without it both run the serial path they run
 # today and lose nothing they would otherwise have found. It is a stop rather than a skip only when
-# --cmux was actually typed, because there the user asked for the thing that is missing.
-report cmux          cmux          "brew install cmux"                optional
+# --herdr was actually typed, because there the user asked for the thing that is missing.
+# Its claude integration (`herdr integration install claude`) is what makes each unit's agent state
+# real rather than screen-scraped; the fan-out names its absence and carries on, because completion
+# rests on the sentinel and the branch marker and never on what the sidebar shows.
+report herdr         herdr         "curl -fsSL https://herdr.dev/install.sh | sh"  optional
 
 # gh is optional because GitHub is one source among several, not the floor: task-run also
 # runs from a todo phase, a list item or free text and finishes with a local `--skip-pr`

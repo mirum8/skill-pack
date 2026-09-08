@@ -44,18 +44,18 @@ cd ../billing
 git worktree remove ../billing-p5
 ```
 
-`--dry-run` prints these lines filled in for every wave with more than one unbuilt leaf; `--cmux`
+`--dry-run` prints these lines filled in for every wave with more than one unbuilt leaf; `--herdr`
 runs them instead.
 
 ## The same recipe, driven
 
-`--cmux` is the automated form of the block above — same worktrees, same `--no-merge`, same `--land`,
+`--herdr` is the automated form of the block above — same worktrees, same `--no-merge`, same `--land`,
 same `--slice` preflight in front of all of it:
 
 ```sh
-FAN="${CLAUDE_PLUGIN_ROOT}/skills/plan-run/scripts/cmux-fanout.sh"
+FAN="${CLAUDE_PLUGIN_ROOT}/skills/plan-run/scripts/fanout.sh"
 
-"$FAN" preflight                                    # cmux reachable · primary tree · clean tree
+"$FAN" preflight                                    # herdr reachable · primary tree · clean tree
 "$FAN" spawn --id phase-5 --dir ../billing-p5 --base main \
        --marker-file docs/billing/todo.md --marker-prefix 'built: ' \
        --prompt "/r:plan-run docs/billing/todo.md --phases 5 --no-merge --yes"
@@ -63,9 +63,9 @@ FAN="${CLAUDE_PLUGIN_ROOT}/skills/plan-run/scripts/cmux-fanout.sh"
 "$FAN" cleanup --id phase-5                         # closes the workspace, removes the worktree
 ```
 
-`spawn` opens a cmux workspace holding a **full interactive `claude` session**, not `claude -p`: a
+`spawn` opens a herdr workspace holding a **full interactive `claude` session**, not `claude -p`: a
 human can watch it, answer a prompt inside it or take it over — the reason the fan-out goes through
-cmux rather than background processes.
+herdr rather than background processes.
 
 **Every unit is spawned, whatever its wave.** A wave of one, a leaf the `--slice` preflight held
 back, a leaf `footprint-warn` flagged — each still gets its own worktree and its own workspace, and
@@ -86,7 +86,7 @@ two independent signals:
 
 | signal | written by | catches |
 |---|---|---|
-| the sentinel at `CMUX_FANOUT_SENTINEL` | Step 3.6 / 3.7 of the child's own run | a session still working, and a run that halted |
+| the sentinel at `FANOUT_SENTINEL` | Step 3.6 / 3.7 of the child's own run | a session still working, and a run that halted |
 | the `built: <branch>` marker on the branch | the child's tick, read by `wait` and by `--land` | a session that reported success and never committed |
 
 Neither alone is enough: a sentinel can be written by a run that then failed to commit, and a
@@ -94,11 +94,20 @@ missing marker can just mean the unit is not done yet.
 
 ## The alarm channel
 
-`spawn --orchestrator <name>` puts `CMUX_FANOUT_ORCHESTRATOR` in the unit's environment, so a unit
-can `SendMessage` **upwards** to the session that spawned it. Downwards works too: `spawn` creates
-the workspace with `--name "$id"`, and that orchestrator-chosen id is the name `SendMessage`
-addresses. Ids repeat across projects, so disambiguate by the `[ref]` `ListAgents` prints beside a
-row.
+`spawn --orchestrator <name>` puts `FANOUT_ORCHESTRATOR` in the unit's environment, so a unit can
+`SendMessage` **upwards** to the session that spawned it. That direction needs no discovery, which
+is why it is the only one wired.
+
+Downwards there is **no address the multiplexer can supply.** `SendMessage` reaches a session by
+Claude Code's own name for it, and that name is unrelated to every handle herdr owns — the
+workspace label, the workspace id, the pane id and the agent name alike. The one honest way to get
+the channel back is for a unit to report **its own** `ListAgents` name in its first upward message:
+discovered, never assumed. So you can reach a unit only after it has spoken to you, and a unit
+blocked before it speaks is reachable by a human and nobody else.
+
+That is what replaces "message it and ask" for a silent unit: the orchestrator stops spawning and
+names the unit **and its workspace id**, which `status` prints for exactly this, and a person opens
+it with `herdr workspace focus <id>` or `herdr agent attach <name>`.
 
 | a unit sends when | the orchestrator does |
 |---|---|
@@ -189,10 +198,10 @@ unasked.
 | exit | means | what to do |
 |---|---|---|
 | 0 | clean, or not enough history to judge — it says which | continue |
-| 2 | a package is claimed by two leaves and its hub files are undeclared | serial: print and continue · `--cmux`: **stop**, or under `--unattended` one unit at a time, landed between |
+| 2 | a package is claimed by two leaves and its hub files are undeclared | serial: print and continue · `--herdr`: **stop**, or under `--unattended` one unit at a time, landed between |
 | 1 | usage or git trouble | a named skip; this improves the preflight, it is not the preflight |
 
-`--cmux` is the strict one because that is where being wrong is expensive: serially it costs one
+`--herdr` is the strict one because that is where being wrong is expensive: serially it costs one
 merge conflict, across a wave every hour the wave spent building.
 
 Two answers to an exit 2, and the report names both: run one leaf per package at a time — still a

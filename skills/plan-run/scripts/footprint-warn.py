@@ -15,7 +15,7 @@ reason this runs unasked -- a guess would need a model, a budget and a human to 
 
 It never edits the plan and never decides anything. Exit 0 when the slice looks clean or when there
 is not enough history to judge, 2 when it found a risk, 1 on usage or git trouble. The caller
-decides what a 2 means: /r:plan-run warns and continues on a serial run, and refuses under --cmux,
+decides what a 2 means: /r:plan-run warns and continues on a serial run, and refuses under --herdr,
 where being wrong costs the whole wave rather than one merge.
 """
 import re

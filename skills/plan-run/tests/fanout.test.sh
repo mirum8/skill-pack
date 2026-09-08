@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Behaviour tests for cmux-fanout.sh — the decisions nothing downstream re-checks.
+# Behaviour tests for fanout.sh — the decisions nothing downstream re-checks.
 #
-#   bash skills/plan-run/tests/cmux-fanout.test.sh
+#   bash skills/plan-run/tests/fanout.test.sh
 #
-# No cmux app is started and no agent is run: cmux is stubbed on PATH, because what is under test is
-# not the fan-out itself but the three judgements the script exists to make, each of which fails by
-# returning a confident wrong answer.
+# No herdr server is contacted and no agent is run: herdr is stubbed on PATH, because what is under
+# test is not the fan-out itself but the three judgements the script exists to make, each of which
+# fails by returning a confident wrong answer.
 #
-#   1. Is the tooling actually there. --cmux is typed deliberately, so a missing or unreachable cmux
-#      that quietly degraded to a serial run would hand back a different thing than was asked for,
-#      with nothing in the report saying so.
+#   1. Is the tooling actually there. --herdr is typed deliberately, so a missing or unreachable
+#      herdr that quietly degraded to a serial run would hand back a different thing than was asked
+#      for, with nothing in the report saying so.
 #   2. Is a unit finished. An interactive session never exits, so completion is reported rather than
 #      observed — and a wave read as finished while one session sits on a prompt lands a branch
 #      nobody built. That is why a sentinel alone is not enough and the marker on the branch is
@@ -23,71 +23,136 @@
 # matter as much as the rest. CLAUDE_CONFIG_DIR points at a throwaway config throughout; the user's
 # own ~/.claude.json is never read or written by this suite.
 #
+# What a stub CANNOT prove is what herdr itself does with what it is handed. Those answers come from
+# measuring the real binary, and they are recorded here so a future editor can tell a design
+# constraint from a guess:
+#
+#   MEASURED against herdr 0.9.0 on 2026-09-08, in a throwaway `herdr --session` on its own socket:
+#     * An idle shell reports foreground_processes holding EXACTLY the shell itself (pid ==
+#       shell_pid), not an empty list. The readiness predicate must accept that shape.
+#     * workspace create -> idle shell took 85ms, so the 15s budget is not one anything healthy nears.
+#     * `agent prompt` delivers text BYTE-IDENTICAL through a real claude: don't / <port> /
+#       "the box" / an em dash / $HOME UNEXPANDED / backticks / 100%. $HOME surviving is the proof
+#       that no shell parses the prompt. `pane send-text` separately round-tripped 82 bytes with a
+#       zero-byte diff.
+#     * `agent start` returned in 3.8s with interactive_ready=true, and echoes the argv it ran.
+#     * Workspace ids are NOT reused (close w2, create -> w3). Pane ids are documented never to be.
+#     * Closing a workspace releases its agent name -> agent_not_found.
+#     * A workspace whose --cwd is a linked worktree reports NO .worktree field, so
+#       workspace_group_close_required cannot fire for a plain create. Its handling is defensive.
+#     * Errors are JSON on STDERR with exit 1; usage errors exit 2; `pane read` prints PLAIN TEXT.
+#     * `herdr status` EXITS 0 with no server running, which is why it can never be the gate.
+#
 # There is no CI, so this suite is the only thing standing between an edit and any of that.
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../../.."
 PACK=$PWD          # the pack root; $REPO below is a throwaway git repo, not this one
-FAN="$PACK/skills/plan-run/scripts/cmux-fanout.sh"
+FAN="$PACK/skills/plan-run/scripts/fanout.sh"
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 pass=0; fail=0
 
 ok()  { pass=$((pass + 1)); printf '  ok   %s\n' "$1"; }
 bad() { fail=$((fail + 1)); printf '  FAIL %s\n     %s\n' "$1" "${2:-}"; }
 
-# A cmux that answers ping and hands back a fresh workspace ref per create, recording every call so
-# the tests can assert what was actually asked of it.
 STUB="$TMP/stub"; mkdir -p "$STUB"
-# The stub RUNS the child command line (see `workspace create` below) so that a line broken by bad
-# quoting fails here exactly as it fails for real. That command ends in `exec claude ...`, and a
-# real `claude` is on PATH in a developer's shell -- so it is shadowed here. Without this the suite
-# launches live interactive sessions.
-# It records its ARGV, one argument per line, because that is the only thing that can tell correct
-# quoting from a prompt that merely appears somewhere in the command string: a broken quote splits
-# the prompt across several argv entries (or never reaches claude at all), while the raw text still
-# shows up in a log of the command line either way.
+# A real `claude` is on PATH in a developer's shell, and `agent start` would find it -- so it is
+# shadowed here. Without this the suite launches live interactive sessions.
 cat > "$STUB/claude" <<'CLAUDE_EOF'
 #!/bin/sh
-: > "${CMUX_CLAUDE_ARGV:-/dev/null}"
-for a in "$@"; do printf '%s\n' "$a" >> "${CMUX_CLAUDE_ARGV:-/dev/null}"; done
 exit 0
 CLAUDE_EOF
 chmod +x "$STUB/claude"
-cat > "$STUB/cmux" <<'STUB_EOF'
+
+# A herdr that keeps just enough state to answer the questions the script asks: which workspaces and
+# panes exist, and which agent names are live. It honours herdr's own conventions, because those ARE
+# the contract under test -- JSON answers on stdout, JSON errors on STDERR with exit 1, usage errors
+# exit 2. A stub that answered errors on stdout would make every not-found probe pass by accident.
+#
+# `pane run` executes its command through a shell for the same reason the whole handshake exists: a
+# line broken by bad quoting must fail here exactly as it fails for real.
+#
+# `agent start` records its post-`--` argv ONE ARGUMENT PER LINE. That is the only thing that can
+# tell a correctly passed argument from text that merely appears somewhere in a command string, and
+# it is what lets the suite assert that the prompt is NOT among those arguments.
+cat > "$STUB/herdr" <<'STUB_EOF'
 #!/bin/sh
-echo "$@" >> "$CMUX_STUB_LOG"
+echo "$*" >> "$HERDR_STUB_LOG"
+S=$HERDR_STUB_STATE; mkdir -p "$S"
+err() { printf '{"error":{"code":"%s","message":"%s"},"id":"stub"}\n' "$1" "${2:-stub error}" >&2; exit 1; }
 case "$1 $2" in
-  "ping "*)              [ "${CMUX_STUB_PING:-0}" = 0 ] || exit 1; echo pong; exit 0 ;;
-  "workspace create")    n=$(( $(cat "$CMUX_STUB_SEQ" 2>/dev/null || echo 0) + 1 ))
-                         echo "$n" > "$CMUX_STUB_SEQ"
-                         # The real child writes its start marker and then execs claude. The stub
-                         # RUNS the --command through a shell so the marker appears exactly when a
-                         # real one would -- which means a command line broken by bad quoting fails
-                         # here the same way it fails for real, and the suite can tell them apart.
-                         [ "${CMUX_STUB_NO_START:-0}" = 0 ] && {
-                           for a in "$@"; do
-                             case $prev in --command) sh -c "$a" >/dev/null 2>&1 || true ;; esac
-                             prev=$a
-                           done
-                         }
-                         [ "${CMUX_STUB_CREATE_SILENT:-0}" = 0 ] || exit 0
-                         echo "OK workspace:$n"; exit 0 ;;
-  "workspace list")      [ "${CMUX_STUB_LIST_FAIL:-0}" = 0 ] || exit 1
-                         [ "${CMUX_STUB_LIST_EMPTY:-0}" = 0 ] || exit 0
-                         n=$(cat "$CMUX_STUB_SEQ" 2>/dev/null || echo 0); i=1
-                         while [ "$i" -le "$n" ]; do
-                           [ "$i" = "${CMUX_STUB_LIST_SKIP:-}" ] || \
-                             echo "  workspace:$i 0000000$i-0000-0000-0000-00000000000$i  unit-$i"
-                           i=$((i + 1))
+  "status "*|"status")   echo "server:"; echo "  status: running"; exit 0 ;;
+  "integration status")  [ "${HERDR_STUB_NO_INTEGRATION:-0}" = 0 ] || { echo "claude: not installed"; exit 0; }
+                         echo "claude: current (v9)"; exit 0 ;;
+  "workspace list")      [ "${HERDR_STUB_LIST_FAIL:-0}" = 0 ] || err server_not_running "no server"
+                         [ "${HERDR_STUB_LIST_GARBAGE:-0}" = 0 ] || { echo "not json at all"; exit 0; }
+                         out=""; for f in "$S"/ws.*; do
+                           [ -e "$f" ] || continue
+                           w=${f##*/ws.}
+                           [ -n "$out" ] && out="$out,"
+                           out="$out{\"workspace_id\":\"$w\",\"label\":\"$(cat "$f")\"}"
                          done
+                         echo "{\"result\":{\"type\":\"workspace_list\",\"workspaces\":[$out]}}"; exit 0 ;;
+  "workspace create")    [ "${HERDR_STUB_CREATE_FAIL:-0}" = 0 ] || err internal_error "create refused"
+                         n=$(( $(cat "$HERDR_STUB_SEQ" 2>/dev/null || echo 0) + 1 ))
+                         echo "$n" > "$HERDR_STUB_SEQ"
+                         label=""; prev=""
+                         for a in "$@"; do
+                           case $prev in --label) label=$a ;; esac
+                           prev=$a
+                         done
+                         echo "$label" > "$S/ws.w$n"; echo "w$n" > "$S/pane.w$n:p1"
+                         [ "${HERDR_STUB_CREATE_NO_PANE:-0}" = 0 ] || { echo '{"result":{"workspace":{"workspace_id":"w'"$n"'"}}}'; exit 0; }
+                         printf '{"result":{"type":"workspace_created","workspace":{"workspace_id":"w%s","label":"%s"},"tab":{"tab_id":"w%s:t1"},"root_pane":{"pane_id":"w%s:p1"}}}\n' "$n" "$label" "$n" "$n"
                          exit 0 ;;
-  "workspace close")     echo "OK $3"; exit 0 ;;
+  "workspace close")     [ -e "$S/ws.$3" ] || err workspace_not_found "workspace $3 not found"
+                         [ "${HERDR_STUB_CLOSE_GROUP:-0}" = 0 ] || err workspace_group_close_required "linked worktrees"
+                         rm -f "$S/ws.$3"
+                         for f in "$S"/pane."$3":*; do [ -e "$f" ] && rm -f "$f"; done
+                         for f in "$S"/agent.*; do
+                           [ -e "$f" ] || continue
+                           case "$(cat "$f")" in "$3":*) rm -f "$f" ;; esac
+                         done
+                         echo '{"result":{"type":"ok"}}'; exit 0 ;;
+  "pane get")            [ "$3" = "${HERDR_STUB_PANE_GONE:-}" ] && err pane_not_found "pane $3 not found"
+                         [ -e "$S/pane.$3" ] || err pane_not_found "pane $3 not found"
+                         echo '{"result":{"pane":{"pane_id":"'"$3"'"}}}'; exit 0 ;;
+  "pane process-info")   p=$4
+                         fg='{"pid":100,"name":"bash","argv":["/bin/bash"]}'
+                         [ "${HERDR_STUB_NEVER_IDLE:-0}" = 0 ] || fg='{"pid":100,"name":"bash"},{"pid":200,"name":"vim"}'
+                         [ -e "$S/agentpane.$p" ] && [ "${HERDR_STUB_NO_CLAUDE:-0}" = 0 ] \
+                           && fg='{"pid":100,"name":"bash"},{"pid":300,"name":"claude"}'
+                         printf '{"result":{"type":"pane_process_info","process_info":{"pane_id":"%s","shell_pid":100,"foreground_processes":[%s]}}}\n' "$p" "$fg"
+                         exit 0 ;;
+  "pane run")            [ "${HERDR_STUB_NO_START:-0}" = 0 ] && sh -c "$4" >/dev/null 2>&1
+                         echo '{"result":{"type":"ok"}}'; exit 0 ;;
+  "agent get")           [ "$3" = "${HERDR_STUB_AGENT_GONE:-}" ] && err agent_not_found "agent target $3 not found"
+                         [ -e "$S/agent.$3" ] || err agent_not_found "agent target $3 not found"
+                         echo '{"result":{"agent":{"name":"'"$3"'"}}}'; exit 0 ;;
+  "agent start")         [ -z "${HERDR_STUB_START_FAIL:-}" ] || err "$HERDR_STUB_START_FAIL" "start refused"
+                         name=$3; pane=""; prev=""; seen=0
+                         : > "${HERDR_CLAUDE_ARGV:-/dev/null}"
+                         for a in "$@"; do
+                           if [ "$seen" = 1 ]; then printf '%s\n' "$a" >> "${HERDR_CLAUDE_ARGV:-/dev/null}"; fi
+                           [ "$a" = "--" ] && seen=1
+                           case $prev in --pane) pane=$a ;; esac
+                           prev=$a
+                         done
+                         echo "$pane" > "$S/agent.$name"; : > "$S/agentpane.$pane"
+                         echo '{"result":{"type":"agent_started","agent":{"name":"'"$name"'","interactive_ready":true}}}'
+                         exit 0 ;;
+  "agent prompt")        [ -z "${HERDR_STUB_PROMPT_FAIL:-}" ] || err "$HERDR_STUB_PROMPT_FAIL" "prompt refused"
+                         [ -e "$S/agent.$3" ] || err agent_not_found "agent target $3 not found"
+                         printf '%s' "$4" > "${HERDR_PROMPT_TEXT:-/dev/null}"
+                         echo '{"result":{"type":"agent_prompted"}}'; exit 0 ;;
 esac
-exit 0
+printf '{"error":{"code":"usage","message":"unknown"},"id":"stub"}\n' >&2
+exit 2
 STUB_EOF
-chmod +x "$STUB/cmux"
+chmod +x "$STUB/herdr"
 export PATH="$STUB:$PATH"
-export CMUX_STUB_LOG="$TMP/cmux.log" CMUX_STUB_SEQ="$TMP/cmux.seq"
-export CMUX_FANOUT_POLL=1
+export HERDR_STUB_LOG="$TMP/herdr.log" HERDR_STUB_SEQ="$TMP/herdr.seq" HERDR_STUB_STATE="$TMP/herdrstate"
+export HERDR_CLAUDE_ARGV="$TMP/claude.argv" HERDR_PROMPT_TEXT="$TMP/prompt.txt"
+export FANOUT_POLL=1
 
 # A private state root per test file, so a developer's real fan-out is never touched and a rerun
 # never inherits the last run's units.
@@ -121,7 +186,7 @@ finish_unit() {   # finish_unit <id> <dir> <branch> <status> [--no-marker]
     if [ "$marker" = marker ]; then printf 'a\n<!-- built: %s -->\n' "$br" > todo.md
     else printf 'a\nno marker here\n' > todo.md; fi
     git add -A && git commit -qm "$br" ) >/dev/null 2>&1
-  local s; s=$(sed -n 's/^sentinel=//p' "$TMP"/cmux-fanout-*/"$id".rec)
+  local s; s=$(sed -n 's/^sentinel=//p' "$TMP"/fanout-*/"$id".rec)
   { printf 'status=%s\n' "$st"; printf 'branch=%s\n' "$br"; } > "$s"
 }
 
@@ -135,21 +200,41 @@ grep -q "trust dialog" <<<"$out" && ok "and says so, rather than inventing trust
 
 trust_repo "$REPO"
 out=$("$FAN" preflight 2>&1); rc=$?
-[[ $rc == 0 ]] && ok "a clean primary tree with cmux reachable passes preflight" \
-               || bad "a clean primary tree with cmux reachable passes preflight" "exit $rc: $out"
+[[ $rc == 0 ]] && ok "a clean primary tree with herdr reachable passes preflight" \
+               || bad "a clean primary tree with herdr reachable passes preflight" "exit $rc: $out"
 
 # A PATH holding neither the stub nor a real installation — the machine running this suite may
-# well have cmux, and the case under test is a machine that does not.
+# well have herdr, and the case under test is a machine that does not.
 out=$(PATH="/usr/bin:/bin" "$FAN" preflight 2>&1); rc=$?
-[[ $rc != 0 ]] && ok "cmux absent exits non-zero" || bad "cmux absent exits non-zero" "exit 0"
-grep -q "not on PATH" <<<"$out" && ok "and says cmux is missing rather than falling back" \
-                                || bad "and says cmux is missing rather than falling back" "$out"
+[[ $rc != 0 ]] && ok "herdr absent exits non-zero" || bad "herdr absent exits non-zero" "exit 0"
+grep -q "not on PATH" <<<"$out" && ok "and says herdr is missing rather than falling back" \
+                                || bad "and says herdr is missing rather than falling back" "$out"
 
-out=$(CMUX_STUB_PING=1 "$FAN" preflight 2>&1); rc=$?
-[[ $rc != 0 ]] && ok "cmux installed but unreachable exits non-zero" \
-               || bad "cmux installed but unreachable exits non-zero" "exit 0"
+# `herdr status` EXITS 0 with no server running, so a gate built on it passes here and fails at
+# every spawn instead — the same confident wrong answer, moved somewhere it costs more. The stub's
+# `status` always succeeds, exactly like the real one, so if preflight ever starts believing it
+# instead of `workspace list`, this case is what notices.
+out=$(HERDR_STUB_LIST_FAIL=1 "$FAN" preflight 2>&1); rc=$?
+[[ $rc != 0 ]] && ok "herdr installed but unreachable exits non-zero, though status says otherwise" \
+               || bad "herdr installed but unreachable exits non-zero, though status says otherwise" "exit 0"
 grep -q "not reachable" <<<"$out" && ok "and distinguishes unreachable from missing" \
                                   || bad "and distinguishes unreachable from missing" "$out"
+out=$(HERDR_STUB_LIST_GARBAGE=1 "$FAN" preflight 2>&1); rc=$?
+[[ $rc != 0 ]] && ok "an answer that is not a workspace list refuses rather than guessing" \
+               || bad "an answer that is not a workspace list refuses rather than guessing" "exit $rc"
+# herdr's own skill gates on HERDR_ENV to stop a model reaching into a session it is not part of.
+# This script only ever touches what it created, and an orchestrator legitimately runs from a plain
+# terminal while the server is up, so requiring it would refuse a working fan-out.
+out=$(env -u HERDR_ENV "$FAN" preflight 2>&1); rc=$?
+[[ $rc == 0 ]] && ok "preflight does not require HERDR_ENV — an orchestrator may sit outside a pane" \
+               || bad "preflight does not require HERDR_ENV — an orchestrator may sit outside a pane" "exit $rc: $out"
+# A missing status hook is a NAMED SKIP, never a refusal: completion rests on the sentinel and the
+# branch marker, so what is lost is sidebar legibility and nothing else.
+out=$(HERDR_STUB_NO_INTEGRATION=1 "$FAN" preflight 2>&1); rc=$?
+[[ $rc == 0 ]] && ok "a missing claude integration is named, not fatal" \
+               || bad "a missing claude integration is named, not fatal" "exit $rc: $out"
+grep -q "integration install claude" <<<"$out" \
+  && ok "and the message names the fix" || bad "and the message names the fix" "$out"
 
 git worktree add -q --detach "$TMP/probe" HEAD
 out=$(cd "$TMP/probe" && "$FAN" preflight 2>&1); rc=$?
@@ -165,6 +250,9 @@ rm -f scratch.txt
 
 echo
 echo "== spawn builds the worktree and a watchable interactive session =="
+# Exact-line matching against the recorded argv, not a substring of a command string: a broken
+# argument splits across entries or vanishes, while its text still shows up in a flat log either way.
+argv_has() { grep -qxF -- "$1" "$HERDR_CLAUDE_ARGV"; }
 P1_PROMPT='/r:plan-run todo.md --phases 1 --no-merge --yes'
 out=$("$FAN" spawn --id p1 --dir "$TMP/wt-p1" --base main \
         --prompt "$P1_PROMPT" \
@@ -172,43 +260,51 @@ out=$("$FAN" spawn --id p1 --dir "$TMP/wt-p1" --base main \
 [[ $rc == 0 ]] && ok "spawn exits 0" || bad "spawn exits 0" "exit $rc: $out"
 [[ -d "$TMP/wt-p1" ]] && ok "and creates the detached worktree" \
                       || bad "and creates the detached worktree" "$TMP/wt-p1 missing"
-grep -q "workspace=workspace:" <<<"$out" && ok "and reports the workspace ref it got back" \
-                                         || bad "and reports the workspace ref it got back" "$out"
-grep -q -- "--permission-mode auto" "$CMUX_STUB_LOG" \
+grep -qE "workspace=w[0-9]+" <<<"$out" && ok "and reports the workspace id it got back" \
+                                       || bad "and reports the workspace id it got back" "$out"
+grep -qE "pane=w[0-9]+:p[0-9]+" <<<"$out" && ok "and the pane, which is what liveness is decided on" \
+                                          || bad "and the pane, which is what liveness is decided on" "$out"
+grep -q "agent=" <<<"$out" && ok "and the agent name, which is what cleanup must address" \
+                           || bad "and the agent name, which is what cleanup must address" "$out"
+argv_has "--permission-mode" && argv_has "auto" \
   && ok "the session runs under --permission-mode auto" \
-  || bad "the session runs under --permission-mode auto" "$(cat "$CMUX_STUB_LOG")"
-grep -q -- "-p " "$CMUX_STUB_LOG" \
-  && bad "the session is an interactive TUI, never headless -p" "$(cat "$CMUX_STUB_LOG")" \
+  || bad "the session runs under --permission-mode auto" "$(cat "$HERDR_CLAUDE_ARGV")"
+argv_has "-p" \
+  && bad "the session is an interactive TUI, never headless -p" "$(cat "$HERDR_CLAUDE_ARGV")" \
   || ok "the session is an interactive TUI, never headless -p"
-grep -q "CMUX_FANOUT_SENTINEL=" "$CMUX_STUB_LOG" \
+grep -q "FANOUT_SENTINEL=" "$HERDR_STUB_LOG" \
   && ok "and is handed the sentinel path it must write" \
-  || bad "and is handed the sentinel path it must write" "$(cat "$CMUX_STUB_LOG")"
+  || bad "and is handed the sentinel path it must write" "$(cat "$HERDR_STUB_LOG")"
 # Without this the unit reaches its implement step and is refused the canonical pipeline, because
 # the Workflow tool only accepts a scriptPath under the cwd or a directory the session was given.
 # It fails late and quietly: the worktree is clean, so the wave looks merely unproductive.
-grep -q -- "--add-dir '$PACK'" "$CMUX_STUB_LOG" \
+argv_has "--add-dir" && argv_has "$PACK" \
   && ok "and is given the pack root, so it can run the canonical pipelines" \
-  || bad "and is given the pack root, so it can run the canonical pipelines" "$(cat "$CMUX_STUB_LOG")"
-# Presence is not enough, which is the whole reason this assertion is separate: `--add-dir` takes a
-# variadic list, so a prompt placed after it is swallowed as one more directory and the session
-# comes up empty — with the flag still present, spelled exactly as the check above wants it. Such a
-# unit runs no skill, so it never halts, never sentinels, and `wait` calls it live for four hours.
-cmd_line=$(grep -F -- "--add-dir" "$CMUX_STUB_LOG" | head -1)
-before_dirs=${cmd_line%%--add-dir*}
-[[ "$before_dirs" == *"'$P1_PROMPT'"* ]] \
-  && ok "with the prompt AHEAD of them — a variadic --add-dir would eat it" \
-  || bad "with the prompt AHEAD of them — a variadic --add-dir would eat it" "$cmd_line"
+  || bad "and is given the pack root, so it can run the canonical pipelines" "$(cat "$HERDR_CLAUDE_ARGV")"
+# THE regression this design exists to prevent. The prompt is documented free prose, so it quotes
+# things; put it on a command line and an escaper has to survive every apostrophe and angle bracket
+# forever. It is delivered by `agent prompt` instead, which means it must appear NOWHERE in the
+# arguments handed to claude -- and a positional reintroduced "to save a call" would also be eaten
+# by the variadic --add-dir, coming up as a session with no prompt that never halts and never
+# sentinels, which `wait` reads as live for four hours.
+argv_has "$P1_PROMPT" \
+  && bad "the prompt is NOT an argv element — no shell ever parses it" "$(cat "$HERDR_CLAUDE_ARGV")" \
+  || ok "the prompt is NOT an argv element — no shell ever parses it"
+[[ "$(cat "$HERDR_PROMPT_TEXT")" == "$P1_PROMPT" ]] \
+  && ok "it is delivered by agent prompt instead, byte for byte" \
+  || bad "it is delivered by agent prompt instead, byte for byte" "$(cat "$HERDR_PROMPT_TEXT")"
 trusted "$TMP/wt-p1" && ok "the new worktree inherits the repo's workspace trust" \
                      || bad "the new worktree inherits the repo's workspace trust" "not marked trusted"
-# The unit is told who spawned it, so an alarm goes UPWARDS to a known address. Downwards would need
-# discovery against every session on the machine, which is why only this direction is wired.
-grep -q "CMUX_FANOUT_ORCHESTRATOR=orch-99" "$CMUX_STUB_LOG" \
+# The unit is told who spawned it, so an alarm goes UPWARDS to a known address. Downwards there is
+# no address the multiplexer can supply: SendMessage addresses a session by Claude Code's own name
+# for it, which is unrelated to any herdr label, workspace, pane or agent handle.
+grep -q "FANOUT_ORCHESTRATOR=orch-99" "$HERDR_STUB_LOG" \
   && ok "and is told the orchestrator's name, so it can raise an alarm upwards" \
-  || bad "and is told the orchestrator's name, so it can raise an alarm upwards" "$(cat "$CMUX_STUB_LOG")"
-: > "$CMUX_STUB_LOG"
+  || bad "and is told the orchestrator's name, so it can raise an alarm upwards" "$(cat "$HERDR_STUB_LOG")"
+: > "$HERDR_STUB_LOG"
 "$FAN" spawn --id pnoorch --dir "$TMP/wt-pnoorch" --base main --prompt x >/dev/null 2>&1
-grep -q "CMUX_FANOUT_ORCHESTRATOR" "$CMUX_STUB_LOG" \
-  && bad "omitting --orchestrator leaves the variable unset, never empty" "$(cat "$CMUX_STUB_LOG")" \
+grep -q "FANOUT_ORCHESTRATOR" "$HERDR_STUB_LOG" \
+  && bad "omitting --orchestrator leaves the variable unset, never empty" "$(cat "$HERDR_STUB_LOG")" \
   || ok "omitting --orchestrator leaves the variable unset, never empty"
 "$FAN" cleanup --id pnoorch >/dev/null 2>&1
 
@@ -216,23 +312,17 @@ grep -q "CMUX_FANOUT_ORCHESTRATOR" "$CMUX_STUB_LOG" \
 # pre-resolution check under the name it was called by and fails the post-resolution one under its
 # real path. So both spellings go across, and the link is built here rather than assumed: this repo
 # is not itself behind one, and a case that only fires on someone else's machine tests nothing.
-: > "$CMUX_STUB_LOG"
+: > "$HERDR_STUB_LOG"
 ln -s "$PACK" "$TMP/packlink"
-"$TMP/packlink/skills/plan-run/scripts/cmux-fanout.sh" \
+"$TMP/packlink/skills/plan-run/scripts/fanout.sh" \
   spawn --id plink --dir "$TMP/wt-plink" --base main --prompt x >/dev/null 2>&1
 PACK_REAL=$(cd "$PACK" && pwd -P)
-grep -q -- "--add-dir '$TMP/packlink'" "$CMUX_STUB_LOG" \
+argv_has "$TMP/packlink" \
   && ok "a pack reached through a symlink sends the path it was called by" \
-  || bad "a pack reached through a symlink sends the path it was called by" "$(cat "$CMUX_STUB_LOG")"
-grep -q -- "--add-dir '$PACK_REAL'" "$CMUX_STUB_LOG" \
+  || bad "a pack reached through a symlink sends the path it was called by" "$(cat "$HERDR_CLAUDE_ARGV")"
+argv_has "$PACK_REAL" \
   && ok "and its resolved path too — the tool re-checks after resolving" \
-  || bad "and its resolved path too — the tool re-checks after resolving" "$(cat "$CMUX_STUB_LOG")"
-# Two flags is where the variadic bite is worst, so the ordering is asserted here as well as on the
-# single-flag spawn above.
-link_line=$(grep -F -- "--add-dir" "$CMUX_STUB_LOG" | head -1)
-[[ "${link_line%%--add-dir*}" == *"'x'"* ]] \
-  && ok "and the prompt still leads, with two directories trailing it" \
-  || bad "and the prompt still leads, with two directories trailing it" "$link_line"
+  || bad "and its resolved path too — the tool re-checks after resolving" "$(cat "$HERDR_CLAUDE_ARGV")"
 "$FAN" cleanup --id plink >/dev/null 2>&1
 
 
@@ -240,14 +330,13 @@ out=$("$FAN" spawn --id p1 --dir "$TMP/wt-dup" --base main --prompt x 2>&1); rc=
 [[ $rc != 0 ]] && ok "a duplicate id is refused rather than overwriting a live unit" \
                || bad "a duplicate id is refused rather than overwriting a live unit" "exit 0"
 
-: > "$CMUX_STUB_LOG"
-out=$(CMUX_STUB_CREATE_SILENT=1 "$FAN" spawn --id px --dir "$TMP/wt-px" --base main --prompt x 2>&1); rc=$?
-[[ $rc != 0 ]] && ok "a create that returns no ref is a failure, not a unit with no workspace" \
-               || bad "a create that returns no ref is a failure, not a unit with no workspace" "exit 0"
+: > "$HERDR_STUB_LOG"
+out=$(HERDR_STUB_CREATE_NO_PANE=1 "$FAN" spawn --id px --dir "$TMP/wt-px" --base main --prompt x 2>&1); rc=$?
+[[ $rc != 0 ]] && ok "a create that names no root pane is a failure, not a unit with nowhere to start" \
+               || bad "a create that names no root pane is a failure, not a unit with nowhere to start" "exit 0"
 [[ ! -d "$TMP/wt-px" ]] && ok "and its half-made worktree is rolled back" \
                         || bad "and its half-made worktree is rolled back" "$TMP/wt-px survived"
 
-echo
 echo "== the cap is enforced where a caller cannot forget it =="
 # The cap is a SETTING now (`steps.fanout.maxUnits`), so the spawn counts below are only meaningful
 # if this checkout resolves the shipped 3. Say so rather than failing four cases with an off-by-one
@@ -273,13 +362,19 @@ finish_unit p3 "$TMP/wt-p3" phase-three ok
 out=$("$FAN" cleanup --id p3 2>&1); rc=$?
 [[ $rc == 0 ]] && ok "cleanup on a finished unit exits 0" || bad "cleanup on a finished unit exits 0" "$out"
 [[ ! -d "$TMP/wt-p3" ]] && ok "and removes its worktree" || bad "and removes its worktree" "still there"
-grep -q "workspace close" "$CMUX_STUB_LOG" && ok "and closes its workspace" \
-                                           || bad "and closes its workspace" "$(cat "$CMUX_STUB_LOG")"
-# By UUID, not by the ref create handed back: cleanup runs long after spawn, and a ref is the one
-# handle that could have come to mean a different workspace by then.
-grep -qE "workspace close 0000000[0-9]-" "$CMUX_STUB_LOG" \
-  && ok "closing it by UUID, never by the ref it was created with" \
-  || bad "closing it by UUID, never by the ref it was created with" "$(cat "$CMUX_STUB_LOG")"
+grep -q "workspace close" "$HERDR_STUB_LOG" && ok "and closes its workspace" \
+                                           || bad "and closes its workspace" "$(cat "$HERDR_STUB_LOG")"
+# By the workspace id it recorded at spawn, and only that one. Cleanup runs long after spawn, so a
+# close aimed at anything derived later could take down a workspace this unit never owned.
+grep -qE "workspace close w[0-9]+" "$HERDR_STUB_LOG" \
+  && ok "closing it by the workspace id it recorded at spawn" \
+  || bad "closing it by the workspace id it recorded at spawn" "$(cat "$HERDR_STUB_LOG")"
+[[ $(grep -c "workspace close" "$HERDR_STUB_LOG") == 1 ]] \
+  && ok "exactly one close, so no other workspace is ever a candidate" \
+  || bad "exactly one close, so no other workspace is ever a candidate" "$(grep -c "workspace close" "$HERDR_STUB_LOG") closes"
+grep -q -- "--group" "$HERDR_STUB_LOG" \
+  && bad "and never --group, which would take the whole wave with it" "$(cat "$HERDR_STUB_LOG")" \
+  || ok "and never --group, which would take the whole wave with it"
 out=$("$FAN" spawn --id p4 --dir "$TMP/wt-p4" --base main --prompt x \
         --marker-file todo.md --marker-prefix 'built: ' 2>&1); rc=$?
 [[ $rc == 0 ]] && ok "the freed slot admits exactly one more unit" \
@@ -313,7 +408,7 @@ out=$("$FAN" wait --id p2 --timeout 5 2>&1); rc=$?
 grep -q "no-marker" <<<"$out" && ok "and says the marker is what is missing" \
                               || bad "and says the marker is what is missing" "$out"
 
-sfile=$(sed -n 's/^sentinel=//p' "$TMP"/cmux-fanout-*/p2.rec)
+sfile=$(sed -n 's/^sentinel=//p' "$TMP"/fanout-*/p2.rec)
 { printf 'status=halted\n'; printf 'branch=phase-two\n'; printf 'reason=build red\n'; } > "$sfile"
 out=$("$FAN" wait --id p2 --timeout 5 2>&1); rc=$?
 [[ $rc == 1 ]] && ok "a failure sentinel reports failed" || bad "a failure sentinel reports failed" "exit $rc: $out"
@@ -346,9 +441,9 @@ out=$("$FAN" spawn --id pu --dir "$TMP/wt-pu" --base main --prompt x \
 grep -q "not tracked" <<<"$out" \
   && ok "and names the weakened gate rather than dropping it silently" \
   || bad "and names the weakened gate rather than dropping it silently" "$out"
-grep -q "^marker_file=$" "$TMP"/cmux-fanout-*/pu.rec \
+grep -q "^marker_file=$" "$TMP"/fanout-*/pu.rec \
   && ok "and records no marker file for the unit" \
-  || bad "and records no marker file for the unit" "$(cat "$TMP"/cmux-fanout-*/pu.rec)"
+  || bad "and records no marker file for the unit" "$(cat "$TMP"/fanout-*/pu.rec)"
 
 finish_unit pu "$TMP/wt-pu" untracked-backlog ok no-marker
 out=$("$FAN" wait --id pu --timeout 5 2>&1); rc=$?
@@ -363,13 +458,13 @@ echo "== a missing sentinel times out; it never reads as done =="
 "$FAN" cleanup --id p2 >/dev/null 2>&1
 "$FAN" spawn --id p6 --dir "$TMP/wt-p6" --base main --prompt x \
        --marker-file todo.md --marker-prefix 'built: ' >/dev/null 2>&1
-: > "$CMUX_STUB_LOG"
+: > "$HERDR_STUB_LOG"
 out=$("$FAN" wait --id p6 --timeout 2 2>&1); rc=$?
 [[ $rc == 3 ]] && ok "a unit that never reports times out with exit 3" \
                || bad "a unit that never reports times out with exit 3" "exit $rc: $out"
 grep -q "p6" <<<"$out" && ok "and names the stalled unit" || bad "and names the stalled unit" "$out"
-grep -q "workspace close" "$CMUX_STUB_LOG" \
-  && bad "a stalled unit's workspace is left open for a human" "$(cat "$CMUX_STUB_LOG")" \
+grep -q "workspace close" "$HERDR_STUB_LOG" \
+  && bad "a stalled unit's workspace is left open for a human" "$(cat "$HERDR_STUB_LOG")" \
   || ok "a stalled unit's workspace is left open for a human"
 [[ -d "$TMP/wt-p6" ]] && ok "and its worktree survives the timeout" \
                       || bad "and its worktree survives the timeout" "removed"
@@ -380,25 +475,35 @@ grep -q "^p6 live" <<<"$out" && ok "status reports it live rather than finished"
 
 echo
 echo "== a unit whose session died is not waited out =="
-# p6 is still live and still has no sentinel. Its workspace is the last one the stub created,
-# so dropping that row from the listing is exactly "the session went away".
-seq=$(cat "$CMUX_STUB_SEQ")
-out=$(CMUX_STUB_LIST_SKIP="$seq" "$FAN" wait --id p6 --timeout 60 2>&1); rc=$?
-[[ $rc == 1 ]] && ok "a vanished workspace fails fast instead of timing out" \
-               || bad "a vanished workspace fails fast instead of timing out" "exit $rc: $out"
-grep -q "workspace gone" <<<"$out" && ok "and says the session died rather than stalled" \
-                                  || bad "and says the session died rather than stalled" "$out"
+# p6 is still live and still has no sentinel. Liveness is decided on the two handles herdr answers
+# DIRECTLY, by error code rather than by a row missing from a listing: a closed pane id is never
+# reused, so pane_not_found is proof this pane is gone; and an agent name is released when its agent
+# exits, so agent_not_found over a live pane catches claude dying and leaving the shell standing.
+P6_PANE=$(sed -n 's/^pane=//p' "$TMP"/fanout-*/p6.rec)
+P6_AGENT=$(sed -n 's/^agent=//p' "$TMP"/fanout-*/p6.rec)
+out=$(HERDR_STUB_PANE_GONE="$P6_PANE" "$FAN" wait --id p6 --timeout 60 2>&1); rc=$?
+[[ $rc == 1 ]] && ok "a vanished pane fails fast instead of timing out" \
+               || bad "a vanished pane fails fast instead of timing out" "exit $rc: $out"
+grep -q "session gone" <<<"$out" && ok "and says the session died rather than stalled" \
+                                 || bad "and says the session died rather than stalled" "$out"
 [[ -d "$TMP/wt-p6" ]] && ok "and its worktree survives, holding whatever it committed" \
                       || bad "and its worktree survives, holding whatever it committed" "removed"
 
-# The two ways the answer is "cannot tell". Both must keep waiting: declaring every live unit
-# dead because cmux hiccuped is the confident wrong answer, and it would abandon a whole wave.
-out=$(CMUX_STUB_LIST_FAIL=1 "$FAN" wait --id p6 --timeout 2 2>&1); rc=$?
-[[ $rc == 3 ]] && ok "cmux unreachable is 'cannot tell', so the wait stands" \
-               || bad "cmux unreachable is 'cannot tell', so the wait stands" "exit $rc: $out"
-out=$(CMUX_STUB_LIST_EMPTY=1 "$FAN" wait --id p6 --timeout 2 2>&1); rc=$?
-[[ $rc == 3 ]] && ok "an empty listing is 'cannot tell' too" \
-               || bad "an empty listing is 'cannot tell' too" "exit $rc: $out"
+# The case a workspace-level probe cannot see at all: the pane is alive, but claude exited and left
+# the shell sitting there. Waiting that out costs the whole four-hour timeout to learn something
+# that was true in the first minute.
+out=$(HERDR_STUB_AGENT_GONE="$P6_AGENT" "$FAN" wait --id p6 --timeout 60 2>&1); rc=$?
+[[ $rc == 1 ]] && ok "claude exiting under a live pane is gone, not live" \
+               || bad "claude exiting under a live pane is gone, not live" "exit $rc: $out"
+
+# The ways the answer is "cannot tell". All must keep waiting: declaring every live unit dead
+# because herdr hiccuped is the confident wrong answer, and it would abandon a whole wave.
+out=$(HERDR_STUB_LIST_FAIL=1 "$FAN" wait --id p6 --timeout 2 2>&1); rc=$?
+[[ $rc == 3 ]] && ok "herdr unreachable is 'cannot tell', so the wait stands" \
+               || bad "herdr unreachable is 'cannot tell', so the wait stands" "exit $rc: $out"
+out=$(HERDR_STUB_LIST_GARBAGE=1 "$FAN" wait --id p6 --timeout 2 2>&1); rc=$?
+[[ $rc == 3 ]] && ok "an answer it cannot parse is 'cannot tell' too" \
+               || bad "an answer it cannot parse is 'cannot tell' too" "exit $rc: $out"
 
 echo
 echo "== --any rolls the window instead of waiting on the slowest =="
@@ -566,60 +671,157 @@ cd "$REPO"
 echo
 echo "== a prompt is passed to the child intact, apostrophes and all =="
 # The prompt is a DOCUMENTED input and callers are told to compose free prose; prose about a
-# checklist quotes the checklist. Interpolated raw into "... '"'"'$prompt'"'"' ...", one apostrophe closes
-# the quoting and the rest is parsed as shell -- an observed spawn hit `<port>`, zsh read it as an
-# input redirection, and the child sat at a `quote>` prompt forever. Nothing caught it: a shell WAS
-# running, so `status` said live for twenty minutes and `wait` would have blocked on a sentinel
-# nobody was going to write. So both halves are asserted here -- that the prompt survives, and that
-# a child which never reaches `claude` is refused rather than reported as spawned.
+# checklist quotes the checklist. Any form that puts it on a command line needs an escaper, and an
+# escaper is a thing that can be got wrong again -- an observed spawn hit `<port>`, zsh read it as
+# an input redirection, and the child sat at a `quote>` prompt forever. Nothing caught it: a shell
+# WAS running, so `status` said live for twenty minutes and `wait` would have blocked on a sentinel
+# nobody was going to write.
+#
+# So the prompt is delivered by `agent prompt` and is never an argument at all. That is what this
+# case guards: the nasty text must arrive whole AND must appear nowhere in claude's argv. Measured
+# against the real binary, `agent prompt` delivers it byte-identical -- $HOME included, unexpanded,
+# which is the proof no shell parses it -- and that is the half a stub cannot check for itself.
 QREPO="$TMP/qrepo"; mkdir -p "$QREPO"
 git -C "$QREPO" init -q -b main; git -C "$QREPO" config user.email t@t; git -C "$QREPO" config user.name t
 printf 'a\n' > "$QREPO/todo.md"; git -C "$QREPO" add -A >/dev/null; git -C "$QREPO" commit -qm base
 QBASE=$(git -C "$QREPO" rev-parse HEAD); trust_repo "$QREPO"
 
 NASTY=$(cat <<'NASTY_EOF'
-don't drop this: open <port> and check "the box" — it's Phase 33
+don't drop this: open <port> and check "the box" — it's Phase 33 $HOME `id` 100%
 NASTY_EOF
 )
-ARGV="$TMP/claude-argv"; export CMUX_CLAUDE_ARGV="$ARGV"; rm -f "$ARGV"
+rm -f "$HERDR_CLAUDE_ARGV" "$HERDR_PROMPT_TEXT"
 out=$(cd "$QREPO" && PATH="$STUB:$PATH" "$FAN" spawn \
         --id q1 --dir "$TMP/wt-q1" --base "$QBASE" --prompt "$NASTY" 2>&1); rc=$?
 
 [ "$rc" = 0 ] && ok "a prompt full of quotes and angle brackets spawns cleanly" \
               || bad "a prompt full of quotes and angle brackets spawns cleanly" "rc=$rc $out"
-# The stub runs the --command through `sh -c`, so a command line broken by bad quoting fails there
-# exactly as it fails for real -- which is what makes this assertion discriminate.
-# ONE argv entry, byte-identical. A prompt that merely appears in the command string proves
-# nothing: that is true of the broken version too, which is what the observed failure looked like.
-got=$(grep -cFx "$NASTY" "$ARGV" 2>/dev/null || echo 0)
-[ "$got" = 1 ] \
-  && ok "and claude receives the prompt as ONE argument, byte for byte" \
-  || bad "and claude receives the prompt as ONE argument, byte for byte" "matched $got line(s) in $(wc -l < "$ARGV" 2>/dev/null || echo 0)-line argv"
-grep -qx -- '--permission-mode' "$ARGV" \
-  && ok "and the flags before it are still their own arguments" \
-  || bad "and the flags before it are still their own arguments" "$(cat "$ARGV" 2>/dev/null)"
-[ -f "$TMP"/cmux-fanout-*/q1.started ] \
+[ "$(cat "$HERDR_PROMPT_TEXT" 2>/dev/null)" = "$NASTY" ] \
+  && ok "and agent prompt receives it as ONE argument, byte for byte" \
+  || bad "and agent prompt receives it as ONE argument, byte for byte" "got: $(cat "$HERDR_PROMPT_TEXT" 2>/dev/null)"
+grep -qF -- "$NASTY" "$HERDR_CLAUDE_ARGV" 2>/dev/null \
+  && bad "and it never reaches claude's argv, where a shell would have parsed it" "$(cat "$HERDR_CLAUDE_ARGV")" \
+  || ok "and it never reaches claude's argv, where a shell would have parsed it"
+grep -qx -- '--permission-mode' "$HERDR_CLAUDE_ARGV" \
+  && ok "while the flags that DO belong there are still their own arguments" \
+  || bad "while the flags that DO belong there are still their own arguments" "$(cat "$HERDR_CLAUDE_ARGV" 2>/dev/null)"
+[ -f "$TMP"/fanout-*/q1.started ] \
   && ok "and the child recorded that it actually started" \
   || bad "and the child recorded that it actually started" "no start marker"
 
 echo
-echo "== a child that never reaches claude is NOT reported as spawned =="
-# The second defect, independent of the quoting: a workspace that CREATED is not a session that
-# STARTED, and every failure shape here (bad command line, missing binary, a shell at a continuation
-# prompt) leaves a live shell behind that `status` cannot tell from a working unit.
-out=$(cd "$QREPO" && CMUX_STUB_NO_START=1 PATH="$STUB:$PATH" "$FAN" spawn \
+echo "== a pane that exists is not a shell that runs commands =="
+# A workspace that CREATED is not a session that STARTED, and `agent start` has the same
+# precondition the handshake does -- the pane must be at an interactive prompt. Every failure shape
+# leaves a LIVE PANE behind, which is the one thing `status` cannot tell from a working unit.
+out=$(cd "$QREPO" && HERDR_STUB_NO_START=1 PATH="$STUB:$PATH" "$FAN" spawn \
         --id q2 --dir "$TMP/wt-q2" --base "$QBASE" --prompt 'plain' 2>&1); rc=$?
-[ "$rc" != 0 ] && ok "spawn fails when the child never started" \
-               || bad "spawn fails when the child never started" "rc=$rc $out"
-grep -q "never started" <<<"$out" \
+[ "$rc" != 0 ] && ok "spawn fails when the handshake never lands" \
+               || bad "spawn fails when the handshake never lands" "rc=$rc $out"
+grep -q "no shell that runs commands" <<<"$out" \
   && ok "and says so, rather than a generic error" \
   || bad "and says so, rather than a generic error" "$out"
 [ -e "$TMP/wt-q2" ] \
   && bad "and the worktree is cleaned up, not left behind" "$TMP/wt-q2 still exists" \
   || ok "and the worktree is cleaned up, not left behind"
-[ -e "$(ls -d "$TMP"/cmux-fanout-*/q2.rec 2>/dev/null)" ] \
+[ -e "$(ls -d "$TMP"/fanout-*/q2.rec 2>/dev/null)" ] \
   && bad "and no unit record is written for a unit that never ran" "q2.rec exists" \
   || ok "and no unit record is written for a unit that never ran"
+
+# THE case that proves the readiness gate is real rather than survived by luck. A pane that never
+# goes idle must stop the spawn BEFORE `agent start` is ever called -- a script that merely waited
+# and pressed on would still call it, and would still pass every assertion above.
+: > "$HERDR_STUB_LOG"
+out=$(cd "$QREPO" && HERDR_STUB_NEVER_IDLE=1 HERDR_STUB_NO_START=1 PATH="$STUB:$PATH" "$FAN" spawn \
+        --id q3 --dir "$TMP/wt-q3" --base "$QBASE" --prompt 'plain' 2>&1); rc=$?
+[ "$rc" != 0 ] && ok "a pane that never reaches a prompt refuses the spawn" \
+               || bad "a pane that never reaches a prompt refuses the spawn" "rc=$rc"
+grep -q "agent start" "$HERDR_STUB_LOG" \
+  && bad "and agent start is never reached — asserted by its ABSENCE from the call log" "$(cat "$HERDR_STUB_LOG")" \
+  || ok "and agent start is never reached — asserted by its ABSENCE from the call log"
+grep -q "workspace close" "$HERDR_STUB_LOG" \
+  && ok "and the workspace it opened is closed again, leaving nothing on screen" \
+  || bad "and the workspace it opened is closed again, leaving nothing on screen" "$(cat "$HERDR_STUB_LOG")"
+
+# One handshake, never a retry. A second `pane run` sent because the first looked lost is text that
+# arrives late and is typed into the agent that started in between -- a unit holding a stray line of
+# shell in its prompt box, which is invisible on the happy path.
+: > "$HERDR_STUB_LOG"
+(cd "$QREPO" && PATH="$STUB:$PATH" "$FAN" spawn \
+   --id q4 --dir "$TMP/wt-q4" --base "$QBASE" --prompt 'plain' >/dev/null 2>&1)
+[[ $(grep -c "^pane run" "$HERDR_STUB_LOG") == 1 ]] \
+  && ok "exactly one handshake is sent to the pane" \
+  || bad "exactly one handshake is sent to the pane" "$(grep -c "^pane run" "$HERDR_STUB_LOG") pane runs"
+(cd "$QREPO" && "$FAN" cleanup --id q4 >/dev/null 2>&1)
+
+echo
+echo "== a unit that comes up but will not take its prompt is not reported as spawned =="
+# herdr documents that a timeout or agent_prompt_stalled does NOT prove the prompt was undelivered,
+# so this must never be retried -- a retry can double-send into a session that already has the work.
+for code in agent_prompt_stalled timeout agent_blocked; do
+  : > "$HERDR_STUB_LOG"
+  out=$(cd "$QREPO" && HERDR_STUB_PROMPT_FAIL="$code" PATH="$STUB:$PATH" "$FAN" spawn \
+          --id "qp" --dir "$TMP/wt-qp" --base "$QBASE" --prompt 'plain' 2>&1); rc=$?
+  [ "$rc" != 0 ] && ok "$code is a spawn failure, not a live unit" \
+                 || bad "$code is a spawn failure, not a live unit" "rc=$rc"
+  [[ $(grep -c "^agent prompt" "$HERDR_STUB_LOG") == 1 ]] \
+    && ok "and the prompt is never re-sent after $code" \
+    || bad "and the prompt is never re-sent after $code" "$(grep -c "^agent prompt" "$HERDR_STUB_LOG") attempts"
+  grep -q "workspace close" "$HERDR_STUB_LOG" \
+    && ok "and its workspace is closed rather than orphaned ($code)" \
+    || bad "and its workspace is closed rather than orphaned ($code)" "$(cat "$HERDR_STUB_LOG")"
+  [ -e "$TMP/wt-qp" ] && bad "and its worktree is rolled back ($code)" "survived" \
+                      || ok "and its worktree is rolled back ($code)"
+done
+
+echo
+echo "== an agent that cannot start takes nothing with it =="
+for code in agent_not_ready timeout agent_name_in_use; do
+  : > "$HERDR_STUB_LOG"
+  out=$(cd "$QREPO" && HERDR_STUB_START_FAIL="$code" PATH="$STUB:$PATH" "$FAN" spawn \
+          --id "qs" --dir "$TMP/wt-qs" --base "$QBASE" --prompt 'plain' 2>&1); rc=$?
+  [ "$rc" != 0 ] && ok "$code refuses the spawn" || bad "$code refuses the spawn" "rc=$rc"
+  grep -q "$code" <<<"$out" && ok "and the message names the code herdr gave ($code)" \
+                            || bad "and the message names the code herdr gave ($code)" "$out"
+  grep -q "workspace close" "$HERDR_STUB_LOG" \
+    && ok "and closes the workspace it opened ($code)" \
+    || bad "and closes the workspace it opened ($code)" "$(cat "$HERDR_STUB_LOG")"
+  [ -e "$TMP/wt-qs" ] && bad "and rolls back the worktree ($code)" "survived" \
+                      || ok "and rolls back the worktree ($code)"
+done
+
+echo
+echo "== the herdr agent name is derived, recorded, and never taken from someone else =="
+# Names are [a-z][a-z0-9_-]{0,31} and unique across the whole SERVER, not per repo -- two repos
+# fanning out `phase-1` at once would collide, and the second start is a hard refusal.
+(cd "$QREPO" && PATH="$STUB:$PATH" "$FAN" spawn --id P1.x --dir "$TMP/wt-qn" --base "$QBASE" --prompt p >/dev/null 2>&1)
+aname=$(sed -n 's/^agent=//p' "$TMP"/fanout-*/P1.x.rec 2>/dev/null)
+[[ $aname =~ ^[a-z][a-z0-9_-]{0,31}$ ]] \
+  && ok "an id with uppercase and dots still yields a legal herdr agent name" \
+  || bad "an id with uppercase and dots still yields a legal herdr agent name" "got '$aname'"
+[[ ${#aname} -le 32 ]] && ok "and one within herdr's 32-character limit" \
+                       || bad "and one within herdr's 32-character limit" "${#aname} chars"
+# Recorded, not recomputed: cleanup and the liveness probe must address the agent THIS spawn named.
+grep -q "^agent=$aname$" "$TMP"/fanout-*/P1.x.rec \
+  && ok "and it is recorded in the unit's rec rather than derived again later" \
+  || bad "and it is recorded in the unit's rec rather than derived again later" "not recorded"
+# A live name belonging to another wave must never be taken over: that is a spawn silently driving
+# somebody else's session, which is the worst outcome available here.
+# `P1.x` and `p1-x` are different unit ids that derive to the SAME herdr agent name, which is the
+# collision the dup-id check cannot see.
+out=$(cd "$QREPO" && PATH="$STUB:$PATH" "$FAN" spawn --id p1-x --dir "$TMP/wt-qn2" --base "$QBASE" --prompt p 2>&1); rc=$?
+[ "$rc" != 0 ] && ok "a derived name that is already live is refused, never reused" \
+               || bad "a derived name that is already live is refused, never reused" "rc=$rc"
+(cd "$QREPO" && "$FAN" cleanup --id P1.x >/dev/null 2>&1)
+
+echo
+echo "== a state path this script cannot put on a command line is refused =="
+# The handshake interpolates the state path into a shell command. Every part of it is constrained
+# except TMPDIR, so a TMPDIR with a space is the one way that line becomes a quoting bug again.
+mkdir -p "$TMP/with space"
+out=$(cd "$QREPO" && TMPDIR="$TMP/with space" PATH="$STUB:$PATH" "$FAN" status 2>&1); rc=$?
+[ "$rc" != 0 ] && ok "a TMPDIR with a space is refused out loud, not escaped around" \
+               || bad "a TMPDIR with a space is refused out loud, not escaped around" "rc=$rc: $out"
 
 cd "$QREPO" && git worktree remove --force "$TMP/wt-q1" >/dev/null 2>&1
 cd "$REPO"

@@ -177,7 +177,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
 {"skill":"r:pack-maintain","kind":"report","reporter":"<the peer's session name>",
  "changed":true,"validated":true,"installed":true,"committed":true,"testAdded":true,
  "findings":[{"track":"pack-report","category":"defect|by-design|legibility",
-              "severity":"blocker|critical|major|minor","file":"skills/plan-run/scripts/cmux-fanout.sh","line":243,
+              "severity":"blocker|critical|major|minor","file":"skills/plan-run/scripts/fanout.sh","line":243,
               "verdict":"confirmed|dismissed|unresolved","fixed":true,"description":"one short line"}]}
 STATS_JSON
 ```

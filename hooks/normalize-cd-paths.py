@@ -10,7 +10,7 @@ Resolution is then skipped outright, `let Le = hasCd && !isAbsolute(t) ?
 undefined : resolve(...)`, and only `Le === null` passes, so "not attempted" is
 treated exactly like "denied". The circuit breaker is bypassImmune and not
 classifier-approvable, so no permission mode and no unattended configuration
-clears it: a `--cmux` unit stalls on a prompt with nobody in the room.
+clears it: a fan-out unit stalls on a prompt with nobody in the room.
 
 Rewriting `cd /abs; grep -rn x internal/` into `cd /abs; grep -rn x
 /abs/internal/` hands the analyzer a target it will resolve, which then matches

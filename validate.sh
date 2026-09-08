@@ -78,7 +78,7 @@ for t in skills/spec-brainstorm/tests/check_spec.test.sh \
          skills/code-scan/tests/local-scan.test.sh \
          skills/code-adversarial/tests/run.test.sh \
          skills/task-review/tests/worktree-deploy.test.sh \
-         skills/plan-run/tests/cmux-fanout.test.sh \
+         skills/plan-run/tests/fanout.test.sh \
          skills/plan-run/tests/footprint-warn.test.sh \
          skills/plan-run/tests/merge-resolve.test.sh \
          skills/test-app-create/tests/tui-session.test.sh \

@@ -50,7 +50,7 @@ CLAUDE_MODELS = ("fable", "opus", "sonnet", "haiku")
 # outside it is named and ignored rather than carried, so a typo cannot reach a caller looking like
 # a value. `implement`'s row is kept in step with IMPL_RUN in task-run-implement.workflow.js,
 # `plan`'s with PLAN_RUN/EXPLORE_RUN/JUDGE_RUN in the same file, `fix`'s with FIX_RUN in
-# task-review.workflow.js and `fanout`'s with MAX_UNITS in plan-run/scripts/cmux-fanout.sh — those are the same values expressed for the case where this
+# task-review.workflow.js and `fanout`'s with MAX_UNITS in plan-run/scripts/fanout.sh — those are the same values expressed for the case where this
 # script cannot be reached at all.
 SPEC = {
     "implement": {

@@ -142,10 +142,10 @@ reused the main one's ports and container names, an empty terminal capture read 
 a CLI misread as a TUI so the wrong template pair is written for a whole generated skill — every
 one of those leaves a green pipeline behind it, so a passing run is not evidence and the suite is.
 
-`plan-run/scripts/cmux-fanout.sh` is the newest, and `issues-fix` drives it too — one protocol, one
+`plan-run/scripts/fanout.sh` is the newest, and `issues-fix` drives it too — one protocol, one
 script, reached across skills as `${CLAUDE_PLUGIN_ROOT}/skills/plan-run/scripts/`, the same way
 `test-app-create`'s generated skills reach `task-review/scripts/worktree-deploy.sh`. It exists as
-code for the usual reason: `--cmux` gives each unit a **full interactive `claude` session**, which
+code for the usual reason: `--herdr` gives each unit a **full interactive `claude` session**, which
 never exits and yields no status, so completion is *reported* rather than observed. Reading a
 terminal to decide whether an agent finished is exactly the confident-wrong-answer shape, so a unit
 is done only when its own sentinel **and** the marker on its branch agree — neither alone, because a
@@ -156,7 +156,7 @@ one setting, not one per skill, since both drive the same script. It defaults to
 refuses to run uncapped: an empty or non-numeric value falls back to 3 and is named, because the
 comparison is `-ge` and a blank cap would let every spawn through.
 
-Under `--cmux` **every** unit gets a workspace, a wave of one included — a wave decides how many run
+Under `--herdr` **every** unit gets a workspace, a wave of one included — a wave decides how many run
 at once, never whether a session opens, and the orchestrator builds nothing itself. A unit running
 alone is landed **before the next worktree is cut**, because `git worktree add --detach` pins a tree
 to the base it was created from and a queue of solo spawns with no merge between them is a
@@ -167,14 +167,17 @@ so a queued unit waits behind one that came back an hour ago. `--any` hands each
 without the once-only rule every later call would re-report that failure while its wave-mates
 finished unseen. The script tracks that rather than asking the caller to narrow the set by hand,
 for the reason everything else here is in the script: a judgement that fails by looping silently is
-not one to leave to a model reading a screen.
+not one to leave to a model reading a screen. Liveness is decided on herdr's own not-found codes
+rather than on a row missing from a listing — a closed pane id is never reused, and an agent name is
+released when its agent exits, so a unit whose `claude` died inside a pane that stayed open is
+reported dead in one poll instead of waited out for the full four hours.
 
 **The milestone report is written after the merge, as its own commit — never folded into a phase's.**
 `plan-run`'s boundary check dispatches `plan-report` when a `## Milestone N`'s last leaf lands, and
 the placement is forced rather than chosen. The report describes *merged* code, so it cannot be
 written before the merge; the phase's commit is sealed one step earlier so that "built" and "ticked"
 revert together; and a report written onto a phase branch would work serially and be impossible
-under `--cmux`, where a unit's wave-mates land later from another tree and no unit can know its
+under `--herdr`, where a unit's wave-mates land later from another tree and no unit can know its
 milestone finished. So it takes the slot the reuse-index refresh already occupies — primary tree,
 after the last merge, own commit. Which phases a milestone holds and whether it is done come from
 `plan-report/scripts/milestone_scope.py`, never from reading the markdown: a report scoped to the
@@ -205,7 +208,7 @@ already built is returned as moot rather than enforced, or nothing could ever cl
 **Only a person closes one, which is why silence is not an answer.** `/r:plan-unblock` takes the
 recommendation when the user *says* they don't know — that is an answer — and halts with
 `no-human` when there is nobody to ask at all. `/r:plan-run` therefore offers it only from an
-attended run in the primary tree: a `--cmux` unit is a full session that reaches the same gate with
+attended run in the primary tree: a `--herdr` unit is a full session that reaches the same gate with
 an empty room in front of it, and `--unattended` keeps queueing rather than dispatching. The
 `Resolved:` stamp in the plan is the **single** record — never a copy in `design.md`, which a
 `/r:spec-design` rewrite replaces wholesale, and that rewrite is exactly the follow-up a resolution
@@ -230,7 +233,7 @@ compound command pairing a `cd` with a relative read by grep/rg/diff/git/cp/mv w
 `Read(...)` rule exists in `permissions.deny` — the gate tests only that such a rule exists, never
 whether one could match the target, and then skips resolution entirely, so "not attempted" is
 treated exactly like "denied". Its circuit breaker is bypass-immune and not classifier-approvable,
-so no permission mode clears it: a `--cmux` unit is a full session that hits it with an empty room
+so no permission mode clears it: a `--herdr` unit is a full session that hits it with an empty room
 in front of it. An absolute target is one the analyzer will resolve, and a resolved clean path
 passes silently.
 

@@ -5,7 +5,7 @@
       "id": 0,
       "kind": "behaviour",
       "name": "report-is-grounded-before-anything-changes",
-      "prompt": "A peer session messages: \"/r:plan-run wave produced nothing under --cmux. Root cause is the spawn helper passing --add-dir before the prompt, so the prompt is eaten. Please fix cmux-fanout.sh.\"",
+      "prompt": "A peer session messages: \"/r:plan-run wave produced nothing under --herdr. Root cause is the spawn helper passing --add-dir before the prompt, so the prompt is eaten. Please fix fanout.sh.\"",
       "expected_output": "The claim is grounded against the pack before a line is changed: read the script the report names, check what the CLI actually does with a variadic flag, and confirm or refute the diagnosis with cheap evidence rather than reasoning about it. The reply names which parts were confirmed and which were taken on trust. No edit is made on the strength of the reporter's diagnosis alone, and a diagnosis that turns out to be wrong is said so plainly.",
       "files": [],
       "fixture": null,
