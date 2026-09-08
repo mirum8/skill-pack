@@ -386,9 +386,16 @@ below inside its own session. For each phase:
      "red" is vacuous exactly where it is most needed: measured, 33 recorded reviews returned
      `build: "n/a"`, 31 of them over Go worktrees carrying 42k added lines that were reviewed
      without a single compile or test.
+   - `planBookkeepingWritten` non-empty — the diff already ticks a checkbox or writes a `built:`
+     marker in the files it names, and the plan you are about to tick in Step 3.6 is the usual one.
+     Never correct here whatever the verdict says: 3.6 ticks *after* this gate, from the criteria
+     the review verified, so a tick present now is a claim nothing has passed — and the `built:`
+     marker is what `--land` keys on to treat a branch as a finished phase. The review reports this
+     and cannot repair it, because only you know which edits in that file were your own: revert
+     exactly those files (`git checkout -- <paths>`) and re-read the verdict.
 
-   Any of these means part of the change had no reader. **Do not merge** — re-run the blocked step
-   until it genuinely runs, fix what is outstanding, or halt.
+   Any of these means part of the change had no reader, or carries a claim nothing checked. **Do
+   not merge** — re-run the blocked step until it genuinely runs, fix what is outstanding, or halt.
 
 5. **Run the phase's own `Done when:` check** — the runnable command or observable response the plan
    wrote for exactly this moment — and record its output.
@@ -1150,7 +1157,9 @@ merged, landed or ticked. Never retry it.
 - **A returned Workflow is not a passed review.** `endVerify` anything but `passed` (`blocked` —
   the pass never ran; `findings-unresolved` — it ran and nobody fixed what it found), a non-empty
   `tracksBlocked` or `tracksDrifted`, or a `build`/`localScan` that is **not green** each mean part
-  of the diff had no reader. `"n/a"` is not green — it is no build at all. Do not merge on any of
+  of the diff had no reader. `"n/a"` is not green — it is no build at all. A non-empty
+  `planBookkeepingWritten` is the other shape: the diff already ticks the plan, before the gate that
+  decides whether it earned it. Do not merge on any of
   them. State the gate the same way everywhere it appears: "red" and "not green" are different
   gates, and the narrower one silently passes every project whose build tool went undetected.
 - **Run the phase's `Done when:`, or name the skip.** It is the only check that asks whether the

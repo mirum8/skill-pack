@@ -2753,6 +2753,14 @@ try {
 // marker appearing in the diff NOW is always premature — there is no run in which it is correct
 // for one to be here. Reported, never repaired: the fix is `git checkout -- <the plan file>`, and
 // only the caller knows which edits in that file were its own.
+//
+// It reads the DIFF, not this run's own agents, and that is what makes it worth its slot: the tick
+// is at least as likely to arrive already written. The recorded instance came from the implement
+// half — a Codex implementer whose wrapper had the DO NOT EDIT rule, summarized it out of the brief
+// it handed the CLI, and left the writer knowing the backlog path from the intent line and nothing
+// about keeping off it. Every fixer below carries NOT_YOUR_BOOKKEEPING, so a reader who takes this
+// report as an accusation against them looks in the wrong half of the run. The caller is told which
+// FILES, never which agent, because the remedy is the same either way.
 const bookkeeping = await agent(
   `Read only — change nothing, stage nothing, commit nothing.
    Run \`git diff\` (plus \`git diff --cached\`) and look ONLY at markdown files for two things:
@@ -2772,7 +2780,7 @@ const planBookkeepingWritten = (bookkeeping && Array.isArray(bookkeeping.files) 
   ? bookkeeping.files : []
 if (planBookkeepingWritten.length) {
   log(`post-task-review: this run's diff TICKS COMPLETION or writes a built: marker in ${planBookkeepingWritten.join(', ')} — ` +
-      `no fixer may do that and the caller ticks after this review returns, so it is premature whatever this verdict says. ` +
+      `no agent on either side of this task may do that and the caller ticks after this review returns, so it is premature whatever this verdict says. ` +
       `Revert those files before committing: \`git checkout -- ${planBookkeepingWritten.join(' ')}\`.` +
       (bookkeeping.detail ? ` (${bookkeeping.detail})` : ''))
 } else if (!bookkeeping) {

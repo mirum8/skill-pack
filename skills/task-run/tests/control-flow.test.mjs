@@ -2668,6 +2668,46 @@ test('plan-fix is pointed at the plan file and warned off the source doc', async
   }
 })
 
+test('the build fixer is warned off the source document too', async () => {
+  // It is the same writer on the same provider repairing the code it just wrote, and it arrives
+  // after a red build — the moment an agent starts editing whatever looks like it needs updating.
+  // A rule attached only to the implementers leaves this one free to tick.
+  const { prompts } = await run({
+    source: todoSource(), args: { source: 'docs/fyl/todo.md / Phase 35' },
+    review: OK_REVIEW, planfix: OK_FIX,
+    overrides: { 'build#': (n) => (n === 1 ? { green: false, inScopeFailures: 'ImporterTest fails' } : { green: true }) },
+  })
+  const p = prompts['build-fix#1']
+  assert.ok(p, 'the build fixer must have been dispatched')
+  assert.match(p, /DO NOT EDIT docs\/fyl\/todo\.md/)
+  assert.match(p, /Do not tick its checkboxes/)
+})
+
+test('on codex the source-doc rule is told to travel into the brief, not just be obeyed', async () => {
+  // The wrapper writes nothing, so a prohibition it merely follows is a prohibition nobody applied.
+  // Observed: a brief that kept "resolves item [#11] of <backlog>" and summarized the DO NOT EDIT
+  // line away came back with the item ticked, in the diff the review then read.
+  const { prompts } = await run({
+    source: todoSource(), args: { source: 'docs/fyl/todo.md / Phase 35' },
+    review: OK_REVIEW, planfix: OK_FIX, config: CODEX_CONFIG,
+  })
+  const p = prompts['implement:backend']
+  assert.match(p, /A PROHIBITION BINDS THE WRITER, AND THE WRITER IS CODEX/)
+  assert.match(p, /docs\/fyl\/todo\.md/, 'the pass-through rule names the file the brief will name')
+  assert.match(p, /Copy the DO NOT EDIT rule into the/)
+  // And the rule it points at is still in the brief below it.
+  assert.match(p, /DO NOT EDIT docs\/fyl\/todo\.md/)
+
+  // A task with no source document must carry neither half — a "do not edit" pointed at nothing
+  // is noise in every issue-sourced codex run.
+  const issue = await run({
+    source: baseSource({ kind: 'issue', sourceDoc: '' }), args: { source: '#81' },
+    review: OK_REVIEW, planfix: OK_FIX, config: CODEX_CONFIG,
+  })
+  assert.doesNotMatch(issue.prompts['implement:backend'], /A PROHIBITION BINDS THE WRITER/)
+  assert.doesNotMatch(issue.prompts['implement:backend'], /DO NOT EDIT/)
+})
+
 test('an issue or free-text task has no source document, and no rule about one', async () => {
   // The rule must name a real path or say nothing: a "do not edit" pointed at nothing is noise in
   // every implementer prompt for every issue-sourced run.

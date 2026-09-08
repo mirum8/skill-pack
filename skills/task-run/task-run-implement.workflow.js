@@ -965,6 +965,11 @@ const planPath = src.planPath || `.task-plans/${src.slug}.md`
 // in that order, so the reviewer's diff is the code change rather than a bookkeeping edit its doc
 // hunter has to rule on, and so only what was actually verified gets ticked. Anything this half
 // wants to say about the plan goes in ${planPath}, which is the document it owns.
+// Every agent that WRITES carries it — the implementers and the build fixer, which is the same
+// writer on the same provider repairing the code it just produced. A rule attached only to the
+// first of them leaves the second free to tick, and the build fixer arrives after a red build,
+// which is exactly when an agent starts editing whatever looks like it needs updating.
+//
 // Reported by the source step, which resolved it. The split is a fallback for a run whose source
 // step predates the field, not the primary answer.
 const sourceDocRule = (src.sourceDoc || '').trim()
@@ -2500,9 +2505,19 @@ const codexPreamble = (a) => `YOU ARE NOT WRITING THIS CODE YOURSELF. Drive the 
      [ -f "$C" ] || C="$(ls -1d "$HOME"/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs | sort -V | tail -n1)"
      node "$C" task --background --model ${implCfg.model} --effort ${implCfg.effort} --write "<the full brief below, verbatim>"
    Writes are ENABLED here — unlike the plan review, this run edits the repo. Pass the ENTIRE brief
-   below through to Codex, including the plan path, the acceptance criteria and the TDD rules: a
-   summarized brief is how an implementer ends up building its own reinterpretation of the plan.
-
+   below through to Codex, including the plan path, the acceptance criteria, the TDD rules and
+   every prohibition in it: a summarized brief is how an implementer ends up building its own
+   reinterpretation of the plan.
+${sourceDocRule ? `
+   A PROHIBITION BINDS THE WRITER, AND THE WRITER IS CODEX. A rule you obey yourself is a rule
+   nobody applied — you edit nothing here, so anything not carried into the brief reaches no one.
+   The one that costs most is the source document, because the brief has to name ${sourceDocRule}
+   to say which item this work resolves: Codex learns the path either way, and with the DO NOT EDIT
+   line summarized out it ticks the item's checkbox. That tick lands in the diff the review then
+   reads, as a claim about work nothing has verified yet, and only the caller knows which edits in
+   that file were its own — so nothing downstream can repair it. Copy the DO NOT EDIT rule into the
+   brief word for word.
+` : ''}
    --background is REQUIRED. It is the only flag that hands the run to a detached worker; omit it
    and the CLI runs inside your own Bash call and is killed with that call about two minutes in,
    over an implementer that averages 963s. The launch hands back a job id in seconds and the run
@@ -2743,7 +2758,7 @@ if (hasBuild) {
        ${inScope}
        Intent (do not undo it): ${src.taskIntent}
        ${selfCheckClause} Plus the one test you touched. Do not run the full suite — this loop rebuilds and re-runs it the moment
-       you return, and that is what proves the failures are gone.${NO_WEAKENING}`,
+       you return, and that is what proves the failures are gone.${LEAVE_SOURCE_ALONE}${NO_WEAKENING}`,
       // The resolved implementer settings, for the same reason the implementers carry them: this
       // is the same agent on the same provider, editing the code it just wrote. Left unpinned it
       // took its depth from the entry point, and left on Claude it would quietly hand a codex run's
