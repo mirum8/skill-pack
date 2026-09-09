@@ -21,6 +21,17 @@ Be tolerant of case and location; skip a missing file silently.
 - `DESIGN.md` / `ui-design.md` — the UI design system (tokens, components, conventions). A
   `DESIGN.md` may follow the google-labs-code/design.md format: normative tokens in YAML front
   matter, rationale in the prose — treat both layers as intent.
+- `tech-design.md` beside a plan's `todo.md` — that plan's BUILD contracts: schema with real column
+  types, endpoint signatures and status codes, the types introduced, module boundaries. Written by
+  `/r:spec-design` before the code existed.
+
+  **`DESIGN.md` and `tech-design.md` are different documents and never the same evidence.**
+  `DESIGN.md` is authoritative for the visual identity, so a divergence against it is a colour, a
+  spacing value or a component state drifting from the documented system. `tech-design.md` is
+  authoritative for the technical shape, so a divergence against it is a column that ended up
+  nullable, an endpoint returning the wrong status, a boundary a module now crosses. The names look
+  alike and the contents have nothing in common — report each under its own category, and never
+  cite one as evidence about the other.
 - `**/CLAUDE.md` — the full hierarchy: root `CLAUDE.md` plus nested module `CLAUDE.md`
   files, and any reference docs they link to (e.g. `docs/*.md` extracted from CLAUDE.md).
   Scope a nested CLAUDE.md's rules to the module directory it lives in.
@@ -52,6 +63,9 @@ concrete code fact that contradict each other.
   change implements something the todo/spec still describes the old way.
 - **design system violated** (`DESIGN.md` / `ui-design.md`): the changed UI code contradicts documented design tokens or
   component rules (colors, spacing, naming, component states).
+- **build contract violated** (`tech-design.md`): the changed code contradicts a milestone's
+  documented schema, endpoint signature or status code, type, or module boundary — a technical
+  promise, not a visual one.
 - **CLAUDE.md rule violated**: the change breaks a stated project convention or constraint.
 - **Undocumented new behavior**: the change adds public/user-visible behavior that the docs
   clearly should mention but don't.
