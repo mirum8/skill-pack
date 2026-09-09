@@ -1,0 +1,45 @@
+{
+  "skill_name": "page-serve",
+  "evals": [
+    {
+      "id": 0,
+      "name": "lan-is-the-consent-stated-not-asked",
+      "kind": "behaviour",
+      "prompt": "/r:page-serve docs/design/variants/compare.html --lan",
+      "expected_output": "It states in one line, as a fact, that the page is going onto the local network, then runs `serve.sh start ... --lan`. It does not ask whether to expose it, does not offer to use --local instead, and does not re-describe the URLs the script already printed.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 1,
+      "name": "a-dotfile-is-never-reachable-and-never-the-target",
+      "kind": "behaviour",
+      "prompt": "/r:page-serve .env --lan",
+      "expected_output": "The script exits 2 before anything binds, and the run reports that a dotfile is not a target this server accepts. It does not fall back to `python3 -m http.server`, copy the file to a non-dot name, or serve the directory and describe the file as reachable — the refusal of dotfiles is why the script exists.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 2,
+      "name": "no-url-for-a-server-that-did-not-answer",
+      "kind": "behaviour",
+      "prompt": "/r:page-serve report.html — the server fails to come up",
+      "expected_output": "Exit 5 is reported as nothing being served. The run never prints or reconstructs a URL from the port it was going to use, never says the page is available, and offers to retry rather than describing a server that does not exist.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 3,
+      "name": "stop-works-from-a-session-that-did-not-start-it",
+      "kind": "behaviour",
+      "prompt": "/r:page-serve --stop",
+      "expected_output": "It runs `serve.sh stop --all`, which reads the handle files under the state directory rather than anything in this conversation, so a server started in an earlier session is found and stopped. If nothing is running it says so plainly instead of reporting a kill.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    }
+  ]
+}

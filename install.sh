@@ -236,7 +236,7 @@ else
   ok  "Installed — but nothing loads until the NEXT session."
   say "Skills-dir plugins are discovered at session start, never mid-session."
   say "Restart, then check that ${CYAN}/plugin${R} lists ${CYAN}r@skills-dir${R} and that"
-  say "${CYAN}/r:${R} autocompletes seventeen skills."
+  say "${CYAN}/r:${R} autocompletes twenty-five skills."
 fi
 if [[ $PREREQ == ok ]]; then
   ok "prerequisites: ok"

@@ -501,9 +501,12 @@ reader owned by one skill stays that skill's reader. Rules that are load-bearing
 - Its suite is `lib/tests/config.test.sh`, and it is the only one it gets.
 
 **Skills that must never self-trigger** (`task-run`, `task-quick`, `issues-fix`, `plan-run`,
-`spec-design`) carry `disable-model-invocation: true` in frontmatter — the enforcement, not just a
-sentence in the body. Each of the five mutates the repo or a plan on a scale nobody wants arrived at
-by inference, so they are invoked deliberately or not at all. Two consequences follow and are easy
+`spec-design`, `ui-prototype`, `page-serve`, `pack-maintain`) carry `disable-model-invocation: true`
+in frontmatter — the enforcement, not just a sentence in the body. Most of them mutate the repo or a
+plan on a scale nobody wants arrived at by inference, so they are invoked deliberately or not at
+all. `page-serve` is the one that mutates nothing and still belongs: it opens a listening socket,
+and `--lan` makes that socket reachable from every device on the network, which is the same class
+of thing. Two consequences follow and are easy
 to forget: their descriptions leave the listing budget entirely (they are not in the router's
 context), and **no prompt can route to them**, so their own `trigger` eval cases are untestable by
 design and their `neighbour-exclusion` cases pass without measuring anything — `tools/run-evals.py`
