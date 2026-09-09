@@ -60,7 +60,7 @@ RETIRED_PACKED = {
 # never existed and make validate report an R-4 cut-over that has nothing to cut over from.
 # They are part of the pack all the same, which is what packed_skills() is for.
 PACK_NATIVE = frozenset({"issues-draft", "pack-maintain", "plan-report", "plan-run",
-                         "plan-unblock", "reuse-index", "task-quick"})
+                         "plan-unblock", "reuse-index", "task-quick", "ui-prototype"})
 
 
 def packed_skills() -> set:

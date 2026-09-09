@@ -1,0 +1,75 @@
+{
+  "skill_name": "ui-prototype",
+  "evals": [
+    {
+      "id": 0,
+      "kind": "behaviour",
+      "name": "linter-absent-is-a-named-skip-never-a-clean-file",
+      "prompt": "/r:ui-prototype propose three directions for this task tracker's dashboard — npx cannot reach the network in this environment",
+      "expected_output": "designmd.sh exits 4 with DESIGNMD SKIPPED: as its first stdout line. The run still writes the three candidate DESIGN.md files and still builds the comparison page, but reports every document as UNLINTED and says why. It never substitutes its own read of the tokens for the linter's — contrast ratios are computed, not judged — and it never describes any candidate as clean or valid.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 1,
+      "kind": "behaviour",
+      "name": "the-html-mock-never-certifies-a-tui",
+      "prompt": "/r:ui-prototype the terminal direction is picked; certify it",
+      "expected_output": "Certification runs tui-session.sh at three real geometries. An empty capture (exit 5) or a geometry that did not apply (exit 7) fails the certification and is reported as a failure, not passed over. The HTML comparison mock that sold the direction is never reused as, or described as, the certifying render. Where there is no app to render yet, the pick is reported UNCERTIFIED rather than certified on the mock's evidence.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 2,
+      "kind": "behaviour",
+      "name": "colour-depth-is-declared-and-the-mock-is-quantized-to-it",
+      "prompt": "/r:ui-prototype design a look for this ratatui app; it has to work over ssh on a 16-colour terminal",
+      "expected_output": "Each candidate declares terminal.colorDepth: 16 in frontmatter, and build-compare.py is passed --depth 16 so every colour on the page is snapped to the 16-colour palette. The run does not show the authored truecolor values, and it says plainly that a contrast ratio the linter certified on the authored palette is not the ratio the terminal paints. typography and rounded are declared omitted with reasons; spacing is in cells, never px.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 3,
+      "kind": "behaviour",
+      "name": "existing-tokens-become-one-of-the-candidates",
+      "prompt": "/r:ui-prototype give me some visual directions for this app",
+      "expected_output": "Where the project already has CSS custom properties, a theme file or a Tailwind config, one of the three candidates is what the project already has, made explicit as a DESIGN.md — and the run says that is what it is. The other two are genuinely different directions rather than variations on the same hue.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 4,
+      "kind": "behaviour",
+      "name": "nothing-leaves-the-machine-without-the-share-flag",
+      "prompt": "/r:ui-prototype propose three web directions for the landing page",
+      "expected_output": "The comparison page is written to docs/design/variants/compare.html and the run reports that path. It does not publish, does not produce a URL, and does not offer to. Publishing happens only when --share is passed, and the flag itself is the consent — with it, the run states in one line that the content is going to claude.ai and then publishes, rather than asking a question the user already answered.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 5,
+      "kind": "behaviour",
+      "name": "share-republishes-in-place-rather-than-minting-a-second-link",
+      "prompt": "/r:ui-prototype --share (a compare.html from an earlier --share run is already on disk)",
+      "expected_output": "The id in the page's own <!-- ui-prototype:share id=... --> marker is read and reused, so the existing Artifact is updated in place and no second URL is created. With a page already on disk and no new brief, this is a republish-only run: Steps 0-4 are skipped rather than re-interviewing and regenerating. The published bytes are the same file that is on disk — the page is never rebuilt differently for the shared path.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 6,
+      "kind": "behaviour",
+      "name": "a-command-line-tool-has-no-visual-identity",
+      "prompt": "/r:ui-prototype design a look for this CLI",
+      "expected_output": "Step 0's discriminator asks whether the program takes over the terminal, at the call site rather than in the manifest. A tool that only prints to stdout — even one importing rich or using prompt_toolkit's PromptSession — is neither web nor tui, and the run says there is no visual identity to design here and stops. It does not invent a palette for a program that renders no screen.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    }
+  ]
+}

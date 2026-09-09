@@ -53,7 +53,7 @@ skills-directory case. Whether plugin discovery follows a *symlinked* entry is
 documented neither way, and it fails identically to a malformed manifest, so the
 pack does not rely on it.
 
-## The twenty-three skills
+## The twenty-four skills
 
 | command | does |
 |---|---|
@@ -75,6 +75,7 @@ pack does not rely on it.
 | `/r:hexagonal-architecture` | Hexagonal Lite boundaries: what lives in core, what a module may import |
 | `/r:tests-write` | JVM test conventions; loads proactively on Java/Kotlin work |
 | `/r:test-app-create` | scaffold a project-local `/test-app` for the detected stack |
+| `/r:ui-prototype` | three candidate `DESIGN.md` identities, rendered from their own tokens and compared locally; the pick lands at the repo root |
 | `/r:git-commit` | group the working tree into logical Conventional Commits |
 | `/r:claudemd-compact` | compact and de-stale a CLAUDE.md hierarchy |
 | `/r:claudemd-patch` | insert the standard rule blocks and the test-writing hook |
@@ -86,8 +87,8 @@ alphabetically sorted `/` menu groups the families: `claudemd-*`, `code-*`,
 `issues-*`, `spec-*`, `task-*`. `hexagonal-architecture` is the one exception — it
 is a rulebook rather than an action, and "hexagonal" is the word someone reaches for.
 
-`task-run`, `task-quick`, `issues-fix`, `plan-run`, `spec-design` and
-`pack-maintain` carry `disable-model-invocation: true` — each says in its own
+`task-run`, `task-quick`, `issues-fix`, `plan-run`, `spec-design`, `ui-prototype`
+and `pack-maintain` carry `disable-model-invocation: true` — each says in its own
 text that it must never fire on its own, and the frontmatter enforces that rather
 than trusting the prose. Each mutates the repo or a plan on a scale nobody wants
 arrived at by inference. They stay invocable by name; they just will not

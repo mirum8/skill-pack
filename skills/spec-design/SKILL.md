@@ -82,6 +82,11 @@ ask which) · `spec.md`, `PROJECT.md`, `DESIGN.md`, `README.md` at the repo root
 **Take more than one when more than one is offered.** Reading only the tidiest is how half the
 requirements go missing. Say which documents you read and what you took from each.
 
+**A root `DESIGN.md` carrying YAML token frontmatter — `colors:`, `typography:`, `spacing:` — is a
+visual identity, not requirements.** `/r:ui-prototype` writes that file, and no product requirement
+can be derived from a colour palette. Skip it here and note that you did; the design contracts it
+does bear on are the UI ones, which reach a phase through the spec.
+
 **When two documents disagree, that is an Open question, never a silent pick.** One of them is out
 of date, and only the user knows which.
 
