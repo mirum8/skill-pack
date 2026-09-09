@@ -20,7 +20,7 @@ Read this before writing anything. `SKILL.md` carries the steps; this file carri
 docs/<topic>/reports/milestone-<N>-<slug>.html
 ```
 
-Beside the plan's own `todo.md` and `design.md`, in a `reports/` directory the skill creates. `<N>`
+Beside the plan's own `todo.md` and `tech-design.md`, in a `reports/` directory the skill creates. `<N>`
 is the milestone's number and `<slug>` its kebab-cased name — both from `milestone_scope.py`, never
 retyped, so a re-run updates the report it wrote last time instead of minting a second one beside
 it.
@@ -103,15 +103,15 @@ list of them.
 
 The load-bearing section, and the reason the report is worth writing.
 
-`design.md`'s contracts are the **claim** — schema, endpoints, types, boundaries, written before
+`tech-design.md`'s contracts are the **claim** — schema, endpoints, types, boundaries, written before
 any code existed. The code is the **fact**. This section reports the fact, and **names every place
 the two diverge**: the column that ended up nullable, the endpoint that returned 409 instead of
 400, the module boundary that moved.
 
 A divergence is not a defect to apologise for — it is what the milestone learned. But a report that
-silently prints `design.md`'s version is worse than no report at all, because it is the document a
+silently prints `tech-design.md`'s version is worse than no report at all, because it is the document a
 reader will trust over the code. Where the plan carried no contracts (a `--shallow` plan has no
-`design.md`), say the design is reported from the code alone and there was nothing to compare it
+`tech-design.md`), say the design is reported from the code alone and there was nothing to compare it
 against.
 
 ### 3 · How it fits together
@@ -195,7 +195,7 @@ survives the session.
 | what is missing | the report says |
 |---|---|
 | a phase's landing commit did not resolve | that phase's changes are described from the plan and the current tree, not from its diff — named in the header's coverage line |
-| the plan has no `design.md` | the design is reported from the code alone; there was no contract to compare it against |
+| the plan has no `tech-design.md` | the design is reported from the code alone; there was no contract to compare it against |
 | `--partial` over an unfinished milestone | which phases are covered and which are not, at the top, in the document itself |
 | a snippet's citation no longer resolves | the snippet is dropped, and the coverage line names it |
 

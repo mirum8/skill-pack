@@ -52,7 +52,7 @@ plan <<'EOF'
 - [ ] **Sign the payments DPA** — the processor needs it before live traffic.
   Owner: legal. Blocks: Phase 2. Timebox: two weeks. Output: a countersigned PDF.
 - [x] **Queue vs cron** — which drives retries?
-  Owner: platform. Blocks: Phase 4. Output: a line in design.md.
+  Owner: platform. Blocks: Phase 4. Output: a line in tech-design.md.
   Resolved: 2026-09-03 — queue; cron cannot honour the 30s target. Alternative: cron.
 
 ## Waves
@@ -332,7 +332,7 @@ PY
                  || bad "Blocks: stops at Informs:, and the unknown field is named" "$out"
 
 # The other half, and it is a DIFFERENT failure: an entry that names no phase blocks the entire run
-# list by design (spec-design/SKILL.md:337, design-contracts.md:78 — "nothing can tell what it was
+# list by design (spec-design/SKILL.md:340, design-contracts.md:80 — "nothing can tell what it was
 # guarding"). What must never happen is the gate stopping a run while naming phases the author
 # never blocked, because that reads as a specific, checked answer.
 gate=$(python3 - "$out" <<'PY'

@@ -5,7 +5,7 @@ description: >-
   signatures and status codes, the types introduced, module boundaries), and leaf phases whose
   checklists carry that contract concretely enough to implement from. Reads a spec
   (docs/<topic>/spec.html from /r:spec-brainstorm, a PRD, a design doc) plus any others you
-  name; writes todo.md with the contracts beside it in design.md. Every leaf declares its
+  name; writes todo.md with the contracts beside it in tech-design.md. Every leaf declares its
   dependencies, so the plan is a graph that says which units may be built at once and refuses a
   wave whose members collide on a file. One leaf is exactly one /r:task-run. An existing plan,
   in any shape including a hand-written checkbox backlog, is an input never overwritten: it is
@@ -23,12 +23,12 @@ disable-model-invocation: true
 
 # Documents to a build plan
 
-Read the documentation, write `todo.md` and `design.md` beside it. The documents made the product
+Read the documentation, write `todo.md` and `tech-design.md` beside it. The documents made the product
 decisions — yours are the build order, the design contracts they imply, and the dependency graph.
 If you find yourself inventing a story, stop and put it in Open questions instead.
 
 **Three levels, two files, one addressable node.** A `## Milestone` groups work; the contracts its
-members share live in `design.md` beside the plan. A `### Phase N` is the **leaf** — the only
+members share live in `tech-design.md` beside the plan. A `### Phase N` is the **leaf** — the only
 executable node, and exactly one `/r:task-run`. Nothing else is addressable, which keeps
 `/r:task-run`, `/r:plan-run` and `scripts/check_todo.py` each dealing with one kind of thing.
 
@@ -69,7 +69,7 @@ checklist, so it reaches the implementer through the path that already exists.
   settle; quietly deferring a v1 story is how a plan ships something nobody agreed to.
 
 - **`--shallow`** — stop after pass 1: the build order alone, no design contracts (Step 4). It
-  writes no `design.md`, and says so rather than leaving a stale one beside a fresh plan.
+  writes no `tech-design.md`, and says so rather than leaving a stale one beside a fresh plan.
 - **`--yes`** — skip the gate (Step 8). It does not skip the questions in Step 3.5: an unresolved
   design choice is recorded in Open questions with the option taken and why, so the decision stays
   visible when nobody was there to make it.
@@ -118,10 +118,13 @@ shape before touching it, because what carries over differs:
 
 | shape | how you know | what carries over |
 |---|---|---|
-| `split` | `## Milestone` + `**Depends on:**`, `design.md` beside it | everything |
-| `packed` | `## Milestone` with an inline `**Design**` | everything; contracts move to `design.md` |
+| `split` | `## Milestone` + `**Depends on:**`, `tech-design.md` beside it | everything |
+| `packed` | `## Milestone` with an inline `**Design**` | everything; contracts move to `tech-design.md` |
 | `flat` | `### Phase N` and `- [ ]`, no milestones, no edges | the leaves; milestones and edges are derived |
 | `foreign` | headings and checkboxes and little else (`## Sprint 2`) | item text and tick state, nothing more |
+
+A `split` plan's contracts file is `tech-design.md`, or a `design.md` where that is what is on disk
+— both read the same way here. Step 9 writes `tech-design.md` either way.
 
 ### Freeze what has landed
 
@@ -159,7 +162,7 @@ in Step 1, or leave the leaf without one and let the checker report it before th
 
 ### Draft to one side
 
-Write the draft to a scratch directory — `todo.md` and `design.md` both — and check and gate it
+Write the draft to a scratch directory — `todo.md` and `tech-design.md` both — and check and gate it
 there. Nothing reaches the real paths until Step 9, so a declined rewrite leaves the original
 byte-identical.
 
@@ -195,7 +198,7 @@ The checker enforces it.
 
 ## Step 3 — pass 2: the design contracts
 
-For each milestone, write its contracts into `design.md` beside the plan — one
+For each milestone, write its contracts into `tech-design.md` beside the plan — one
 `## Milestone N — <name>` section each, holding the decisions its leaves **share**. Only now:
 until the leaves exist you cannot tell shared from local.
 
@@ -208,12 +211,12 @@ until the leaves exist you cannot tell shared from local.
 - **Boundaries** — which module owns what, and what may import what.
 
 Write only what is shared. A contract used by exactly one leaf belongs in that leaf's items, not
-in `design.md` — hoisting it adds a hop for the reader and reaches nobody extra.
+in `tech-design.md` — hoisting it adds a hop for the reader and reaches nobody extra.
 
-**Two files, one document.** The plan is the spine — what runs, in what order. `design.md` is what a
+**Two files, one document.** The plan is the spine — what runs, in what order. `tech-design.md` is what a
 human reads to decide whether the design is *right*; no tool reads it, which is why Step 7 checks
 the two against each other. A milestone heading in the plan may carry one pointer line for the
-reader — `Contracts: design.md#milestone-1-ledger`. **Never on a `- [ ]` line**: an item that
+reader — `Contracts: tech-design.md#milestone-1-ledger`. **Never on a `- [ ]` line**: an item that
 points out of its own block reaches the implementer as a dangling pointer.
 
 **The ceiling is contracts, and it is deliberate.** Schema, signatures, endpoints, errors, test
@@ -280,7 +283,7 @@ the milestone — the implementer never sees that section. Repetition between th
 the items it produced is expected and correct, not duplication to factor out.
 
 **`--shallow` stops after pass 1** — it skips Steps 3 and 3.5, not the rest. Milestones, leaves,
-`Depends on:` and the checklist, with no design pass, no contracts in the items and no `design.md`:
+`Depends on:` and the checklist, with no design pass, no contracts in the items and no `tech-design.md`:
 the build order alone, for when the code will be designed at execution time and the plan only
 orders the work. It still checks, gates, hands off and records (`mode: "shallow"`).
 
@@ -410,7 +413,7 @@ to yet:
 ```sh
 python3 "${CLAUDE_SKILL_DIR}/scripts/check_todo.py" <draft>/todo.md \
     --spec docs/<topic>/spec.html \
-    --design <draft>/design.md \
+    --tech-design <draft>/tech-design.md \
     --against docs/<topic>/todo.md      # rewrite only — the plan this one replaces
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/plan-unblock/scripts/resolve_scope.py" <draft>/todo.md --check
 ```
@@ -426,9 +429,9 @@ missing "done when", oversized leaves, numbering gaps, files referenced before t
 item that defers outside its own block, two leaves sharing a file inside one wave, and a `##
 Waves` summary that has drifted from the edges. It prints the derived wave table either way.
 
-`--design` checks the two files are one document: a milestone whose contracts nobody can find, a
+`--tech-design` checks the two files are one document: a milestone whose contracts nobody can find, a
 contracts section for a milestone that doesn't exist, a name changed on one side only, and
-contracts left inline while `design.md` sits beside them. Omit it on `--shallow`, which writes none.
+contracts left inline while `tech-design.md` sits beside them. Omit it on `--shallow`, which writes none.
 
 `--against` is the mechanical guard on the freeze rule, and on a rewrite it is not optional. It
 reports a frozen leaf that vanished or was retitled, one that was renumbered, a tick that was lost
@@ -471,7 +474,7 @@ and it is invisible if a declined run simply ends.
 part that can destroy something:
 
 ```
-Rewriting docs/billing/todo.md — found shape: packed (inline Design, no design.md)
+Rewriting docs/billing/todo.md — found shape: packed (inline Design, no tech-design.md)
 
   frozen    4   Phases 1–4 — ticked, carried through unchanged
   re-split  3   Phase 5 → Phases 5–7        (unbuilt)
@@ -490,11 +493,14 @@ unless named here.
 ## Step 9 — hand off
 
 Move the draft into place **beside the documents** — `docs/<topic>/todo.md` and
-`docs/<topic>/design.md` when the spec is `docs/<topic>/spec.html`. Never write a root `todo.md`
+`docs/<topic>/tech-design.md` when the spec is `docs/<topic>/spec.html`. Never write a root `todo.md`
 when the spec lives in `docs/`: a second plan with independent numbering is a trap.
 
-On a rewrite, both files are replaced together. If the plan is tracked, leave it as a working-tree
-change and say so — `git diff` is the best record of what the rewrite moved.
+On a rewrite, both files are replaced together. A `design.md` Step 1.5 read as the contracts file is
+replaced by `tech-design.md` here, never left beside it: two contracts documents beside one plan are
+free to disagree, and only one of them is the file anything still reads. If the plan is tracked,
+leave it as a working-tree change and say so — `git diff`, the delete included, is the best record
+of what the rewrite moved.
 
 Report the leaf count, where the v1 line falls, the wave table, and anything you had to assume.
 **Lead with `## Resolve first` if it isn't empty** — those block real leaves and need a person, so
@@ -560,8 +566,8 @@ Three things are load-bearing for `/r:task-run` and `/r:plan-run` and must not d
   and its heading shape is what both tools locate. A milestone is `##`, never `###`.
 - **Only buildable work carries a `### Phase` heading.**
 
-Everything else is for the human and the implementer's head start, not for a parser. `design.md`
-is read by no tool — which makes moving the contracts there safe, and makes the `--design` check
+Everything else is for the human and the implementer's head start, not for a parser. `tech-design.md`
+is read by no tool — which makes moving the contracts there safe, and makes the `--tech-design` check
 the only thing that will ever notice it drifting.
 
 ## Never do this

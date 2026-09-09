@@ -2,7 +2,7 @@
 
 ## Full shape
 
-The plan is the spine — what runs, in what order. `design.md` beside it holds the contracts, which
+The plan is the spine — what runs, in what order. `tech-design.md` beside it holds the contracts, which
 no tool reads and every human does.
 
 ### `docs/billing/todo.md`
@@ -18,7 +18,7 @@ Everything under "Resolve first" is closed by a person, or by `/r:plan-unblock` 
 - [ ] **Debezium against RDS** — can it read our instance, or do we need a polling fallback?
       Owner: platform. Blocks: Phase 7. Timebox: one afternoon. Output: a line in the spec's Risks.
 - [x] **Queue vs cron for retries** — which drives them?
-      Owner: platform. Blocks: Phase 9. Timebox: an hour. Output: a line in `design.md`.
+      Owner: platform. Blocks: Phase 9. Timebox: an hour. Output: a line in `tech-design.md`.
       Resolved: 2026-06-04 — a queue; cron cannot honour the 30s target. Alternative: cron.
 
 ## Waves
@@ -28,7 +28,7 @@ Everything under "Resolve first" is closed by a person, or by `/r:plan-unblock` 
 - Wave 2: Phase 6
 
 ## Milestone 1 — Ledger
-Contracts: `design.md#milestone-1-ledger`
+Contracts: `tech-design.md#milestone-1-ledger`
 
 ### Phase 1 — Ledger schema
 **Implements:** Record a ledger entry
@@ -44,10 +44,10 @@ Contracts: `design.md#milestone-1-ledger`
 ...
 ```
 
-### `docs/billing/design.md`
+### `docs/billing/tech-design.md`
 
 ```markdown
-# Billing — Design contracts
+# Billing — Tech design contracts
 
 Read beside `todo.md`. Nothing here reaches an implementer: the leaf items repeat whatever they
 need, because `/r:task-run` sees one leaf block and nothing else.
@@ -65,7 +65,7 @@ need, because `/r:task-run` sees one leaf block and nothing else.
 ...
 ```
 
-A `--shallow` plan has no `design.md` at all — it skips the design pass, and a contracts file left
+A `--shallow` plan has no `tech-design.md` at all — it skips the design pass, and a contracts file left
 beside a plan that never had contracts is worse than none.
 
 ### The `Resolve first` entry, and why it is a checkbox
@@ -80,7 +80,7 @@ subject is part of the subject, and an entry whose `Blocks:` is missing or names
 the **entire run list**, because nothing can tell what it was guarding.
 
 A closed entry keeps its `Resolved:` line — the date, the decision, and the force that settled it —
-and that line is the **single record**. It is not copied into `design.md`: a rewrite replaces both
+and that line is the **single record**. It is not copied into `tech-design.md`: a rewrite replaces both
 files together, so the copy there would be destroyed by the very step a resolution usually triggers.
 
 `/r:plan-unblock` is what closes these. It is also the only thing that may write in this section:
@@ -91,7 +91,7 @@ claim about who decided something.
 
 | level | heading | addressable | carries |
 |---|---|---|---|
-| grouping | `## Milestone N — name` | no | a name, and a pointer to its contracts in `design.md` |
+| grouping | `## Milestone N — name` | no | a name, and a pointer to its contracts in `tech-design.md` |
 | **leaf** | `### Phase N — title` | **yes — one `/r:task-run`** | `Depends on`, `Files`, `Risk`, the checklist, `Done when` |
 | item | `- [ ]` | no | one concrete, self-contained piece of the contract |
 
@@ -105,13 +105,13 @@ milestone is `##` — as `###` it becomes something an agent will try to build.
 `/r:task-run` resolves `"todo.md / Phase 1"` by locating **that block** and lifting **its** checklist
 into acceptance criteria. It does not read upward and follows no links out. So:
 
-- `design.md` is for the human, and for the pass that *derives* leaf items from it.
+- `tech-design.md` is for the human, and for the pass that *derives* leaf items from it.
 - A leaf item that points at it ("per the milestone design") arrives as a dangling pointer — the
   contract it names is in another file, and the planner re-derives whatever it can.
 - Therefore **every item repeats the part of the contract it needs.** Repetition between a contracts
   section and the items it produced is correct, not duplication to factor out: one is read by a
   person deciding whether the design is right, the other by a planner that never sees the first.
-- The milestone heading may carry one `Contracts: design.md#…` pointer line for the reader. It sits
+- The milestone heading may carry one `Contracts: tech-design.md#…` pointer line for the reader. It sits
   on the milestone, never on a `- [ ]` line — the difference between a signpost and a dangling
   pointer.
 
@@ -188,8 +188,8 @@ it: reformat into the shape above, re-derive against the documents.
 
 | shape found | how you know | what carries over |
 |---|---|---|
-| `split` | `## Milestone` + `**Depends on:**`, `design.md` beside it | everything |
-| `packed` | `## Milestone` with an inline `**Design**` | everything; contracts move to `design.md` |
+| `split` | `## Milestone` + `**Depends on:**`, `tech-design.md` beside it | everything |
+| `packed` | `## Milestone` with an inline `**Design**` | everything; contracts move to `tech-design.md` |
 | `flat` | `### Phase N` and `- [ ]`, no milestones, no edges | the leaves; milestones and edges are derived |
 | `foreign` | headings and checkboxes and little else | item text and tick state, nothing more |
 
@@ -218,13 +218,13 @@ absent and let the check fail.
 
 ```sh
 python3 "${CLAUDE_SKILL_DIR}/scripts/check_todo.py" docs/<topic>/todo.md \
-    --spec docs/<topic>/spec.html --design docs/<topic>/design.md
+    --spec docs/<topic>/spec.html --tech-design docs/<topic>/tech-design.md
 python3 "${CLAUDE_SKILL_DIR}/scripts/check_todo.py" <draft>/todo.md --against docs/<topic>/todo.md
 python3 "${CLAUDE_SKILL_DIR}/scripts/check_todo.py" docs/<topic>/todo.md --slice 3,4
 ```
 
-`--design` checks the two files are one document: a milestone with no contracts section, a section
-with no milestone, a name changed on one side, contracts left inline beside a `design.md`. Nothing
+`--tech-design` checks the two files are one document: a milestone with no contracts section, a section
+with no milestone, a name changed on one side, contracts left inline beside a `tech-design.md`. Nothing
 else will notice — no tool reads the contracts file, which makes moving them there safe and this
 check the only guard.
 

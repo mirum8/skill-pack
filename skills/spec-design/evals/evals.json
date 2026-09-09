@@ -429,7 +429,7 @@
         "docs/billing/spec.html — three user stories, one of them added since the plan was written",
         "docs/billing/todo.md — packed shape (inline **Design**), Phases 1-4 ticked with <!-- built: --> markers, Phases 5-8 untouched"
       ],
-      "expected_output": "The run is a REWRITE, not a fresh plan: it names the shape it found (packed), freezes Phases 1-4 verbatim, re-splits or drops only unbuilt leaves, gives the new story a leaf numbered above the highest frozen one, moves the contracts into design.md, and shows the migration counts at the gate before anything is written.",
+      "expected_output": "The run is a REWRITE, not a fresh plan: it names the shape it found (packed), freezes Phases 1-4 verbatim, re-splits or drops only unbuilt leaves, gives the new story a leaf numbered above the highest frozen one, moves the contracts into tech-design.md, and shows the migration counts at the gate before anything is written.",
       "assertions": [
         {
           "id": "not_overwritten",
@@ -447,7 +447,7 @@
         },
         {
           "id": "contracts_moved",
-          "text": "design.md carries one '## Milestone N' section per milestone and the plan carries no inline **Design**",
+          "text": "tech-design.md carries one '## Milestone N' section per milestone and the plan carries no inline **Design**",
           "check": "script"
         },
         {

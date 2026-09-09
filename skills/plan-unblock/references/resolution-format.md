@@ -79,7 +79,7 @@ A tick with no `Resolved:` line is reported by `resolve_scope.py --check`. It is
 for gating — somebody clearly closed it — and named, because the plan now records that a decision
 happened and nothing about what it was.
 
-**The stamp is the single record.** It is not duplicated into `design.md`: that file is replaced
+**The stamp is the single record.** It is not duplicated into `tech-design.md`: that file is replaced
 wholesale by a `/r:spec-design` rewrite, which is exactly the follow-up a resolution triggers, and
 two copies of one decision drift apart with nothing to notice.
 
@@ -90,7 +90,7 @@ the reader holds one context and not five.
 
 Write it in **ASD-STE100 Simplified Technical English** — the register `/wait-what` asks for. One
 idea per sentence. Active voice. Plain words. **Use the plan's own nouns**: the class, entity and
-phase names in the phase block, in `design.md` and in the spec (or `CONTEXT.md`, where the project
+phase names in the phase block, in `tech-design.md` and in the spec (or `CONTEXT.md`, where the project
 keeps one). A noun you invent is one the reader has to map back to something real.
 
 > **R1 — Debezium against RDS** · decision · platform · blocks Phase 7 · one afternoon

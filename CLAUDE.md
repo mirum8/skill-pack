@@ -210,7 +210,7 @@ recommendation when the user *says* they don't know — that is an answer — an
 `no-human` when there is nobody to ask at all. `/r:plan-run` therefore offers it only from an
 attended run in the primary tree: a `--herdr` unit is a full session that reaches the same gate with
 an empty room in front of it, and `--unattended` keeps queueing rather than dispatching. The
-`Resolved:` stamp in the plan is the **single** record — never a copy in `design.md`, which a
+`Resolved:` stamp in the plan is the **single** record — never a copy in `tech-design.md`, which a
 `/r:spec-design` rewrite replaces wholesale, and that rewrite is exactly the follow-up a resolution
 tends to trigger. `--against` is what makes the stamp durable instead.
 

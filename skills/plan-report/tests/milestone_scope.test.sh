@@ -43,7 +43,7 @@ cat > "$PLAN" <<'EOF'
 # Billing — Implementation Plan
 
 ## Milestone 1 — Ledger
-Contracts: `design.md#milestone-1-ledger`
+Contracts: `tech-design.md#milestone-1-ledger`
 
 ### Phase 1 — Ledger schema <!-- built: phase-ledger-schema -->
 **Implements:** Record a ledger entry
@@ -79,7 +79,7 @@ eq  "and its progress is visible" 'd["milestones"][1]["ticked"]' '1'
 # A hyphen is the other dash the plan format allows, and a heading the resolver cannot see is a
 # phase that silently belongs to no milestone — the report would then be scoped to nothing.
 eq  "a hyphen heading is a milestone too" 'd["milestones"][1]["name"]' '"Payouts"'
-eq  "the contracts pointer is carried" 'd["milestones"][0]["contracts"]' '"`design.md#milestone-1-ledger`"'
+eq  "the contracts pointer is carried" 'd["milestones"][0]["contracts"]' '"`tech-design.md#milestone-1-ledger`"'
 
 echo
 echo "== a report that already exists is not offered again =="

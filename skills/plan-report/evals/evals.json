@@ -69,7 +69,7 @@
       "name": "divergence-from-the-contracts-is-reported-not-smoothed",
       "kind": "behaviour",
       "prompt": "/r:plan-report docs/billing/todo.md 1",
-      "expected_output": "Where design.md says the endpoint returns 400 on a malformed cursor and the code returns 409, the report says the code returns 409 AND names the divergence. It never prints the contract's version as though it were the fact: design.md is the claim written before the code existed, and a report that silently repeats it is the version a reader will trust over the code.",
+      "expected_output": "Where tech-design.md says the endpoint returns 400 on a malformed cursor and the code returns 409, the report says the code returns 409 AND names the divergence. It never prints the contract's version as though it were the fact: tech-design.md is the claim written before the code existed, and a report that silently repeats it is the version a reader will trust over the code.",
       "files": [],
       "fixture": null,
       "assertions": []

@@ -2,12 +2,12 @@
 """Check a generated todo.md for the defects a read-through misses.
 
     python3 check_todo.py docs/<topic>/todo.md [--spec docs/<topic>/spec.html]
-                                               [--design docs/<topic>/design.md]
+                                               [--tech-design docs/<topic>/tech-design.md]
     python3 check_todo.py docs/<topic>/todo.md --against <the-plan-being-replaced.md>
     python3 check_todo.py docs/<topic>/todo.md --slice 5,9
 
 With --spec, also checks that every user story in the spec reaches a phase.
-With --design, checks the plan's spine against the contracts file beside it.
+With --tech-design, checks the plan's spine against the contracts file beside it.
 With --against, checks that a REWRITE preserved every leaf that already carries landed work -- the
 ticks, the numbers and the built markers a half-executed plan is the only record of.
 With --slice, answers one question instead: may these leaves run CONCURRENTLY, each in its own
@@ -250,7 +250,7 @@ def resolved_entries(text):
     """The subject line of every CLOSED `## Resolve first` entry, whitespace collapsed.
 
     A resolution is a decision somebody made, and the entry's `Resolved:` line is the only place
-    the plan keeps it -- deliberately, because a copy in design.md would be destroyed by the very
+    the plan keeps it -- deliberately, because a copy in tech-design.md would be destroyed by the very
     rewrite this function guards. So a closed entry is frozen for the same reason a ticked leaf is:
     dropping it loses the record, and the plan then reads as though the question is still open.
     """
@@ -334,51 +334,52 @@ def check_against(prev_text, new_text, out):
                 f"the plan says where the change went.")
 
 
-def check_design(plan_text, design_p, out):
+def check_tech_design(plan_text, contracts_p, out):
     """The plan is the spine; the contracts live beside it, one '## Milestone N' section each.
 
-    Nothing MACHINE-readable is in the design file -- /r:task-run lifts a leaf block and never reads
+    Nothing MACHINE-readable is in the contracts file -- /r:task-run lifts a leaf block and never reads
     upward or outward -- so a drift here costs a human reader, never a build. That is exactly why it
     needs checking: nothing else would ever notice.
     """
-    if not design_p.exists():
-        out(f"missing: {design_p} — the contracts live beside the plan, one '## Milestone N' "
+    if not contracts_p.exists():
+        out(f"missing: {contracts_p} — the contracts live beside the plan, one '## Milestone N' "
             f"section per milestone")
         return
     plan_ms = {int(n): " ".join(t.split()) for n, t in MILESTONE.findall(plan_text)}
     des_ms = {int(n): " ".join(t.split()) for n, t in
-              MILESTONE.findall(design_p.read_text(encoding="utf-8", errors="replace"))}
+              MILESTONE.findall(contracts_p.read_text(encoding="utf-8", errors="replace"))}
     if not plan_ms:
-        out(f"--design was given but the plan has no '## Milestone N — name' headings to match "
-            f"{design_p.name} against")
+        out(f"--tech-design was given but the plan has no '## Milestone N — name' headings to match "
+            f"{contracts_p.name} against")
     for n, t in sorted(plan_ms.items()):
         if n not in des_ms:
-            out(f"Milestone {n} — {t}: no '## Milestone {n}' section in {design_p.name}. Its "
+            out(f"Milestone {n} — {t}: no '## Milestone {n}' section in {contracts_p.name}. Its "
                 f"leaves were derived from contracts a reader now cannot find.")
         elif des_ms[n].lower() != t.lower():
-            out(f"Milestone {n}: the plan calls it {t!r}, {design_p.name} calls it {des_ms[n]!r} "
+            out(f"Milestone {n}: the plan calls it {t!r}, {contracts_p.name} calls it {des_ms[n]!r} "
                 f"— one of them was renamed alone.")
     for n, t in sorted(des_ms.items()):
         if n not in plan_ms:
-            out(f"{design_p.name} has a '## Milestone {n} — {t}' section with no milestone in the "
+            out(f"{contracts_p.name} has a '## Milestone {n} — {t}' section with no milestone in the "
                 f"plan — contracts for leaves that do not exist.")
     if re.search(r"^\*\*Design\*\*", plan_text, re.M):
-        out(f"the plan still carries an inline '**Design**' section while {design_p.name} sits "
+        out(f"the plan still carries an inline '**Design**' section while {contracts_p.name} sits "
             f"beside it — two copies of one contract drift apart silently. Move it.")
 
 
 def main():
     args = sys.argv[1:]
     if not args:
-        print("usage: check_todo.py <todo.md> [--spec <spec.html>] [--design <design.md>] "
+        print("usage: check_todo.py <todo.md> [--spec <spec.html>] "
+              "[--tech-design <tech-design.md>] "
               "[--against <previous-todo.md>] [--slice <n,n>]")
         return 2
     todo_p = Path(args[0])
-    spec_p, slice_req, design_p, prev_p = None, None, None, None
+    spec_p, slice_req, contracts_p, prev_p = None, None, None, None
     if "--slice" in args:
         slice_req = {int(n) for n in re.findall(r"\d+", args[args.index("--slice") + 1])}
-    if "--design" in args:
-        design_p = Path(args[args.index("--design") + 1])
+    if "--tech-design" in args:
+        contracts_p = Path(args[args.index("--tech-design") + 1])
     if "--against" in args:
         prev_p = Path(args[args.index("--against") + 1])
     if "--spec" in args:
@@ -564,8 +565,8 @@ def main():
         return 0
 
     # --- the two files, and the plan this one replaces ---------------------------
-    if design_p is not None:
-        check_design(t, design_p, out)
+    if contracts_p is not None:
+        check_tech_design(t, contracts_p, out)
     if prev_p is not None:
         if not prev_p.exists():
             out(f"missing: {prev_p} — nothing to compare the rewrite against")

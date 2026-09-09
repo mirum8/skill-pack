@@ -35,7 +35,7 @@ Three things shape the design:
   whether it is finished are answered by `milestone_scope.py`, never by reading the markdown and
   counting. Both failures are silent: a report scoped to the wrong phases still renders, and a
   milestone called complete one phase early still produces a document that reads as authoritative.
-- **The report describes what was BUILT.** `design.md` holds contracts written before the code
+- **The report describes what was BUILT.** `tech-design.md` holds contracts written before the code
   existed; the code is what happened. Where they diverge, the divergence is the most valuable line
   in the document — a report that quietly prints the plan's version is the one a reader will trust
   over the code.
@@ -96,11 +96,11 @@ current tree instead of from their diff, and the header's coverage line says so.
 
 ## Step 1 — Read the intent
 
-The milestone's contracts from `design.md` at the `Contracts:` pointer, and each phase's block from
+The milestone's contracts from `tech-design.md` at the `Contracts:` pointer, and each phase's block from
 the plan. This is the **claim** — hold it separately from what you are about to read in the code, or
 the two blur and the divergences vanish.
 
-A `--shallow` plan has no `design.md`. That is not a defect: report the design from the code alone
+A `--shallow` plan has no `tech-design.md`. That is not a defect: report the design from the code alone
 and say there was nothing to compare it against.
 
 ## Step 2 — Read the code that landed
@@ -154,7 +154,7 @@ read twice.
   empty, not concise — cut it or give it its decision back. Then go the other way: list the
   decisions this milestone made and confirm each one appears. A decision dropped for brevity is the
   failure this document exists to prevent.
-- **Every gap is in the FILE**, not only in the terminal: unresolved commits, a missing `design.md`,
+- **Every gap is in the FILE**, not only in the terminal: unresolved commits, a missing `tech-design.md`,
   a `--partial` scope, a dropped snippet.
 
 ## Step 6 — Commit, unless told not to
@@ -179,7 +179,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
 STATS_JSON
 ```
 
-**`divergences` is the field worth having.** It counts the places the code and `design.md` disagreed
+**`divergences` is the field worth having.** It counts the places the code and `tech-design.md` disagreed
 — the thing this report exists to surface. A run with contracts to compare against and zero
 divergences means the plan predicted the build exactly, which is either excellent planning or a
 report that did not look; across many runs, a `divergences` that is always zero while
@@ -201,7 +201,7 @@ The script always exits `0`; a lost row is never a failed run. Never retry it.
   is done, by reading the markdown yourself. Both wrong answers are confident and silent.
 - **An incomplete milestone stops** unless `--partial`, and a `--partial` report says so in the
   document, not only in the terminal.
-- **Report the design as BUILT, and name every divergence.** `design.md` is the claim; the code is
+- **Report the design as BUILT, and name every divergence.** `tech-design.md` is the claim; the code is
   the fact. Printing the claim as though it were the fact makes this document actively harmful — it
   is the version a reader will trust over the code.
 - **Snippets are copied, never retyped**, and always carry `path:LINE`. A citation that does not

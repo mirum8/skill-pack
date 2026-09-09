@@ -274,11 +274,11 @@ slice "and so does a slice holding both ends"   "1,2" 1
 
 # ---------------------------------------------------------------------------------------------
 # The rewrite layer: --against (a plan may be re-derived, but never over work that has landed)
-# and --design (the spine and the contracts beside it are one document in two files).
+# and --tech-design (the spine and the contracts beside it are one document in two files).
 # ---------------------------------------------------------------------------------------------
 
 prev()   { cat > "$TMP/prev.md"; }
-design() { cat > "$TMP/design.md"; }
+tech_design() { cat > "$TMP/tech-design.md"; }
 
 # against <name> <pattern> — the rewrite check reports it
 against() {
@@ -292,7 +292,7 @@ against_silent() {
 }
 # designs <name> <pattern>
 designs() {
-  local out; out=$(python3 "$CHECK" "$TMP/todo.md" --design "$TMP/design.md" 2>&1)
+  local out; out=$(python3 "$CHECK" "$TMP/todo.md" --tech-design "$TMP/tech-design.md" 2>&1)
   grep -qiE "$2" <<<"$out" && ok "$1" || bad "$1" "no match for /$2/ in:${out:0:400}"
 }
 
@@ -433,13 +433,13 @@ plan <<'EOF'
 - [ ] does `b`
 **Done when:** `mvn test` is green.
 EOF
-design <<'EOF'
+tech_design <<'EOF'
 ## Milestone 1 — Ledger
 - Schema `ledger_entry` — `id uuid primary key`
 EOF
 designs "a milestone with no contracts section is reported" "no '## Milestone 2' section"
 
-design <<'EOF'
+tech_design <<'EOF'
 ## Milestone 1 — Ledger
 - Schema `ledger_entry` — `id uuid primary key`
 
@@ -452,7 +452,7 @@ EOF
 designs "a contracts section with no milestone is reported" "no milestone in the plan"
 
 echo
-echo "== contracts left inline while a design file sits beside the plan =="
+echo "== contracts left inline while a contracts file sits beside the plan =="
 plan <<'EOF'
 ## Milestone 1 — Ledger
 **Design**
@@ -465,11 +465,25 @@ plan <<'EOF'
 - [ ] `V1__ledger.sql` creates `ledger_entry`
 **Done when:** `mvn test` is green.
 EOF
-design <<'EOF'
+tech_design <<'EOF'
 ## Milestone 1 — Ledger
 - Schema `ledger_entry` — `id uuid primary key`
 EOF
 designs "two copies of one contract are reported" "still carries an inline"
+
+echo
+echo "== a legacy design.md beside the plan is never silently read as the contracts file =="
+# The contracts file is tech-design.md. A project still holding the old name has its contracts in a
+# file this checker does not read, and the only safe report is that the one it was told to read is
+# missing -- a quiet fallback to design.md would leave that project green forever on a file nothing
+# else in the pack still names.
+rm -f "$TMP/tech-design.md"
+cat > "$TMP/design.md" <<'EOF'
+## Milestone 1 — Ledger
+- Schema `ledger_entry` — `id uuid primary key`
+EOF
+designs "a legacy design.md does not satisfy --tech-design" "missing: .*tech-design\.md"
+rm -f "$TMP/design.md"
 
 echo "== the acceptance-criteria check reads PHASE blocks, not the whole file =="
 # `## Resolve first` entries carry checkboxes of their own now. A whole-file search finds one
@@ -510,7 +524,7 @@ silent "and a plan whose phases have them is quiet" "checkboxes under any phase"
 
 echo
 echo "== a rewrite may not drop a decision somebody made =="
-# The Resolved: line is the ONLY record of the decision -- deliberately, since a copy in design.md
+# The Resolved: line is the ONLY record of the decision -- deliberately, since a copy in tech-design.md
 # would be destroyed by this very rewrite. Dropping it makes the plan read as though the question
 # is still open, which is the same loss as an un-ticked leaf.
 prev <<'EOF'

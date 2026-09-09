@@ -132,7 +132,7 @@ can refer back to one and `--entry` names something they have seen.
 Each entry opens with a brief — **why this blocks, then what the options are** — before you ask
 anything about it. The template is in `${CLAUDE_SKILL_DIR}/references/resolution-format.md` §4.
 Write it in Simplified Technical English, in the plan's own nouns: one idea per sentence, active
-voice, and the class and entity names the phase block and `design.md` already use.
+voice, and the class and entity names the phase block and `tech-design.md` already use.
 
 Read the blocked phase's own items, `Files:` and `Done when:` first, so "why this blocks" names
 what cannot be built or verified. Asserting that something is blocked is not a reason.
@@ -229,7 +229,7 @@ it names them and stops.
 It does **not** re-plan, renumber, regenerate `## Waves` or re-match `Implements:`. That graph is
 `/r:spec-design`'s, and a second writer of it is a lockstep tax nobody is paying attention to. If a
 rewrite is genuinely wanted, say what it costs: `/r:spec-design <the documents>` replaces `todo.md`
-and `design.md` together, with `--against` freezing what is already built.
+and `tech-design.md` together, with `--against` freezing what is already built.
 
 ## Step 8 — report, then record the run
 
@@ -284,7 +284,7 @@ retry it.
 - **Write inside `## Resolve first` and nowhere else in the plan.** No phase block, no phase item,
   no `## Waves`, no renumbering. Anything you want to say about a phase goes in the report.
 - **Never edit a file the entry's `Output:` names.** Name it as outstanding instead; `spec.html`
-  and `design.md` have their own owners.
+  and `tech-design.md` have their own owners.
 - **One commit, the plan file alone, on base in the primary tree** — or `--no-commit` and no git at
   all. Never sweep another change into it, and never write from a worktree.
 - **`--dry-run` writes nothing, ever**, and still records the run.
