@@ -8,7 +8,8 @@ description: >-
   browser. Use on "/r:page-serve <file>", "/r:page-serve <file> --lan", "serve this page", "open
   this on my phone", "put this html on a local web server", "/r:page-serve --stop". The server
   refuses every dotfile and every symlink leaving the served directory, so `.git` and `.env` are
-  unreachable even on the LAN, and it prints a URL only after the page has actually answered.
+  unreachable even on the LAN, it always uses port 8000 so one firewall rule keeps matching, and
+  it prints a URL only after the page has actually answered.
   Nothing is uploaded and nothing leaves the local network. NOT for publishing a page to
   claude.ai (that is `/r:ui-prototype --share`), running a project's own dev server or app (that
   is its `/test-app`), or driving a page in a browser (`agent-browser`).
@@ -29,7 +30,7 @@ script directly — that is how `/r:ui-prototype` Step 5 offers a LAN URL for it
 ## Invocation
 
 ```
-/r:page-serve <file|dir> [--lan] [--port N] [--no-copy]   start it
+/r:page-serve <file|dir> [--lan] [--port N] [--no-copy]   start it (port 8000)
 /r:page-serve --stop [<handle>]                           stop one, or all of them
 /r:page-serve --list                                      what is running
 ```
@@ -60,6 +61,24 @@ leaving the user to guess between the two lines above it. `--no-copy` leaves the
 and a machine with no `pbcopy`/`wl-copy`/`xclip`/`xsel` is **named**: the page is served either
 way, and failing a working server over a missing clipboard tool would be the tail wagging the dog.
 
+**The port is 8000 and it does not move.** A firewall rule names a port, so a server that
+quietly took the next free one would land outside the rule that was opened for it and be dropped
+with nothing to read — a page that does not load, from a run that reported success. A busy 8000 is
+therefore an error (`3`) naming what holds it, never a silent move; `--port N` overrides it
+deliberately, and `PAGE_SERVE_PORT` moves the default on a host that has allowed a different one.
+
+Allow it **once per host**, scoped to the LAN rather than to everything:
+
+```bash
+sudo ufw allow from 192.168.88.0/24 to any port 8000 proto tcp   # ufw
+sudo firewall-cmd --add-port=8000/tcp                            # firewalld
+```
+
+The script names the firewall it can see when `--lan` is given, because that check is the one it
+cannot make for you: traffic from the host to its own address goes over loopback, so the server
+answers itself perfectly while every other device is being dropped. Reading the rules needs root,
+so it names the firewall and the command and never claims a verdict.
+
 **A URL is printed only when the page answered.** The script polls after spawning and exits `5`
 with no URL if nothing responds. Never fill that gap in from the port it was going to use: a URL
 nothing is listening on is indistinguishable from a working one until somebody taps it on another
@@ -79,7 +98,7 @@ substitute the one-liner when the script is inconvenient.
 |---|---|
 | `0` | serving, and the page answered |
 | `2` | the target is missing, unreadable, a dotfile, or outside the working directory |
-| `3` | no port could be bound |
+| `3` | port 8000 is taken — by another page-serve, or by something else |
 | `5` | it started and never answered — **nothing was served, and no URL exists** |
 | `64` | usage |
 

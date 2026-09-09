@@ -2,7 +2,7 @@
 #
 # serve.sh — put one local page on http, on this machine or on the LAN.
 #
-#   serve.sh start <file|dir> [--lan] [--port N] [--no-copy]
+#   serve.sh start <file|dir> [--lan] [--port N] [--no-copy]      (port 8000)
 #   serve.sh stop <handle> | --all
 #   serve.sh list
 #
@@ -26,6 +26,10 @@
 # server answers the target path with a 200 and prints a URL only then. A URL nothing is
 # listening on is indistinguishable from a working one until somebody taps it, which is exactly
 # the confident wrong answer this pack writes scripts to prevent.
+#
+# It always uses port 8000 unless --port says otherwise. A firewall rule names a port, so a
+# server that quietly moved to the next free one would land outside the rule that was opened for
+# it and be dropped with nothing to read. Allow 8000 once per host; a busy 8000 is an error.
 #
 # Handles live in ~/.claude/page-serve/<handle>.json (pid, port, root, bind, page, started),
 # so `stop` works from a session that did not start the server. `list` prunes dead ones.
@@ -52,8 +56,13 @@ E_USAGE=64
 # are actually using.
 STATE="${PAGE_SERVE_STATE:-${HOME}/.claude/page-serve}"
 POLL_TRIES=${PAGE_SERVE_POLL_TRIES:-40}   # x 0.25s = 10s
-PORT_LO=8100
-PORT_HI=8199
+# ONE port, always. A firewall rule is written for a port number, so a server that drifts to the
+# next free one lands outside the rule the user opened and is dropped without saying why. 8000 is
+# the port to allow once per host; --port overrides it deliberately, and a busy 8000 is an error
+# rather than a silent move.
+# PAGE_SERVE_PORT moves the fixed port for a host that has allowed a different one -- and for
+# the suite, which must not depend on this machine's 8000 being free.
+DEFAULT_PORT="${PAGE_SERVE_PORT:-8000}"
 
 # The header block IS the help, delimited by `set -uo pipefail` rather than by a line number:
 # a hardcoded range silently truncates the moment the header grows, and the part it cuts is the
@@ -101,7 +110,9 @@ class Guarded(SimpleHTTPRequestHandler):
         pass
 
 
-ThreadingHTTPServer.allow_reuse_address = False
+# SO_REUSEADDR, because the port is fixed and a restart must not fail on a TIME_WAIT socket from
+# the run before it. It does not let this bind over a LIVE listener -- that would need SO_REUSEPORT.
+ThreadingHTTPServer.allow_reuse_address = True
 ThreadingHTTPServer((BIND, PORT), lambda *a: Guarded(*a, directory=ROOT)).serve_forever()
 PY
 }
@@ -149,18 +160,41 @@ copy_to_clipboard() {
   return 1
 }
 
+# A host firewall is the usual reason a printed LAN URL does not open, and the poll cannot catch
+# it: traffic from the box to its OWN address goes over loopback, so the server answers itself
+# perfectly while every other device is dropped. Reading the RULES needs root, so this names the
+# firewall and the command rather than claiming a verdict it cannot reach.
+firewall_note() {  # $1 port  $2 primary ip
+  local port=$1 ip=$2 cidr=""
+  [ -n "$ip" ] && cidr="${ip%.*}.0/24"
+  if [ "$(uname)" = Darwin ]; then
+    /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate 2>/dev/null \
+      | grep -q 'State = 1' || return 0
+    echo "           the macOS firewall is on. If another device cannot open this, allow"
+    echo "           incoming connections for python3 in Settings > Network > Firewall."
+  elif [ "$(systemctl is-active ufw 2>/dev/null)" = active ]; then
+    echo "           ufw is active here. If another device cannot open this, the port is why:"
+    echo "           sudo ufw allow from ${cidr:-192.168.0.0/16} to any port $port proto tcp"
+  elif [ "$(systemctl is-active firewalld 2>/dev/null)" = active ]; then
+    echo "           firewalld is active here. If another device cannot open this:"
+    echo "           sudo firewall-cmd --add-port=$port/tcp"
+  fi
+}
+
+# $1 wanted port (may be empty)  $2 the address the server will bind.
+# Probing 127.0.0.1 for a server about to bind 0.0.0.0 answers a different question, and
+# SO_REUSEADDR matches what the server itself sets -- without it a socket still in TIME_WAIT from
+# the last run reads as "in use" and a restart on the fixed port fails for no reason.
 free_port() {
-  python3 - "$1" "$PORT_LO" "$PORT_HI" <<'PY'
+  python3 - "${1:-$DEFAULT_PORT}" "$2" <<'PY'
 import socket, sys
-want, lo, hi = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
-cands = [int(want)] if want else list(range(lo, hi + 1))
-for p in cands:
-    s = socket.socket()
-    try:
-        s.bind(("127.0.0.1", p)); s.close(); print(p); sys.exit(0)
-    except OSError:
-        s.close()
-sys.exit(1)
+port, bind = int(sys.argv[1]), sys.argv[2]
+s = socket.socket()
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+try:
+    s.bind((bind, port)); s.close(); print(port)
+except OSError:
+    sys.exit(1)
 PY
 }
 
@@ -199,9 +233,26 @@ cmd_start() {
   case "$page" in .*) echo "page-serve: $page is a dotfile and this server refuses those" >&2
                       exit $E_TARGET ;; esac
 
-  local port; port=$(free_port "$want") || {
-    if [ -n "$want" ]; then echo "page-serve: port $want is already in use" >&2
-    else echo "page-serve: no free port in $PORT_LO-$PORT_HI" >&2; fi
+  # Our own registry first, and this is not belt-and-braces. SO_REUSEADDR lets a bind on
+  # 127.0.0.1:8000 succeed while another server holds 0.0.0.0:8000, so the socket probe alone
+  # says the port is free -- and since the handle is named for the port, the second start would
+  # overwrite the first one's JSON and orphan a process nothing can stop.
+  local live="$STATE/p${want:-$DEFAULT_PORT}.json"
+  if [ -f "$live" ]; then
+    local lpid; lpid=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$live" 2>/dev/null)
+    if [ -n "$lpid" ] && kill -0 "$lpid" 2>/dev/null; then
+      echo "page-serve: p${want:-$DEFAULT_PORT} is already serving (pid $lpid). The port is fixed" \
+           "so a firewall can allow it once; stop it first with" \
+           "\`serve.sh stop p${want:-$DEFAULT_PORT}\`, or pass --port." >&2
+      exit $E_PORT
+    fi
+    rm -f "$live" "$STATE/p${want:-$DEFAULT_PORT}.py" "$STATE/p${want:-$DEFAULT_PORT}.log"
+  fi
+
+  local port; port=$(free_port "$want" "$bind") || {
+    echo "page-serve: port ${want:-$DEFAULT_PORT} is already in use on $bind. This port is fixed" \
+         "so it can be allowed through a firewall once; moving to another one would land outside" \
+         "that rule. Stop what is holding it (serve.sh stop --all) or pass --port." >&2
     exit $E_PORT; }
 
   mkdir -p "$STATE"
@@ -255,9 +306,11 @@ PY
       paste="http://$main:$port/$page"
       [ "$others_n" -gt 0 ] &&
         echo "           (also on $others_n other interface(s): $(echo $others))"
+      firewall_note "$port" "$main"
     elif [ "$others_n" -gt 0 ]; then
       for ip in $others; do echo "  lan      http://$ip:$port/$page"; done
       paste="http://$(echo "$others" | head -1):$port/$page"
+      firewall_note "$port" "$(echo "$others" | head -1)"
     else
       echo "  lan      bound to 0.0.0.0 — no LAN address found on this machine"
     fi
@@ -301,12 +354,16 @@ cmd_list() {
     local h; h=$(basename "${f%.json}")
     local pid; pid=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$f")
     if kill -0 "$pid" 2>/dev/null; then
-      python3 - "$f" "$h" <<'PY'
+      # `0.0.0.0` is a bind, not a destination -- printing it hands back a URL that opens
+      # nowhere. A lan-bound server is listed at the address a browser can actually use.
+      local host; host=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["bind"])' "$f")
+      [ "$host" = "0.0.0.0" ] && host=$(primary_ip | head -1)
+      [ -n "$host" ] || host=127.0.0.1
+      python3 - "$f" "$h" "$host" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
 print("  %-8s pid %-7s %s  http://%s:%d/%s" % (
-    sys.argv[2], d["pid"], d["root"],
-    "127.0.0.1" if d["bind"] == "127.0.0.1" else d["bind"], d["port"], d["page"]))
+    sys.argv[2], d["pid"], d["root"], sys.argv[3], d["port"], d["page"]))
 PY
       any=1
     else

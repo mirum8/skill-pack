@@ -16,6 +16,9 @@ set -uo pipefail
 SERVE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/scripts/serve.sh"
 TMP=$(mktemp -d)
 export PAGE_SERVE_STATE="$TMP/state"
+# A port of its own: the shipped default is 8000, and a suite that seized it would fight whatever
+# the user is actually serving. The default itself is asserted separately, from the script.
+export PAGE_SERVE_PORT=8399
 cleanup() { bash "$SERVE" stop --all >/dev/null 2>&1; chmod -R u+w "$TMP" 2>/dev/null; rm -rf "$TMP"; }
 trap cleanup EXIT
 pass=0; fail=0
@@ -188,7 +191,32 @@ rc=$(go start site/.env)
 [ "$rc" = 2 ] && ok "a dotfile target exits 2" || bad "dotfile target" "got $rc"
 
 echo
-echo "== usage, and a port already taken =="
+echo "== the port is fixed, so a firewall rule written once keeps matching =="
+# A server that drifts to the next free port lands outside the rule that was opened for it and is
+# dropped with nothing to read, which is why a busy port is an error rather than a quiet move.
+grep -q 'PAGE_SERVE_PORT:-8000' "$SERVE" \
+  && ok "the shipped default is 8000" || bad "default port" "$(grep -n DEFAULT_PORT= "$SERVE")"
+go start site/index.html >/dev/null
+[ "$(port_of)" = 8399 ] && ok "and a start uses it rather than scanning" || bad "fixed port" "got $(port_of)"
+rc=$(go start site/index.html)
+[ "$rc" = 3 ] \
+  && ok "a second start on it exits 3 instead of moving to the next one" || bad "second start" "got $rc"
+grep -qi 'already serving' "$TMP/err" \
+  && ok "and names the process holding it" || bad "names the holder" "$(cat "$TMP/err")"
+go stop --all >/dev/null
+
+# The restart loop is the common one: edit the page, stop, start. Without SO_REUSEADDR the socket
+# left in TIME_WAIT reads as "in use" and the second start fails on a port that is genuinely free.
+fails=0
+for i in 1 2 3; do
+  rc=$(go start site/index.html); [ "$rc" = 0 ] || fails=$((fails+1))
+  go stop --all >/dev/null
+done
+[ "$fails" = 0 ] && ok "and stop/start cycles on it keep working (TIME_WAIT does not block a rebind)" \
+                 || bad "restart cycle" "$fails of 3 starts failed"
+
+echo
+echo "== usage =="
 rc=$(go frobnicate)
 [ "$rc" = 64 ] && ok "an unknown subcommand exits 64" || bad "unknown subcommand" "got $rc"
 rc=$(go start)
@@ -198,11 +226,6 @@ rc=$(go --help)
 grep -q 'Exit codes are the whole contract' "$TMP/out" \
   && ok "and the contract is what it prints" || bad "help text" "$(head -3 "$TMP/out")"
 
-go start site/index.html >/dev/null
-P=$(port_of)
-rc=$(go start site/index.html --port "$P")
-[ "$rc" = 3 ] && ok "a port already in use exits 3" || bad "port in use" "got $rc"
-go stop --all >/dev/null
 
 echo
 printf '  %d passed, %d failed\n\n' "$pass" "$fail"
