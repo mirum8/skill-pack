@@ -1,0 +1,29 @@
+<style>
+.lay-topnav { display:flex; flex-direction:column; min-height:360px; }
+.lay-topnav > .top { display:flex; align-items:center; gap:var(--_gap);
+  padding:var(--_pad); border-bottom:1.5px solid var(--_border); }
+.lay-topnav > .top > .ui-nav { display:flex; gap:4px; margin-left:auto; }
+.lay-topnav > .body { padding:var(--_pad); display:flex; flex-direction:column;
+  gap:var(--_gap); }
+.lay-topnav > .body > .split { display:grid; grid-template-columns:1fr 1fr;
+  gap:var(--_gap); }
+</style>
+<div class="lay-topnav">
+  <div class="top">
+    <div class="ui-brand"><span class="ui-dot"></span>Ledger</div>
+    <nav class="ui-nav"><a class="on">Entries</a><a>Payouts</a><a>Reports</a></nav>
+  </div>
+  <div class="body">
+    <div class="ui-bar"><span class="ui-h">Account balance</span><button class="ui-btn">Add entry</button></div>
+    <div class="split">
+      <div class="ui-card"><span class="ui-amt">£12,480.00</span><span class="ui-meta">available</span></div>
+      <div class="ui-card"><span class="ui-amt">£940.00</span><span class="ui-meta">held</span></div>
+    </div>
+    <p class="ui-lede">Every entry is stored in minor units. Nothing here rounds until it is displayed.</p>
+    <table class="ui-table">
+      <tr><th>ID</th><th>Account</th><th>Amount</th><th>Status</th></tr>
+      <tr><td>0a1c</td><td>acme-ltd</td><td>12,480.00</td><td>ok</td></tr>
+      <tr class="on"><td>0a1d</td><td>brightsea</td><td>-940.00</td><td>held</td></tr>
+    </table>
+  </div>
+</div>

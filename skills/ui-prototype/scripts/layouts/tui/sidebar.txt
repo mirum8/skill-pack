@@ -1,0 +1,7 @@
+┌─ ledger ────────┬─────────────────────┐
+│@ > entries       @│ 0a1d  brightsea     │
+│   payouts       │ amount     -940.00  │
+│   reports       │ status     held     │
+│   settings      │ opened     12 Mar   │
+│                 │                     │
+└ ^n new  ^q quit ┴─────────────────────┘

@@ -133,14 +133,17 @@ Its findings are recorded under their own `quick-codex` track: same tool as `tas
 different mode and a much smaller change under it, so merging them would make neither readable.
 
 **Every bundled executable has a test, and it is the only one it gets.** The two workflows have
-their control-flow tests below; all eleven scripts under `skills/*/scripts/` have suites beside them.
-They all guard the same failure shape, which is why none of them is optional: each script either
-*decides a scope*, *decides whether a tool ran*, or *decides whether the app is on the screen at
-all*, and every one of those fails by returning a confident wrong answer. A scan that resolved to
-the wrong files, a review wrapper that banked a missing plugin as clean, a worktree stack that
-reused the main one's ports and container names, an empty terminal capture read as a clean screen,
-a CLI misread as a TUI so the wrong template pair is written for a whole generated skill — every
-one of those leaves a green pipeline behind it, so a passing run is not evidence and the suite is.
+their control-flow tests below; every script under `skills/*/scripts/` has a suite beside it, and
+`validate.sh` names each one explicitly — a suite that is not in that list never runs and nothing
+complains, which is how `ui-prototype`'s two sat unexecuted from the day the skill landed. They all
+guard the same failure shape, which is why none of them is optional: each script either *decides a
+scope*, *decides whether a tool ran*, *decides whether the app is on the screen at all*, or
+*decides what a listening socket hands out*, and every one of those fails by returning a confident
+wrong answer. A scan that resolved to the wrong files, a review wrapper that banked a missing
+plugin as clean, a worktree stack that reused the main one's ports and container names, an empty
+terminal capture read as a clean screen, a CLI misread as a TUI so the wrong template pair is
+written for a whole generated skill, a URL printed for a server that never answered — every one of
+those leaves a green pipeline behind it, so a passing run is not evidence and the suite is.
 
 `plan-run/scripts/fanout.sh` is the newest, and `issues-fix` drives it too — one protocol, one
 script, reached across skills as `${CLAUDE_PLUGIN_ROOT}/skills/plan-run/scripts/`, the same way
@@ -506,9 +509,8 @@ in frontmatter — the enforcement, not just a sentence in the body. Most of the
 plan on a scale nobody wants arrived at by inference, so they are invoked deliberately or not at
 all. `page-serve` is the one that mutates nothing and still belongs: it opens a listening socket,
 and `--lan` makes that socket reachable from every device on the network, which is the same class
-of thing. Two consequences follow and are easy
-to forget: their descriptions leave the listing budget entirely (they are not in the router's
-context), and **no prompt can route to them**, so their own `trigger` eval cases are untestable by
+of thing. Two consequences follow and are easy to forget: their descriptions leave the listing
+budget entirely (they are not in the router's context), and **no prompt can route to them**, so their own `trigger` eval cases are untestable by
 design and their `neighbour-exclusion` cases pass without measuring anything — `tools/run-evals.py`
 skips both kinds and says why rather than counting them as passes.
 

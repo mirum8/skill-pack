@@ -78,13 +78,16 @@ echo
 echo "== the version pin =="
 # The format is "alpha" and the CLI is 0.x. Unpinned, today's clean file fails tomorrow with
 # no edit, and it reads as the palette getting worse rather than the tool changing.
+# The stub reads the path from the environment rather than being rewritten in place: `sed -i`
+# takes a mandatory backup suffix on BSD, so the rewrite silently did nothing here and the
+# assertion below passed over an argv file that was never written.
+export ARGV_OUT="$TMP/argv"
 npx_stub <<'EOF'
 #!/bin/sh
-echo "$@" > "$TMPDIR_ARGV"
+echo "$@" > "$ARGV_OUT"
 echo '{"findings":[],"summary":{"errors":0,"warnings":0,"infos":0}}'
 exit 0
 EOF
-sed -i "s|\$TMPDIR_ARGV|$TMP/argv|" "$STUB/npx"
 rc=$(go lint some.md --format json)
 grep -q '@google/design.md@0\.4\.0' "$TMP/argv" \
   && ok "npx is invoked with the pinned version" || bad "version pin" "argv: $(cat "$TMP/argv" 2>/dev/null)"

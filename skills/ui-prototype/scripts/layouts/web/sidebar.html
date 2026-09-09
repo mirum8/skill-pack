@@ -1,0 +1,24 @@
+<style>
+.lay-sidebar { display:grid; grid-template-columns:190px 1fr; min-height:360px; }
+.lay-sidebar > .side { border-right:1.5px solid var(--_border); padding:var(--_pad);
+  display:flex; flex-direction:column; gap:var(--_gap); }
+.lay-sidebar > .body { padding:var(--_pad); display:flex; flex-direction:column;
+  gap:var(--_gap); }
+</style>
+<div class="lay-sidebar">
+  <aside class="side">
+    <div class="ui-brand"><span class="ui-dot"></span>Ledger</div>
+    <nav class="ui-nav"><a class="on">Entries</a><a>Payouts</a><a>Reports</a><a>Settings</a></nav>
+  </aside>
+  <div class="body">
+    <div class="ui-bar"><span class="ui-h">Account balance</span><button class="ui-btn">Add entry</button></div>
+    <p class="ui-lede">Every entry is stored in minor units. Nothing here rounds until it is displayed.</p>
+    <div class="ui-card"><span class="ui-amt">£12,480.00</span><span class="ui-meta">updated just now</span></div>
+    <table class="ui-table">
+      <tr><th>ID</th><th>Account</th><th>Amount</th><th>Status</th></tr>
+      <tr><td>0a1c</td><td>acme-ltd</td><td>12,480.00</td><td>ok</td></tr>
+      <tr class="on"><td>0a1d</td><td>brightsea</td><td>-940.00</td><td>held</td></tr>
+      <tr><td>0a1e</td><td>northwind</td><td>3,200.00</td><td>ok</td></tr>
+    </table>
+  </div>
+</div>

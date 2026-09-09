@@ -1,27 +1,30 @@
 ---
 description: >-
   Propose three candidate visual identities as real `DESIGN.md` files in the
-  google-labs-code/design.md token format, lint each with the REAL CLI, render each from its own
-  exported tokens into a local comparison page, and land the pick as the project's root
-  `DESIGN.md`. Covers a web GUI and a terminal UI: on a TUI, typography and corner-rounding are
-  declared omitted (the terminal owns the font; cells have no radius), spacing is in cells, and a
-  required 16/256/truecolor depth quantizes the mock so it never shows a palette the terminal
-  cannot paint. Use on "/r:ui-prototype", "give me some visual directions to choose from", "propose
-  a few looks for this UI", "I need a DESIGN.md", or when someone wants token candidates to compare
-  before committing to one, on either surface. Writes `docs/design/variants/compare.html` and
-  nothing leaves the machine; `--share` additionally publishes that same page as a private Artifact
-  and republishes in place rather than minting a second link. A candidate that does not lint clean
-  is never shown, and the pick is certified with a REAL render — never an HTML mock standing in for
-  one. NOT for the product spec (`/r:spec-brainstorm`), the build plan (`/r:spec-design`), or
-  scaffolding a project's `/test-app` (`/r:test-app-create`).
+  google-labs-code/design.md token format, lint each with the REAL CLI, and build ONE prototype
+  page where a layout picker and a design picker are independent choices — any arrangement painted
+  by any candidate's own exported tokens — then land the pick as the project's root `DESIGN.md`.
+  Covers a web GUI and a terminal UI: on a TUI, typography and corner-rounding are declared
+  omitted (the terminal owns the font; cells have no radius), spacing is in cells, and a required
+  16/256/truecolor depth quantizes the mock so it never shows a palette the terminal cannot paint.
+  Use on "/r:ui-prototype", "give me some visual directions to choose from", "propose a few looks
+  for this UI", "let me pick a layout and a look", "I need a DESIGN.md", or when someone wants
+  token candidates to compare before committing to one, on either surface. Writes
+  `docs/design/variants/compare.html` and nothing leaves the machine; `--share` additionally
+  publishes that same page as a private Artifact and republishes in place rather than minting a
+  second link. A candidate that does not lint clean is never shown, and the pick is certified with
+  a REAL render — never an HTML mock standing in for one. NOT for the product spec
+  (`/r:spec-brainstorm`), the build plan (`/r:spec-design`), or scaffolding a project's
+  `/test-app` (`/r:test-app-create`).
 disable-model-invocation: true
 ---
 
 # UI prototype — candidate identities, rendered and picked
 
-Three candidate `DESIGN.md` files, each rendered from its own tokens so the choice is informed,
-then one of them lands at the repo root. The deliverable is a **linted document**, not a picture:
-the picture exists so a person can choose, and is thrown away.
+Three candidate `DESIGN.md` files and a page that paints any of them into any of several layouts,
+so the choice is informed on both axes, then one of them lands at the repo root. The deliverable is
+a **linted document**, not a picture: the picture exists so a person can choose, and is thrown
+away.
 
 **Not automatic.** This skill writes a root `DESIGN.md` and a directory of rejected candidates, and
 neither is something anyone wants arrived at by inference. Invoke it deliberately or not at all.
@@ -80,6 +83,11 @@ references and Dimension syntax: `references/format-spec.md`.
 **Make them genuinely different.** Three variations on one hue is not a choice. Vary the thing the
 Overview section is about — the register — and let colour follow from it.
 
+**Layout is not written here.** The format has no key for how a screen is arranged, and inventing
+one trips the linter's `unknown-key` rule. Arrangement is the page's *other* axis in Step 4: a
+candidate says what the app looks like, a skeleton says how it is laid out, and the person picking
+chooses one of each.
+
 On a **terminal** surface, read `references/tui-mapping.md` first: `omitted:` for typography and
 rounding with real reasons, spacing in cells, and a required `terminal.colorDepth`.
 
@@ -102,7 +110,7 @@ every one of them as **UNLINTED**, say why, and never call one clean. Nothing ch
 substitute your own read of the tokens for the linter's: it computes WCAG contrast ratios, and you
 cannot.
 
-## Step 4 — render each candidate from its own tokens
+## Step 4 — build the one prototype page
 
 ```bash
 "${CLAUDE_SKILL_DIR}/scripts/designmd.sh" export docs/design/variants/<name>/DESIGN.md \
@@ -113,19 +121,49 @@ python3 "${CLAUDE_SKILL_DIR}/scripts/build-compare.py" \
     --variant "<Name>=docs/design/variants/<name>/vars.css"   # once per candidate
 ```
 
+**One page, two independent choices.** A layout picker and a design picker sit above a single
+stage; picking is CSS only, so every pair of the two axes is reachable without a reload and the
+page carries no script at all. Three shipped skeletons come in per surface — web: sidebar, top nav,
+split master-detail; terminal: single pane, sidebar, three pane — and `--layout "<Name>=<path>"`
+(repeatable) replaces that set when a project's real screens are worth drawing instead.
+
 **The CSS is generated, never hand-written.** That is what makes the page and the documents unable
 to disagree — one is produced from the other. A mock you style by hand drifts from the tokens the
 moment either is edited, and nothing downstream re-reads the page to catch it.
 
-Both surfaces render as HTML here: a terminal frame is a grid of styled cells in a `<pre>`, so
-**choosing** needs no tmux and no browser. On a terminal surface pass `--depth` matching the
-document's `terminal.colorDepth` — the script quantizes to it, because a truecolor palette the
-linter certified at 4.5:1 is painted as the nearest of 16 on a terminal that lacks the depth.
+**Which is also the one rule a skeleton has to keep: it names no colour, size or font of its own.**
+Everything it paints with comes from the selected design through the `--_*` aliases the script
+guarantees — `--_surface`, `--_text`, `--_primary`, `--_on-primary`, `--_border`, `--_radius`,
+`--_gap`, `--_pad`. A fallback *is* a hardcoded colour, and specifically the one the design picker
+cannot override, so skeletons carry none. A layout that hardcodes one anyway is named on the page
+rather than silently shipped.
 
-## Step 5 — present the comparison
+Both surfaces render as HTML here: a terminal frame is a grid of styled cells in a `<pre>`, so
+**choosing** needs no tmux and no browser. A frame is plain text with `@` toggling the accent span,
+so a highlight can cover one pane of a line rather than the whole row; an unpaired `@` is an error,
+because it would paint the rest of the frame as selected. On a terminal surface pass `--depth`
+matching the document's `terminal.colorDepth` — the script quantizes to it, because a truecolor
+palette the linter certified at 4.5:1 is painted as the nearest of 16 on a terminal that lacks the
+depth. Only hex is reduced, so a colour written as `oklch()`, `color-mix()` or a keyword is
+**named on the page as unquantized** rather than passed off as what the terminal paints.
+
+## Step 5 — present the page
 
 Give the path. `docs/design/variants/compare.html` opens from `file://` with no network, and
 nothing has left the machine.
+
+**To open it on a phone or a second screen**, serve it on the LAN rather than copying the file
+around:
+
+```bash
+"${CLAUDE_PLUGIN_ROOT}/skills/page-serve/scripts/serve.sh" start \
+    docs/design/variants/compare.html --lan
+```
+
+That is `/r:page-serve`'s script, reached directly because the skill sets
+`disable-model-invocation` and cannot be called through the Skill tool. `--lan` puts the page on
+the local network; say so in one line before running it, and leave it off for a `127.0.0.1`-only
+server. Either way the URL lands on the clipboard, ready to paste into a browser.
 
 **`--share`** publishes that same file as a private Artifact and hands back the URL. Three rules:
 the page is built once and published as-is, never regenerated for the shared path; the id lives in
@@ -137,13 +175,18 @@ user already answered by typing the flag.
 Bare `/r:ui-prototype --share` with a `compare.html` already on disk republishes it and skips Steps
 0–4.
 
-Then **ask which one**, and take a blend as a fourth candidate through the same gate rather than
-hand-merging two winners.
+Then **ask which design and which layout**. They are separate answers — someone can want the
+sidebar with the third palette — so take them as two, and take a blend of two designs as a fourth
+candidate through the same gate rather than hand-merging two winners.
 
 ## Step 6 — land the pick
 
 Copy the winner to the repo root as `DESIGN.md` and lint it once more. Leave the losers in
-`docs/design/variants/` — they are the record of what was turned down. Then:
+`docs/design/variants/` — they are the record of what was turned down.
+
+**Record the chosen layout as one sentence in the Overview section**, naming the skeleton. The
+format has no key for arrangement and inventing one fails the linter, so prose is where it goes —
+and a decision nobody wrote down is one the first build re-litigates from scratch. Then:
 
 ```bash
 "${CLAUDE_SKILL_DIR}/scripts/designmd.sh" diff DESIGN.md docs/design/variants/<runner-up>/DESIGN.md
@@ -194,7 +237,8 @@ described as the certifying render.
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
 {"skill":"r:ui-prototype","outcome":"picked|unlinted|uncertified|skipped|blocked",
- "surface":"web|tui","candidates":3,"linted":true,"certified":true,"shared":false}
+ "surface":"web|tui","candidates":3,"layouts":3,"layout":"<the skeleton picked>",
+ "linted":true,"certified":true,"shared":false}
 STATS_JSON
 ```
 

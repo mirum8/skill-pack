@@ -1,0 +1,6 @@
+┌─ ledger ──────┬───────────────┬───────┐
+│@ > entries     @│ 0a1c acme-ltd │ ok    │
+│   payouts     │ 0a1d brightsea│ held  │
+│   reports     │ 0a1e northwind│ ok    │
+│   settings    │               │       │
+└ ^n new  ^f filter  ^q quit ───────────┘

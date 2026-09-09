@@ -70,6 +70,16 @@
       "files": [],
       "fixture": null,
       "assertions": []
+    },
+    {
+      "id": 7,
+      "name": "layout-and-design-are-two-choices-not-one",
+      "kind": "behaviour",
+      "prompt": "/r:ui-prototype — a small web app for tracking invoices",
+      "expected_output": "Step 4 builds ONE page: a layout picker and a design picker over a single stage, every pair reachable, no <script> anywhere on it. The three shipped web skeletons come in by default and carry no colour of their own — every value they paint with is a --_* alias resolved from the selected candidate's exported tokens. Layout is never written into a DESIGN.md, which has no key for arrangement; Step 5 asks for both answers separately, and Step 6 records the chosen skeleton as a sentence in the Overview section of the landed document.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
     }
   ]
 }

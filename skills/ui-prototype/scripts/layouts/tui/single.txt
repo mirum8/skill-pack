@@ -1,0 +1,7 @@
+┌─ ledger ──────────────────────────────┐
+│ ID    ACCOUNT      AMOUNT      STATUS │
+│ 0a1c  acme-ltd     12,480.00   ok     │
+│@ 0a1d  brightsea      -940.00   held   @│
+│ 0a1e  northwind     3,200.00   ok     │
+│                                       │
+└ ^n new  ^f filter  ^q quit ───────────┘

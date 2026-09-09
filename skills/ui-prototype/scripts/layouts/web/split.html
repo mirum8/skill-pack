@@ -1,0 +1,26 @@
+<style>
+.lay-split { display:grid; grid-template-columns:1fr 290px; min-height:360px; }
+.lay-split > .list { padding:var(--_pad); display:flex; flex-direction:column;
+  gap:var(--_gap); }
+.lay-split > .detail { border-left:1.5px solid var(--_border); padding:var(--_pad);
+  display:flex; flex-direction:column; gap:var(--_gap); }
+.lay-split .ui-brand { margin-bottom:2px; }
+</style>
+<div class="lay-split">
+  <div class="list">
+    <div class="ui-brand"><span class="ui-dot"></span>Ledger</div>
+    <div class="ui-bar"><span class="ui-h">Entries</span><button class="ui-btn">Add entry</button></div>
+    <table class="ui-table">
+      <tr><th>ID</th><th>Account</th><th>Amount</th><th>Status</th></tr>
+      <tr><td>0a1c</td><td>acme-ltd</td><td>12,480.00</td><td>ok</td></tr>
+      <tr class="on"><td>0a1d</td><td>brightsea</td><td>-940.00</td><td>held</td></tr>
+      <tr><td>0a1e</td><td>northwind</td><td>3,200.00</td><td>ok</td></tr>
+    </table>
+  </div>
+  <div class="detail">
+    <span class="ui-h">brightsea</span>
+    <p class="ui-lede">Held pending a manual review. Nothing rounds until it is displayed.</p>
+    <div class="ui-card"><span class="ui-amt">-£940.00</span><span class="ui-meta">held · 12 Mar</span></div>
+    <button class="ui-btn">Release</button>
+  </div>
+</div>

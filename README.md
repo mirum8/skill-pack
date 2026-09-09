@@ -75,7 +75,7 @@ pack does not rely on it.
 | `/r:hexagonal-architecture` | Hexagonal Lite boundaries: what lives in core, what a module may import |
 | `/r:tests-write` | JVM test conventions; loads proactively on Java/Kotlin work |
 | `/r:test-app-create` | scaffold a project-local `/test-app` for the detected stack |
-| `/r:ui-prototype` | three candidate `DESIGN.md` identities, rendered from their own tokens and compared locally; the pick lands at the repo root |
+| `/r:ui-prototype` | three candidate `DESIGN.md` identities on one page, any layout against any palette; the pick lands at the repo root |
 | `/r:page-serve` | one local page on http — this machine only, or the whole LAN with `--lan` |
 | `/r:git-commit` | group the working tree into logical Conventional Commits |
 | `/r:claudemd-compact` | compact and de-stale a CLAUDE.md hierarchy |

@@ -90,8 +90,15 @@ ships to unknown terminals should say so there.
 
 ## What the comparison page shows, and what it does not
 
-The mock is a `<pre>` grid of styled cells, quantized to the declared depth. It is good enough to
-choose between three palettes and to catch an unreadable one.
+The mock is a `<pre>` grid of styled cells, quantized to the declared depth, and there are three of
+them: a single pane, a sidebar and a three-pane split, switchable against any candidate. It is good
+enough to choose between three palettes, to catch an unreadable one, and to see whether the palette
+survives being cut into panes — a two-colour scheme that reads cleanly on one full-width table can
+lose every boundary once there are three.
+
+A frame is plain text, and `@` toggles the accent span. That is why the highlight can cover one
+pane of a line rather than the whole row, which is what a selected item in a sidebar actually looks
+like; an unpaired `@` is refused, because it would paint the rest of the frame as selected.
 
 It is **not** proof. It cannot tell you the frame fits at 80 columns, that the app's renderer emits
 those attributes, or that the box-drawing characters align in the user's font. Only
