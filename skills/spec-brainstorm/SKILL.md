@@ -123,6 +123,15 @@ three rules:
    Can only they tell you? Ask. **A question that settles scope passes, even when it is a
    business question** — scope is what is most often got wrong, and it is invisible in the code.
 
+**A question that survives the gates and has named options is asked with `AskUserQuestion`, not
+in prose.** A forced trade-off, a default offered for veto, a correction between two shapes — each
+is a click; written as a numbered line in a paragraph it comes back as "whatever you think", or as
+a silence you have to read as agreement, which is indistinguishable from a veto nobody noticed.
+Prose keeps what has no honest option list: the scope, the users, the one case, and a list to edit.
+The prose carries the reasoning and the open questions, then one call carries the round's choices —
+recommendation first and labelled `(Recommended)`, each option's description naming its cost, no
+authored "Other". `references/interview.md` §2 has the mapping and the four-question ceiling.
+
 **Decide by default, and say that you guessed.** A wrong guess costs one sentence of correction —
 cheaper than asking almost every time. A decision you made goes into the coverage ledger as
 `assumed`, **never** as `answered` — as an answer it is indistinguishable from something they told
@@ -130,8 +139,8 @@ you, and `--continue` will never raise it again.
 
 Every question must be about the thing being designed. An area that doesn't apply is settled as
 not applicable — write down why and move on. **Never ask a question to confirm that something
-doesn't apply**, and never hand someone a multiple choice between options you could have chosen
-between.
+doesn't apply**, and never hand someone a choice between options you could have chosen between —
+gate 1 deletes that question, rather than dressing it up as a click.
 
 **The interview ends two ways only: every coverage row is settled, or the user stops it.** There
 is no question quota. After each round, play back the running model — entities, states, module cut
@@ -154,7 +163,9 @@ When the research lands, **you talk first**: in ≤120 words, name the problem c
 industry's own vocabulary, list the components that recurred, and say what you copy versus what
 you deliberately do differently. Then ask only about the decisions where prior art disagrees,
 each as two named options with the force that decides it and your recommendation. Everything the
-field agrees on is a statement, not a question.
+field agrees on is a statement, not a question. Those disagreements are the tool's shape exactly:
+two named options, the force that decides between them in each description, your recommendation
+first.
 
 ## Step 3 — write the document
 
@@ -247,7 +258,10 @@ put it in the gap list, and **say which rows you downgraded**:
 
 The gap list is therefore: every `open` row · every `assumed` row · every row you just downgraded ·
 every `Assumed — not confirmed` line · every open question the user could answer in one sentence.
-Ask about all of them. Batch them, but ask them.
+Ask about all of them. Batch them, but ask them — and an `assumed` row is a default offered for
+veto, which is a click, so it goes through `AskUserQuestion` with the assumption as the
+recommended option. A sweep of them is the one place `multiSelect` is right: the rows are
+independent, and objecting to two of seven is one answer, not two.
 
 ### Audit the shape too — a document can be complete and the wrong shape
 
@@ -423,6 +437,8 @@ what was written. Never retry it.
   choice as a default nobody discussed.
 - Never rewrite prose during a restructure that is only moving. Moving a section is not a licence
   to reword it, and least of all to retitle a story.
+- Never ask a settled choice in prose. If you can name its two to four options, it goes through
+  `AskUserQuestion` — a numbered line in a paragraph is answered with "whatever you think".
 - Never ask what you could decide yourself and record as an assumption.
 - Never ask what a grep, a read or a fetch could answer. State what you found.
 - Never accept an adjective as a requirement. Reflect it back as a number or a rule.

@@ -5,7 +5,7 @@ This file owns the question rules, the round structure and the coverage floor.
 ## Contents
 
 1. The three rules
-2. Batching
+2. Batching, and how a question is delivered
 3. The funnel
 4. Round bank
 5. Making answers concrete
@@ -85,15 +85,51 @@ listening, because it is.
 
 ---
 
-## 2. Batching
+## 2. Batching, and how a question is delivered
 
-Put **3–6 numbered questions in one call**, under ~150 words of question text. Round trips,
-not question counts, make people quit.
+Put **3–6 questions in one round**, under ~150 words of question text. Round trips, not
+question counts, make people quit.
 
 Ask alone only what reshapes the tree: the scope in round 1, and the v1 cut in round 8.
 Everything else batches. Order inside a batch: what you most need first, cheapest last. Mark
-the optional ones `(skip — I'll default to X)` so a tired user can drop them without feeling
-like they failed.
+the optional prose ones `(skip — I'll default to X)` so a tired user can drop them without
+feeling like they failed; in a tool call that marking is the recommended option itself.
+
+### A choice goes through `AskUserQuestion`. Only an open question stays in prose
+
+A question whose answer is one of a few named alternatives is asked with the **tool**, never as a
+numbered line in a paragraph. A selectable option is answered in a click; a paragraph ending in a
+question mark is answered with "whatever you think", or with silence you then have to read as
+agreement — and that reading is the failure, because a veto invited in prose and not given is
+indistinguishable from a veto nobody noticed.
+
+Rule 2's four styles decide which half a question is in:
+
+| Style | Delivery |
+|---|---|
+| **Open question** — scope, users, the one case | Prose. There is no honest option list, and authoring one is scope inflation by question. |
+| **Forced trade-off** — characteristics | Tool, always. Two options, each naming what it gives up. This is the style the tool exists for. |
+| **Propose, then correct** | Tool when the correction is a choice between named shapes; prose when it is a list to edit — an entity list, a file count, a set of states. |
+| **Default and veto** | Tool. The default is the first option, labelled `(Recommended)`; the realistic alternative is the second. |
+
+Mechanics, the same in every call: the recommendation **first** and labelled `(Recommended)`; each
+`description` carries that option's **cost** rather than a restatement of its label; `header` is
+the topic in twelve characters or fewer; `multiSelect` false unless the answers genuinely combine
+(a sweep of assumed rows does). Never author an "Other" option — the tool always offers one, and
+that is where "I don't know" (§9) and the answer you didn't foresee arrive. Where the options are
+different *shapes* of a contract, an API or a schema, put a few lines of each in `preview` so they
+can be compared side by side.
+
+**The prose comes first, then one call for the round.** The message carries the reasoning, the
+playback and the open questions; the call carries the choices. The tool takes at most four
+questions of two to four options, which sits under the batch ceiling — so when more than four
+choices are live, take the four with the most leverage (Rule 1 already ranks them) and let the rest
+ride as defaults recorded `assumed`. Nothing is lost: `--continue` offers every `assumed` row back,
+while a seventh question in the same breath is what makes people quit.
+
+A choice with one real option is a default, not a decision — record it and move on rather than
+calling the tool. And never call it twice on the same decision: a second prompt after an answer is
+re-litigation in a form the user cannot ignore (§8).
 
 ---
 
@@ -592,6 +628,7 @@ difference is whether the reader knows.
 | **Failure to probe** — accepting "fast", "secure", "scalable" | Does any adjective lack a number or a rule? | Reflect it back as a rule or a number |
 | Leading question | Does the phrasing signal the answer you want? | State your recommendation openly, then ask neutrally |
 | Premature detail | Are you asking about paging while the scope is open? | Follow the funnel |
+| **Choice asked in prose** — a trade-off or a default written as a numbered line | Could you name its two to four options? | Ask it with `AskUserQuestion` (§2); prose keeps only what has no option list |
 | Compound question | Count the `and`s and `?`s | One idea per numbered item |
 | **Scope inflation by question** — "want notifications, an admin panel, an API?" | Did the user mention it, or did you? | Ask about cuts, not additions |
 | Amnesia | Diff against the answer ledger before each batch | Quote their earlier answer when you use it |
