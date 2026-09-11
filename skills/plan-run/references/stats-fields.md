@@ -29,10 +29,14 @@ row it reads as a string of failures — the one metric here a naive per-row ave
 
 **`haltReason` is why, where `haltedAt` is only which phase.** A closed vocabulary, so it can be
 counted: `implement-stopped` | `review-blocked` | `tracks-blocked` | `build-red` | `done-when-failed`
-| `merge-conflict` | `dirty-base` | `recheck-blocked` | `slice-refused` | `workflow-unavailable`.
-The one worth separating from the others is `review-blocked` — a review that ran and left part of
-the diff unread is a different failure from a red build, and the one that would otherwise have
-merged.
+| `merge-conflict` | `dirty-base` | `recheck-blocked` | `slice-refused` | `workflow-unavailable`
+| `resolve-first`. The one worth separating from the others is `review-blocked` — a review that ran
+and left part of the diff unread is a different failure from a red build, and the one that would
+otherwise have merged.
+
+`resolve-first` is the one halt with no phase: Step 1's gate stops the run before any phase is
+reached, so `haltedAt` stays null and the reason alone separates it from a clean finish. It covers
+an `--unattended` run too, when a `blocksEverything` entry leaves nothing to build.
 
 **`degraded` and `questionsQueued` are what `--unattended` costs.** `degraded` counts the
 workarounds it took — a dirty base snapshotted, a conflict auto-resolved, a wave run one unit at a
@@ -71,9 +75,12 @@ does — the orchestrator owns the merge, and the boundary sits behind it.
 
 **`resolveFirstOutstanding` is how often the gate actually fires.** It is the count of unresolved
 `## Resolve first` entries the script found, whatever the run then did about them — zero on the
-plans that carry none, which is most of them. Nothing recorded this before, so "how often does a
-plan stop on a question nobody answered" has never been answerable, and the mechanism was argued
-from first principles alone. Read it against `phasesInRun`: a non-zero count on a run that still
-built everything is the carve-out working (the blocked phases were out of scope); a non-zero count
-with `phasesInRun: 0` is a plan that could not start at all, which is the case `/r:plan-unblock`
-exists for.
+plans that carry none, which is most of them. It is what makes "how often does a plan stop on a
+question nobody answered" answerable from rows rather than argued from first principles.
+
+Read it against `haltReason`, never against `phasesInRun`. A non-zero count with
+`haltReason: "resolve-first"` is a plan that could not start at all, which is the case
+`/r:plan-unblock` exists for; a non-zero count under any other reason, or none, is the carve-out
+working — the blocked phases were out of scope, or `--unattended` dropped them. `phasesInRun`
+cannot carry that answer: a `herdr` or `land` row leaves it at zero whatever it built, so read
+against it every carve-out on those modes looks like a plan that never started.

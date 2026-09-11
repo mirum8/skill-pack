@@ -196,6 +196,9 @@ Resolve first: 2 outstanding
   → /r:plan-unblock <plan> settles these, then re-run this command.
 ```
 
+Then record the run (Step 4) with `haltReason: "resolve-first"` and `haltedAt: null` — no phase was
+reached, and a gate stop recorded with no reason reads exactly like a clean finish.
+
 **The offer is terminal, not a dispatch.** This step parsed the plan once; resuming after the
 entries were closed would build from a run list that predates them. And offer it **only** from an
 attended run in the primary tree — never under `--unattended`, `--no-merge` or `--dry-run`. A
@@ -206,7 +209,8 @@ room and write the answers into the plan as settled.
 **Under `--unattended`, drop the blocked phases from the run list and build the rest**, naming both
 halves in the report. The blocker still needs a person and no blocked phase is built — one
 unresolved question stops one phase, not the night. `blocksEverything` is the exception it cannot
-work around: an entry that names no phase blocks all of them, so there is nothing left to build.
+work around: an entry that names no phase blocks all of them, so there is nothing left to build —
+the same `resolve-first` halt.
 
 If the run list is empty, say why — "every phase in `docs/billing/todo.md` is ticked", "`--from 9`
 is past the last phase" — and stop.
