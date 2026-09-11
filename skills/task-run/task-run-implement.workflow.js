@@ -443,6 +443,26 @@ const CONFIG = {
     notes: { type: 'array', items: { type: 'string' } },
   },
 }
+// What lib/read-config.py prints for `--step plan`: no provider, and three tiers in one row. Its own
+// schema, never CONFIG — that one requires `provider` and has no slot for the explorer and judge
+// keys, so an agent returning a plan row into it drops four settings and invents the rest: one
+// returned its own haiku/low as the planning row, and the planner ran on it. The model enums are
+// what stop an invented full model id from reaching agent().
+const PLAN_CONFIG = {
+  type: 'object', additionalProperties: false,
+  required: ['model', 'effort'],
+  properties: {
+    step: { type: 'string' },
+    model: { type: 'string', enum: ['fable', 'opus', 'sonnet', 'haiku'] },
+    effort: { type: 'string', enum: ['low', 'medium', 'high', 'xhigh', 'max'] },
+    exploreModel: { type: 'string', enum: ['fable', 'opus', 'sonnet', 'haiku'] },
+    exploreEffort: { type: 'string', enum: ['low', 'medium', 'high', 'xhigh', 'max'] },
+    judgeModel: { type: 'string', enum: ['fable', 'opus', 'sonnet', 'haiku'] },
+    judgeEffort: { type: 'string', enum: ['low', 'medium', 'high', 'xhigh', 'max'] },
+    sources: { type: 'array', items: { type: 'string' } },
+    notes: { type: 'array', items: { type: 'string' } },
+  },
+}
 
 // --------------------------------------------------------------- helpers -----
 // The subagent-flow contract in code: a null return means the agent died or was
@@ -993,7 +1013,7 @@ log(`run-task-implement: ${src.kind} "${src.slug}" — tier ${profile} (${forced
 //
 // Two rows, two agents, one wave. `implement` decides who writes the code; `plan` decides the
 // planner, the explorers and the judges that come before it. Separate agents rather than one
-// reading twice, because the CONFIG schema describes ONE resolved row — a combined shape would
+// reading twice, because each schema describes ONE resolved row — a combined shape would
 // have to be nullable in halves, and a half that came back empty would be indistinguishable from
 // one that resolved to the built-in values.
 const readCfg = (step) => agent(
@@ -1004,7 +1024,7 @@ const readCfg = (step) => agent(
 
    The script always exits 0 by design; a value it could not read comes back as the built-in
    default with a line in \`notes\` saying so. Return \`notes\` even when it is empty.`,
-  { label: step === 'implement' ? 'config' : `config-${step}`, phase: 'Source', schema: CONFIG, ...GP, ...SINK })
+  { label: step === 'implement' ? 'config' : `config-${step}`, phase: 'Source', schema: step === 'plan' ? PLAN_CONFIG : CONFIG, ...GP, ...SINK })
 const [implCfg, planCfg] = await parallel([
   () => readCfg('implement').catch(() => null),
   () => readCfg('plan').catch(() => null),

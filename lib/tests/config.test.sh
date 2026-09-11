@@ -186,6 +186,39 @@ mkdir -p "$CACHED/.claude/plugins/cache/openai-codex/codex/0.146.0/scripts"
 : > "$CACHED/.claude/plugins/cache/openai-codex/codex/0.146.0/scripts/codex-companion.mjs"
 ok "the version-cache path counts as installed" "$(read_cfg "$CACHED" "$PACK" "$CODEX" provider)" codex
 
+# Both pipelines hand this reader's object back VERBATIM into a schema with
+# additionalProperties:false. A key the schema has no slot for is dropped by the agent returning it,
+# and a key the schema requires that the row lacks gets invented — a plan row read into the
+# implement schema came back as the config agent's own haiku/low, and the planner ran on it. Every
+# key the reader emits for a step must be a slot in the schema its pipeline reads that step with.
+schema_keys() {  # <workflow> <schema const>
+  python3 - "$1" "$2" <<'PY'
+import re, sys
+src = open(sys.argv[1]).read()
+block = re.search(r"^const " + sys.argv[2] + r" = \{\n(.*?)^\}", src, re.S | re.M).group(1)
+print(" ".join(re.findall(r"^    (\w+):", block, re.M)))
+PY
+}
+reader_keys() {  # <home> <step>
+  HOME="$1" python3 - "$2" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("rc", "lib/read-config.py")
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(" ".join(m.resolve(sys.argv[1], repo="/nonexistent")))
+PY
+}
+for triple in "skills/task-run/task-run-implement.workflow.js CONFIG implement" \
+              "skills/task-run/task-run-implement.workflow.js PLAN_CONFIG plan" \
+              "skills/task-review/task-review.workflow.js CONFIG fix"; do
+  read -r wf schema step <<<"$triple"
+  have=" $(schema_keys "$wf" "$schema" 2>/dev/null) "; missing=
+  for k in $(reader_keys "$HASCODEX" "$step"); do [[ $have == *" $k "* ]] || missing+=" $k"; done
+  ok "$(basename "$wf" .workflow.js) $schema holds every --step $step key" "${missing:-none}" none
+done
+grep -q "schema: step === 'plan' ? PLAN_CONFIG : CONFIG" skills/task-run/task-run-implement.workflow.js \
+  && ok "the plan row is read with PLAN_CONFIG" yes yes \
+  || ok "the plan row is read with PLAN_CONFIG" no yes
+
 # --- the wrapper is tuned apart from the writer ------------------------------
 # Under `provider: codex` two agents run: Codex writes the code, and a Claude subagent drives the
 # CLI and collects a run past the ~600s cap. They are separate settings because they fail
