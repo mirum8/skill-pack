@@ -41,9 +41,11 @@
 #                          reports only that unit, so the caller can cleanup and
 #                          refill the slot while the rest are still working --
 #                          the difference between a rolling window and batches
-#                          waiting on the slowest. A verdict is handed back once;
+#                          waiting on the slowest. A sentinel is handed back once;
 #                          a failed unit is deliberately left standing, and
-#                          without that it would be re-reported forever.
+#                          without that it would be re-reported forever. A unit
+#                          resumed in place writes a new sentinel, which is
+#                          handed back in its turn.
 #   status                 one line per unit: live | ok | failed | stalled.
 #   cleanup --id U         close the workspace, shut down the Codex broker keyed to
 #                          the unit's path, remove the worktree, free a slot.
@@ -254,6 +256,15 @@ stop_codex_broker() {               # stop_codex_broker <dir>; never fails its c
 # wave-mates finished unseen. Tracking it here rather than asking the caller to
 # narrow the set by hand is the same choice the rest of this script makes: a
 # judgement that fails by looping silently belongs in the script.
+#
+# The mark covers the sentinel it was written for, never the unit for good. A
+# failed unit left standing can be resumed in place, and the sentinel it writes
+# then is a verdict nobody has seen: read as already handed back, it is neither
+# ready nor pending, so `--any` would exit 0 with "no unreported units" at the
+# moment the unit succeeded, and the phase is never landed. So a sentinel strictly
+# NEWER than the mark is unreported. Equal times count as reported: on a
+# filesystem with coarse timestamps a sentinel and the mark written over it share
+# one, and reading that as new would re-report the unit forever.
 reported() { printf '%s/%s.reported' "$state" "$1"; }
 
 # A unit is live from spawn until cleanup, not until its sentinel lands: a failed
@@ -733,7 +744,9 @@ do_wait() {
     pending=(); ready=()
     for id in "${ids[@]}"; do
       if [ -e "$(sentinel "$id")" ]; then
-        if [ "$any" = 1 ] && [ ! -e "$(reported "$id")" ]; then ready+=("$id"); fi
+        if [ "$any" = 1 ] && { [ ! -e "$(reported "$id")" ] || [ "$(sentinel "$id")" -nt "$(reported "$id")" ]; }; then
+          ready+=("$id")
+        fi
       else
         pending+=("$id")
       fi

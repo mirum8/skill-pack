@@ -712,6 +712,25 @@ grep -q "^a3 ok phase-a3-again" <<<"$out" \
   && ok "cleanup clears the once-only mark, so a reused id reports again" \
   || bad "cleanup clears the once-only mark, so a reused id reports again" "exit $rc: $out"
 
+# The mark is one per SENTINEL, not one per unit. A failed unit left standing can be resumed in place
+# once whatever halted it is cleared, and its fresh sentinel is a verdict nobody has seen. Read as
+# already handed back, it is neither ready nor pending, so --any exits 0 with "no unreported units"
+# at the exact moment the unit succeeded -- and a caller trusting that exit never lands the phase.
+a1s=$(sed -n 's/^sentinel=//p' "$TMP"/fanout-*/a1.rec)
+rm -f "$a1s"
+out=$("$FAN" wait --any --id a1 --timeout 2 2>&1); rc=$?
+[[ $rc == 3 ]] && ok "a reported unit resumed in place, sentinel removed, is waited on again" \
+               || bad "a reported unit resumed in place, sentinel removed, is waited on again" "exit $rc: $out"
+finish_unit a1 "$TMP/wt-a1" phase-a1-resumed ok
+out=$("$FAN" wait --any --id a1 --timeout 3 2>&1); rc=$?
+[[ $rc == 0 ]] && grep -q "^a1 ok phase-a1-resumed" <<<"$out" \
+  && ok "and its fresh sentinel is handed back, not swallowed as already reported" \
+  || bad "and its fresh sentinel is handed back, not swallowed as already reported" "exit $rc: $out"
+out=$("$FAN" wait --any --id a1 --timeout 3 2>&1); rc=$?
+grep -q "no unreported units" <<<"$out" \
+  && ok "and only once — that sentinel is now handed back like any other" \
+  || bad "and only once — that sentinel is now handed back like any other" "exit $rc: $out"
+
 for u in a1 a3 a4; do "$FAN" cleanup --id "$u" >/dev/null 2>&1; done
 
 echo

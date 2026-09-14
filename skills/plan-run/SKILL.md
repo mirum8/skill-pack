@@ -751,6 +751,13 @@ For each wave, in wave order:
    everything, and is how a caller that lost its place picks it up again. Do not poll `status` in
    place of `--any`: deciding "is it done yet" by re-reading a report on a timer is the judgement
    this script exists to take off you.
+
+   Once means once **per sentinel**. A failed unit left standing can be resumed in place when what
+   halted it is cleared, and the sentinel it writes then is handed back by `--any` like any other.
+   Delete its old sentinel (the `sentinel=` line of the spawn output) before it resumes: with the
+   old one still on disk, `--any` has nothing to wait for and answers "no unreported units" until
+   the fresh one lands. Never `cleanup` a live unit to re-arm the wait — that removes the worktree
+   the resumed run is working in.
 6. **A unit that failed or stalled is left standing** — workspace open, worktree in place, both named
    in the report. A stall is usually a question waiting for a human, and that state is the only
    evidence of what went wrong.
