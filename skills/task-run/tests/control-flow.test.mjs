@@ -1589,6 +1589,17 @@ test('Codex plan review unavailable is a hard stop — no stand-in reviewer', as
   assert.equal(out.stopped, 'codex-plan-review-unavailable')
 })
 
+test('the halt reason counts the Codex dispatches actually made, not the retry bound', async () => {
+  const terminal = await run({ review: { ran: false, blockedCause: 'missing-cli', findings: [], note: 'codex CLI missing' } })
+  assert.equal(terminal.counts['codex-plan-review#1'], 1)
+  assert.match(terminal.out.planReview.reason, /1 dispatch,/)
+  assert.doesNotMatch(terminal.out.planReview.reason, /3 attempts/)
+
+  const transient = await run({ review: { ran: false, blockedCause: 'job-died', findings: [], note: 'job died' } })
+  assert.equal(transient.counts['codex-plan-review#1'], 3)
+  assert.match(transient.out.planReview.reason, /3 dispatches,/)
+})
+
 test('no source in args stops before anything is spawned', async () => {
   const { out, counts } = await run({ args: {} })
   assert.equal(out.stopped, 'no-source')

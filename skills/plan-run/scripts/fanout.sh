@@ -45,7 +45,8 @@
 #                          a failed unit is deliberately left standing, and
 #                          without that it would be re-reported forever.
 #   status                 one line per unit: live | ok | failed | stalled.
-#   cleanup --id U         close the workspace, remove the worktree, free a slot.
+#   cleanup --id U         close the workspace, shut down the Codex broker keyed to
+#                          the unit's path, remove the worktree, free a slot.
 #                          Refuses a tree with uncommitted changes -- a unit that
 #                          reported success and left a dirty tree did not finish,
 #                          and removing it would remove the evidence.
@@ -216,6 +217,34 @@ close_workspace() {                 # close_workspace <workspace_id>; 0 = closed
       return 1 ;;
     *) say "herdr workspace close $ws failed (${HD_CODE:-no code}): $HD_MSG"; return 1 ;;
   esac
+}
+
+# The Codex companion keeps one broker per workspace PATH and reuses it for as long as its socket
+# answers, and closing a unit's workspace does not take it down. So it outlives the worktree with its
+# cwd deleted, and the next unit cut at the same path hands every Codex job to it: each dies at
+# startup with "failed to load configuration", and the plan review halts a phase over a healthy
+# tree. The plugin's own SessionEnd hook is the teardown, run here against the unit's path.
+#
+# The caller's environment is scrubbed first. An orchestrator is itself a session with the plugin,
+# and the hook falls back to the broker the environment names when the path has none of its own --
+# which would take down the orchestrator's broker mid-wave. CLAUDE_PLUGIN_DATA is set rather than
+# inherited for the same reason: it names whichever plugin's hook exported it.
+#
+# A shutdown that fails is named and never holds a slot: the worktree is going either way, and what
+# is left behind is a stale process, not work.
+stop_codex_broker() {               # stop_codex_broker <dir>; never fails its caller
+  local scripts="$HOME/.claude/plugins/marketplaces/openai-codex/plugins/codex/scripts"
+  [ -f "$scripts/session-lifecycle-hook.mjs" ] \
+    || scripts=$(ls -1d "$HOME"/.claude/plugins/cache/openai-codex/codex/*/scripts 2>/dev/null | sort -V | tail -n1) \
+    || scripts=
+  [ -n "$scripts" ] && [ -f "$scripts/session-lifecycle-hook.mjs" ] || return 0
+  command -v node >/dev/null 2>&1 || return 0
+  python3 -c 'import json,sys; print(json.dumps({"cwd": sys.argv[1]}))' "$1" \
+    | env -u CODEX_COMPANION_APP_SERVER_ENDPOINT -u CODEX_COMPANION_APP_SERVER_PID_FILE \
+          -u CODEX_COMPANION_APP_SERVER_LOG_FILE -u CODEX_COMPANION_SESSION_ID \
+          CLAUDE_PLUGIN_DATA="$HOME/.claude/plugins/data/codex-openai-codex" \
+          node "$scripts/session-lifecycle-hook.mjs" SessionEnd >/dev/null 2>&1 \
+    || say "could not shut down the Codex broker for $1 — a later unit at this path may see its Codex jobs die with \"failed to load configuration\"; kill the broker process whose cwd is that path"
 }
 # Written by `wait --any` when it hands a unit's verdict back, and removed with
 # the unit by `cleanup`. It exists because the caller is REQUIRED to leave a
@@ -472,6 +501,9 @@ do_spawn() {
   if hd agent get "$aname"; then
     die "spawn: the herdr agent name '$aname' is already live — another unit or another fan-out holds it; use a shorter or more distinct --id"
   fi
+
+  # The path is free, so any broker still keyed to it belongs to a unit that is gone.
+  stop_codex_broker "$dir"
 
   git worktree add --detach "$dir" "$base" >/dev/null \
     || die "spawn: git worktree add --detach '$dir' '$base' failed"
@@ -797,6 +829,7 @@ do_cleanup() {
   # slot that could not be freed must not be reported as freed, and the rec is what `status` and the
   # cap read to know the unit is still holding one.
   close_workspace "$ws" || die "cleanup: '$id' still holds its slot — its worktree and rec are left in place"
+  [ -n "$dir" ] && stop_codex_broker "$dir"
   [ -d "$dir" ] && git worktree remove "$dir" >/dev/null 2>&1 || true
   git worktree prune >/dev/null 2>&1 || true
   rm -f "$r" "$(sentinel "$id")" "$(reported "$id")"

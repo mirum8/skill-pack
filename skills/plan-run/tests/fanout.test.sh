@@ -449,6 +449,77 @@ rm -f "$TMP/wt-p4/scratch.txt"
 "$FAN" cleanup --id p4 >/dev/null 2>&1
 
 echo
+echo "== a unit's Codex broker goes down with its worktree =="
+# The Codex companion keeps one broker per workspace PATH and reuses it for as long as its socket
+# answers. A broker outliving its worktree keeps answering with its cwd deleted, so the next unit cut
+# at the same path hands every Codex job to it and each dies with "failed to load configuration" --
+# a plan review that halts the phase over a tree that is perfectly healthy. The plugin's own
+# SessionEnd hook is what shuts a broker down; the stub below stands in for it and records what it
+# was handed. A HOME holding it keeps the developer's real plugin out of the suite.
+if command -v node >/dev/null 2>&1; then
+  CXH="$TMP/cxhome"; CXS="$CXH/.claude/plugins/marketplaces/openai-codex/plugins/codex/scripts"
+  mkdir -p "$CXS"
+  cat > "$CXS/session-lifecycle-hook.mjs" <<'HOOK_EOF'
+import fs from 'node:fs'
+const { cwd } = JSON.parse(fs.readFileSync(0, 'utf8'))
+fs.appendFileSync(process.env.CX_HOOK_LOG, JSON.stringify({
+  event: process.argv[2], cwd, exists: fs.existsSync(cwd),
+  data: process.env.CLAUDE_PLUGIN_DATA ?? null,
+  endpoint: process.env.CODEX_COMPANION_APP_SERVER_ENDPOINT ?? null,
+  session: process.env.CODEX_COMPANION_SESSION_ID ?? null,
+}) + '\n')
+if (process.env.CX_HOOK_FAIL) process.exit(1)
+HOOK_EOF
+  export CX_HOOK_LOG="$TMP/cxhook.log"; : > "$CX_HOOK_LOG"
+  hook_field() { python3 -c 'import json,sys
+rows=[json.loads(l) for l in open(sys.argv[1]) if l.strip()]
+print(rows[int(sys.argv[2])].get(sys.argv[3]) if len(rows) > int(sys.argv[2]) else "<no call>")' "$CX_HOOK_LOG" "$1" "$2"; }
+  # The orchestrator is itself a Claude session with the Codex plugin, so its environment names ITS
+  # broker, and the hook falls back to that endpoint when the path has none of its own.
+  orch_env=(CODEX_COMPANION_APP_SERVER_ENDPOINT=unix:/orchestrator/broker.sock
+            CODEX_COMPANION_SESSION_ID=orchestrator CLAUDE_PLUGIN_DATA="$TMP/some-other-plugin")
+  WTB="$(cd "$TMP" && pwd -P)/wt-pb"
+
+  out=$(env "${orch_env[@]}" HOME="$CXH" "$FAN" spawn --id pb --dir "$TMP/wt-pb" --base main --prompt x 2>&1); rc=$?
+  [[ $rc == 0 ]] && ok "a unit spawns with the Codex plugin present" || bad "a unit spawns with the Codex plugin present" "exit $rc: $out"
+  [[ $(hook_field 0 event) == SessionEnd && $(hook_field 0 cwd) == "$WTB" ]] \
+    && ok "spawn shuts down any broker left at the unit's path" \
+    || bad "spawn shuts down any broker left at the unit's path" "$(cat "$CX_HOOK_LOG")"
+  [[ $(hook_field 0 exists) == False ]] \
+    && ok "before the worktree is cut, so the new unit never reaches the old broker" \
+    || bad "before the worktree is cut, so the new unit never reaches the old broker" "$(cat "$CX_HOOK_LOG")"
+  [[ $(hook_field 0 data) == "$CXH/.claude/plugins/data/codex-openai-codex" ]] \
+    && ok "reading the Codex plugin's own state, not whichever plugin the caller's env names" \
+    || bad "reading the Codex plugin's own state, not whichever plugin the caller's env names" "$(hook_field 0 data)"
+  [[ $(hook_field 0 endpoint) == None && $(hook_field 0 session) == None ]] \
+    && ok "and never handed the orchestrator's own broker or session" \
+    || bad "and never handed the orchestrator's own broker or session" "$(cat "$CX_HOOK_LOG")"
+
+  out=$(env "${orch_env[@]}" HOME="$CXH" "$FAN" cleanup --id pb 2>&1); rc=$?
+  [[ $rc == 0 && ! -d "$WTB" ]] && ok "cleanup still removes the worktree" || bad "cleanup still removes the worktree" "exit $rc: $out"
+  [[ $(hook_field 1 event) == SessionEnd && $(hook_field 1 cwd) == "$WTB" && $(hook_field 1 exists) == True ]] \
+    && ok "cleanup shuts the unit's broker down while its worktree still exists" \
+    || bad "cleanup shuts the unit's broker down while its worktree still exists" "$(cat "$CX_HOOK_LOG")"
+  [[ $(hook_field 1 endpoint) == None && $(hook_field 1 session) == None ]] \
+    && ok "and never the orchestrator's" || bad "and never the orchestrator's" "$(cat "$CX_HOOK_LOG")"
+
+  "$FAN" spawn --id pc --dir "$TMP/wt-pc" --base main --prompt x >/dev/null 2>&1
+  out=$(CX_HOOK_FAIL=1 HOME="$CXH" "$FAN" cleanup --id pc 2>&1); rc=$?
+  [[ $rc == 0 && ! -d "$TMP/wt-pc" ]] \
+    && ok "a broker shutdown that fails does not hold the slot" \
+    || bad "a broker shutdown that fails does not hold the slot" "exit $rc: $out"
+  grep -q "Codex broker" <<<"$out" && ok "and is named, never swallowed" || bad "and is named, never swallowed" "$out"
+
+  "$FAN" spawn --id pd --dir "$TMP/wt-pd" --base main --prompt x >/dev/null 2>&1
+  out=$(HOME="$TMP/no-codex-home" "$FAN" cleanup --id pd 2>&1); rc=$?
+  [[ $rc == 0 && ! -d "$TMP/wt-pd" ]] \
+    && ok "a machine without the Codex plugin cleans up exactly as before" \
+    || bad "a machine without the Codex plugin cleans up exactly as before" "exit $rc: $out"
+else
+  echo "  skip node is not installed, so the Codex broker cases cannot run"
+fi
+
+echo
 echo "== a unit is finished only when its report AND the repo agree =="
 finish_unit p1 "$TMP/wt-p1" phase-one ok
 out=$("$FAN" wait --id p1 --timeout 5 2>&1); rc=$?

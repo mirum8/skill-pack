@@ -2047,7 +2047,9 @@ ${checks.map((c, i) => `     ${i + 1}. ${c}`).join('\n')}
   // at all. A re-dispatch runs Codex again; it never substitutes a stand-in reviewer, and if all
   // three attempts come back dead the run still halts.
   let lastCodexNote = ''
-  const askCodex = (pass, prior) => reliable(`codex-plan-review#${pass}`, 'Plan-review', async () => {
+  let codexDispatches = 0
+  const askCodex = (pass, prior) => reliable(`codex-plan-review#${pass}`, 'Plan-review', async (attempt) => {
+    codexDispatches = attempt
     const r = await agent(
     `Run the REAL Codex over the PLAN FILE ${planPath} (not a diff) and challenge it.
      Task source: ${rawSource}
@@ -2099,13 +2101,17 @@ ${checks.map((c, i) => `     ${i + 1}. ${c}`).join('\n')}
   let review = await askCodex(1)
   // Step 2 has no fallback: the plan is critiqued by the real Codex or not at all.
   if (blocked(review)) {
-    log('run-task-implement: the Codex plan review could NOT run after 3 attempts — stopping. No stand-in reviewer is acceptable here.')
+    // The count is what was dispatched, never the retry bound: a terminal cause is dispatched once,
+    // and "3 attempts" over a single dispatch sends the reader looking for flakiness in a failure
+    // that reproduces every time.
+    const dispatches = `${codexDispatches} dispatch${codexDispatches === 1 ? '' : 'es'}`
+    log(`run-task-implement: the Codex plan review could NOT run after ${dispatches} — stopping. No stand-in reviewer is acceptable here.`)
     // The initializer's reason describes a run that stopped BEFORE this step, and leaving it here
     // contradicted the halt's own detail: `reason` said "stopped before the plan review" while the
     // detail described Codex dying midway through reviewing the plan file. `reason` is the field a
     // caller reads programmatically, so the two disagreeing means the machine-readable half was
     // the wrong one.
-    planReview.reason = 'the Codex plan review was dispatched and could not complete — 3 attempts, no critique'
+    planReview.reason = `the Codex plan review was dispatched and could not complete — ${dispatches}, no critique`
     return await stop('codex-plan-review-unavailable', { detail: (review && review.note) || lastCodexNote || '' })
   }
   planReview.ran = true
