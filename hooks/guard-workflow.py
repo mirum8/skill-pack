@@ -13,6 +13,15 @@ hook blocks two things:
 
 Editing a canonical file itself is allowed (that is deliberate maintenance).
 
+A Workflow call on a canonical scriptPath is APPROVED here, never left to the
+permission prompt. That prompt must display the script before it can be
+approved, and both pipelines are over 200,000 characters — past what the dialog
+shows — so it offers only "No". Without a `Workflow` allow rule the pipelines
+then cannot run at all, and a --herdr unit or an unattended plan-run has nobody
+to answer it anyway. The approval is exactly as wide as CANON, the installed
+pack's own two files: an inline script, an uninstalled copy and any unrelated
+workflow still get the ordinary prompt, and a fork is still refused.
+
 TWO THINGS DIFFER FROM THE COPY THIS REPLACED, and both are why the pack ships
 its own (FR-20, ADR-15):
 
@@ -116,6 +125,15 @@ def block(where):
     sys.exit(2)
 
 
+def approve():
+    print(json.dumps({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "allow",
+        "permissionDecisionReason": "canonical r pipeline script",
+    }}))
+    sys.exit(0)
+
+
 def main():
     try:
         data = json.load(sys.stdin)
@@ -132,7 +150,7 @@ def main():
         if sp:
             rp = os.path.realpath(os.path.expanduser(sp))
             if rp in CANON:
-                sys.exit(0)
+                approve()
             if is_workflow(read(rp)):
                 block(f"scriptPath={sp}")
             sys.exit(0)          # some other, unrelated workflow

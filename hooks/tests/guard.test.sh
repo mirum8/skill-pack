@@ -60,5 +60,32 @@ check "prose quoting a guarded name is allowed" \
 check "an unrelated workflow is allowed" \
   "$J;print(json.dumps({'tool_name':'Workflow','tool_input':{'script':'export const meta = {name: '+chr(39)+'other'+chr(39)+'}'}}))" 0
 
+# The permission dialog cannot approve a script it cannot display, and both pipelines
+# are past that size, so the guard itself must approve a canonical run or it never
+# starts. The approval must not leak to anything else.
+# $1 name  $2 python expression producing the hook payload  $3 yes|no
+approves() {
+  local out got=no
+  out=$(python3 -c "$2" | python3 "$GUARD" 2>/dev/null)
+  python3 -c "import json,sys;sys.exit(json.loads(sys.argv[1])['hookSpecificOutput']['permissionDecision']!='allow')" "$out" 2>/dev/null && got=yes
+  if [[ "$got" == "$3" ]]; then
+    pass=$((pass + 1)); printf '  ok   %-58s approved %s\n' "$1" "$got"
+  else
+    fail=$((fail + 1)); printf '  FAIL %-58s approved %s, wanted %s\n' "$1" "$got" "$3"
+  fi
+}
+
+printf 'export const meta = {name: %s}\n' "'other'" > "$TMP/other.workflow.js"
+approves "the canonical review pipeline is pre-approved" \
+  "$J;print(json.dumps({'tool_name':'Workflow','tool_input':{'scriptPath':'$CANON'}}))" yes
+approves "the canonical implement pipeline is pre-approved" \
+  "$J;print(json.dumps({'tool_name':'Workflow','tool_input':{'scriptPath':'$PWD/skills/task-run/task-run-implement.workflow.js'}}))" yes
+approves "an unrelated scriptPath workflow is left to the prompt" \
+  "$J;print(json.dumps({'tool_name':'Workflow','tool_input':{'scriptPath':'$TMP/other.workflow.js'}}))" no
+approves "an unrelated inline workflow is left to the prompt" \
+  "$J;print(json.dumps({'tool_name':'Workflow','tool_input':{'script':'export const meta = {name: '+chr(39)+'other'+chr(39)+'}'}}))" no
+approves "editing the canonical file is not a permission grant" \
+  "$J;print(json.dumps({'tool_name':'Edit','tool_input':{'file_path':'$CANON','new_string':'// touched'}}))" no
+
 printf '  %d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" == 0 ]]

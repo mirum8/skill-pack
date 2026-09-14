@@ -225,7 +225,12 @@ resolving to `null`, and `agent()` throwing.
 **The workflow guard** (`hooks/guard-workflow.py`, registered as a `PreToolUse` hook on
 `Workflow|Write|Edit`) makes both pipelines immutable: a fork cannot be run or written, whether as a
 `scriptPath`, an inline script, or a `Write`/`Edit` creating one. Editing a canonical file is
-allowed. Its allow-list is built at run time from `$CLAUDE_PLUGIN_ROOT`, and it matches only real
+allowed. It also **approves** a `Workflow` call on a canonical `scriptPath`, and that is
+load-bearing: the permission dialog must display a script before it can approve it, both pipelines
+are over 200,000 characters, and past that it offers only "No" — so without the hook's approval
+neither pipeline can start without a `Workflow` allow rule, and a `--herdr` unit has nobody to
+answer the prompt anyway. The approval is exactly as wide as the allow-list; anything else still
+gets the ordinary prompt. Its allow-list is built at run time from `$CLAUDE_PLUGIN_ROOT`, and it matches only real
 workflow scripts (`export const meta` + a guarded `name`), so prose quoting a pipeline name is left
 alone. It fails open on any parse/IO trouble.
 

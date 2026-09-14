@@ -377,8 +377,13 @@ allow-list is built at run time from `$CLAUDE_PLUGIN_ROOT`, so it travels with t
 pack, and it matches only real workflow scripts — prose that merely quotes a
 guarded pipeline name is left alone.
 
-`hooks/tests/guard.test.sh` covers both halves: the canonical pipelines run, forks
-do not.
+It also approves a `Workflow` call on either canonical script, so no permission
+rule is needed to run them. The permission dialog must display a script before it
+can approve it, and both pipelines are too large for it — past that size it offers
+only "No". The approval covers the installed pack's own two files and nothing else.
+
+`hooks/tests/guard.test.sh` covers every half: the canonical pipelines run and are
+approved, forks do not run, and nothing else is approved.
 
 ### Eval suites
 
