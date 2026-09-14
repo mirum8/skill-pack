@@ -1726,6 +1726,44 @@ const markLedger = async (key, extra, phaseName) => {
 }
 
 // --- Phase 2: the plan -------------------------------------------------------
+// On a resume the tree is read against the ledger before anything else touches the adopted plan —
+// before the Codex review an unstamped plan gets, and before anything is dispatched into the tree.
+// A stop here was decidable before that review started, so reviewing first only spends the most
+// expensive step on the adopted-plan path for a verdict the stop throws away. Two stops, both
+// fail-closed. A ledger that cannot be read leaves no way to tell finished work from stray work. And
+// a tree holding changes that no ledger line claims holds work no step of this pipeline recorded
+// writing — a Codex job that kept running after a stop is the recorded case, and it left a whole
+// backend nobody had reviewed or compiled. Dispatching the implementers over it would build the task
+// on that; deleting it would destroy what may be somebody's work. Only a person can say which, so
+// the run stops and names the files.
+//
+// The tree is read on the feature branch, because changes already committed there count, so the
+// checkout started before Phase 2 is awaited here. A checkout that failed or stayed on base reads
+// nothing: that tree is not the one the ledger describes, and Phase 4's branch stops end the run
+// before any code is written anyway.
+let ledger = null
+if (resuming && branchP) {
+  const early = await branchP
+  const here = !blocked(early) && early.onBranch ? String(early.onBranch).trim() : ''
+  if (here && here !== src.base) {
+    ledger = await reliable('ledger-read', 'Plan', () => agent(
+      `Read this task's resume ledger. Run exactly this from the repo root and return the JSON it
+       prints EXACTLY as printed — every field, unchanged. Change nothing, commit nothing:
+
+         python3 "${LEDGER_PY}" read --plan "${planPath}" --base "${src.base}"`,
+      { label: 'ledger-read', phase: 'Plan', schema: LEDGER_READ, ...GP, ...ECHO }))
+    if (blocked(ledger) || ledger.error) {
+      const why = (ledger && ledger.error) || 'the ledger read returned nothing'
+      log(`run-task-implement: cannot read the resume ledger of ${planPath} (${why}) — stopping rather than guessing which work in the tree is finished`)
+      return await stop('resume-ledger-unread', { branch: here, base: src.base, detail: why })
+    }
+    if ((ledger.unclaimed || []).length) {
+      log(`run-task-implement: the tree holds ${ledger.unclaimed.length} changed file(s) that no step of this pipeline recorded writing (${ledger.unclaimed.slice(0, 8).join(', ')}${ledger.unclaimed.length > 8 ? ', …' : ''}) — stopping so a person decides whether to keep them; nothing was reviewed or dispatched over them`)
+      return await stop('resume-unclaimed-tree', { branch: here, base: src.base, unclaimed: ledger.unclaimed })
+    }
+  }
+}
+
 // Resume: an adopted plan is never re-planned, and is re-reviewed only when it carries no stamp.
 phase('Plan')
 if (resuming) log(reviewedEarlier
@@ -2527,32 +2565,6 @@ if (onBranch === src.base) {
   return await stop('branch-not-created', { base: src.base, wanted: wantBranch, detail: br.note || '' })
 }
 if (onBranch !== wantBranch) log(`run-task-implement: on "${onBranch}", not the requested "${wantBranch}" — continuing (it is a feature branch, not ${src.base}), but the caller merges what the handoff names`)
-
-// On a resume the tree is read against the ledger before anything is dispatched into it. Two stops,
-// both fail-closed. A ledger that cannot be read leaves no way to tell finished work from stray
-// work. And a tree holding changes that no ledger line claims holds work no step of this pipeline
-// recorded writing — a Codex job that kept running after a stop is the recorded case, and it left a
-// whole backend nobody had reviewed or compiled. Dispatching the implementers over it would build
-// the task on that; deleting it would destroy what may be somebody's work. Only a person can say
-// which, so the run stops and names the files.
-let ledger = null
-if (resuming) {
-  ledger = await reliable('ledger-read', 'Implement', () => agent(
-    `Read this task's resume ledger. Run exactly this from the repo root and return the JSON it
-     prints EXACTLY as printed — every field, unchanged. Change nothing, commit nothing:
-
-       python3 "${LEDGER_PY}" read --plan "${planPath}" --base "${src.base}"`,
-    { label: 'ledger-read', phase: 'Implement', schema: LEDGER_READ, ...GP, ...ECHO }))
-  if (blocked(ledger) || ledger.error) {
-    const why = (ledger && ledger.error) || 'the ledger read returned nothing'
-    log(`run-task-implement: cannot read the resume ledger of ${planPath} (${why}) — stopping rather than guessing which work in the tree is finished`)
-    return await stop('resume-ledger-unread', { branch: onBranch, base: src.base, detail: why })
-  }
-  if ((ledger.unclaimed || []).length) {
-    log(`run-task-implement: the tree holds ${ledger.unclaimed.length} changed file(s) that no step of this pipeline recorded writing (${ledger.unclaimed.slice(0, 8).join(', ')}${ledger.unclaimed.length > 8 ? ', …' : ''}) — stopping so a person decides whether to keep them; nothing was dispatched over them`)
-    return await stop('resume-unclaimed-tree', { branch: onBranch, base: src.base, unclaimed: ledger.unclaimed })
-  }
-}
 
 // Route by area, and split only when the work genuinely spans both — one subagent per area, in
 // parallel, each owning a disjoint slice. A subagent handed only "build your slice" will happily

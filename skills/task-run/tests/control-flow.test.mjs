@@ -2265,6 +2265,33 @@ test('resume: changes in the tree that no ledger line claims stop the run before
   assert.equal(counts['build#1'], undefined)
 })
 
+test('resume: the tree is checked before a plan with no stamp is reviewed again', async () => {
+  // A resume that is going to stop on the tree must not first spend a Codex plan review: that review
+  // is the most expensive thing the adopted-plan path runs, and its verdict is thrown away by a stop
+  // that was decidable before it started.
+  const files = ['pom.xml', 'src/main/java/App.java']
+  const { out, counts, seq } = await run({ source: RESUME({ planReviewed: '' }), review: OK_REVIEW, planfix: OK_FIX,
+    ledger: LEDGER({ reviewed: '', tree: files, unclaimed: files }) })
+  assert.equal(out.stopped, 'resume-unclaimed-tree')
+  assert.equal(counts['codex-plan-review#1'], undefined)
+  assert.equal(counts['planner'], undefined)
+  assert.ok(seq.indexOf('branch') < seq.indexOf('ledger-read'), 'the tree is read on the feature branch')
+})
+
+test('resume: an unreadable ledger stops before the plan review too', async () => {
+  const { out, counts } = await run({ source: RESUME({ planReviewed: '' }), review: OK_REVIEW, planfix: OK_FIX,
+    overrides: { 'ledger-read': null } })
+  assert.equal(out.stopped, 'resume-ledger-unread')
+  assert.equal(counts['codex-plan-review#1'], undefined)
+})
+
+test('resume: a checkout that stays on base reads no ledger and stops as a branch failure', async () => {
+  const { out, counts } = await run({ source: RESUME(), overrides: { branch: { onBranch: 'main' } } })
+  assert.equal(out.stopped, 'branch-not-created')
+  assert.equal(counts['ledger-read'], undefined, 'the tree on base is not the tree the ledger describes')
+  assert.deepEqual(implementLabels(counts), [])
+})
+
 test('resume: a ledger that cannot be read stops the run — dead, throwing, or reporting an error', async () => {
   for (const val of [null, THROW, LEDGER({ error: 'fatal: not a git repository' })]) {
     const { out, counts } = await run({ source: RESUME(), overrides: { 'ledger-read': val } })
