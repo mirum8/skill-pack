@@ -92,7 +92,8 @@ const SOURCE = {
   type: 'object', additionalProperties: false,
   required: ['kind', 'slug', 'branch', 'base', 'taskIntent', 'criteria', 'profile',
              'profileReason', 'uiTouched', 'uiVisualChange', 'hasBackend', 'hasFrontend',
-             'buildTool', 'exploreAspects', 'planPath', 'planStatus', 'planReviewed', 'branchExists'],
+             'buildTool', 'exploreAspects', 'planPath', 'planStatus', 'planReviewed', 'branchExists',
+             'branchHasBase'],
   properties: {
     kind: { type: 'string', enum: ['issue', 'todo', 'item', 'text'] },
     slug: { type: 'string' },
@@ -134,6 +135,9 @@ const SOURCE = {
     // completed, so it is the one thing a later run can stand on to skip that review.
     planReviewed: { type: 'string' },
     branchExists: { type: 'boolean' },
+    // Whether an existing branch already holds base. An existing branch is checked out and kept as
+    // it is, so this is what decides whether that checkout moves the tree back to an older commit.
+    branchHasBase: { type: 'boolean' },
     blockedReason: { type: 'string' },   // e.g. gh missing/unauthenticated, source unreadable
   },
 }
@@ -988,7 +992,10 @@ ${inRepo}
    8. RESUME STATE: planPath = ".task-plans/<slug>.md". Report planStatus from its "status:"
       header if the file exists (else "none"), planReviewed as the text after "reviewed:" in that
       same header, verbatim ("" when the file or the line is absent), and branchExists from
-      \`git rev-parse --verify <branch>\`. Do NOT create the branch or the plan file here.
+      \`git rev-parse --verify <branch>\`. When the branch exists, set branchHasBase from
+      \`git merge-base --is-ancestor <base> <branch>\`: true ONLY when it exits 0, false on any
+      other exit. When the branch does not exist, branchHasBase is true. Do NOT create the branch
+      or the plan file here.
    9. exploreAspects: the different aspects of the codebase that must be mapped before planning,
       one short instruction each, along the change's NATURAL SEAMS (e.g. "persistence + data model
       + migrations", "the web/UI layer + templates", "the closest existing feature + its tests").
@@ -1001,6 +1008,18 @@ if (blocked(src)) return { stopped: 'source-unresolved' }
 if (src.blockedReason) {
   log(`run-task-implement: cannot start — ${src.blockedReason}`)
   return { stopped: 'source-blocked', detail: src.blockedReason }
+}
+// An existing branch is checked out and kept exactly as it is, so it must already hold base. One cut
+// before a later commit on base — the commit that preserved this task's plan is the recorded case —
+// takes the tree back to that older commit: the checkout deletes the plan base holds, and the run
+// builds on the old commit while believing it resumed. Resetting or rebasing it decides the fate of
+// any commits of its own, which is a person's call, so the run stops before it has spent an agent.
+// An unreported answer counts as "does not hold base": nothing else stands between that branch and
+// the checkout.
+if (src.branchExists && src.branchHasBase !== true) {
+  const detail = `${src.branch} already exists and does not contain ${src.base} — checking it out would move the tree back to an older commit. With no commits of its own (\`git log ${src.base}..${src.branch}\` empty) it can be reset to ${src.base}; with some, a person decides whether to rebase or discard them`
+  log(`run-task-implement: cannot start — ${detail}`)
+  return { stopped: 'branch-behind-base', branch: src.branch, base: src.base, detail }
 }
 let profile = forcedProfile || (TIERS.includes(src.profile) ? src.profile : 'full')
 let profileEscalated = false
@@ -1755,6 +1774,14 @@ if (resuming && branchP) {
     if (blocked(ledger) || ledger.error) {
       const why = (ledger && ledger.error) || 'the ledger read returned nothing'
       log(`run-task-implement: cannot read the resume ledger of ${planPath} (${why}) — stopping rather than guessing which work in the tree is finished`)
+      return await stop('resume-ledger-unread', { branch: here, base: src.base, detail: why })
+    }
+    // Phase 0 read the plan on base and this read is on the branch, so the two can disagree. A plan
+    // that is gone or not yet adopted here reads back as a clean ledger with nothing claimed, which
+    // is exactly the answer that would let the run adopt a plan that is not on disk.
+    if (!['implementing', 'done'].includes(ledger.planStatus)) {
+      const why = `the plan on ${here} reads status "${ledger.planStatus}", where ${src.base} read "${src.planStatus}"`
+      log(`run-task-implement: ${why} — stopping rather than adopting a plan that is not in this tree`)
       return await stop('resume-ledger-unread', { branch: here, base: src.base, detail: why })
     }
     if ((ledger.unclaimed || []).length) {

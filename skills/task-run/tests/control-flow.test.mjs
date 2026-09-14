@@ -2183,7 +2183,7 @@ const NOTHING = { recorded: false, matches: false }
 const MATCHES = { recorded: true, matches: true }
 const LEDGER = (over = {}) => ({ planStatus: 'implementing', reviewed: STAMP, slices: [], build: NOTHING,
   review: NOTHING, tree: [], unclaimed: [], error: '', ...over })
-const RESUME = (over = {}) => baseSource({ planStatus: 'implementing', branchExists: true, planReviewed: STAMP, ...over })
+const RESUME = (over = {}) => baseSource({ planStatus: 'implementing', branchExists: true, branchHasBase: true, planReviewed: STAMP, ...over })
 const implementLabels = (counts) => Object.keys(counts).filter((l) => l.startsWith('implement'))
 
 test('resume: an adopted plan carrying a review stamp skips planning and the plan review, and names the stamp', async () => {
@@ -2296,6 +2296,40 @@ test('resume: a ledger that cannot be read stops the run — dead, throwing, or 
   for (const val of [null, THROW, LEDGER({ error: 'fatal: not a git repository' })]) {
     const { out, counts } = await run({ source: RESUME(), overrides: { 'ledger-read': val } })
     assert.equal(out.stopped, 'resume-ledger-unread', `for ${String(val && val.error || val)}`)
+    assert.deepEqual(implementLabels(counts), [])
+  }
+})
+
+test('an existing branch that does not contain base stops the run before anything is dispatched', async () => {
+  // The recorded shape: the phase branch was cut before the commit that preserved the plan on main.
+  // Checking it out as instructed deletes the plan file, and the ledger read over the missing file
+  // comes back clean — so the run adopted a plan that was not on disk and built on the old commit.
+  for (const source of [RESUME({ branchHasBase: false }), baseSource({ branchExists: true, branchHasBase: false })]) {
+    const { out, counts } = await run({ source, review: OK_REVIEW, planfix: OK_FIX })
+    assert.equal(out.stopped, 'branch-behind-base', `planStatus ${source.planStatus}`)
+    assert.equal(out.branch, 'issue-81-import')
+    assert.equal(out.base, 'main')
+    assert.equal(counts['branch'], undefined, 'the checkout that would delete the plan never runs')
+    assert.deepEqual(Object.keys(counts).filter((l) => l.startsWith('explore')), [])
+    assert.deepEqual(implementLabels(counts), [])
+  }
+})
+
+test('an existing branch whose ancestry went unreported is treated as not containing base', async () => {
+  const { out, counts } = await run({ source: RESUME({ branchHasBase: undefined }) })
+  assert.equal(out.stopped, 'branch-behind-base')
+  assert.equal(counts['branch'], undefined)
+})
+
+test('resume: a ledger read on the feature branch that finds no adopted plan stops the run', async () => {
+  // Whatever removed the plan between Phase 0's read on base and the read on the branch, the ledger
+  // then describes a tree with no plan in it, and every judgement it returns is about nothing.
+  for (const planStatus of ['none', 'reviewing']) {
+    const { out, counts } = await run({ source: RESUME({ planReviewed: '' }), review: OK_REVIEW, planfix: OK_FIX,
+      ledger: LEDGER({ planStatus, reviewed: '' }) })
+    assert.equal(out.stopped, 'resume-ledger-unread', `for planStatus ${planStatus}`)
+    assert.match(out.detail, new RegExp(planStatus))
+    assert.equal(counts['codex-plan-review#1'], undefined)
     assert.deepEqual(implementLabels(counts), [])
   }
 })

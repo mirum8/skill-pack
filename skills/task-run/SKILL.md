@@ -143,7 +143,8 @@ A `stopped` result is a real halt, not a hint to carry on by hand. **Never re-ru
 | `branch-failed` / `branch-not-created` / `branch-name-missing` | the run could not get off the base branch (the checkout never happened, or Phase 0 produced no usable branch name) | Report it. **Never continue on base** — the whole point of the halt is that the diff would land on `main` and the finish step would try to merge `main` into itself. |
 | `implement-blocked` | an implementer reports the plan is wrong or blocked | Surface *its* reason. Don't work around it. When the work split by area, read `implemented` / `filesChanged`: the implementers that finished first left a **real uncommitted diff on the branch**, so report both halves — a halt described as "nothing happened" sends the next run planning against a tree it thinks is clean. |
 | `resume-unclaimed-tree` | the adopted plan's tree holds changes that no line of its ledger claims — work no step of this pipeline recorded writing, such as a job that kept running after a stop | Report the listed `unclaimed` files and **ask the user** whether to keep or discard them. Never delete them yourself and never re-run over them: they are either somebody's work or unverified output, and only the user knows which. |
-| `resume-ledger-unread` | the ledger in the adopted plan could not be read — the helper died, or git could not answer for the base | Report it. A resume that cannot tell finished work from stray work must not guess. |
+| `branch-behind-base` | the feature branch already exists and does not contain base, so checking it out would move the tree back to an older commit — deleting a plan base holds and building on stale code | Report `detail`. When `git log <base>..<branch>` is empty the branch holds nothing of its own and the user may reset it to base; when it holds commits, **ask the user** whether to rebase or discard them. Never reset, rebase or delete it yourself. |
+| `resume-ledger-unread` | the ledger in the adopted plan could not be read — the helper died, git could not answer for the base, or the plan on the feature branch is missing or not adopted where base had one | Report it. A resume that cannot tell finished work from stray work must not guess. |
 | `build-red-preexisting` | red build from failures that already fail on base | Surface them. Never fix or weaken an out-of-scope test to force green. |
 | `build-red` | the in-scope build is still red after 3 bounded attempts | Surface the remaining failures. |
 
@@ -220,7 +221,8 @@ A task-run run **owns one feature branch** and ends by merging it into base. **T
   - an adopted plan is never re-planned; at `full` it is re-reviewed unless it carries a `reviewed:` stamp;
   - a slice whose files are unchanged is not dispatched again, and one whose files moved is;
   - the build is skipped only when nothing was re-dispatched and a green build or passed review was recorded over this exact tree, and `resume.reviewDone` skips Step 5 on the same condition;
-  - changes in the tree that no ledger line claims stop the run as `resume-unclaimed-tree`, for the user to keep or discard — never built on.
+  - changes in the tree that no ledger line claims stop the run as `resume-unclaimed-tree`, for the user to keep or discard — never built on;
+  - an existing branch that does not contain base stops the run as `branch-behind-base` before anything is dispatched, because checking it out would take the plan away with the newer commits.
   The ledger lives in the plan file and nowhere else, because the plan is the one artifact that travels with the work; delete the plan file to force a fresh plan and review. Never re-create the branch, never spawn a duplicate.
 - **The branch-exists check (inside the implement workflow)** and the **idempotent merge (Step 6)** are the deterministic backstops — honor both so a resumed or re-invoked run can't double-branch or double-merge.
 

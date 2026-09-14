@@ -230,7 +230,10 @@ work that is gone, and a tree whose changes nothing claimed read as clean builds
 reviewed. That second case is a **stop** (`resume-unclaimed-tree`), never a guess in either direction:
 a Codex job that kept writing after a run was stopped left a whole uncompiled backend in a worktree,
 and neither building on it nor deleting it is a call a pipeline may make. An adopted full-tier plan
-with no stamp is reviewed again, because a plan file on disk is not evidence its review ran. The
+with no stamp is reviewed again, because a plan file on disk is not evidence its review ran. An
+existing feature branch that does not contain base is a stop too (`branch-behind-base`): it is
+checked out as-is, so it would take the tree back past the commit holding the plan, and the ledger
+read over a missing plan comes back clean. The
 ledger lives in the plan and **never in the stats store**: the plan travels with the branch and dies
 with the worktree, while a store row outlives the tree it describes, answers for the next tree cut
 at the same path — the same shape as a Codex broker keyed by path — and is best-effort by design.
