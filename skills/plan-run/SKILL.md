@@ -757,7 +757,9 @@ For each wave, in wave order:
    Delete its old sentinel (the `sentinel=` line of the spawn output) before it resumes: with the
    old one still on disk, `--any` has nothing to wait for and answers "no unreported units" until
    the fresh one lands. Never `cleanup` a live unit to re-arm the wait — that removes the worktree
-   the resumed run is working in.
+   the resumed run is working in. The resumed unit's implement half picks up from the ledger in its
+   plan file: finished slices are not redone, and a tree holding changes no step recorded stops it as
+   `resume-unclaimed-tree` for a person to decide.
 6. **A unit that failed or stalled is left standing** — workspace open, worktree in place, both named
    in the report. A stall is usually a question waiting for a human, and that state is the only
    evidence of what went wrong.

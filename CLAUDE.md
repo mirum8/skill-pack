@@ -48,6 +48,7 @@ bash skills/task-review/tests/worktree-deploy.test.sh       # main-vs-worktree +
 bash skills/test-app-create/tests/tui-session.test.sh       # the TUI driver's fail-closed contract
 bash skills/plan-report/tests/milestone_scope.test.sh       # milestone scope + the boundary predicate
 bash skills/plan-unblock/tests/resolve_scope.test.sh        # the Resolve-first parser + the gate
+bash skills/task-run/tests/plan-ledger.test.sh              # the resume ledger: matches, claims, the lock
 bash hooks/tests/guard.test.sh                             # workflow-guard behaviour
 bash hooks/tests/normalize-cd-paths.test.sh                # the cd rewrite + every case it declines
 bash lib/tests/stats.test.sh                               # stats sink + hook + reporter
@@ -216,6 +217,24 @@ an empty room in front of it, and `--unattended` keeps queueing rather than disp
 `Resolved:` stamp in the plan is the **single** record — never a copy in `tech-design.md`, which a
 `/r:spec-design` rewrite replaces wholesale, and that rewrite is exactly the follow-up a resolution
 tends to trigger. `--against` is what makes the stamp durable instead.
+
+**A stopped run resumes from a ledger in its plan file, and the ledger's judgements are a script.**
+Stops mid-phase are the common case, not the edge: the store holds 8 `plan-run` runs halted at
+`implement-stopped` against 4 that finished. So `.task-plans/<slug>.md` carries, beside `status:`, a
+`reviewed:` stamp written only after a real Codex plan review, a `slice <label>: done` line per
+implementer that returned clean, and `build: green` / `review: done` lines, each with a hash of what
+it covered. `task-run/scripts/plan-ledger.py` writes them and reads them back, and it alone decides
+what a resume may skip — a slice whose files still match, a build or review over an unchanged tree —
+because both wrong answers are confident ones: a slice called done over files that moved builds on
+work that is gone, and a tree whose changes nothing claimed read as clean builds on code nothing
+reviewed. That second case is a **stop** (`resume-unclaimed-tree`), never a guess in either direction:
+a Codex job that kept writing after a run was stopped left a whole uncompiled backend in a worktree,
+and neither building on it nor deleting it is a call a pipeline may make. An adopted full-tier plan
+with no stamp is reviewed again, because a plan file on disk is not evidence its review ran. The
+ledger lives in the plan and **never in the stats store**: the plan travels with the branch and dies
+with the worktree, while a store row outlives the tree it describes, answers for the next tree cut
+at the same path — the same shape as a Codex broker keyed by path — and is best-effort by design.
+Resume events are copied into the stats row as `resume` for measurement, and nothing reads them back.
 
 **Every workflow edit needs its control-flow test.** `tests/control-flow.test.mjs` executes the
 script with `agent()`/`parallel()`/`phase()`/`log()` stubbed and asserts the branches — what stops
