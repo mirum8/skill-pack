@@ -1018,9 +1018,10 @@ addresses, three different things, and mixing them is what makes each of them us
 Five rules, and the first is what makes this safe to switch on:
 
 - **A report is never a halt, and never a question.** Send it and carry on with the same run you
-  would have had. Never wait for a reply, never poll for one, and never let a maintainer's answer
-  change what this run does — a pack fixed mid-run does not retroactively change the run that
-  reported it. If the defect genuinely stops the work, that is a halt on its own terms and the halt
+  would have had. Never wait for a reply and never poll for one. When a reply does arrive, apply the
+  workaround it gives only where it changes **how a pack step is run** — a flag, a command, a step
+  to skip and name — and never what this run builds; name it in your report like any other
+  workaround. If the defect genuinely stops the work, that is a halt on its own terms and the halt
   rules above apply unchanged; the report is extra, not instead.
 - **Never work around a pack defect silently.** Working around it is usually right — report it *and*
   keep going — but the workaround goes in this run's own report to the user as well, in the words of
@@ -1035,8 +1036,9 @@ Five rules, and the first is what makes this safe to switch on:
   field empty because a tier does not fill it, a step that runs only at one profile. Report it in the
   same shape and let the maintainer say which it is: "this looked like a malfunction and was not" is
   a real finding about the tooling's legibility, and it is cheap to answer.
-- **The maintainer does not touch this repo.** It fixes the pack, in the pack's repo, and replies.
-  Nothing it does lands in this working tree, so nothing about `--ask` can change this run's diff.
+- **The maintainer does not touch this repo.** It replies with how to get past the defect in this
+  run, files major ones for its user, and changes the pack only when its user says so. Nothing it
+  does lands in this working tree, so nothing about `--ask` can change this run's diff.
 
 **Under `--herdr`, pass `--ask <session>` through to every unit's own command line**, exactly as the
 spawn prompt already carries `--phases` and `--no-merge`. The unit is the first thing that touches

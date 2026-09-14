@@ -81,7 +81,7 @@ pack does not rely on it.
 | `/r:claudemd-compact` | compact and de-stale a CLAUDE.md hierarchy |
 | `/r:claudemd-patch` | insert the standard rule blocks and the test-writing hook |
 | `/r:reuse-index` | mine the plan corpus into one doc naming the canonical example of each pattern |
-| `/r:pack-maintain` | take the maintainer post for this pack: ground a peer's defect report, then fix, test, publish and reply |
+| `/r:pack-maintain` | take the maintainer post for this pack: ground a peer's defect report, reply with a workaround, file major ones under `issues/` and notify |
 
 Names are domain-first (`<domain>-<action>`, at most three kebab segments) so the
 alphabetically sorted `/` menu groups the families: `claudemd-*`, `code-*`,
