@@ -45,7 +45,7 @@ const DEFAULT_PLAN_CONFIG = { model: 'fable', effort: 'medium', exploreModel: 's
 // provider the defaults happen to ship. Its `wrapperModel` deliberately DIFFERS from
 // IMPL_CODEX_RUN's haiku: a fixture that repeats the fallback cannot tell "the config was read"
 // apart from "the config was ignored", which is the whole point of the assertion below.
-const CODEX_CONFIG = { provider: 'codex', model: 'gpt5.6-sol', effort: 'low',
+const CODEX_CONFIG = { provider: 'codex', model: 'gpt-5.6-sol', effort: 'low',
                        wrapperModel: 'sonnet', wrapperEffort: 'medium',
                        sources: ['/repo/.config/skill-pack.yaml'], notes: [] }
 const CLAUDE_CONFIG = { provider: 'claude', model: 'sonnet', effort: 'high',
@@ -789,11 +789,11 @@ test('the codex provider drives the CLI and keeps the slices, not the personas',
   })
   for (const l of ['implement:backend', 'implement:frontend']) {
     assert.equal(optsBy[l].agentType, 'general-purpose', `${l} must not keep a Claude persona`)
-    // The WRAPPER's tier, not the writer's: gpt5.6-sol/low goes to the CLI, sonnet/medium drives it.
+    // The WRAPPER's tier, not the writer's: gpt-5.6-sol/low goes to the CLI, sonnet/medium drives it.
     assert.equal(optsBy[l].model, 'sonnet', `${l} must carry the configured wrapper model`)
     assert.equal(optsBy[l].effort, 'medium', `${l} must carry the configured wrapper effort`)
     assert.match(prompts[l], /codex-companion\.mjs/)
-    assert.match(prompts[l], /--background --model gpt5\.6-sol --effort low --write/)
+    assert.match(prompts[l], /--background --model gpt-5\.6-sol --effort low --write/)
     // Without --background the CLI is awaited inside the Bash call and dies with it at the tool's
     // 120s default, over an implementer that averages 963s.
     assert.match(prompts[l], /--background is REQUIRED/)
@@ -834,7 +834,7 @@ test('the codex provider drives the CLI and keeps the slices, not the personas',
 })
 
 test('the codex wrapper is tuned apart from the writer, and never dispatched untiered', async () => {
-  // Two agents, two jobs: gpt5.6-sol writes the code, a Claude subagent drives the CLI and collects
+  // Two agents, two jobs: gpt-5.6-sol writes the code, a Claude subagent drives the CLI and collects
   // the detached run. Tuning one must not move the other — and the wrapper's failure mode
   // is halting the run over work Codex finished, which is why it cannot quietly become untiered.
   const tuned = await run({
@@ -845,20 +845,20 @@ test('the codex wrapper is tuned apart from the writer, and never dispatched unt
   assert.equal(tuned.optsBy['implement:backend'].model, 'opus')
   assert.equal(tuned.optsBy['implement:backend'].effort, 'high')
   // The writer's pair is untouched by that — it still reaches the CLI.
-  assert.match(tuned.prompts['implement:backend'], /--model gpt5\.6-sol --effort low --write/)
+  assert.match(tuned.prompts['implement:backend'], /--model gpt-5\.6-sol --effort low --write/)
   // The plan reviewer carries its OWN constant, so tuning the wrapper cannot re-tier it — they
   // agree today, and this is what keeps that a coincidence rather than a coupling. It is also
   // PINNED, not inherited: unnamed, its tier is whatever the caller happens to be running.
   assert.equal(tuned.optsBy['codex-plan-review#1'].effort, 'medium')
   assert.equal(tuned.optsBy['codex-plan-review#1'].model, 'haiku')
-  assert.match(tuned.logText, /codex gpt5\.6-sol \/ low, driven by opus \/ high/)
+  assert.match(tuned.logText, /codex gpt-5\.6-sol \/ low, driven by opus \/ high/)
 
   // A row with no wrapper keys — an older config, or an agent that dropped them — must land on the
   // built-in pair rather than dispatching a wrapper with no model and no depth.
   const bare = await run({
     source: baseSource({ buildTool: 'maven', hasBackend: true, hasFrontend: false }),
     review: OK_REVIEW, planfix: OK_FIX,
-    config: { provider: 'codex', model: 'gpt5.6-sol', effort: 'low', sources: [], notes: [] },
+    config: { provider: 'codex', model: 'gpt-5.6-sol', effort: 'low', sources: [], notes: [] },
   })
   assert.equal(bare.optsBy['implement:backend'].model, 'haiku')
   assert.equal(bare.optsBy['implement:backend'].effort, 'medium')

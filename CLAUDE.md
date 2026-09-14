@@ -377,7 +377,7 @@ stays that skill's store. Rules that are load-bearing:
   recorded fact. The table cannot yet compare **providers** — the mined effort is the *subagent's*,
   and on codex that is the driver's rather than the writer's — which is why the resolved row is
   written into the run payload as `implProvider`/`implModel`/`implEffort`. The shipped default is
-  codex/`gpt5.6-sol`/`medium`, driven by a haiku/medium wrapper, and it cannot agree with
+  codex/`gpt-5.6-sol`/`medium`, driven by a haiku/medium wrapper, and it cannot agree with
   `IMPL_RUN`: that fallback is claude/`opus`/`medium` and has no provider to set, so a codex row is
   unmirrorable there by construction. The workflow names the substitution in its log instead, which
   is what keeps an unreachable config visible rather than a silent tier change. `medium` is the
@@ -388,7 +388,7 @@ stays that skill's store. Rules that are load-bearing:
   `ui-fix-minor` — with the same five keys; `FIX_RUN` is their fallback. Not the readability
   refactor, which invokes `/r:code-refactor` and would have nothing to hand a CLI. They are the
   pack's second-largest write-side block (595M + 493M + 238M tokens), and the shipped row is
-  codex/`gpt5.6-sol`/`low` — the least-measured value in the pack, with no Codex fixer run yet.
+  codex/`gpt-5.6-sol`/`low` — the least-measured value in the pack, with no Codex fixer run yet.
   Two consequences to hold onto. A fixer must never run **deeper** than the implementer whose code
   it patches, and nothing enforces that across two independent rows — `task-review` does not read
   `steps.implement`, and a silent clamp would override a value the user can see in their own file.
@@ -485,7 +485,13 @@ reader owned by one skill stays that skill's reader. Rules that are load-bearing
 - **`provider: codex` is verified before it is honoured**, at the two paths `check-prereqs.sh`
   already looks in. Absent, the *whole row* falls back to claude/opus/medium: a codex model name
   means nothing to `agent()`, and carrying the codex effort across would re-tier the Claude path by
-  accident. All three substitutions are named.
+  accident. All three substitutions are named. The codex **model** is verified the same way, against
+  the slugs the installed CLI caches in `$CODEX_HOME/models_cache.json` — never a list pinned in the
+  reader, which would go stale. A name outside it takes the same whole-row fallback, because the API
+  rejects it with a 400 on every job and the run stops at implement with nothing written. The slip
+  this exists for is one character — `gpt5.6-sol` for `gpt-5.6-sol` — which reads correctly to every
+  human reviewer and nothing else in the pack would catch. No cache means no judgement, never a
+  refusal.
 - **`steps.plan` is the planning half, and it is three tiers in one row** — the planner, the
   explorers that map the code for it, and the judges that triage the plan review. One row because
   the three are chosen together: a deeper planner wants shallower judges, not deeper ones. The
