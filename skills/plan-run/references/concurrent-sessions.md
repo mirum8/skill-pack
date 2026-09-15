@@ -238,19 +238,21 @@ that depends on a higher-numbered one.
 whole wave is testable in seconds:
 
 ```sh
-sim=$(git rev-parse main)
-for b in "${ordered[@]}"; do
-  if ! out=$(git merge-tree --write-tree --name-only "$sim" "$b"); then
-    echo "CONFLICT landing $b:"; sed -n '2,$p' <<<"$out"; exit 1   # line 1 is the tree oid
-  fi
-  sim=$(head -1 <<<"$out")                                        # merge the next one onto this
-done
+"${CLAUDE_PLUGIN_ROOT}/skills/plan-run/scripts/wave-simulate.sh" main "${ordered[@]}"
+# 0 clean · 2 conflict (branch + files printed) · 1 could not run (git's error printed)
 ```
 
-Carrying `sim` forward is the point: a branch that merges onto `main` may still conflict with the
-branch landing before it, and pairwise checks against a fixed base never see that. **Merge nothing
-until the loop finishes** — merging until the first conflict leaves a wave half-landed, and every
-remaining branch faces a base the simulation never cleared.
+Carrying the simulation forward is the point: a branch that merges onto `main` may still conflict
+with the branch landing before it, and pairwise checks against a fixed base never see that. **Merge
+nothing until the script finishes** — merging until the first conflict leaves a wave half-landed,
+and every remaining branch faces a base the simulation never cleared.
+
+What it carries forward is a **commit with both parents**, never the tree `merge-tree` prints:
+the next `merge-tree` needs a commit to find a merge base and refuses a tree, and the second parent
+models the real `--no-ff` merge, so a branch cut from its wave-mate simulates the way it will
+land. And `merge-tree` exits 1 both on a conflict and when it could not run, so a failure that
+names no conflicted file is an **error, not a conflict** — reading it as one stops a clean wave
+with nothing merged and a report naming no files.
 
 ## Build between merges
 

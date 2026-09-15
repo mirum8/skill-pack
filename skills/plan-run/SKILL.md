@@ -876,10 +876,14 @@ checked out there). It builds after every merge, and nothing else.
    sequence rather than a set of pairs:
 
    ```sh
-   git merge-tree --write-tree --name-only "$base" "$branch"   # exit 1 = conflicts, and it names them
+   "${CLAUDE_PLUGIN_ROOT}/skills/plan-run/scripts/wave-simulate.sh" "$base" <branches in ascending phase order>
    ```
 
-   It writes no working tree and no index, so it costs seconds and risks nothing. A conflict here
+   Exit 0 means the whole wave merges clean — go on to step 4. Exit 2 is a conflict: stop with
+   nothing merged and name the branch and the files it printed. Exit 1 means the simulation could
+   not run — stop and name git's error; it is **never** read as a conflict, and never as clean.
+
+   It writes no ref, working tree or index, so it costs seconds and risks nothing. A conflict here
    stops the pass with **nothing merged** — merging until one is hit leaves a wave half-landed and a
    base that differs from the one every remaining branch was built on.
 

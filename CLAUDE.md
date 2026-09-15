@@ -49,6 +49,7 @@ bash skills/test-app-create/tests/tui-session.test.sh       # the TUI driver's f
 bash skills/plan-report/tests/milestone_scope.test.sh       # milestone scope + the boundary predicate
 bash skills/plan-unblock/tests/resolve_scope.test.sh        # the Resolve-first parser + the gate
 bash skills/task-run/tests/plan-ledger.test.sh              # the resume ledger: matches, claims, the lock
+bash skills/plan-run/tests/wave-simulate.test.sh            # the wave dry-merge: conflict vs could-not-run
 bash hooks/tests/guard.test.sh                             # workflow-guard behaviour
 bash hooks/tests/normalize-cd-paths.test.sh                # the cd rewrite + every case it declines
 bash lib/tests/stats.test.sh                               # stats sink + hook + reporter
