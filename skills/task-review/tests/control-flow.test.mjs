@@ -2537,6 +2537,24 @@ test('a diff that ticks completion is reported, whatever the verdict', async () 
   assert.match(logText, /git checkout -- docs\/fyl\/todo\.md/, 'and names the repair')
 })
 
+test('the resume ledger in .task-plans/ is never reported as bookkeeping', async () => {
+  // plan-ledger.py writes `reviewed:`, `slice …: done` and `build: green` into the plan on every
+  // task-run by design, and the caller reverts whatever this reports — which deletes the ledger.
+  const ledgerOnly = await run({
+    overrides: { 'bookkeeping-check': { files: ['/srv/wt/.task-plans/project-skeleton.md'], detail: 'build: green added' } },
+  })
+  assert.deepEqual(ledgerOnly.out.planBookkeepingWritten, [])
+  assert.doesNotMatch(ledgerOnly.logText, /TICKS COMPLETION/)
+  assert.doesNotMatch(ledgerOnly.logText, /could not check whether the diff writes plan bookkeeping/,
+    'a check that found only the ledger ran, and ran clean')
+
+  const mixed = await run({
+    overrides: { 'bookkeeping-check': { files: ['.task-plans/x.md', 'docs/fyl/todo.md'] } },
+  })
+  assert.deepEqual(mixed.out.planBookkeepingWritten, ['docs/fyl/todo.md'], 'the source doc is still reported')
+  assert.match(mixed.logText, /git checkout -- docs\/fyl\/todo\.md$|git checkout -- docs\/fyl\/todo\.md`/m)
+})
+
 test('a clean run reports no bookkeeping, and a dead check is not a clean one', async () => {
   const clean = await run()
   assert.deepEqual(clean.out.planBookkeepingWritten, [])
