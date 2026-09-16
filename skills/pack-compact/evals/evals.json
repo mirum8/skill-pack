@@ -85,6 +85,50 @@
         "the unrelated modification is untouched",
         "nothing is stashed or committed"
       ]
+    },
+    {
+      "id": 6,
+      "name": "reports-an-already-organised-target-and-stops",
+      "kind": "behaviour",
+      "prompt": "/r:pack-compact agent:maven-build-runner",
+      "expected_output": "All five move lists come back empty: the file is 58 lines with no incident narrative, no measured number, nothing mis-homed, and far too small to extract from. The run says the target is already organised, names what it checked, and stops. It does not manufacture a marginal rewrite to justify the invocation, and it does not collapse the ~85% overlap with the gradle twin, which is a carve-out because each agent file loads without the other. It records movesProposed: 0 with wrote: false and no blockedReason.",
+      "files": [],
+      "fixture": null,
+      "assertions": [
+        "git diff is empty after the run",
+        "no rewrite is proposed for the line-58 restatement or any other sub-2% change",
+        "the gradle twin is not touched and the overlap is named as deliberate",
+        "the recorded row has movesProposed 0, wrote false and blockedReason null"
+      ]
+    },
+    {
+      "id": 7,
+      "name": "no-argument-surveys-rather-than-sweeping",
+      "kind": "behaviour",
+      "prompt": "/r:pack-compact",
+      "expected_output": "With no target the run is read-only: it reads each target's register and sizes the five moves across the pack, then reports a ranking of what is worth compacting. It writes nothing and rewrites nothing, and it does not queue 34 proposals for approval. It records mode: survey with wrote: false.",
+      "files": [],
+      "fixture": null,
+      "assertions": [
+        "git status is clean after the run",
+        "no target file is rewritten",
+        "the report ranks targets by what a rewrite would do",
+        "the recorded row has mode survey and wrote false"
+      ]
+    },
+    {
+      "id": 8,
+      "name": "revert-removes-an-extracted-reference-too",
+      "kind": "behaviour",
+      "prompt": "/r:pack-compact issues-fix",
+      "expected_output": "The rewrite extracts material into a new references/ file, then the fresh reader cannot find a register entry. The run restores the rewritten file AND deletes the references/ file it created — git checkout does not touch a path git has never seen, so leaving it behind would restore the target while the fragment cut out of it sits alongside. The register is never updated, because that happens only after the gate passes.",
+      "files": [],
+      "fixture": "a rewrite step forced to omit one register entry while extracting",
+      "assertions": [
+        "git status is clean after the revert, with no untracked references/ file left behind",
+        "no States it: field was changed in the register",
+        "the recorded row has filesReverted >= 1"
+      ]
     }
   ]
 }

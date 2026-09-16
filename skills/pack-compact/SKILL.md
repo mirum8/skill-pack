@@ -32,11 +32,18 @@ where a thing is said and how many times, never what is said.
 ## Invocation
 
 ```
-/r:pack-compact                    every skill, agent and pipeline, one file at a time
+/r:pack-compact                    survey every target and rank what is worth doing — writes nothing
 /r:pack-compact plan-run           one skill, with its references/
 /r:pack-compact agent:bug-hunter-ui
 /r:pack-compact skills/task-review/task-review.workflow.js
 ```
+
+**A rewrite always names its target.** With no argument the run is a **survey**: Steps 0–2 over
+every target, read-only, reporting which ones actually have something to compact and how much,
+ranked. It never rewrites. The alternative — sweeping all 34 targets and stopping at each
+proposal — is 34 approvals in a row, which nobody gives one at a time, and the pressure that
+creates is to wave them through in a batch. That is the unattended mode this skill does not have,
+arrived at by exhaustion. Survey first, then name a target.
 
 ## Step 0 — refuse what you cannot undo
 
@@ -97,6 +104,14 @@ and the judgement calls; the moves in brief:
 Then stop and show it. There is no unattended mode: nothing in the pack invokes this skill, so an
 approval nobody has to give would only be a way of skipping one.
 
+**Five empty lists is a result, and reporting it is the whole job that run had.** Say plainly that
+the target is already organised, name what you checked, and stop. Do not go looking for a smaller
+thing to change so the invocation has something to show for itself — a file that is already
+compact is the outcome this skill is for, and the pressure runs the other way: the user has just
+invoked it and is waiting. A rewrite that exists to justify a run is the one kind of change here
+that cannot be worth its risk, because the risk is a lost rule and the reward is nothing. Shorter
+is not the goal; each thing said once, where it belongs, is, and a file can already be there.
+
 ## Step 3 — rewrite from scratch
 
 Dispatch a subagent with the register entries, the file's own order and the approved lists, and
@@ -139,9 +154,28 @@ Then two readers, both dispatched from here:
 - **An adversarial diff** that reads old and new side by side and reports anything the new file no
   longer says, or says more weakly.
 
-**Any entry the fresh reader cannot find, or the adversarial reader flags, means
-`git checkout -- <path>` and a report of the loss.** Not a patch. A patched rewrite is how a file
-ends up half-organised and short a rule, and nothing downstream re-reads the prose to catch it.
+**Any entry the fresh reader cannot find, or the adversarial reader flags, means the run is put
+back and the loss reported.** Not a patch. A patched rewrite is how a file ends up half-organised
+and short a rule, and nothing downstream re-reads the prose to catch it.
+
+Putting it back means **every file the run wrote**, not just the rewritten one:
+
+```sh
+git checkout -- <path>                 # the rewritten file
+rm -f <references the run created>     # an UNTRACKED file survives a checkout
+```
+
+The second line is the one that is easy to miss. An extraction creates a new `references/` file,
+`git checkout` has nothing to say about a path git has never seen, and the revert then reports
+success over a half-extracted target — the target restored and the fragment it was extracted into
+still sitting beside it.
+
+**The register is updated last, after every check above has passed.** A run may change an entry's
+*States it:* when text moves to `references/`, and doing that before the gate would put the
+register into the same failure: the rewrite reverts, the register keeps pointing at a file that no
+longer exists, and this run reports a clean revert while the next run fails
+`check_behaviour_register()` on a dead path. Touch it only once there is something true to point
+at, and it never needs reverting.
 
 Finally run `./validate.sh`. If a frontmatter `description` changed, that is routing and only a
 model run can prove it: `python3 tools/run-evals.py --skill <target>`, and the always-on listing
@@ -156,8 +190,9 @@ anything restored. Then the row:
 ```sh
 python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
 { "skill": "r:pack-compact", "kind": "result",
-  "target": "<name>", "filesProcessed": 0,
+  "target": "<name>", "mode": "survey|target", "filesProcessed": 0,
   "bytesBefore": 0, "bytesAfter": 0, "registryEntries": 0,
+  "movesProposed": 0,
   "sectionsRehomed": 0, "duplicatesCollapsed": 0, "narrativesConverted": 0,
   "bytesExtracted": 0, "numbersRefreshed": 0,
   "descriptionChanged": false, "filesReverted": 0,
@@ -169,6 +204,20 @@ STATS_JSON
 `bytesBefore` against `bytesAfter`, read beside `filesReverted`, is the only pair that says
 whether this did its job — shrinking while reverting nothing is the result; shrinking while
 reverting is churn.
+
+**`movesProposed` is what separates the three ways a run writes nothing**, and they need opposite
+responses:
+
+| | reading | what it asks for |
+|---|---|---|
+| `movesProposed: 0`, `wrote: false`, no `blockedReason` | the target is already organised | nothing — a real result |
+| `movesProposed: N`, `wrote: false`, no `blockedReason` | proposed and declined | read the proposal; the judgement was wrong or the timing was |
+| any, `blockedReason` set | the run could not reach a check | make it run — this is an absence of judgement, not a judgement of zero |
+
+Without the count the first two are the same row, and a pack whose prose is in good order reads
+exactly like a skill nobody agrees with. A survey run records `mode: "survey"`, `wrote: false` and
+the `movesProposed` it would have made across every target, so the sweep is measurable without
+having written anything.
 
 `findings` records **both sides** of the Step 4 adjudication: `verdict: "confirmed"` for an entry
 that was really lost, `verdict: "dismissed"` for one the reader missed and the file kept. Logging
@@ -182,7 +231,10 @@ change what was written. Never retry it.
 ## Non-negotiables
 
 - **The register is invariant.** Never drop a behaviour, with or without approval.
-- **A lost entry means revert, never patch.** The file goes back and the run says so.
+- **A lost entry means revert, never patch.** Every file the run wrote goes back — including any
+  `references/` it created, which a checkout will not touch — and the run says so.
+- **An empty proposal is reported, never filled.** A target that is already organised is the
+  result, not a run that failed to find work.
 - **Real checks only.** `behavior_tokens.py`, a genuinely fresh reader that never saw the
   original, `./validate.sh`, and `run-evals.py` for any description change. Never a summary of
   what a check would have said.

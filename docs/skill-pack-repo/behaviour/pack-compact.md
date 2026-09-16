@@ -218,14 +218,54 @@ flowchart TD
   *Enforced by:* —
   *Tested by:* —
 
+- **SB-pack-compact-031** — **A rewrite always names its target.** With no argument the run is a
+  read-only **survey**: Steps 0–2 over every target, ranked by what is worth doing, writing
+  nothing. Sweeping all 34 and stopping at each proposal would be 34 approvals in a row, which
+  nobody gives one at a time — the pressure that creates is to wave them through as a batch, which
+  is the unattended mode this skill does not have, reached by exhaustion.
+  *States it:* `skills/pack-compact/SKILL.md`
+  *Enforced by:* —
+  *Tested by:* —
+- **SB-pack-compact-032** — **Five empty lists is a result, and reporting it is that run's whole
+  job.** The run says the target is already organised, names what it checked, and stops. It never
+  looks for a smaller thing to change so the invocation has something to show: a rewrite that
+  exists to justify a run risks a lost rule for no reward, and the pressure runs that way because
+  the user has just invoked the skill and is waiting.
+  *States it:* `skills/pack-compact/SKILL.md`
+  *Enforced by:* —
+  *Tested by:* —
+- **SB-pack-compact-033** — **`movesProposed` separates the three ways a run writes nothing.**
+  Zero with no `blockedReason` is a target already organised; N with no `blockedReason` is a
+  proposal declined; a `blockedReason` at all is a check that could not run, which is an absence of
+  judgement rather than a judgement of zero. Without the count the first two are the same row, and
+  a pack whose prose is in good order reads exactly like a skill nobody agrees with.
+  *States it:* `skills/pack-compact/SKILL.md`
+  *Enforced by:* `lib/record-run.py`
+  *Tested by:* `lib/tests/stats.test.sh`
+- **SB-pack-compact-034** — **Putting a run back means every file it wrote**, including any
+  `references/` file an extraction created. `git checkout` has nothing to say about a path git has
+  never seen, so an untracked fragment survives the revert and leaves the target restored with the
+  piece cut out of it still sitting alongside.
+  *States it:* `skills/pack-compact/SKILL.md`
+  *Enforced by:* —
+  *Tested by:* —
+- **SB-pack-compact-035** — **The register is updated last, after every check has passed.**
+  A *States it:* changed before the gate survives the revert that follows it: the rewrite goes
+  back, the register keeps pointing at a file that no longer exists, this run reports a clean
+  revert, and the next run fails `check_behaviour_register()` on a dead path. Touched only once
+  there is something true to point at, it never needs reverting.
+  *States it:* `skills/pack-compact/SKILL.md`
+  *Enforced by:* `tools/validate.py`
+  *Tested by:* —
+
 ## Prose-only behaviours
 
-21 of 30: SB-pack-compact-003, SB-pack-compact-007, SB-pack-compact-008, SB-pack-compact-009,
-SB-pack-compact-010, SB-pack-compact-011, SB-pack-compact-012, SB-pack-compact-013,
-SB-pack-compact-017, SB-pack-compact-018, SB-pack-compact-019, SB-pack-compact-020,
-SB-pack-compact-021, SB-pack-compact-022, SB-pack-compact-024, SB-pack-compact-028,
-SB-pack-compact-029, SB-pack-compact-030, SB-pack-compact-002, SB-pack-compact-005,
-SB-pack-compact-006.
+24 of 35: SB-pack-compact-002, SB-pack-compact-003, SB-pack-compact-005, SB-pack-compact-006,
+SB-pack-compact-007, SB-pack-compact-008, SB-pack-compact-009, SB-pack-compact-010,
+SB-pack-compact-011, SB-pack-compact-012, SB-pack-compact-013, SB-pack-compact-017,
+SB-pack-compact-018, SB-pack-compact-019, SB-pack-compact-020, SB-pack-compact-021,
+SB-pack-compact-022, SB-pack-compact-024, SB-pack-compact-028, SB-pack-compact-029,
+SB-pack-compact-030, SB-pack-compact-031, SB-pack-compact-032, SB-pack-compact-034.
 
 The revert rule (SB-019) is the one worth staring at: it is the whole safety of the skill and
 nothing but the wording holds it up.
