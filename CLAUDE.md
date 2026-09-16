@@ -518,7 +518,7 @@ rewrite checked against the file it replaces only ever proves it copied itself.
 
 Three rules carry it. **The register points at the prose and the prose never points back**, so
 compaction does not add `SB-` tags to the files it is lightening. **An entry with neither
-enforcement nor a test is prose-only** — 1339 of 2249 are, which is the pack's real exposure and
+enforcement nor a test is prose-only** — 1340 of 2250 are, which is the pack's real exposure and
 the reason a failed check restores a file rather than patching it. And **an eval suite counts as a
 test only where `run-evals.py` scores it**: it skips every `behaviour` case, so a flagged skill's
 suite names its rules without ever failing on one. `check_behaviour_register()` in `validate.py`

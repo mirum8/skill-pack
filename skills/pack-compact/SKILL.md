@@ -45,6 +45,24 @@ proposal — is 34 approvals in a row, which nobody gives one at a time, and the
 creates is to wave them through in a batch. That is the unattended mode this skill does not have,
 arrived at by exhaustion. Survey first, then name a target.
 
+**The survey fans out, for the same reason Step 3 does.** One read-only subagent per target,
+dispatched from the main thread, each running Steps 0–2 against its own target and returning a
+short fixed row — target, register entries, prose-only count, what each of the five moves found,
+bytes and lines, and one line of verdict. The orchestrator ranks 34 rows; it never holds what they
+were derived from.
+
+Read inline instead and the survey costs about **1.8 MB of context before it can rank anything** —
+1.24 MB of register plus 617 KB of target prose, of which `plan-run` alone is an 82 KB `SKILL.md`
+against a 2,081-line register. A survey whose whole output is a table of counts is the worst
+possible thing to pay that for, and a caller who spends the session on it has no room left to act
+on the answer.
+
+Dispatch in batches, largest targets first, so an interrupted survey is still a useful ranking
+rather than nothing. And the same rule as Step 3 applies to reaching them at all: a subagent has
+no `Agent` tool, so **if you cannot reach the `Agent` tool, stop and say so** — surveying a few
+targets inline and presenting the ranking as if it covered the pack is worse than not surveying,
+because the gaps are invisible in a table.
+
 ## Step 0 — refuse what you cannot undo
 
 Four preconditions, all of them cheap and all of them fatal:

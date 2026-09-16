@@ -133,13 +133,13 @@ would otherwise fix it:
 | `test-app-create` | 110 | 51 | [`test-app-create.md`](test-app-create.md) |
 | `tests-write` | 44 | 41 | [`tests-write.md`](tests-write.md) |
 | `ui-prototype` | 85 | 35 | [`ui-prototype.md`](ui-prototype.md) |
-| **total** | **2249** | **1339** (59%) | |
+| **total** | **2250** | **1340** (59%) | |
 
 A snapshot, frozen with the register. `python3 tools/validate.py` prints the live totals on every
 run and `check_behaviour_register()` fails if a target loses its file, so this table going stale is
 visible rather than silent.
 
-**1339 of 2249 behaviours are held up by wording alone.** That is the number this register was
+**1340 of 2250 behaviours are held up by wording alone.** That is the number this register was
 built to produce, and the reason `/r:pack-compact` restores a file rather than patching it.
 
 The figure errs high by roughly ten entries: a first pass cleared every eval citation from

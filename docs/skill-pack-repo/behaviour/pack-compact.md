@@ -258,14 +258,29 @@ flowchart TD
   *Enforced by:* `tools/validate.py`
   *Tested by:* —
 
+- **SB-pack-compact-036** — **The survey fans out: one read-only subagent per target, dispatched
+  from the main thread**, each returning a short fixed row (entries, prose-only, what each move
+  found, bytes, one line of verdict) that the orchestrator ranks without holding what produced it.
+  Read inline the survey costs ~1.8 MB of context before it can rank anything — 1.24 MB of
+  register plus 617 KB of target prose, `plan-run` alone being an 82 KB `SKILL.md` against a
+  2,081-line register — which is the worst thing to spend a session on when the entire output is a
+  table of counts. Dispatch is in batches, largest first, so an interrupted survey still ranks;
+  and a context that cannot reach the `Agent` tool **stops and says so**, because a few targets
+  surveyed inline and presented as the pack is worse than no survey, the gaps being invisible in a
+  table.
+  *States it:* `skills/pack-compact/SKILL.md`
+  *Enforced by:* —
+  *Tested by:* —
+
 ## Prose-only behaviours
 
-24 of 35: SB-pack-compact-002, SB-pack-compact-003, SB-pack-compact-005, SB-pack-compact-006,
+25 of 36: SB-pack-compact-002, SB-pack-compact-003, SB-pack-compact-005, SB-pack-compact-006,
 SB-pack-compact-007, SB-pack-compact-008, SB-pack-compact-009, SB-pack-compact-010,
 SB-pack-compact-011, SB-pack-compact-012, SB-pack-compact-013, SB-pack-compact-017,
 SB-pack-compact-018, SB-pack-compact-019, SB-pack-compact-020, SB-pack-compact-021,
 SB-pack-compact-022, SB-pack-compact-024, SB-pack-compact-028, SB-pack-compact-029,
-SB-pack-compact-030, SB-pack-compact-031, SB-pack-compact-032, SB-pack-compact-034.
+SB-pack-compact-030, SB-pack-compact-031, SB-pack-compact-032, SB-pack-compact-034,
+SB-pack-compact-036.
 
 The revert rule (SB-019) is the one worth staring at: it is the whole safety of the skill and
 nothing but the wording holds it up.

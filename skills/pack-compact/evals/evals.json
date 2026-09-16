@@ -106,12 +106,14 @@
       "name": "no-argument-surveys-rather-than-sweeping",
       "kind": "behaviour",
       "prompt": "/r:pack-compact",
-      "expected_output": "With no target the run is read-only: it reads each target's register and sizes the five moves across the pack, then reports a ranking of what is worth compacting. It writes nothing and rewrites nothing, and it does not queue 34 proposals for approval. It records mode: survey with wrote: false.",
+      "expected_output": "With no target the run is read-only and FANS OUT: one subagent per target, dispatched from the main thread, each running Steps 0-2 on its own target and returning a short row. The orchestrator ranks the rows and never reads the 1.8 MB of register and target prose they came from. It writes nothing, rewrites nothing, and does not queue 34 proposals for approval. It records mode: survey with wrote: false.",
       "files": [],
       "fixture": null,
       "assertions": [
         "git status is clean after the run",
         "no target file is rewritten",
+        "one subagent is dispatched per target, from the main thread, in batches",
+        "no target SKILL.md or register file is read into the orchestrator's own context",
         "the report ranks targets by what a rewrite would do",
         "the recorded row has mode survey and wrote false"
       ]
