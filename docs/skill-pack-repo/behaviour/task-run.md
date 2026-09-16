@@ -467,7 +467,7 @@ Two things the graph deliberately does **not** claim, because the suite contradi
   `.config/defaults.yaml`, then the built-in row — and are never inherited from the session. They
   are not flags. `IMPL_RUN` (claude / `opus` / `medium`) is the fallback for a run that could not
   reach the config **at all**, and it cannot mirror the shipped row: the shipped row is
-  codex/`gpt5.6-sol`/`medium`, and a fallback path has no provider to set. The two therefore
+  codex/`gpt-5.6-sol`/`medium`, and a fallback path has no provider to set. The two therefore
   disagree by construction, and what keeps that honest is the log — a run that could not read the
   file says so by name.
   *States it:* `skills/task-run/SKILL.md`, `.config/defaults.yaml`
@@ -1646,7 +1646,7 @@ Recorded, not fixed — each is a real divergence a reader would otherwise resol
    planner". The markdown and three comments are stale.
 2. **`IMPL_RUN`'s claim to mirror the config.** Its comment says "The shipped default is this row
    exactly — claude/opus/medium — so the file and this fallback agree". `.config/defaults.yaml`
-   ships `provider: codex` / `gpt5.6-sol` / `medium` and states explicitly that the two "deliberately
+   ships `provider: codex` / `gpt-5.6-sol` / `medium` and states explicitly that the two "deliberately
    disagree". The defaults file is right; the comment is stale.
 3. **`JUDGE_RUN`'s claim to be the shipped row.** Its comment says "the shipped one is the measured
    status quo, and dropping the judges to sonnet becomes a change someone makes". The shipped

@@ -286,7 +286,7 @@ One markdown file and three comments are describing a tier nothing runs at.
 ## C-38 — `IMPL_RUN`'s comment claims an agreement the config denies · open
 
 The comment says the file and the fallback agree — claude/opus/medium. `.config/defaults.yaml`
-ships `provider: codex` / `gpt5.6-sol` / `medium` and states in its own words that the two
+ships `provider: codex` / `gpt-5.6-sol` / `medium` and states in its own words that the two
 "deliberately disagree". The defaults file is right.
 
 ## C-39 — `JUDGE_RUN`'s comment describes the unshipped value as shipped · open

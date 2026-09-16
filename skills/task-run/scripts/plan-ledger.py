@@ -168,9 +168,22 @@ def resolve(root, files, base):
     except GitError:
         in_tree = []
     out = []
+    # Compared through realpath, never abspath: `git rev-parse --show-toplevel` hands back a path
+    # with every symlink resolved, and a caller reports whatever it was handed. On macOS a repo
+    # under TMPDIR is /var/folders/... to the caller and /private/var/folders/... to git, so an
+    # abspath comparison finds no common root, the path is left absolute, and the claim then
+    # matches nothing — the slice reads as having claimed no files and every one of them resurfaces
+    # as unclaimed. That is the fail-open direction: a resume redoes work a slice already did.
+    real_root = os.path.realpath(root)
     for f in files:
-        if os.path.isabs(f) and os.path.commonpath([root, os.path.abspath(f)]) == root:
-            f = os.path.relpath(f, root)
+        if os.path.isabs(f):
+            real_f = os.path.realpath(f)
+            try:
+                inside = os.path.commonpath([real_root, real_f]) == real_root
+            except ValueError:      # different drives, or a path this cannot be asked of
+                inside = False
+            if inside:
+                f = os.path.relpath(real_f, real_root)
         if f in in_tree or os.path.exists(os.path.join(root, f)):
             out.append(f)
             continue
