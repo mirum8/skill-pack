@@ -1,0 +1,90 @@
+{
+  "skill_name": "pack-compact",
+  "notes": "disable-model-invocation: true, so no prompt can route here and routing cases would measure nothing. FR-11 inverts: this suite carries behaviour cases only.",
+  "evals": [
+    {
+      "id": 0,
+      "name": "refuses-a-target-with-no-register",
+      "kind": "behaviour",
+      "prompt": "/r:pack-compact code-quality",
+      "expected_output": "Before rewriting anything the skill checks docs/skill-pack-repo/behaviour/code-quality.md. With the register file absent it refuses the target and says why — without a statement of what the prose has to keep saying, a rewrite can only be checked against the file it is replacing, which proves nothing. It does not fall back to deriving an inventory from the prose, and it does not rewrite the file.",
+      "files": [],
+      "fixture": "a pack checkout with docs/skill-pack-repo/behaviour/code-quality.md deleted",
+      "assertions": [
+        "no edit is made to skills/code-quality/",
+        "the refusal names the missing register path",
+        "no register file is created to work around the refusal"
+      ]
+    },
+    {
+      "id": 1,
+      "name": "restores-rather-than-patches-a-lost-behaviour",
+      "kind": "behaviour",
+      "prompt": "/r:pack-compact reuse-index",
+      "expected_output": "The rewrite drops a register entry — say the rule that a run which could not mine anything records blockedReason and no findings. The fresh reader cannot find it. The skill runs git checkout on the file and reports the loss, naming the entry. It does not add the missing sentence back and carry on, and the run does not report a successful compaction.",
+      "files": [],
+      "fixture": "a rewrite step forced to omit one register entry",
+      "assertions": [
+        "git diff for the target is empty after the run",
+        "the report names the lost SB- id",
+        "the recorded row has filesReverted >= 1 and a findings entry with verdict confirmed"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "executable-files-change-only-in-comments",
+      "kind": "behaviour",
+      "prompt": "/r:pack-compact skills/task-review/task-review.workflow.js",
+      "expected_output": "Only whole comment lines are rewritten: incident narrative becomes the present-tense failure mode it taught. behavior_tokens.py code-identical passes, so every executable line is byte-identical, and the pipeline's own control-flow test still passes. The meta.name string is untouched, because the workflow guard matches on it.",
+      "files": [],
+      "fixture": null,
+      "assertions": [
+        "behavior_tokens.py code-identical exits 0 against the pre-run file",
+        "node --test skills/task-review/tests/control-flow.test.mjs passes",
+        "the meta.name value is unchanged",
+        "bash hooks/tests/guard.test.sh passes"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "extraction-into-references-is-not-loss",
+      "kind": "behaviour",
+      "prompt": "/r:pack-compact issues-fix",
+      "expected_output": "Long material a run reads only sometimes moves into references/ behind a pointer that says when to follow it. The token check is run with every new file as --after, so text that moved is not counted as text that went missing, and the register entries whose States it: path changed are updated to the new location. No entry is dropped.",
+      "files": [],
+      "fixture": null,
+      "assertions": [
+        "behavior_tokens.py tokens exits 0 with the extracted references passed as --after",
+        "each moved entry's States it: path is updated in the register",
+        "no register entry is removed"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "keeps-a-reason-restated-in-a-separately-loaded-file",
+      "kind": "behaviour",
+      "prompt": "/r:pack-compact agent:bug-hunter-pattern",
+      "expected_output": "The measured turn-and-token budget in the agent file also appears in skills/task-review/SKILL.md. The skill leaves it in place rather than collapsing it as duplication: an agent file is loaded without its calling skill, so the copy in it is the only one that context will ever read. The report explains the decision rather than silently keeping it.",
+      "files": [],
+      "fixture": null,
+      "assertions": [
+        "the measured figures remain in agents/bug-hunter-pattern.md",
+        "the report names deliberate cross-context restatement as the reason"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "refuses-a-dirty-tree",
+      "kind": "behaviour",
+      "prompt": "/r:pack-compact plan-report",
+      "expected_output": "git status --porcelain is not empty. The skill stops before reading anything and says why: its only failure response is git checkout on the file it rewrote, and that is unambiguous only when the working tree held nothing else. It does not stash, commit, or rewrite around the uncommitted work.",
+      "files": [],
+      "fixture": "a checkout with one unrelated modified file",
+      "assertions": [
+        "no file is rewritten",
+        "the unrelated modification is untouched",
+        "nothing is stashed or committed"
+      ]
+    }
+  ]
+}

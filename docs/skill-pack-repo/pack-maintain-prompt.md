@@ -1,4 +1,12 @@
-# Prompt — create the `r:pack-maintain` skill
+# Provenance: the build prompt that produced `r:pack-maintain`
+
+> **This is a historical working note, not current design.** The prompt was carried out:
+> `skills/pack-maintain/SKILL.md` exists, `--ask <session>` is live in both
+> `skills/plan-run/SKILL.md` and `skills/issues-fix/SKILL.md`, and later commits have moved the
+> skill past what is asked for here. Read it for the four verified incident reports under
+> "Why it exists" — they are the evidence behind the skill's core rule, that a report is a claim
+> and not a finding. Read `skills/pack-maintain/SKILL.md` and
+> `docs/skill-pack-repo/behaviour/pack-maintain.md` for what the skill actually does.
 
 Run this in a dedicated session in `~/projects/skill-pack`.
 

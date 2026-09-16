@@ -1,6 +1,6 @@
 # r — a personal Claude Code skill pack
 
-Twenty-five engineering skills and the eight agents they dispatch, in one repository,
+Twenty-six engineering skills and the eight agents they dispatch, in one repository,
 loaded as a skills-directory plugin named `r`. Every skill is reachable as
 `/r:<name>`.
 
@@ -53,7 +53,7 @@ skills-directory case. Whether plugin discovery follows a *symlinked* entry is
 documented neither way, and it fails identically to a malformed manifest, so the
 pack does not rely on it.
 
-## The twenty-five skills
+## The twenty-six skills
 
 | command | does |
 |---|---|
@@ -82,6 +82,7 @@ pack does not rely on it.
 | `/r:claudemd-patch` | insert the standard rule blocks and the test-writing hook |
 | `/r:reuse-index` | mine the plan corpus into one doc naming the canonical example of each pattern |
 | `/r:pack-maintain` | take the maintainer post for this pack: ground a peer's defect report, reply with a workaround, file major ones under `issues/` and notify |
+| `/r:pack-compact` | restructure the pack's own prose against its frozen behaviour register — same behaviour, fewer seams |
 
 Names are domain-first (`<domain>-<action>`, at most three kebab segments) so the
 alphabetically sorted `/` menu groups the families: `claudemd-*`, `code-*`,

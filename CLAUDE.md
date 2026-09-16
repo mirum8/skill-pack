@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repository is
 
-The source of `r`, a **skills-directory plugin** for Claude Code: 23 skills (`/r:<name>`) and the
+The source of `r`, a **skills-directory plugin** for Claude Code: 26 skills (`/r:<name>`) and the
 8 agents they dispatch. There is no application here — the "product" is prose (`SKILL.md`),
 workflow scripts, agent definitions and a hook, all loaded by Claude Code itself.
 
@@ -96,7 +96,8 @@ lib/                         pack-wide stats sink + reporter + config reader, sh
 .config/defaults.yaml        the shipped settings; a project overrides them in its own .config/
 tools/                       build/validation scripts — NOT shipped
 tests/, validate.sh          repo-level test + gate — NOT shipped
-docs/skill-pack-repo/        spec.html, architecture.html, interview notes — NOT shipped
+docs/skill-pack-repo/        spec.html (the machinery spec), behaviour/ (what each skill
+                             DOES), interview + provenance notes — NOT shipped
 ```
 
 `install.sh` copies exactly `.claude-plugin/ .config/ skills/ agents/ hooks/ lib/ check-prereqs.sh`.
@@ -507,6 +508,31 @@ reader owned by one skill stays that skill's reader. Rules that are load-bearing
   `SKILL.md`, because `issues-fix` and `plan-run` come in by `scriptPath` and a markdown read would
   skip them. In the review it sits after the `reviewNeeded` gate, so a doc-only turn pays nothing.
 - Its suite is `lib/tests/config.test.sh`, and it is the only one it gets.
+
+**`docs/skill-pack-repo/behaviour/` states what the pack does, and `/r:pack-compact` rewrites
+prose against it.** One markdown file per skill and per bundled agent, each entry an `SB-` id, a
+behaviour in the present tense, and three fields: the prose file that *states it*, the code that
+*enforces it*, the suite that *tests it*. It is read by a skill and by a person, and it exists
+because prose here is edited fix by fix — a rule lands where the editor was standing, and a
+rewrite checked against the file it replaces only ever proves it copied itself.
+
+Three rules carry it. **The register points at the prose and the prose never points back**, so
+compaction does not add `SB-` tags to the files it is lightening. **An entry with neither
+enforcement nor a test is prose-only** — 1336 of 2244 are, which is the pack's real exposure and
+the reason a failed check restores a file rather than patching it. And **an eval suite counts as a
+test only where `run-evals.py` scores it**: it skips every `behaviour` case, so a flagged skill's
+suite names its rules without ever failing on one. `check_behaviour_register()` in `validate.py`
+holds all three, plus coverage — a skill added without a register file fails the gate, which is
+what stops this going stale the way `spec.html`'s narrative did.
+
+`spec.html` keeps its own half: 63 FR/BR/NFR/ADR/R ids, still cited ~200 times and still
+authoritative, describing the pack as an artifact as of the 2026-07-31 cut-over. Its narrative
+describes fifteen skills and is banner-scoped rather than rewritten.
+
+`behaviour/contradictions.md` is the register's first by-product — 62 places two files in the pack
+disagree, found by stating each one's behaviour and comparing. **Nothing there is reconciled
+silently**: picking a winner is a decision, and a sweep that made two files agree would make it in
+whichever direction was easier to phrase.
 
 **Skills that must never self-trigger** (`task-run`, `task-quick`, `issues-fix`, `plan-run`,
 `spec-design`, `ui-prototype`, `page-serve`, `pack-maintain`) carry `disable-model-invocation: true`

@@ -59,9 +59,9 @@ RETIRED_PACKED = {
 # neither half of RENAME: putting one there would send install.sh hunting an ancestor that
 # never existed and make validate report an R-4 cut-over that has nothing to cut over from.
 # They are part of the pack all the same, which is what packed_skills() is for.
-PACK_NATIVE = frozenset({"issues-draft", "pack-maintain", "page-serve", "plan-report",
-                         "plan-run", "plan-unblock", "reuse-index", "task-quick",
-                         "ui-prototype"})
+PACK_NATIVE = frozenset({"issues-draft", "pack-compact", "pack-maintain", "page-serve",
+                         "plan-report", "plan-run", "plan-unblock", "reuse-index",
+                         "task-quick", "ui-prototype"})
 
 
 def packed_skills() -> set:
@@ -115,7 +115,7 @@ ORIGINAL_ROOTS = ("~/.claude/skills", "~/.agents/skills")
 # distinguish "auto-loaded" from "explicitly told to run", so it also blocked
 # /r:task-run's mandatory Step 5 from reaching the review through the Skill tool.
 # There, the rule is held by the description and the non-negotiables instead.
-NO_AUTO_FIRE = {"task-run", "issues-fix", "plan-run", "task-quick"}
+NO_AUTO_FIRE = {"task-run", "issues-fix", "plan-run", "task-quick", "pack-compact"}
 
 # Files worth rewriting at all; everything else is copied byte-for-byte.
 TEXT_SUFFIXES = (".md", ".js", ".mjs", ".py", ".sh", ".json", ".template", ".txt")

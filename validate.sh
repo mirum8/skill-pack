@@ -86,7 +86,8 @@ for t in skills/spec-brainstorm/tests/check_spec.test.sh \
          skills/plan-unblock/tests/resolve_scope.test.sh \
          skills/ui-prototype/tests/designmd.test.sh \
          skills/ui-prototype/tests/build-compare.test.sh \
-         skills/page-serve/tests/serve.test.sh; do
+         skills/page-serve/tests/serve.test.sh \
+         skills/pack-compact/tests/behavior_tokens.test.sh; do
   if out=$(bash "$t" 2>&1); then
     printf '  ✓ %-52s %s\n' "${t#skills/}" "$(tail -1 <<<"$out" | tr -s ' ')"
   else

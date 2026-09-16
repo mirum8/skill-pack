@@ -1,4 +1,13 @@
-# Proposed: make a `--cmux` wave run and land by itself
+# Provenance: why `/r:plan-run` lands a wave the way it does
+
+> **This is a historical working note, not current design, and not a proposal.** It was written
+> against a flag called `--cmux`, which is now `--herdr`. Most of what it proposes shipped —
+> `--land`, `--auto-resolve`, `--unattended`, `--ask <session>` and
+> `skills/plan-run/scripts/footprint-warn.py` are all live — so its own "nothing here is applied"
+> line below is no longer true. Read it for the two `mirum8/fyl` incidents that justify the
+> design; read `skills/plan-run/SKILL.md`,
+> `skills/plan-run/references/concurrent-sessions.md` and
+> `docs/skill-pack-repo/behaviour/plan-run.md` for what the skill actually does.
 
 Changes to `/r:plan-run` — four in `--land` and Step 3.6, plus the alarm channel between the
 orchestrator and its units. Nothing here is applied.

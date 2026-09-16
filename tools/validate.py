@@ -588,6 +588,113 @@ def check_vendored():
         fail("FR-12", "the vendored html-effectiveness LICENSE is missing")
 
 
+# --- behaviour register -----------------------------------------------------
+# docs/skill-pack-repo/behaviour/ states what each skill and agent DOES, one entry per behaviour,
+# and /r:pack-compact rewrites prose against it rather than against the prose it is replacing.
+# That only holds while the register covers the pack, so coverage is a gate rather than a habit:
+# a skill added without a register file is a skill the compactor would rewrite with no ground
+# truth and no way to notice a rule going missing.
+#
+# The path fields are checked because they are the whole mechanism. `States it:` is the file
+# compaction must keep saying the thing; `Enforced by:` and `Tested by:` are what decides whether
+# an entry is prose-only, and a prose-only entry is the class a rewrite can lose in silence. A
+# path that no longer resolves turns a real guarantee into a decorative one at the moment the
+# file moves, which is exactly when nobody is looking.
+REGISTER = os.path.join(REPO, "docs", "skill-pack-repo", "behaviour")
+SB_ID = re.compile(r"^\s*[-*]\s+\*\*(SB-[a-z0-9-]+-\d{3})\*\*")
+SB_FIELD = re.compile(r"^\s*\*(States it|Enforced by|Tested by):\*\s*(.+?)\s*$")
+BACKTICKED = re.compile(r"`([^`]+)`")
+
+
+def register_targets():
+    """Every target owing a register file: packed skills, plus agents under an agent- prefix."""
+    return ({s: f"{s}.md" for s in R.packed_skills()}
+            | {f"agent-{a}": f"agent-{a}.md" for a in R.AGENTS})
+
+
+
+def scores_mechanically(target):
+    """Does this target's eval suite carry a case run-evals.py actually scores?
+
+    Only `trigger` and `neighbour-exclusion` are mechanical. A flagged skill can carry neither —
+    no prompt can route to it — so its suite is behaviour cases that name rules and never fail on
+    them, which is not a test however carefully it is written.
+    """
+    path = os.path.join(SKILLS, target, "evals", "evals.json")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            cases = json.load(fh).get("evals", [])
+    except (OSError, ValueError):
+        return False
+    return any(c.get("kind") in ("trigger", "neighbour-exclusion") for c in cases)
+
+
+def check_behaviour_register():
+    if not os.path.isdir(REGISTER):
+        fail("register", "docs/skill-pack-repo/behaviour/ is missing — nothing states what the "
+                         "pack does, so a prose rewrite has no ground truth to be checked against")
+        return
+    if not os.path.isfile(os.path.join(REGISTER, "README.md")):
+        fail("register", "behaviour/README.md is missing — it is the format contract every "
+                         "other file in there is written to")
+
+    seen = {}
+    prose_only = 0
+    entries = 0
+    for target, fname in sorted(register_targets().items()):
+        path = os.path.join(REGISTER, fname)
+        if not os.path.isfile(path):
+            fail("register", f"{target} has no behaviour/{fname} — /r:pack-compact refuses a "
+                             "target with no register, so this skill cannot be compacted")
+            continue
+        current = None
+        fields = {}
+        for n, line in enumerate(open(path, encoding="utf-8"), 1):
+            m = SB_ID.match(line)
+            if m:
+                if current and not (fields.get("Enforced by") or fields.get("Tested by")):
+                    prose_only += 1
+                current, fields = m.group(1), {}
+                entries += 1
+                if not current.startswith(f"SB-{target}-"):
+                    fail("register", f"{fname}:{n} declares {current}, which does not belong to "
+                                     f"this target — an id names the file it lives in")
+                if current in seen:
+                    fail("register", f"{current} is declared twice: {seen[current]} and "
+                                     f"{fname}:{n}. Ids are references; a duplicate silently "
+                                     "redirects one of them")
+                else:
+                    seen[current] = f"{fname}:{n}"
+                continue
+            f = SB_FIELD.match(line)
+            if f and current:
+                key, value = f.group(1), f.group(2)
+                fields[key] = value not in ("\u2014", "-", "none")
+                # An eval suite counts as a test only where run-evals.py actually scores it. It
+                # scores the two mechanical routing kinds and SKIPS every behaviour case, so a
+                # suite of behaviour cases names its rules without ever failing on one. Citing
+                # such a suite moves an entry out of the prose-only column with nothing holding it
+                # up, and that column is the only number saying how much of the pack is guarded by
+                # wording alone. A suite that does carry a routing case is a real check of the
+                # routing claims in it, so those citations stand.
+                if key == "Tested by" and "evals" in value and not scores_mechanically(target):
+                    fail("register", f"{fname}:{n} {current} cites an eval suite with no trigger "
+                                     "or neighbour-exclusion case. run-evals.py skips every "
+                                     "behaviour case, so nothing in that suite can fail — this "
+                                     "entry is prose-only")
+                for ref in BACKTICKED.findall(value):
+                    if not os.path.exists(os.path.join(REPO, ref)):
+                        fail("register", f"{fname}:{n} {current} cites `{ref}`, which is not in "
+                                         f"the repo. A dead {key} path reads as a guarantee and "
+                                         "is not one")
+        if current and not (fields.get("Enforced by") or fields.get("Tested by")):
+            prose_only += 1
+
+    if entries:
+        NOTES.append(f"behaviour register: {entries} entries over "
+                     f"{len(register_targets())} targets, {prose_only} held up by prose alone")
+
+
 # --- R-4 --------------------------------------------------------------------
 # R-4 is the risk that an edit lands in a pre-pack original instead of the pack, so "closed" may
 # only be claimed when NO root holds a twin. Checking one root and announcing the pack is the only
@@ -757,6 +864,7 @@ def main():
     check_script_modes()
     check_vendored()
     check_near_duplicates()
+    check_behaviour_register()
     check_drift(args.source, args.refresh_drift_baseline)
 
     for n in NOTES:
