@@ -298,8 +298,9 @@ fallback agree" holds for the planner and explorers, not the judges.
 ## C-40 — `task-run`'s stop table and handoff list are short · open
 
 The stop table omits `source-unresolved`, returned when the Phase 0 agent itself dies and distinct
-from `source-blocked`. The handoff key list omits `headDetached`, `treeCommitted` and
-`implemented`, two of which the skill elsewhere tells the caller to act on.
+from `source-blocked`. The handoff key list omits `headDetached`, `treeCommitted`, `implemented`
+and now `resume` — the last being the key Step 5 itself branches on. Three of the four are keys the
+skill elsewhere tells the caller to act on.
 
 ## C-41 — `classifyOnly` exists only in the script · open
 
@@ -456,3 +457,52 @@ granted shell tool is `Bash`, and the gradle twin says `Bash` correctly at the s
 related asymmetries, recorded as entries rather than defects: maven carries `WebFetch`/`WebSearch`
 that nothing in its prose uses, and it lacks gradle's "`Bash` may ONLY execute gradle/gradlew
 commands" bound, so its read-only promise rests on one bullet instead of a bounded command set.
+
+
+## C-63 — `planReview.ran: false` now has a third meaning the sentence does not list · open
+
+`skills/task-run/SKILL.md` says `ran: false` means the tier was below full or this was a resume.
+Since `d09180f` a full-tier resume of an **unstamped** plan runs the review and returns `ran: true`,
+and a **stamped** resume returns `ran: false` for a reason the sentence never mentions. The field is
+what a caller reads to decide whether the plan was challenged at all.
+
+## C-64 — the build skip and the review skip are documented as one condition and are two · open
+
+`skills/task-run/SKILL.md` says the build is skipped when a green build or passed review was
+recorded over this exact tree, and that `resume.reviewDone` skips Step 5 on the same condition.
+`plan-ledger.py` accepts a `build:` **or** a `review:` line for the build, and **only** a matching
+`review:` line for `reviewDone`. Same sentence, two different predicates.
+
+## C-65 — the `reviewed:` stamp has two readers that can disagree · open
+
+`skills/task-run/SKILL.md` says the plan header is a ledger the implement workflow reads back
+through `scripts/plan-ledger.py`. It does not: `reviewedEarlier` comes from `src.planReviewed` —
+Phase 0's own read of the header **on base, before the checkout** — while the script's `reviewed`
+field is read **on the feature branch**, returned, and never looked at (`ledger.reviewed` has no
+reader in `task-run-implement.workflow.js`). The two answer differently whenever the plan on the
+branch is not the plan on base, which is exactly the case a resume is for.
+
+## C-66 — two files name a verdict that no longer exists · open
+
+`skills/issues-fix/SKILL.md` and `fanout.sh`'s own comment both say an untracked marker file "would
+come back `no-marker` — a broken fix, to anyone reading the run". Since `b54bad8` that case is
+`failed marker-unreadable`, split from `no-marker` precisely because the two need opposite fixes.
+Both passages argue for dropping the marker at `spawn`, which the code still does, so only the
+verdict named under them is wrong.
+
+## C-67 — the wave dry-merge is `plan-run`'s alone, and `issues-fix` lands differently · open
+
+`plan-run` clears the **whole wave** with `scripts/wave-simulate.sh` and merges nothing until it
+passes. `issues-fix`'s `--land` merges branches one at a time and records a conflicting group as
+failed, accepting a half-landed wave. Pre-existing, and sharper now that the simulation is a script
+under `skills/plan-run/scripts/` that `issues-fix` does not reach for — the two skills share
+`fanout.sh` but not this.
+
+## C-68 — a register entry describing a mechanism that was replaced · open
+
+`SB-plan-run-199` still describes the inline `git merge-tree --write-tree --name-only` loop
+"carried forward onto the **tree** the last one produced". Since `e6d76de` the dry-merge is a
+bundled script and carries forward a **commit with both parents**, never the tree oid. Its core
+claim — dry-merge first, nothing merged until it passes — holds, and SB-plan-run-250..253 state the
+current mechanism beside it, but the entry's command and its tree-vs-commit detail are stale and
+its `—`/`—` fields understate the coverage it now has.

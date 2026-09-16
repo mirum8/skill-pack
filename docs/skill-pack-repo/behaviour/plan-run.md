@@ -12,6 +12,7 @@ Sources this file was frozen from:
 | `skills/plan-run/references/concurrent-sessions.md` | the git mechanics of `--no-merge` / `--land` / `--herdr` |
 | `skills/plan-run/references/stats-fields.md` | every field of the stats row and the question it answers |
 | `skills/plan-run/scripts/fanout.sh` | the fan-out: preflight, spawn, wait, status, cleanup |
+| `skills/plan-run/scripts/wave-simulate.sh` | the wave dry-merge `--land` runs before it merges anything |
 | `skills/plan-run/scripts/footprint-warn.py` | the history check behind the slice preflight |
 | `skills/plan-run/scripts/merge-resolve.py` | `--auto-resolve`'s additive-conflict rule |
 
@@ -83,7 +84,7 @@ flowchart TD
   end
   CLEAN -->|"wave complete"| LAND
 
-  LAND["<b>--land</b> — primary tree only<br/>refuse on .git/MERGE_HEAD<br/>map branch&rarr;phase by its built: marker &mdash; no marker means skip and say so<br/>dry-merge the WHOLE wave with git merge-tree first<br/>merge ascending &middot; build after EVERY merge &middot; halt on red"]
+  LAND["<b>--land</b> — primary tree only<br/>refuse on .git/MERGE_HEAD<br/>map branch&rarr;phase by its built: marker &mdash; no marker means skip and say so<br/>wave-simulate.sh the WHOLE wave first &mdash; 0 clean &middot; 2 conflict &middot; 1 could not run<br/>merge ascending &middot; build after EVERY merge &middot; halt on red"]
   LAND --> MS2["milestone boundary once, after the last merge"]
   MS2 --> ENDR
 
@@ -1221,6 +1222,16 @@ flowchart TD
   *Enforced by:* `skills/plan-run/scripts/fanout.sh`
   *Tested by:* `skills/plan-run/tests/fanout.test.sh`
 
+- **SB-plan-run-247** — A resumed unit's implement half **picks up from the ledger in its plan
+  file**: slices it already finished are not redone, and a tree holding changes no ledger line
+  claims stops it as `resume-unclaimed-tree` for a person to keep or discard. Re-running a finished
+  slice rewrites work the unit already committed on the branch `--land` is waiting for, and
+  unclaimed changes are either somebody's work or unverified output — only the user knows which, so
+  nothing is built on top of them.
+  *States it:* `skills/plan-run/SKILL.md`
+  *Enforced by:* `skills/task-run/task-run-implement.workflow.js`
+  *Tested by:* `skills/task-run/tests/control-flow.test.mjs`
+
 - **SB-plan-run-152** — **Do not poll `status` in place of `--any`.** `status` reports everything
   regardless and is how a caller that lost its place picks it up again, but deciding "is it done
   yet" by re-reading a report on a timer is exactly the judgement the script exists to take off the
@@ -1577,6 +1588,26 @@ flowchart TD
   *Enforced by:* `skills/plan-run/scripts/fanout.sh`
   *Tested by:* `skills/plan-run/tests/fanout.test.sh`
 
+- **SB-plan-run-248** — `unit_verdict` **captures `git show "<branch>:<file>"` and matches the
+  marker from a here-string with `grep -qF`**, never piping git into `grep -q`. Piped under
+  `pipefail`, grep exits at the match and git dies of SIGPIPE writing the rest, so a plan larger
+  than the pipe buffer makes a **marked** branch read as unmarked — at a 1 MB plan that is every
+  run rather than a flake, and the unit it loses is one that built, reviewed and committed cleanly.
+  *States it:* `skills/plan-run/scripts/fanout.sh`
+  *Enforced by:* `skills/plan-run/scripts/fanout.sh`
+  *Tested by:* `skills/plan-run/tests/fanout.test.sh`
+
+- **SB-plan-run-249** — **The read is checked on its own, so `failed marker-unreadable` and `failed
+  no-marker` are two verdicts rather than one.** A branch or marker file git cannot read at all is
+  `marker-unreadable`, carrying git's own first error line; only a file git read that holds no
+  `<prefix><branch>` is `no-marker`, and `wait`'s usage block names both. Behind a pipe git's exit
+  status is unreadable and the two collapse into each other, yet they need opposite fixes — a
+  `no-marker` unit has a phase it did not finish, a `marker-unreadable` one has a branch or a path
+  that does not exist.
+  *States it:* `skills/plan-run/scripts/fanout.sh`
+  *Enforced by:* `skills/plan-run/scripts/fanout.sh`
+  *Tested by:* `skills/plan-run/tests/fanout.test.sh`
+
 ## `--land` — merging what the concurrent sessions built
 
 - **SB-plan-run-195** — `--land` runs **from the primary working tree only** and refuses from a
@@ -1612,6 +1643,76 @@ flowchart TD
   set of pairs. It writes no working tree and no index, so it costs seconds; a conflict there stops
   the pass with nothing merged, because merging until one is hit leaves a wave half-landed and a
   base that differs from the one every remaining branch was built on.
+  *States it:* `skills/plan-run/SKILL.md`, `skills/plan-run/references/concurrent-sessions.md`
+  *Enforced by:* —
+  *Tested by:* —
+
+- **SB-plan-run-250** — The dry-merge is **one bundled script rather than a loop written out at the
+  call site**: `"${CLAUDE_PLUGIN_ROOT}/skills/plan-run/scripts/wave-simulate.sh" "$base" <branches
+  in ascending phase order>`, invoked by `SKILL.md` and by `references/concurrent-sessions.md`
+  alike, neither of which restates it. Both of its wrong answers are confident ones — a false
+  conflict stops a clean wave with nothing merged, a false clean merges half a wave onto a base the
+  rest never cleared — so there is one encoding of the decision and one suite over that encoding.
+  *States it:* `skills/plan-run/SKILL.md`, `skills/plan-run/references/concurrent-sessions.md`
+  *Enforced by:* `skills/plan-run/scripts/wave-simulate.sh`
+  *Tested by:* `skills/plan-run/tests/wave-simulate.test.sh`
+
+- **SB-plan-run-251** — Its **exit code is the verdict**: `0` the whole wave merges clean, printing
+  `clean: <n> branches onto <base>`; `2` one branch conflicts, printing `CONFLICT <branch>:` and the
+  conflicted file names on stdout; `1` the simulation could not run, printing git's error on
+  stderr. Only `0` goes on to the merge.
+  *States it:* `skills/plan-run/SKILL.md`, `skills/plan-run/references/concurrent-sessions.md`,
+  `skills/plan-run/scripts/wave-simulate.sh`
+  *Enforced by:* `skills/plan-run/scripts/wave-simulate.sh`
+  *Tested by:* `skills/plan-run/tests/wave-simulate.test.sh`
+
+- **SB-plan-run-252** — **`git merge-tree`'s own exit status is not the verdict**, because it exits 1
+  both on a conflict and when it could not run at all. A conflict is exit 1 **with conflicted file
+  names** — read from its output past the tree oid on line 1 and stopping at the first blank line —
+  and every other failure is an error, reported as one and never as a conflict.
+  *States it:* `skills/plan-run/scripts/wave-simulate.sh`,
+  `skills/plan-run/references/concurrent-sessions.md`
+  *Enforced by:* `skills/plan-run/scripts/wave-simulate.sh`
+  *Tested by:* `skills/plan-run/tests/wave-simulate.test.sh`
+
+- **SB-plan-run-253** — What carries forward from one branch to the next is a **commit with both
+  parents** (`git commit-tree <tree> -p <sim> -p <branch>`), never the tree oid `merge-tree` prints:
+  the next `merge-tree` needs a commit to find a merge base and refuses a tree, and the second
+  parent is what models the real `--no-ff` merge, so a branch cut from its wave-mate simulates the
+  way it will actually land rather than as a conflict against work already in its own history.
+  *States it:* `skills/plan-run/references/concurrent-sessions.md`,
+  `skills/plan-run/scripts/wave-simulate.sh`
+  *Enforced by:* `skills/plan-run/scripts/wave-simulate.sh`
+  *Tested by:* `skills/plan-run/tests/wave-simulate.test.sh`
+
+- **SB-plan-run-254** — The simulation **writes only unreachable objects — no ref, index, working
+  tree or `MERGE_HEAD`** — which is what lets a whole wave be cleared in seconds with nothing
+  merged, and what keeps a failed simulation from leaving the primary tree in the state `--land`'s
+  own Step 0 refuses to start from.
+  *States it:* `skills/plan-run/SKILL.md`, `skills/plan-run/scripts/wave-simulate.sh`
+  *Enforced by:* `skills/plan-run/scripts/wave-simulate.sh`
+  *Tested by:* `skills/plan-run/tests/wave-simulate.test.sh`
+
+- **SB-plan-run-255** — Fewer than two arguments, and a `<base>` that does not resolve to a commit
+  (`git rev-parse --verify -q "$base^{commit}"`), are both named and refused with **exit 1**, the
+  could-not-run code, never 2. A mistyped base reported as a conflict would stop a wave that merges
+  perfectly well.
+  *States it:* `skills/plan-run/scripts/wave-simulate.sh`
+  *Enforced by:* `skills/plan-run/scripts/wave-simulate.sh`
+  *Tested by:* `skills/plan-run/tests/wave-simulate.test.sh`
+
+- **SB-plan-run-256** — It exports its own author and committer identity
+  (`wave-simulate <wave-simulate@localhost>`) for the simulation commits, so a repo with no
+  `user.name`/`user.email` configured simulates instead of failing `commit-tree` — a failure that
+  would be reported as "the simulation could not run" over a wave with nothing wrong with it.
+  *States it:* `skills/plan-run/scripts/wave-simulate.sh`
+  *Enforced by:* `skills/plan-run/scripts/wave-simulate.sh`
+  *Tested by:* —
+
+- **SB-plan-run-257** — **Exit 1 is read as neither a conflict nor a clean wave**: the pass stops and
+  names git's error. Read as a conflict it stops a wave that merges perfectly well, with nothing
+  merged and a report naming no files; read as clean it merges a wave the simulation never cleared,
+  which is the failure the dry-merge exists to prevent.
   *States it:* `skills/plan-run/SKILL.md`, `skills/plan-run/references/concurrent-sessions.md`
   *Enforced by:* —
   *Tested by:* —
@@ -2025,29 +2126,42 @@ Recorded here, not fixed — each needs a decision this register cannot make.
   while the alarm channel requires `--orchestrator <name>` on **every** spawn (SB-plan-run-157). A
   run that copies the block gets no upward channel at all.
 
+- **Two comments name one verdict where the code reports two.** `fanout.sh`'s own `spawn` comment
+  says an unreadable marker file "returns `no-marker` for a unit that fixed, reviewed and committed
+  its group cleanly", and `issues-fix`'s untracked-backlog note says it in the same words;
+  `unit_verdict` reports that case as `marker-unreadable` (SB-plan-run-249). Both passages argue for
+  dropping the marker at `spawn`, which the code does, so each conclusion holds and only the verdict
+  named under it is wrong.
+
 Against `skills/issues-fix/SKILL.md`, which drives the same `fanout.sh`, no contradiction was
 found on the shared `--herdr` / `--ask` / `--land` material — the `--ask` five rules, the preflight's
 four checks, the sentinel-and-marker rule, the `wait --any` window, the cap-in-config rule and the
-primary-tree requirement are stated the same way in both. Two **divergences** that are deliberate
-rather than contradictory: `plan-run` documents the once-per-sentinel rule and the resumed-unit
-sentinel (SB-plan-run-151) and `issues-fix` does not; and `plan-run`'s "Being a unit" has four
-message cases to `issues-fix`'s three, the extra one being the spec-pinned test
-(SB-plan-run-166), which has no counterpart in a flat backlog.
+primary-tree requirement are stated the same way in both, and both take the marker read from the
+same `fanout.sh`. Three **divergences** that are deliberate rather than contradictory: `plan-run`
+documents the once-per-sentinel rule and the resumed-unit sentinel (SB-plan-run-151) and
+`issues-fix` does not; `plan-run`'s "Being a unit" has four message cases to `issues-fix`'s three,
+the extra one being the spec-pinned test (SB-plan-run-166), which has no counterpart in a flat
+backlog; and **the wave dry-merge is `plan-run`'s alone** — `issues-fix`'s `--land` merges its
+branches one at a time and records a conflicting group as failed, so it accepts a half-landed wave
+where `plan-run` clears the whole one first (SB-plan-run-250) and merges nothing until it passes.
+The script lives under `skills/plan-run/scripts/`, which `issues-fix` reaches for `fanout.sh` and
+not for this.
 
 ## Prose-only behaviours
 
-174 of this file's 246 entries have neither an *Enforced by:* nor a *Tested by:* — nothing fails if
+175 of this file's 257 entries have neither an *Enforced by:* nor a *Tested by:* — nothing fails if
 they quietly stop being true, which makes them exactly the class a rewrite can lose in silence.
-That is 71% of the skill, and it is the expected shape: `plan-run` is an orchestration skill whose
-code (`fanout.sh`, `merge-resolve.py`, `footprint-warn.py`, and the three sibling scripts it calls)
-covers the fan-out and the two conflict decisions, while the pipeline itself — the step order, the
-gates, the halts, the handoff fields, the report — is held up entirely by its own wording.
+That is 68% of the skill, and it is the expected shape: `plan-run` is an orchestration skill whose
+code (`fanout.sh`, `wave-simulate.sh`, `merge-resolve.py`, `footprint-warn.py`, and the three
+sibling scripts it calls) covers the fan-out, the wave dry-merge and the two conflict decisions,
+while the pipeline itself — the step order, the gates, the halts, the handoff fields, the report —
+is held up entirely by its own wording.
 
 All of them, by ID:
 
 > `SB-plan-run-` 001–007, 009–011, 013–023, 025–026, 028–034, 040–065, 068–069, 071–072, 074–083,
 > 085–096, 098–103, 105–109, 111–115, 117–124, 126, 128–129, 131, 135–138, 140–141, 143, 145–146,
-> 152, 154, 158, 160–168, 195–204, 210, 213–234, 236–245
+> 152, 154, 158, 160–168, 195–204, 210, 213–234, 236–245, 257
 
 The ones whose loss would be silent **and** expensive, called out because a compaction pass is most
 tempted by them — each reads as a caveat rather than a rule:
@@ -2078,4 +2192,5 @@ tempted by them — each reads as a caveat rather than a rule:
 | 201 | a clean merge is trusted as a compiling tree across a package-level symbol collision |
 | 210 | an auto-resolved merge is patched up instead of aborted, and the dropped line fails only in tests |
 | 216 | a blocked review is banked as clean by an unattended run |
+| 257 | a simulation that could not run is read as a conflict and stops a clean wave, or as clean and lands a wave nothing cleared |
 | 236–245 | the stats row stops being readable: a halt records nothing, or `mode` goes missing and every other number becomes ambiguous |

@@ -1717,6 +1717,87 @@ barrier**, so the teardown in the `finally` is reached from every exit path incl
   *Enforced by:* `skills/task-review/scripts/worktree-deploy.sh`
   *Tested by:* `skills/task-review/tests/worktree-deploy.test.sh`
 
+## The resume ledger under `.task-plans/`
+
+- **SB-task-review-190** — The bookkeeping check is told to **ignore files under `.task-plans/`**.
+  That directory is `/r:task-run`'s own resume ledger, stamped with `reviewed:`, `slice …: done` and
+  `build: green` on every run by design, so a ledger line arriving in the diff is the pipeline
+  working, not an agent ticking somebody's plan. Read as ordinary bookkeeping it is a false positive
+  on every single run the ledger exists for.
+  *States it:* `skills/task-review/task-review.workflow.js`
+  *Enforced by:* `skills/task-review/task-review.workflow.js`
+  *Tested by:* `skills/task-review/tests/control-flow.test.mjs`
+
+- **SB-task-review-191** — The prompt's exclusion is not trusted on its own: the returned list is
+  filtered against `/(^|\/)\.task-plans\//` before anything is logged. A prohibition in a prompt is
+  obeyed by a model, and the consequence of one being missed here is destructive rather than noisy —
+  the remedy this check hands the caller is `git checkout -- <file>`, which on a plan file discards
+  the ledger the next resume reads and every plan-review edit sitting beside it.
+  *States it:* `skills/task-review/task-review.workflow.js`
+  *Enforced by:* `skills/task-review/task-review.workflow.js`
+  *Tested by:* `skills/task-review/tests/control-flow.test.mjs`
+
+- **SB-task-review-192** — The filter is per **file**, never per answer. A diff that stamps the
+  ledger and also flips a `- [ ]` in `docs/…/todo.md` still reports the todo file and names only it
+  in the `git checkout --` line. Dropping the whole report because one entry was the ledger would
+  hide exactly the tick this check exists to catch.
+  *States it:* `skills/task-review/task-review.workflow.js`
+  *Enforced by:* `skills/task-review/task-review.workflow.js`
+  *Tested by:* `skills/task-review/tests/control-flow.test.mjs`
+
+- **SB-task-review-193** — Liveness is decided on the **answer**, not on the filtered list: the gap
+  report fires on `!bookkeeping` alone, so a check that ran and found only ledger files reports
+  nothing rather than "could not check whether the diff writes plan bookkeeping". A dead check and a
+  clean one must stay distinguishable (SB-task-review-159), and a list that filtered to empty is a
+  clean one.
+  *States it:* `skills/task-review/task-review.workflow.js`
+  *Enforced by:* `skills/task-review/task-review.workflow.js`
+  *Tested by:* `skills/task-review/tests/control-flow.test.mjs`
+
+## The codex model name
+
+- **SB-task-review-194** — The shipped `steps.fix` row names the Codex slug **`gpt-5.6-sol`** — the
+  hyphen after `gpt` is part of the name. The suite asserts that exact string on the
+  `codex-companion.mjs` command line and in the log line the fixers print, because the slug is data
+  the CLI matches literally rather than a label anyone reads.
+  *States it:* `.config/defaults.yaml`
+  *Enforced by:* `lib/read-config.py`, `tools/validate.py`
+  *Tested by:* `skills/task-review/tests/control-flow.test.mjs`, `lib/tests/config.test.sh`
+
+- **SB-task-review-195** — A codex `model` is checked against the list the **installed Codex CLI
+  keeps for itself** — `models_cache.json` under `$CODEX_HOME`, else `~/.codex` — and never against
+  a list pinned in the reader, which would go stale the week the CLI's line-up changes.
+  *States it:* `lib/read-config.py`
+  *Enforced by:* `lib/read-config.py`
+  *Tested by:* `lib/tests/config.test.sh`
+
+- **SB-task-review-196** — A name outside that list falls the **whole row** back to
+  claude/`opus`/`medium`, the same substitution a missing Codex plugin gets and for the same reason,
+  and the note quotes the rejected value beside the slugs the CLI does offer. Honoured, the name is
+  rejected by the API with a 400 on every job, so the fix phase burns its slot having written
+  nothing; a named Claude row that runs beats a codex row that 400s. A one-character slip —
+  `gpt5.6-sol` for `gpt-5.6-sol` — reads correctly to anyone reviewing the file, which is why a
+  person is not the check.
+  *States it:* `lib/read-config.py`
+  *Enforced by:* `lib/read-config.py`
+  *Tested by:* `lib/tests/config.test.sh`
+
+- **SB-task-review-197** — An absent or unreadable `models_cache.json` yields an empty list and the
+  name is **not judged at all**. A CLI that has never run has no list to offer, and refusing every
+  codex row on such a machine would be a guess in the other direction — the reader substitutes only
+  where it knows, never where it cannot see.
+  *States it:* `lib/read-config.py`
+  *Enforced by:* `lib/read-config.py`
+  *Tested by:* `lib/tests/config.test.sh`
+
+- **SB-task-review-198** — `--check` applies the same test and is the one mode that exits non-zero,
+  so the gate cannot ship a `.config/defaults.yaml` whose codex model this reader would reject at run
+  time. On a machine with no model list it exits 0 rather than failing the gate over something it
+  cannot see.
+  *States it:* `lib/read-config.py`
+  *Enforced by:* `lib/read-config.py`, `tools/validate.py`
+  *Tested by:* `lib/tests/config.test.sh`
+
 ## Prose-only behaviours
 
 Held up by wording alone — no *Enforced by:* and no *Tested by:*. Nothing fails if one quietly stops
@@ -1724,6 +1805,7 @@ being true, which makes these the entries a rewrite can lose in silence.
 
 | id | one line |
 |---|---|
+| SB-task-review-001 | the routine never fires on its own — only an explicit call or `/r:task-run`'s review step |
 | SB-task-review-002 | the no-self-trigger rule lives in the description and the non-negotiables, never in frontmatter |
 | SB-task-review-007 | a context with no `Workflow` tool stops and says so rather than improvising a skim |
 | SB-task-review-014 | real tools only — never an LLM imitation of a scanner, reviewer or build |
@@ -1734,4 +1816,4 @@ being true, which makes these the entries a rewrite can lose in silence.
 | SB-task-review-074 | a degraded Codex review wrapper reads as fewer findings, never as an error |
 | SB-task-review-178 | `/r:claudemd-compact --auto` is unattended but evidence-gated |
 
-**9 prose-only** of **189 entries**.
+**10 prose-only** of **198 entries**.

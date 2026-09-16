@@ -95,6 +95,20 @@ would otherwise fix it:
   those strings. Renaming them to match the directories disarms the immutability guard on both
   pipelines, and nothing downstream notices.
 
+**Coverage is per target, and that is weaker than it sounds.** The gate checks that every packed
+skill and bundled agent HAS a file, not that the file is current. A register goes stale the moment
+a skill grows a behaviour nobody records, and nothing mechanical can see that in prose.
+
+One piece of it can be checked, because it has a name to look for: **every executable a skill
+ships must be named somewhere in its register**. A new bundled script is the shape this drift
+takes when it is worth catching — it arrives with its own suite, its own fail-closed contract and
+usually a halt, and a register that has never heard of it is ground truth with a hole in it. That
+rule caught `wave-simulate.sh` and `plan-ledger.py` on the merge that introduced them, which is
+twice in one merge.
+
+It still does not catch a new rule added to existing prose. Refreshing a register after somebody
+else's commits lands is a job, not a gate.
+
 ## Coverage
 
 | target | entries | prose-only | file |
@@ -118,28 +132,28 @@ would otherwise fix it:
 | `hexagonal-architecture` | 35 | 33 | [`hexagonal-architecture.md`](hexagonal-architecture.md) |
 | `issues-draft` | 46 | 44 | [`issues-draft.md`](issues-draft.md) |
 | `issues-fix` | 165 | 134 | [`issues-fix.md`](issues-fix.md) |
-| `pack-compact` | 30 | 19 | [`pack-compact.md`](pack-compact.md) |
+| `pack-compact` | 36 | 23 | [`pack-compact.md`](pack-compact.md) |
 | `pack-maintain` | 52 | 43 | [`pack-maintain.md`](pack-maintain.md) |
 | `page-serve` | 36 | 5 | [`page-serve.md`](page-serve.md) |
 | `plan-report` | 57 | 38 | [`plan-report.md`](plan-report.md) |
-| `plan-run` | 246 | 174 | [`plan-run.md`](plan-run.md) |
+| `plan-run` | 257 | 175 | [`plan-run.md`](plan-run.md) |
 | `plan-unblock` | 70 | 44 | [`plan-unblock.md`](plan-unblock.md) |
 | `reuse-index` | 53 | 25 | [`reuse-index.md`](reuse-index.md) |
 | `spec-brainstorm` | 161 | 108 | [`spec-brainstorm.md`](spec-brainstorm.md) |
 | `spec-design` | 129 | 71 | [`spec-design.md`](spec-design.md) |
 | `task-quick` | 42 | 38 | [`task-quick.md`](task-quick.md) |
-| `task-review` | 189 | 10 | [`task-review.md`](task-review.md) |
-| `task-run` | 136 | 23 | [`task-run.md`](task-run.md) |
+| `task-review` | 198 | 10 | [`task-review.md`](task-review.md) |
+| `task-run` | 173 | 25 | [`task-run.md`](task-run.md) |
 | `test-app-create` | 110 | 51 | [`test-app-create.md`](test-app-create.md) |
 | `tests-write` | 44 | 41 | [`tests-write.md`](tests-write.md) |
 | `ui-prototype` | 85 | 35 | [`ui-prototype.md`](ui-prototype.md) |
-| **total** | **2250** | **1340** (59%) | |
+| **total** | **2307** | **1343** (58%) | |
 
 A snapshot, frozen with the register. `python3 tools/validate.py` prints the live totals on every
 run and `check_behaviour_register()` fails if a target loses its file, so this table going stale is
 visible rather than silent.
 
-**1340 of 2250 behaviours are held up by wording alone.** That is the number this register was
+**1343 of 2307 behaviours are held up by wording alone.** That is the number this register was
 built to produce, and the reason `/r:pack-compact` restores a file rather than patching it.
 
 The figure errs high by roughly ten entries: a first pass cleared every eval citation from

@@ -1,13 +1,15 @@
 # Behaviour register — `task-run`
 
 `/r:task-run` takes one unit of work from a blank slate to a reviewed, tested, shipped change.
-It is **two prose files and one pipeline**:
+It is **two prose files, one pipeline and one script**:
 
 | file | owns |
 |---|---|
 | `skills/task-run/SKILL.md` | the front door, Step 5 (`/r:task-review`), Step 6 (finish), resume & concurrency |
 | `skills/task-run/task-run-implement.workflow.js` | Steps 0–4 — source, explore, design, plan, plan review, implement, build |
+| `skills/task-run/scripts/plan-ledger.py` | the resume ledger in the plan's header — what a stopped run finished, and whether the tree still holds it |
 | `skills/task-run/tests/control-flow.test.mjs` | the branches of that script, with `agent()`/`parallel()` stubbed |
+| `skills/task-run/tests/plan-ledger.test.sh` | the ledger's match, claim and lock — the judgements that fail by being confidently wrong |
 
 The script is the single encoding of Steps 0–4. `SKILL.md` delegates to it and must not restate
 the graph; there is no prose fallback engine, because a context with no `Workflow` tool has no
@@ -49,6 +51,8 @@ flowchart TD
   SB -- yes --> XSU[/stopped: source-unresolved/]
   P0 --> SBR{src.blockedReason?<br/>gh missing/unauth, unreadable file,<br/>contentless task, ambiguous locator}
   SBR -- yes --> XSB[/stopped: source-blocked/]
+  SBR -- no --> BHB{"branchExists and<br/>branchHasBase !== true?"}
+  BHB -- yes --> XBB[/stopped: branch-behind-base<br/>before any agent is spent<br/>an unreported answer counts as NO/]
 
   CFG --> P1
 
@@ -78,16 +82,30 @@ flowchart TD
     D1["agent label: ui-design<br/>GP · opus/high · NO schema<br/>section &ge; 600 chars + DESIGN-INTENT trailer"]
   end
   D -- yes --> D1
-  D -- no --> P2
+  D -- no --> LEDG
   D1 --> DDEAD{blocked or no section?}
   DDEAD -- yes --> DFALL["log: the planner takes the<br/>frontend-design pass back<br/>NOT a halt"]
   DDEAD -- no --> DOK[designSection + designIntent]
-  DFALL --> P2
-  DOK --> P2
+  DFALL --> LEDG
+  DOK --> LEDG
+
+  LEDG{"resuming AND a branch<br/>was dispatched?"}
+  LEDG -- no --> P2
+  LEDG -- yes --> LAW[await the branch HERE<br/>the ledger is read on the feature branch]
+  LAW --> LON{"on a branch, and not base?"}
+  LON -- no --> P2
+  LON -- yes --> LRD["agent label: ledger-read<br/>GP · haiku/low · schema LEDGER_READ<br/>plan-ledger.py read --plan --base<br/>reliable(): 3 attempts · relays, never judges"]
+  LRD --> LERR{dead, or error?}
+  LERR -- yes --> XRLU[/stopped: resume-ledger-unread/]
+  LERR -- no --> LSTAT{"planStatus implementing/done<br/>in THIS tree?"}
+  LSTAT -- no --> XRLU
+  LSTAT -- yes --> LUNC{any unclaimed files?}
+  LUNC -- yes --> XRUT[/stopped: resume-unclaimed-tree<br/>names the files — a person keeps or discards/]
+  LUNC -- no --> P2
 
   subgraph P2S["phase('Plan')"]
     P2{"planStatus implementing/done?"}
-    P2 -- yes, resume --> ADOPT[adopt the plan on disk<br/>skip plan AND plan-review]
+    P2 -- yes, resume --> ADOPT[adopt the plan on disk<br/>never re-planned at any tier]
     P2 -- no --> TIER{profile}
     TIER -- light --> PL["agent label: plan-light<br/>GP · fable/medium · NO schema"]
     TIER -- standard/full --> PF["agent label: planner<br/>agentType Plan · planRun · NO schema<br/>read-only by construction"]
@@ -108,7 +126,7 @@ flowchart TD
   WOK -- yes --> P3G
   ADOPT --> P3G
 
-  P3G{"profile == full<br/>and not resuming?"}
+  P3G{"profile == full AND<br/>(not resuming OR no reviewed: stamp)?"}
   P3G -- no --> P4
   P3G -- yes --> P3
 
@@ -141,8 +159,10 @@ flowchart TD
 
   TERM --> XCPR[/stopped: codex-plan-review-unavailable<br/>no stand-in reviewer/]
   P3 -.-> |3 dead attempts| XCPR
-  PS --> P4
-  FLIP -- yes --> P4
+  PS --> MRV
+  FLIP -- yes --> MRV
+  MRV["agent label: ledger-mark:reviewed<br/>codex · N passes · R raised · A applied · D dropped<br/>written only here, before any code"]
+  MRV --> P4
 
   subgraph P4S["phase('Implement')"]
     P4{branch promise exists?}
@@ -158,10 +178,11 @@ flowchart TD
     ROUTE -- yes --> TWO["backend: r:java-backend-developer<br/>frontend: r:htmx-thymeleaf-dev<br/>by hasBackend / hasFrontend<br/>neither -> general-purpose"]
     ONE --> IMP
     TWO --> IMP
-    IMP["parallel, one per area<br/>agent label: implement:&lt;area&gt;<br/>implRun · schema IMPL<br/>(codex provider: agentType forced to general-purpose)"]
+    IMP["parallel, one per area<br/>agent label: implement:&lt;area&gt;<br/>implRun · schema IMPL<br/>(codex provider: agentType forced to general-purpose)<br/>a slice recorded done whose files still match<br/>is NOT dispatched; one whose files moved is"]
+    IMP --> MSL["agent label: ledger-mark:slice:&lt;area&gt;<br/>the moment THAT slice returns clean<br/>a blocked slice is never marked"]
   end
 
-  IMP --> STUCK{any blockedOn,<br/>or every slice blocked?}
+  MSL --> STUCK{any blockedOn,<br/>or every slice blocked?}
   STUCK -- yes --> PROBE["agent label: halt-tree<br/>GP · sonnet/low · schema TREE<br/>git status --porcelain + git diff --name-only base"]
   PROBE --> XIB[/stopped: implement-blocked<br/>carries filesChanged from the TREE<br/>treeRead says whether anyone looked/]
   STUCK -- no --> P5
@@ -169,7 +190,9 @@ flowchart TD
   subgraph P5S["phase('Build')"]
     P5{"buildTool == none?"}
     P5 -- yes --> NA["buildGreen = n/a"]
-    P5 -- no --> BL
+    P5 -- no --> VCH{"nothing re-dispatched AND<br/>build: or review: matches this tree?"}
+    VCH -- yes --> SKIPB["buildGreen = true<br/>resume.buildSkipped = true<br/>not built again"]
+    VCH -- no --> BL
     BL["loop i = 1..3<br/>agent label: build#i<br/>agentType runnerAgent or general-purpose<br/>sonnet/medium · schema BUILD<br/>i=1 clean + unscoped; i&gt;1 fast + module-scoped"]
     BL --> GREEN{green?}
     GREEN -- yes --> OK[buildGreen = true]
@@ -177,12 +200,16 @@ flowchart TD
     INS -- true --> XBRP[/stopped: build-red-preexisting/]
     INS -- false --> BFIX["agent label: build-fix#i<br/>agentType = the first area's · implRun<br/>i &lt; 3 only"]
     BFIX --> BL
+    OK --> MBD["agent label: ledger-mark:build<br/>build: green over the whole tree"]
   end
 
   BL -.-> |still red after 3| XBR[/stopped: build-red<br/>carries inScope + preExisting + buildLog/]
 
-  NA --> HEAD
-  OK --> HEAD
+  NA --> RDONE
+  MBD --> RDONE
+  SKIPB --> RDONE
+  RDONE["resume.reviewDone = nothing re-dispatched<br/>AND a review: line matches this tree<br/>a build: line does NOT produce it"]
+  RDONE --> HEAD
   HEAD["agent label: head-check<br/>GP · haiku/low · schema BRANCH<br/>re-reads HEAD, never halts on it"]
   HEAD --> STATS["agent label: stats<br/>GP · haiku/low · best effort, never retried"]
   STATS --> HANDOFF([handoff to the caller<br/>Steps 5 and 6])
@@ -191,8 +218,11 @@ flowchart TD
   XSRC -.-> NOSTAT
   XSU -.-> NOSTAT
   XSB -.-> NOSTAT
+  XBB -.-> NOSTAT
   XEB -.-> NOSTAT
-  XPB --> STATS2[/every stop from the planner down<br/>records a stats row tagged with the reason<br/>and carries planReview out with it/]
+  XRLU --> STATS2
+  XRUT --> STATS2
+  XPB --> STATS2[/every stop from the resume check down<br/>records a stats row tagged with the reason<br/>and carries planReview out with it/]
   XPNW --> STATS2
   XCPR --> STATS2
   XBNM --> STATS2
@@ -746,7 +776,11 @@ Two things the graph deliberately does **not** claim, because the suite contradi
 
 ### Phase 2 — the plan
 
-- **SB-task-run-055** — A plan file already at `status: implementing` or `done` is **adopted**:
+- **SB-task-run-055** — **SUPERSEDED 2026-09-16 by `d09180f`, kept in place because ids are
+  references.** The `reviewed:` stamp now records whether an earlier run's Codex review settled, so
+  "whether an earlier one reviewed it" IS knowable here and a full-tier resume of an unstamped plan
+  reviews it. Current behaviour is SB-task-run-154 and SB-task-run-156. As written:
+  A plan file already at `status: implementing` or `done` is **adopted**:
   planning and the plan review are skipped entirely. The log does not guess what that means — a
   Workflow script is not told whether the runtime resumed it, so "this is a resume" and "a plan file
   from an earlier attempt is lying on disk" are indistinguishable from inside, and a fresh run once
@@ -846,7 +880,11 @@ Two things the graph deliberately does **not** claim, because the suite contradi
 
 ### Phase 3 — the Codex plan review
 
-- **SB-task-run-065** — The Codex plan review runs at **`full` tier only and never on a resume**,
+- **SB-task-run-065** — **PARTLY SUPERSEDED 2026-09-16 by `d09180f`, kept in place because ids are
+  references.** It now also runs on a full-tier resume whose plan carries no `reviewed:` stamp;
+  SB-task-run-156 states the current gate. Everything below about WHICH agent type runs it, and why,
+  still holds. As written:
+  The Codex plan review runs at **`full` tier only and never on a resume**,
   and it reviews the **plan document**, not a diff — there is no diff yet, and the
   adversarial-review `run.sh` reviews a diff and is the wrong tool. It runs on `general-purpose`,
   **not** `codex:codex-rescue`: that type auto-loads `codex-cli-runtime`, which makes it a one-shot
@@ -1590,14 +1628,342 @@ Two things the graph deliberately does **not** claim, because the suite contradi
   *Enforced by:* `skills/task-run/task-run-implement.workflow.js`
   *Tested by:* `skills/task-run/tests/control-flow.test.mjs`
 
+### The resume ledger
+
+- **SB-task-run-137** — The resume ledger lives in the plan file's **own header**, beside `status:`,
+  and nowhere else. The plan is the one artifact that travels with the work: it moves with the
+  branch, it is deleted with the worktree, and deleting it is already how a user forces a fresh
+  plan. A record kept anywhere else — the stats store above all — outlives the tree it describes
+  and answers for the next one cut at the same path, and the sink is best-effort by design.
+  *States it:* `skills/task-run/scripts/plan-ledger.py`
+  *Enforced by:* `skills/task-run/scripts/plan-ledger.py`
+  *Tested by:* `skills/task-run/tests/plan-ledger.test.sh`
+
+- **SB-task-run-138** — Four line shapes, one per thing a run can finish: `reviewed: <note> ·
+  <UTC minute>`, `slice <label>: done sha256=<16 hex> files=[…]`, `build: green sha256=…`,
+  `review: done sha256=…`. A slice's hash covers **the files it claimed**; a build or review hash
+  covers **the whole tree against base**. What each line vouches for is the difference between a
+  step that may be skipped and one that may not, so the two hash scopes are not interchangeable.
+  *States it:* `skills/task-run/scripts/plan-ledger.py`
+  *Enforced by:* `skills/task-run/scripts/plan-ledger.py`
+  *Tested by:* `skills/task-run/tests/plan-ledger.test.sh`
+
+- **SB-task-run-139** — A ledger line is a **header** line: the header is every leading line matching
+  `^[A-Za-z][A-Za-z0-9 _.-]*:` up to the first blank one, a mark lands inside it, `status:` stays the
+  first line, and the plan body comes back byte-for-byte. The plan is a document a person reads and
+  a later commit ships; bookkeeping that reflowed it would be visible in every diff of the work.
+  *States it:* `skills/task-run/scripts/plan-ledger.py`
+  *Enforced by:* `skills/task-run/scripts/plan-ledger.py`
+  *Tested by:* `skills/task-run/tests/plan-ledger.test.sh`
+
+- **SB-task-run-140** — `.task-plans/` is excluded from the tree the hashes cover, so the plan's own
+  edits — this ledger among them, and the `## Post-review changes` section Step 5 appends — never
+  break a match. Without it every mark would invalidate the line it just wrote.
+  *States it:* `skills/task-run/scripts/plan-ledger.py`
+  *Enforced by:* `skills/task-run/scripts/plan-ledger.py`
+  *Tested by:* `skills/task-run/tests/plan-ledger.test.sh`
+
+- **SB-task-run-141** — The tree a resume has to account for is `git diff --name-only <base>` **plus**
+  untracked files that are not ignored. Both halves are needed: the work is uncommitted until Step 6,
+  and a change already committed on the feature branch still counts against base. An unknown base is
+  reported as an `error`, never as an empty tree — an empty tree is the answer that says everything
+  is accounted for.
+  *States it:* `skills/task-run/scripts/plan-ledger.py`
+  *Enforced by:* `skills/task-run/scripts/plan-ledger.py`
+  *Tested by:* `skills/task-run/tests/plan-ledger.test.sh`
+
+- **SB-task-run-142** — A slice matches only while every file it claimed is byte-identical to what it
+  left. A file that no longer exists hashes differently from one that is empty, so a claimed file
+  **deleted** after its slice finished breaks the match rather than reading as unchanged — the
+  direction that matters, since a deletion is exactly the edit that makes the rest of the plan wrong.
+  *States it:* `skills/task-run/scripts/plan-ledger.py`
+  *Enforced by:* `skills/task-run/scripts/plan-ledger.py`
+  *Tested by:* `skills/task-run/tests/plan-ledger.test.sh`
+
+- **SB-task-run-143** — A slice **claims its files whether or not they still match**. A mismatched
+  slice is re-run, and those files are its own work to redo — not somebody else's to stop the run
+  over. Counting them as unclaimed would turn every ordinary "the tree moved on" resume into a
+  question for the user.
+  *States it:* `skills/task-run/scripts/plan-ledger.py`
+  *Enforced by:* `skills/task-run/scripts/plan-ledger.py`
+  *Tested by:* `skills/task-run/tests/plan-ledger.test.sh`
+
+- **SB-task-run-144** — A `build:` or `review:` line that **still matches claims the whole tree**,
+  not just what the slices named. The build fixer and the review's own fixers edit files no slice
+  ever claimed, and those edits were built or reviewed with everything else; without this rule every
+  run that reached a green build would come back holding unclaimed files.
+  *States it:* `skills/task-run/scripts/plan-ledger.py`
+  *Enforced by:* `skills/task-run/scripts/plan-ledger.py`
+  *Tested by:* `skills/task-run/tests/plan-ledger.test.sh`
+
+- **SB-task-run-145** — A claim is **resolved before it is recorded**, because implementers report
+  the files they changed in whatever form they saw them — a repo path, an absolute path, sometimes a
+  bare file name. A name that resolves to exactly one path in the tree is recorded as that path; one
+  that resolves to two or more is **kept as given**. A claim naming no real path claims nothing, and
+  the file it meant then reads as unclaimed on the resume; guessing between two files is the other
+  wrong answer, and this script exists to give neither.
+  *States it:* `skills/task-run/scripts/plan-ledger.py`
+  *Enforced by:* `skills/task-run/scripts/plan-ledger.py`
+  *Tested by:* `skills/task-run/tests/plan-ledger.test.sh`
+
+- **SB-task-run-146** — An absolute claim is brought inside the repo through **`realpath`, never
+  `abspath`**. `git rev-parse --show-toplevel` hands back a path with every symlink resolved and a
+  caller reports whatever it was handed, so on macOS a repo under `TMPDIR` is `/var/…` to the caller
+  and `/private/var/…` to git. Compared unresolved the two share no common root, the claim stays
+  absolute, it matches nothing, the slice reads as having claimed no files, and every one of them
+  resurfaces as unclaimed. That is the **fail-open** direction — a resume redoing work a slice
+  already finished — which is why the comparison is made on resolved paths on both sides.
+  *States it:* `skills/task-run/scripts/plan-ledger.py`
+  *Enforced by:* `skills/task-run/scripts/plan-ledger.py`
+  *Tested by:* `skills/task-run/tests/plan-ledger.test.sh`
+
+- **SB-task-run-147** — A mark **replaces the line with its own prefix rather than stacking**: one
+  `reviewed:`, one line per slice label, one `build:`, one `review:`. A step that ran twice is one
+  fact with a newer hash, and two lines claiming the same key would leave the reader picking.
+  *States it:* `skills/task-run/scripts/plan-ledger.py`
+  *Enforced by:* `skills/task-run/scripts/plan-ledger.py`
+  *Tested by:* `skills/task-run/tests/plan-ledger.test.sh`
+
+- **SB-task-run-148** — The read-modify-write is **locked** (`fcntl.flock`). Slices finish in
+  parallel and each marks its own line; without the lock two marks landing together keep only the
+  one that wrote last, and the slice that lost its line is re-dispatched by the next resume.
+  *States it:* `skills/task-run/scripts/plan-ledger.py`
+  *Enforced by:* `skills/task-run/scripts/plan-ledger.py`
+  *Tested by:* `skills/task-run/tests/plan-ledger.test.sh`
+
+- **SB-task-run-149** — **Every mode exits 0 and reports failure in its JSON**, because bookkeeping
+  must never fail the run that calls it: a missing plan file, a tree git cannot answer for, a repo
+  that is not one, a refused label — all come back `written: false` with an `error`, and the caller
+  loses a shortcut rather than a run. The one exception is a usage error (a `--key` outside
+  `reviewed` / `build` / `review` / `slice:<label>`), which exits 2 — that is a caller bug, and
+  failing it silently would leave a step recording nothing at all.
+  *States it:* `skills/task-run/scripts/plan-ledger.py`
+  *Enforced by:* `skills/task-run/scripts/plan-ledger.py`
+  *Tested by:* `skills/task-run/tests/plan-ledger.test.sh`
+
+- **SB-task-run-150** — A slice label outside `[A-Za-z0-9_.-]+` is **refused**, not sanitised. The
+  label is written into a line a regex reads back, so a label carrying a space or a bracket writes a
+  line the reader cannot parse — a slice silently recorded as nothing.
+  *States it:* `skills/task-run/scripts/plan-ledger.py`
+  *Enforced by:* `skills/task-run/scripts/plan-ledger.py`
+  *Tested by:* `skills/task-run/tests/plan-ledger.test.sh`
+
+- **SB-task-run-151** — A plan file that is absent reads as `planStatus: "none"` with nothing
+  recorded, and cannot be marked. A missing plan is not a clean one: the workflow turns exactly this
+  answer into a stop rather than into permission to adopt a plan that is not on disk (`SB-task-run-160`).
+  *States it:* `skills/task-run/scripts/plan-ledger.py`
+  *Enforced by:* `skills/task-run/scripts/plan-ledger.py`
+  *Tested by:* `skills/task-run/tests/plan-ledger.test.sh`
+
+- **SB-task-run-152** — Phase 0's resume state carries two more facts than the plan's `status:`:
+  `planReviewed`, the text after `reviewed:` in that header **verbatim** (`''` when the file or the
+  line is absent), and `branchHasBase` from `git merge-base --is-ancestor <base> <branch>` — `true`
+  **only** on exit 0, `false` on any other exit, and `true` when the branch does not exist. Phase 0
+  creates neither the branch nor the plan file; it only reports what is there.
+  *States it:* `skills/task-run/task-run-implement.workflow.js`
+  *Enforced by:* `skills/task-run/task-run-implement.workflow.js`
+  *Tested by:* `skills/task-run/tests/control-flow.test.mjs`
+
+- **SB-task-run-153** — **An existing branch that does not contain base stops the run**
+  (`branch-behind-base`) before an agent is spent, before the explorers, and before the checkout.
+  An existing branch is checked out and kept exactly as it is (`SB-task-run-048`), so a branch cut
+  before a later commit on base takes the tree back to that older commit — the recorded case is a
+  phase branch cut before the commit that preserved this task's plan, where the checkout deleted the
+  plan, the ledger read over the missing file came back clean, and the run adopted a plan that was
+  not on disk while building on the old commit. Resetting, rebasing or discarding its own commits
+  decides the fate of work, which is a person's call. An **unreported** `branchHasBase` counts as
+  "does not hold base": nothing else stands between that branch and the checkout.
+  *States it:* `skills/task-run/SKILL.md`
+  *Enforced by:* `skills/task-run/task-run-implement.workflow.js`
+  *Tested by:* `skills/task-run/tests/control-flow.test.mjs`
+
+- **SB-task-run-154** — **A plan file's presence is not evidence its review ran; the `reviewed:`
+  stamp is.** An adopted `full`-tier plan carrying no stamp is challenged by Codex again, before any
+  code is written — the challenge is one of the two things separating this pipeline from a
+  single-context run, and a plan left by an attempt that halted inside the review looks identical
+  from here to one left by an attempt that was interrupted after it. A stamped plan is not
+  re-reviewed: re-running a review that really did happen over an unchanged plan buys nothing.
+  *States it:* `skills/task-run/SKILL.md`
+  *Enforced by:* `skills/task-run/task-run-implement.workflow.js`
+  *Tested by:* `skills/task-run/tests/control-flow.test.mjs`
+
+- **SB-task-run-155** — The stamp is written **only after a real Codex review completed and its
+  triage settled**, at the end of Phase 3 and before a line of code is written. A blocked Codex stops
+  the run at full tier and stamps nothing, so a stamp can only exist where a critique existed. Its
+  note records what that review did — `codex · N pass(es) · R raised · A applied · D dropped` — plus
+  a UTC minute, so a reader can weigh the review a later run is standing on instead of trusting a
+  bare flag.
+  *States it:* `skills/task-run/task-run-implement.workflow.js`
+  *Enforced by:* `skills/task-run/task-run-implement.workflow.js`
+  *Tested by:* `skills/task-run/tests/control-flow.test.mjs`
+
+- **SB-task-run-156** — An adopted plan is **never re-planned**, at any tier — the planner does not
+  run on it and the log says the plan was adopted at status X. Below `full` no plan review runs
+  either, stamp or not: the tier decides that, and a resume does not change it.
+  *States it:* `skills/task-run/task-run-implement.workflow.js`
+  *Enforced by:* `skills/task-run/task-run-implement.workflow.js`
+  *Tested by:* `skills/task-run/tests/control-flow.test.mjs`
+
+- **SB-task-run-157** — `planReview.adoptedPlan` is `true` on **every** resume, whether or not the
+  review re-ran, and when the review is skipped the `reason` **names the stamp it is standing on**
+  (or says the tier runs no review at all). The caller needs a field rather than prose, and a reason
+  that names the earlier review is what lets a reader disagree with the decision to skip it.
+  *States it:* `skills/task-run/task-run-implement.workflow.js`
+  *Enforced by:* `skills/task-run/task-run-implement.workflow.js`
+  *Tested by:* `skills/task-run/tests/control-flow.test.mjs`
+
+- **SB-task-run-158** — The ledger is read **on the feature branch**, so the branch promise
+  dispatched alongside planning is awaited early on a resume rather than at the top of Phase 4.
+  Changes already committed on the branch count against base, and the tree on base is not the tree
+  the ledger describes. A checkout that failed or stayed on base reads **nothing** — Phase 4's
+  branch stops end the run before any code is written anyway, so there is nothing to protect there.
+  *States it:* `skills/task-run/task-run-implement.workflow.js`
+  *Enforced by:* `skills/task-run/task-run-implement.workflow.js`
+  *Tested by:* `skills/task-run/tests/control-flow.test.mjs`
+
+- **SB-task-run-159** — The tree is checked against the ledger **before** the Codex review an
+  unstamped plan gets, and before anything is dispatched into the tree. Both resume stops are
+  decidable from the ledger alone, and reviewing first would spend the most expensive step on the
+  adopted-plan path for a verdict the stop throws away.
+  *States it:* `skills/task-run/task-run-implement.workflow.js`
+  *Enforced by:* `skills/task-run/task-run-implement.workflow.js`
+  *Tested by:* `skills/task-run/tests/control-flow.test.mjs`
+
+- **SB-task-run-160** — **A ledger that cannot be read stops the run** (`resume-ledger-unread`) —
+  a dead or throwing reader, a reader that reports an `error`, and a plan on the branch whose status
+  is outside `implementing`/`done` where base read one of them. All three fail **closed**: without
+  the ledger there is no way to tell finished work from stray work, and the missing-plan case is the
+  dangerous one, because a plan that is gone reads back as a clean ledger with nothing claimed —
+  exactly the answer that would let a run adopt a plan that is not in this tree.
+  *States it:* `skills/task-run/SKILL.md`
+  *Enforced by:* `skills/task-run/task-run-implement.workflow.js`
+  *Tested by:* `skills/task-run/tests/control-flow.test.mjs`
+
+- **SB-task-run-161** — **Changed files that no ledger line claims stop the run**
+  (`resume-unclaimed-tree`), with the files named. They are work no step of this pipeline recorded
+  writing — the recorded case is a Codex job that kept running after the run was stopped and left a
+  whole backend nobody had reviewed or compiled. Dispatching the implementers over it builds the task
+  on code nothing wrote, reviewed or compiled; deleting it destroys what may be somebody's work. Only
+  a person can say which, so the run stops, and the caller **asks** rather than deleting or re-running
+  over them.
+  *States it:* `skills/task-run/SKILL.md`
+  *Enforced by:* `skills/task-run/task-run-implement.workflow.js`
+  *Tested by:* `skills/task-run/tests/control-flow.test.mjs`
+
+- **SB-task-run-162** — A slice is skipped **only when the ledger says it finished and its files are
+  unchanged since**; one whose files moved is dispatched again, because what it recorded is no longer
+  what the tree holds. A skipped slice still appears in the handoff's `implemented` and carries its
+  recorded `filesChanged`, so the run accounts for the whole plan rather than reporting half of it.
+  *States it:* `skills/task-run/SKILL.md`
+  *Enforced by:* `skills/task-run/task-run-implement.workflow.js`
+  *Tested by:* `skills/task-run/tests/control-flow.test.mjs`
+
+- **SB-task-run-163** — Each slice is marked **the moment it returns clean**, not once every slice is
+  back. When one slice halts, or the session dies while the other is still writing, the half that
+  finished is exactly what a resume must not redo. A blocked slice is never marked, and a run that
+  halts at `implement-blocked` still leaves the finished half recorded.
+  *States it:* `skills/task-run/task-run-implement.workflow.js`
+  *Enforced by:* `skills/task-run/task-run-implement.workflow.js`
+  *Tested by:* `skills/task-run/tests/control-flow.test.mjs`
+
+- **SB-task-run-164** — `build: green` is marked only after the bounded build loop reached green, and
+  a resume **skips the build only when nothing was re-dispatched and a matching `build:` or `review:`
+  line covers exactly this tree** — the review runs its own full build, so either line vouches. Then
+  `buildGreen` is `true` and `resume.buildSkipped` says so. A single re-dispatched slice makes the
+  tree new and the build runs.
+  *States it:* `skills/task-run/SKILL.md`
+  *Enforced by:* `skills/task-run/task-run-implement.workflow.js`
+  *Tested by:* `skills/task-run/tests/control-flow.test.mjs`
+
+- **SB-task-run-165** — `resume.reviewDone` is `true` **only** when nothing was re-dispatched and a
+  `review: done` line matches this exact tree. It is the one signal that skips Step 5, and a
+  `build:` line does not produce it: a green build is not a review.
+  *States it:* `skills/task-run/task-run-implement.workflow.js`
+  *Enforced by:* `skills/task-run/task-run-implement.workflow.js`
+  *Tested by:* `skills/task-run/tests/control-flow.test.mjs`
+
+- **SB-task-run-166** — **A mark that fails costs the record, never the run.** A dead, throwing or
+  `written: false` mark is logged by name — saying that a resume will redo that step rather than skip
+  it — and the run continues to its handoff. A mark is written the moment a step finishes rather than
+  at the end, because a run killed midway is exactly the run that needs it.
+  *States it:* `skills/task-run/task-run-implement.workflow.js`
+  *Enforced by:* `skills/task-run/task-run-implement.workflow.js`
+  *Tested by:* `skills/task-run/tests/control-flow.test.mjs`
+
+- **SB-task-run-167** — `resume` is a handoff key and a stats-row field alike —
+  `{ adopted, reviewedEarlier, slicesSkipped, slicesRerun, buildSkipped, reviewDone }` — declared
+  above every stop so the sink can read it on a halted run too. The caller acts on `reviewDone`; the
+  lists are how the store can eventually say how much a resume actually saved, which is a question no
+  other row can be asked.
+  *States it:* `skills/task-run/task-run-implement.workflow.js`
+  *Enforced by:* `skills/task-run/task-run-implement.workflow.js`
+  *Tested by:* `skills/task-run/tests/control-flow.test.mjs`
+
+- **SB-task-run-168** — The ledger agents **only relay**. `ledger-read` and `ledger-mark:<key>` run
+  the script and return its JSON unchanged under a schema; every judgement in it — whether a slice's
+  files still match, which files nothing claimed — is made by the script from hashes. A model reading
+  a tree to decide what is finished is the confident-wrong-answer shape this whole mechanism exists
+  to avoid.
+  *States it:* `skills/task-run/task-run-implement.workflow.js`
+  *Enforced by:* `skills/task-run/scripts/plan-ledger.py`
+  *Tested by:* `skills/task-run/tests/plan-ledger.test.sh`
+
+- **SB-task-run-169** — **Step 5 records `review: done` in the ledger as its last act**, and only
+  after a review that passed. The line tells a later run that this exact tree was reviewed, so a run
+  stopped between the review and the commit resumes straight to Step 6 instead of reviewing the same
+  diff again. A mark that fails costs that shortcut and nothing else — say so and continue.
+  *States it:* `skills/task-run/SKILL.md`
+  *Enforced by:* —
+  *Tested by:* —
+
+- **SB-task-run-170** — **Step 5 is skipped when `handoff.resume.reviewDone` is true**, and the
+  report says the review was carried over from an earlier run; the plan already carries `status:
+  done` and its `## Post-review changes`. On anything weaker — `reviewDone` false or absent — the
+  review runs in full. The review is the pipeline's last read of the diff, so the bar for skipping it
+  is a recorded pass over this exact tree and nothing less.
+  *States it:* `skills/task-run/SKILL.md`
+  *Enforced by:* —
+  *Tested by:* —
+
+- **SB-task-run-171** — Three stop reasons extend the list in `SB-task-run-136`:
+  `branch-behind-base`, `resume-ledger-unread` and `resume-unclaimed-tree`. The first is returned
+  from Phase 0, before the stats sink exists, so it records **no** row — like `no-pack-root` and
+  `source-blocked`; the two resume stops go through the ordinary `stop()` and record a row carrying
+  `planReview` and `resume`. Each names what the user has to decide, because none of the three is
+  something the run may resolve on its own.
+  *States it:* `skills/task-run/SKILL.md`
+  *Enforced by:* `skills/task-run/task-run-implement.workflow.js`
+  *Tested by:* `skills/task-run/tests/control-flow.test.mjs`
+
+- **SB-task-run-172** — The shipped Codex model slug is **`gpt-5.6-sol`**, in `steps.implement` and
+  `steps.fix` alike. The hyphen is load-bearing and unreadable: `gpt5.6-sol` reads correctly to
+  anyone reviewing the file, and the API rejects it with a 400 on every job, so a run stops at
+  implement with nothing written.
+  *States it:* `.config/defaults.yaml`
+  *Enforced by:* `tools/validate.py`
+  *Tested by:* —
+
+- **SB-task-run-173** — A `codex` model name is checked against **the list the installed Codex CLI
+  keeps for itself** (`models_cache.json` under `$CODEX_HOME`, else `~/.codex`), never a list pinned
+  in the reader — a pinned list goes stale the week the models change. A name the CLI does not offer
+  falls back **the whole row** to the built-in claude row, the same as a missing plugin and for the
+  same reason: a named Claude row that runs beats a codex row that 400s every job, and the
+  substitution is named in `notes`. An unreadable or absent cache returns nothing and the name is
+  **not judged at all** — a CLI that has never run has no list, and refusing every codex row on such
+  a machine is a guess in the other direction. `--check` applies the same test, so the gate cannot
+  ship a defaults file this reader would reject.
+  *States it:* `lib/read-config.py`
+  *Enforced by:* `lib/read-config.py`
+  *Tested by:* `lib/tests/config.test.sh`
+
 ---
 
 ## Prose-only behaviours
 
-Held up by wording alone — no *Enforced by:* and no *Tested by:*. Nothing fails if any of these
-quietly stops being true, which makes them exactly the class a rewrite can lose in silence. All but
-one live in `SKILL.md`'s Steps 5–6 and its concurrency rules, which is expected: the workflow stops
-at the build, so everything after it is prose by construction.
+**25 of 173.** Held up by wording alone — no *Enforced by:* and no *Tested by:*. Nothing fails if
+any of these quietly stops being true, which makes them exactly the class a rewrite can lose in
+silence. All but one live in `SKILL.md`'s Steps 5–6 and its concurrency rules, which is expected:
+the workflow stops at the build, so everything after it is prose by construction.
 
 | id | behaviour |
 |---|---|
@@ -1624,6 +1990,8 @@ at the build, so everything after it is prose by construction.
 | SB-task-run-132 | one agent per branch; never spawn a parallel resumer |
 | SB-task-run-133 | never stop or kill a subagent to resolve a stall |
 | SB-task-run-135 | real tools, or stop |
+| SB-task-run-169 | Step 5 records `review: done` in the ledger as its last act, only after a review that passed |
+| SB-task-run-170 | Step 5 is skipped on `handoff.resume.reviewDone`, and on nothing weaker |
 
 Three further entries are *partly* covered and are **not** counted above, but are worth naming
 because the uncovered half is the load-bearing one:
@@ -1655,8 +2023,25 @@ Recorded, not fixed — each is a real divergence a reader would otherwise resol
    for the judges.
 4. **`source-unresolved` is missing from `SKILL.md`'s stop table.** The table lists `no-source` /
    `source-blocked`; the script also returns `source-unresolved` when the Phase 0 agent itself dies.
-5. **The handoff key list in `SKILL.md` is short by three.** It omits `headDetached`,
-   `treeCommitted` and `implemented`, all of which the script returns and the first two of which
-   `SKILL.md` elsewhere tells the caller to act on.
+5. **The handoff key list in `SKILL.md` is short by four.** It omits `headDetached`,
+   `treeCommitted`, `implemented` and `resume`, all of which the script returns — the first two of
+   which `SKILL.md` elsewhere tells the caller to act on, and `resume` is the key its own Step 5
+   branches on.
 6. **`classifyOnly` is undocumented in `SKILL.md`.** Not a contradiction, but the dry-run mode, its
    `repo`/`sourceModel` options and its return shape exist only in the script.
+7. **`SKILL.md` still says `planReview.ran: false` "means the tier was below full or this was a
+   resume".** A `full`-tier resume of a plan carrying no `reviewed:` stamp now runs the review and
+   returns `ran: true`, and a resume with a stamp returns `ran: false` for a third reason the
+   sentence does not list. `planReview.adoptedPlan` and the `reason` string are what actually say
+   which case it is.
+8. **The build skip and the review skip are described as one condition and are not.** `SKILL.md`
+   says the build is skipped when "a green build or passed review was recorded over this exact
+   tree, and `resume.reviewDone` skips Step 5 on the same condition". The script accepts either a
+   `build:` or a `review:` line for the build, and **only** a matching `review:` line for
+   `reviewDone` — a green build is not a review, and the narrower rule is the one in the code.
+9. **The stamp the review decision stands on is not read through the ledger script.** `SKILL.md`
+   says the plan's header is "a ledger the implement workflow reads back through
+   `scripts/plan-ledger.py`". The `reviewed:` stamp is read by the Phase 0 agent straight out of the
+   header — on **base**, before the checkout — and that is the value `reviewAgain` tests; the
+   script's own `reviewed` field, read on the feature branch, is returned and never looked at. The
+   two can disagree whenever the plan on the branch is not the plan on base.

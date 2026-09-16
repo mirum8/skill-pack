@@ -690,6 +690,24 @@ def check_behaviour_register():
         if current and not (fields.get("Enforced by") or fields.get("Tested by")):
             prose_only += 1
 
+    # Coverage is per TARGET, which says a register file exists and not that it is current — and
+    # the way it goes stale is a skill growing a new bundled script while its file stays as it was.
+    # A script is the one piece of that drift with a name to look for, so it is the one piece that
+    # can be checked: every executable a skill ships must be named somewhere in its register. It
+    # does not catch a new behaviour added to existing prose, and nothing mechanical does; what it
+    # catches is the case that already happened twice in one merge.
+    for script in sorted(glob.glob(os.path.join(SKILLS, "*", "scripts", "*"))):
+        if not script.endswith((".py", ".sh", ".mjs", ".js")):
+            continue
+        target = os.path.relpath(script, SKILLS).split(os.sep)[0]
+        path = os.path.join(REGISTER, f"{target}.md")
+        if not os.path.isfile(path):
+            continue                                  # already reported as missing coverage
+        if os.path.basename(script) not in open(path, encoding="utf-8").read():
+            fail("register", f"{target}.md never names {os.path.basename(script)} — a skill grew "
+                             "an executable its register does not describe, so /r:pack-compact "
+                             "would rewrite that skill against an out-of-date ground truth")
+
     if entries:
         NOTES.append(f"behaviour register: {entries} entries over "
                      f"{len(register_targets())} targets, {prose_only} held up by prose alone")
