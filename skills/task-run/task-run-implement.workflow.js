@@ -92,7 +92,8 @@ const SOURCE = {
   type: 'object', additionalProperties: false,
   required: ['kind', 'slug', 'branch', 'base', 'taskIntent', 'criteria', 'profile',
              'profileReason', 'uiTouched', 'uiVisualChange', 'hasBackend', 'hasFrontend',
-             'buildTool', 'exploreAspects', 'planPath', 'planStatus', 'branchExists'],
+             'buildTool', 'exploreAspects', 'planPath', 'planStatus', 'planReviewed', 'branchExists',
+             'branchHasBase'],
   properties: {
     kind: { type: 'string', enum: ['issue', 'todo', 'item', 'text'] },
     slug: { type: 'string' },
@@ -130,7 +131,13 @@ const SOURCE = {
     // where a whole-file task makes ticking most tempting. Empty for an issue or free text.
     sourceDoc: { type: 'string' },
     planStatus: { type: 'string', enum: ['none', 'reviewing', 'implementing', 'done'] },
+    // The plan's `reviewed:` stamp, verbatim, or ''. Written only after a real Codex review
+    // completed, so it is the one thing a later run can stand on to skip that review.
+    planReviewed: { type: 'string' },
     branchExists: { type: 'boolean' },
+    // Whether an existing branch already holds base. An existing branch is checked out and kept as
+    // it is, so this is what decides whether that checkout moves the tree back to an older commit.
+    branchHasBase: { type: 'boolean' },
     blockedReason: { type: 'string' },   // e.g. gh missing/unauthenticated, source unreadable
   },
 }
@@ -401,6 +408,37 @@ const TREE = {
   type: 'object', additionalProperties: false,
   required: ['filesPresent'],
   properties: { filesPresent: { type: 'array', items: { type: 'string' } } },
+}
+// What skills/task-run/scripts/plan-ledger.py prints, carried back unchanged. Every judgement in it
+// — whether a slice's files still match, which files nothing claimed — is made by the script from
+// hashes; the agent that runs it only relays the output.
+const LEDGER_MATCH = {
+  type: 'object', additionalProperties: false,
+  required: ['recorded', 'matches'],
+  properties: { recorded: { type: 'boolean' }, matches: { type: 'boolean' } },
+}
+const LEDGER_READ = {
+  type: 'object', additionalProperties: false,
+  required: ['planStatus', 'reviewed', 'slices', 'build', 'review', 'tree', 'unclaimed', 'error'],
+  properties: {
+    planStatus: { type: 'string' },
+    reviewed: { type: 'string' },
+    slices: { type: 'array', items: {
+      type: 'object', additionalProperties: false,
+      required: ['label', 'files', 'matches'],
+      properties: { label: { type: 'string' }, files: { type: 'array', items: { type: 'string' } }, matches: { type: 'boolean' } },
+    } },
+    build: LEDGER_MATCH,
+    review: LEDGER_MATCH,
+    tree: { type: 'array', items: { type: 'string' } },
+    unclaimed: { type: 'array', items: { type: 'string' } },
+    error: { type: 'string' },
+  },
+}
+const LEDGER_MARK = {
+  type: 'object', additionalProperties: false,
+  required: ['written'],
+  properties: { written: { type: 'boolean' }, error: { type: 'string' } },
 }
 const BUILD = {
   type: 'object', additionalProperties: false,
@@ -952,8 +990,12 @@ ${inRepo}
        (the markdown path before the " / ", or the whole argument when it is a bare path). Empty
        string for an issue or for free text. Later steps are told not to write to it.
    8. RESUME STATE: planPath = ".task-plans/<slug>.md". Report planStatus from its "status:"
-      header if the file exists (else "none"), and branchExists from
-      \`git rev-parse --verify <branch>\`. Do NOT create the branch or the plan file here.
+      header if the file exists (else "none"), planReviewed as the text after "reviewed:" in that
+      same header, verbatim ("" when the file or the line is absent), and branchExists from
+      \`git rev-parse --verify <branch>\`. When the branch exists, set branchHasBase from
+      \`git merge-base --is-ancestor <base> <branch>\`: true ONLY when it exits 0, false on any
+      other exit. When the branch does not exist, branchHasBase is true. Do NOT create the branch
+      or the plan file here.
    9. exploreAspects: the different aspects of the codebase that must be mapped before planning,
       one short instruction each, along the change's NATURAL SEAMS (e.g. "persistence + data model
       + migrations", "the web/UI layer + templates", "the closest existing feature + its tests").
@@ -966,6 +1008,18 @@ if (blocked(src)) return { stopped: 'source-unresolved' }
 if (src.blockedReason) {
   log(`run-task-implement: cannot start — ${src.blockedReason}`)
   return { stopped: 'source-blocked', detail: src.blockedReason }
+}
+// An existing branch is checked out and kept exactly as it is, so it must already hold base. One cut
+// before a later commit on base — the commit that preserved this task's plan is the recorded case —
+// takes the tree back to that older commit: the checkout deletes the plan base holds, and the run
+// builds on the old commit while believing it resumed. Resetting or rebasing it decides the fate of
+// any commits of its own, which is a person's call, so the run stops before it has spent an agent.
+// An unreported answer counts as "does not hold base": nothing else stands between that branch and
+// the checkout.
+if (src.branchExists && src.branchHasBase !== true) {
+  const detail = `${src.branch} already exists and does not contain ${src.base} — checking it out would move the tree back to an older commit. With no commits of its own (\`git log ${src.base}..${src.branch}\` empty) it can be reset to ${src.base}; with some, a person decides whether to rebase or discard them`
+  log(`run-task-implement: cannot start — ${detail}`)
+  return { stopped: 'branch-behind-base', branch: src.branch, base: src.base, detail }
 }
 let profile = forcedProfile || (TIERS.includes(src.profile) ? src.profile : 'full')
 let profileEscalated = false
@@ -1425,20 +1479,17 @@ const branchP = !wantBranch ? null : (async () => {
 //
 // The agent is read-only and writes nothing. The section reaches disk through the same scribe that
 // writes the plan, so there is exactly one artifact and one verbatim-copy check.
-// The ONLY signal available here is the plan file's own status header — a Workflow script is not
-// told whether the runtime resumed it, so "this is a resume" and "a plan file from an earlier run
-// is lying on disk" are indistinguishable from inside. That is not a reason to describe one as the
-// other. Observed: a FRESH run with no resumeFromRunId adopted the plan left by an earlier attempt
-// at the same phase and reported `reason: "resume — the plan was reviewed in the original run"`,
-// which reads as benign. The Codex plan challenge — one of the two things separating this pipeline
-// from a single-context run — was skipped on the strength of a file, and the file came from the
-// attempt that halted with the feature unimplemented.
-//
-// So the behaviour stands (re-reviewing an unchanged plan buys nothing when the review really did
-// happen) and the REPORT stops guessing: it says a plan was adopted at status X, that its review
-// was not re-run in THIS run, and that whether an earlier one reviewed it is not knowable here.
-// A caller that wants the challenge deletes the plan file, which is the one lever that works.
+// What an earlier run finished is known only from the plan file's own header. A Workflow script is
+// not told whether the runtime resumed it, and a plan left by an attempt that halted looks exactly
+// like one left by an attempt that was interrupted, so nothing about the file's mere presence is
+// trusted. `status:` says planning finished. The `reviewed:` stamp says the Codex challenge
+// happened, because it is written only after a real review completed (see markLedger). An adopted
+// full-tier plan with no stamp is therefore reviewed again rather than built unreviewed: that
+// challenge is one of the two things separating this pipeline from a single-context run, and a
+// file on disk is not evidence it ran. What else a resume may skip — finished slices, a build over
+// an unchanged tree — is decided in Phase 4 by plan-ledger.py, from hashes.
 const resuming = src.planStatus === 'implementing' || src.planStatus === 'done'
+const reviewedEarlier = resuming ? String(src.planReviewed || '').trim() : ''
 // Shared by the design agent, both planners and the implementers: everyone downstream builds
 // against the same acceptance criteria, so they are rendered once.
 const criteriaText = (src.criteria || []).length
@@ -1552,6 +1603,10 @@ if (designWanted) {
 // that stops in any of those WAS reviewed, and a stop that omits the block reads as "Codex never
 // challenged this plan" — a different and much worse claim.
 const planReview = { ran: false, reason: 'stopped before the plan review', passes: 0, raised: 0, applied: [], dropped: [], judged: [] }
+// What this run took from the ledger, in the handoff and the stats row alike: `reviewDone` is what
+// lets the caller skip a review whose tree is unchanged, and the lists are how the store can say
+// how much a resume actually saved. Declared here, above every stop, because recordRun reads it.
+const resume = { adopted: !!resuming, reviewedEarlier, slicesSkipped: [], slicesRerun: [], buildSkipped: false, reviewDone: false }
 
 // The branch, as two facts rather than one. `branchOn` is what the repo was really on the last
 // time anything asked git; `branchDrifted` says the answer changed under the run. They are plain
@@ -1626,6 +1681,7 @@ const recordRun = async ({ stopped = '', buildGreen = 'n/a' } = {}) => {
       planReviewRan: !!planReview.ran,
       planApplied: planReview.applied.length,
       planDropped: planReview.dropped.length,
+      resume,
       // One row per finding Codex raised against the plan, with the judges' verdict. The two counts
       // above say how many landed and how many were thrown out; these say WHICH rubric keeps
       // producing findings nobody buys, which is the number that decides whether a plan-review pass
@@ -1666,13 +1722,82 @@ const stop = async (reason, extra = {}, buildGreen) => {
   return { stopped: reason, planPath, planReview, ...extra }
 }
 
+// The resume ledger lives in the plan's own header, beside `status:`, because the plan file is the
+// one artifact that travels with the work: it moves with the branch, it goes when the worktree goes,
+// and deleting it already forces a fresh plan. Never the stats store — a row there outlives the
+// tree it describes, answers for the next one cut at the same path, and is best-effort by design.
+//
+// A mark is bookkeeping, and fails the way bookkeeping may: a mark that is lost costs a resume the
+// chance to skip that step, never this run its result. It is written the moment a step finishes,
+// not at the end, because a run killed midway is exactly the run that needs it.
+const LEDGER_PY = `${PACK}/skills/task-run/scripts/plan-ledger.py`
+const shellArg = (s) => `"${String(s).replace(/(["\\$`])/g, '\\$1')}"`
+const markLedger = async (key, extra, phaseName) => {
+  const r = await agent(
+    `Record one line in this task's resume ledger. Run exactly this from the repo root, change
+     nothing else, and return the JSON it prints — \`written\` and \`error\` exactly as printed:
+
+       python3 "${LEDGER_PY}" mark --plan "${planPath}" --base "${src.base}" --key ${key}${extra}`,
+    { label: `ledger-mark:${key}`, phase: phaseName, schema: LEDGER_MARK, ...GP, ...ECHO }).catch(() => null)
+  if (!r || r.written !== true) {
+    log(`run-task-implement: could not record "${key}" in the ledger of ${planPath}${r && r.error ? ` (${r.error})` : ''} — a resume will redo that step rather than skip it`)
+  }
+}
+
 // --- Phase 2: the plan -------------------------------------------------------
-// Resume: a plan already past review is not re-planned or re-reviewed.
+// On a resume the tree is read against the ledger before anything else touches the adopted plan —
+// before the Codex review an unstamped plan gets, and before anything is dispatched into the tree.
+// A stop here was decidable before that review started, so reviewing first only spends the most
+// expensive step on the adopted-plan path for a verdict the stop throws away. Two stops, both
+// fail-closed. A ledger that cannot be read leaves no way to tell finished work from stray work. And
+// a tree holding changes that no ledger line claims holds work no step of this pipeline recorded
+// writing — a Codex job that kept running after a stop is the recorded case, and it left a whole
+// backend nobody had reviewed or compiled. Dispatching the implementers over it would build the task
+// on that; deleting it would destroy what may be somebody's work. Only a person can say which, so
+// the run stops and names the files.
+//
+// The tree is read on the feature branch, because changes already committed there count, so the
+// checkout started before Phase 2 is awaited here. A checkout that failed or stayed on base reads
+// nothing: that tree is not the one the ledger describes, and Phase 4's branch stops end the run
+// before any code is written anyway.
+let ledger = null
+if (resuming && branchP) {
+  const early = await branchP
+  const here = !blocked(early) && early.onBranch ? String(early.onBranch).trim() : ''
+  if (here && here !== src.base) {
+    ledger = await reliable('ledger-read', 'Plan', () => agent(
+      `Read this task's resume ledger. Run exactly this from the repo root and return the JSON it
+       prints EXACTLY as printed — every field, unchanged. Change nothing, commit nothing:
+
+         python3 "${LEDGER_PY}" read --plan "${planPath}" --base "${src.base}"`,
+      { label: 'ledger-read', phase: 'Plan', schema: LEDGER_READ, ...GP, ...ECHO }))
+    if (blocked(ledger) || ledger.error) {
+      const why = (ledger && ledger.error) || 'the ledger read returned nothing'
+      log(`run-task-implement: cannot read the resume ledger of ${planPath} (${why}) — stopping rather than guessing which work in the tree is finished`)
+      return await stop('resume-ledger-unread', { branch: here, base: src.base, detail: why })
+    }
+    // Phase 0 read the plan on base and this read is on the branch, so the two can disagree. A plan
+    // that is gone or not yet adopted here reads back as a clean ledger with nothing claimed, which
+    // is exactly the answer that would let the run adopt a plan that is not on disk.
+    if (!['implementing', 'done'].includes(ledger.planStatus)) {
+      const why = `the plan on ${here} reads status "${ledger.planStatus}", where ${src.base} read "${src.planStatus}"`
+      log(`run-task-implement: ${why} — stopping rather than adopting a plan that is not in this tree`)
+      return await stop('resume-ledger-unread', { branch: here, base: src.base, detail: why })
+    }
+    if ((ledger.unclaimed || []).length) {
+      log(`run-task-implement: the tree holds ${ledger.unclaimed.length} changed file(s) that no step of this pipeline recorded writing (${ledger.unclaimed.slice(0, 8).join(', ')}${ledger.unclaimed.length > 8 ? ', …' : ''}) — stopping so a person decides whether to keep them; nothing was reviewed or dispatched over them`)
+      return await stop('resume-unclaimed-tree', { branch: here, base: src.base, unclaimed: ledger.unclaimed })
+    }
+  }
+}
+
+// Resume: an adopted plan is never re-planned, and is re-reviewed only when it carries no stamp.
 phase('Plan')
-if (resuming) log(`run-task-implement: ADOPTING the existing ${planPath} (status "${src.planStatus}") — skipping plan + plan-review. ` +
-    `The Codex plan challenge does NOT run in this run. This is a resume only if you meant it to be: a plan file left by an earlier ` +
-    `attempt at this task looks identical from here, and an abandoned attempt's plan is the least trustworthy one in the repo. ` +
-    `Delete ${planPath} and re-run to force a fresh plan and review.`)
+if (resuming) log(reviewedEarlier
+  ? `run-task-implement: ADOPTING the existing ${planPath} (status "${src.planStatus}"), reviewed by Codex in an earlier run (${reviewedEarlier}) — skipping plan + plan-review. Delete ${planPath} and re-run to force a fresh plan and review.`
+  : profile === 'full'
+    ? `run-task-implement: ADOPTING the existing ${planPath} (status "${src.planStatus}") — skipping planning. It carries no review stamp, so the Codex plan review runs on it before any code is written.`
+    : `run-task-implement: ADOPTING the existing ${planPath} (status "${src.planStatus}") — skipping planning; the ${profile} tier runs no plan review.`)
 
 // What the planner is told about the visuals, in three shapes.
 //
@@ -1925,14 +2050,15 @@ ${uiDesignNote}
 // unchallenged plan as a clean one. A BLOCKED Codex never reaches here: at full tier that stops
 // the run outright above, so on a run that completed these two causes are the whole list, and the
 // field says which rather than leaving the caller to infer it from the tier.
-if (resuming || profile !== 'full') {
-  planReview.reason = resuming
-    ? `not re-run — this run adopted an existing ${planPath} at status "${src.planStatus}", so the plan was NOT challenged by Codex in THIS run. Whether an earlier run reviewed it cannot be determined from here; delete the plan file to force a fresh review`
+const reviewAgain = resuming && !reviewedEarlier && profile === 'full'
+if (resuming) planReview.adoptedPlan = true
+if ((resuming && !reviewAgain) || profile !== 'full') {
+  planReview.reason = reviewedEarlier
+    ? `not re-run — this run adopted ${planPath}, which Codex reviewed in an earlier run (${reviewedEarlier}); delete the plan file to force a fresh review`
     : `not run at the ${profile} tier — the Codex plan review is full-tier only`
-  planReview.adoptedPlan = !!resuming
 }
 
-if (!resuming && profile === 'full') {
+if ((!resuming || reviewAgain) && profile === 'full') {
   phase('Plan-review')
   const rubric = `Work through this fixed rubric. Tag every finding major or minor, and tag it
      with EXACTLY ONE rubric, spelled verbatim from this list:
@@ -2442,6 +2568,10 @@ ${b.items.map((f, n) => `         ${n + 1}. [${f.severity}][${f.rubric}] ${f.wha
     await agent(`Set the "status:" header in ${planPath} to "implementing". Change nothing else.`,
       { label: 'plan-status', phase: 'Plan-review', schema: WROTE, ...GP, ...SCRIBE })
   }
+  // The stamp a later run stands on to skip this review. Written only here, after Codex produced a
+  // critique and the triage settled it — a blocked review stops the run above and stamps nothing.
+  const passes = planReview.passes || 1
+  await markLedger('reviewed', ` --note ${shellArg(`codex · ${passes} pass${passes === 1 ? '' : 'es'} · ${planReview.raised} raised · ${planReview.applied.length} applied · ${planReview.dropped.length} dropped`)}`, 'Plan-review')
 }
 
 // --- Phase 4: implement, test-first -----------------------------------------
@@ -2496,6 +2626,17 @@ if (!isJvm) {
 // same files — but the persona does not: the Claude implementer types would carry their own model
 // and their prompts describe an agent that edits directly, and here the agent only drives the CLI.
 if (implProvider === 'codex') for (const a of areas) a.agentType = 'general-purpose'
+
+// A slice is skipped only when the ledger says it finished AND its files are unchanged since. One
+// whose files moved is re-dispatched: what it recorded is no longer what the tree holds.
+const doneSlices = new Map()
+if (ledger) for (const a of areas) {
+  const s = (ledger.slices || []).find((x) => x.label === a.label)
+  if (s && s.matches) { doneSlices.set(a.label, s); resume.slicesSkipped.push(a.label) } else if (s) resume.slicesRerun.push(a.label)
+}
+const nothingRedone = !!ledger && areas.every((a) => doneSlices.has(a.label))
+if (resume.slicesSkipped.length) log(`run-task-implement: resuming — ${resume.slicesSkipped.join(', ')} finished in an earlier run with files unchanged since, not dispatched again`)
+if (resume.slicesRerun.length) log(`run-task-implement: resuming — ${resume.slicesRerun.join(', ')} finished earlier but their files changed since, dispatching again`)
 
 // An implementer's self-check only has to prove its slice COMPILES and that ITS OWN tests pass.
 // Phase 4 runs the certifying build the moment every implementer returns, so a full build here is
@@ -2655,9 +2796,19 @@ const implBrief = (a) => `${implProvider === 'codex' ? codexPreamble(a) : ''}Imp
    - If the plan looks WRONG or blocked, stop and set blockedOn instead of silently deviating. A
      subagent quietly "improving" on the plan is how a run ends up contradicting its own intent.${implProvider === 'codex' ? BATCH_CLAUSE : ''}`
 
-const impls = await parallel(areas.map((a) => () =>
-  reliable(`implement:${a.label}`, 'Implement', () => agent(
-    implBrief(a), { label: `implement:${a.label}`, phase: 'Implement', schema: IMPL, agentType: a.agentType, ...implRun }))))
+// Each slice is marked the moment it returns clean, not once every slice is back: when one halts,
+// or the session dies while the other is still writing, the half that finished is exactly what a
+// resume must not redo.
+const impls = await parallel(areas.map((a) => async () => {
+  const done = doneSlices.get(a.label)
+  if (done) return { done: true, summary: `${a.label}: done in an earlier run — ${done.files.length} file(s) unchanged since, not dispatched again`, filesChanged: done.files, testEvidence: [] }
+  const r = await reliable(`implement:${a.label}`, 'Implement', () => agent(
+    implBrief(a), { label: `implement:${a.label}`, phase: 'Implement', schema: IMPL, agentType: a.agentType, ...implRun }))
+  if (!blocked(r) && !r.blockedOn && r.summary) {
+    await markLedger(`slice:${a.label}`, ` --files ${(r.filesChanged || []).map(shellArg).join(' ')}`, 'Implement')
+  }
+  return r
+}))
 
 // A blocked slice HALTS the run, and that stays true: half a plan implemented is not a finished
 // task, and the caller has to re-plan rather than build on it. What changes is that the halt no
@@ -2727,7 +2878,14 @@ phase('Build')
 // build that never ran, and the PR body then reported it as passing. post-task-review already
 // reports 'n/a' for the same case; the two now agree. Only ever true | false | 'n/a'.
 let buildGreen = 'n/a'
-if (hasBuild) {
+// A resume with nothing re-dispatched skips the build only when a green build or a passed review
+// was recorded over exactly this tree — the review runs its own full build, so either line vouches.
+const treeVouched = nothingRedone && ((ledger.build.recorded && ledger.build.matches) || (ledger.review.recorded && ledger.review.matches))
+if (hasBuild && treeVouched) {
+  resume.buildSkipped = true
+  buildGreen = true
+  log('run-task-implement: resuming — a green build was recorded over this exact tree and nothing was re-dispatched, not building again')
+} else if (hasBuild) {
   buildGreen = false
   const changed = impls.flatMap((r) => (r && r.filesChanged) || []).join(', ')
   const staleRule = `If any source file was DELETED or RENAMED since the last build, run \`${src.buildCmd}\` instead — a removed source can leave a stale .class behind that would let a broken build pass.`
@@ -2805,7 +2963,9 @@ if (hasBuild) {
       buildLog: (lastBuild && lastBuild.failures) || '',
     }, buildGreen)
   }
+  await markLedger('build', '', 'Build')
 }
+resume.reviewDone = !!(nothingRedone && ledger.review.recorded && ledger.review.matches)
 
 // --- Handoff -----------------------------------------------------------------
 // Steps 5 (post-task-review) and 6 (finish) belong to the CALLER, which runs them in its own
@@ -2915,6 +3075,10 @@ return {
   // The caller carries `applied` into the PR body; `dropped` is there so a dismissal can be
   // questioned instead of disappearing.
   planReview,
+  // What this run took from the plan's ledger. `reviewDone` is true only when nothing was
+  // re-dispatched and a passed review was recorded over this exact tree — the caller skips Step 5
+  // on it, and on nothing weaker.
+  resume,
   implemented: impls.filter((r) => r && r.summary).map((r) => r.summary),
   // What the implementers OBSERVED when they ran each test before/after the change — the evidence
   // behind "test-first", rather than the plan's claim about it. Carry it into the PR body: a test

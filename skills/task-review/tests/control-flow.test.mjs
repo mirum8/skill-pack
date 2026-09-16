@@ -52,7 +52,7 @@ const finding = (what = 'off-by-one on the last row') =>
 // The row lib/read-config.py resolves from the SHIPPED .config/defaults.yaml for `--step fix`.
 // Kept in step with that file: the point of these assertions is what a run with no project config
 // actually does.
-const DEFAULT_FIX_CONFIG = { provider: 'codex', model: 'gpt5.6-sol', effort: 'low',
+const DEFAULT_FIX_CONFIG = { provider: 'codex', model: 'gpt-5.6-sol', effort: 'low',
                              wrapperModel: 'haiku', wrapperEffort: 'medium',
                              sources: ['/pack/.config/defaults.yaml'], notes: [] }
 const CLAUDE_FIX_CONFIG = { provider: 'claude', model: 'opus', effort: 'medium',
@@ -393,11 +393,11 @@ test('on the codex provider the fixers DRIVE the CLI and never patch the code th
   // The Claude personas carry their own model and describe an agent that edits directly; here the
   // subagent only drives the CLI and reads back what landed.
   assert.equal(opts['fix-correctness'].agentType, 'general-purpose')
-  // The WRAPPER's tier, not the writer's: gpt5.6-sol/low goes to the CLI, haiku/medium drives it.
+  // The WRAPPER's tier, not the writer's: gpt-5.6-sol/low goes to the CLI, haiku/medium drives it.
   assert.equal(opts['fix-correctness'].model, 'haiku')
   assert.equal(opts['fix-correctness'].effort, 'medium')
   assert.match(prompts['fix-correctness'], /codex-companion\.mjs/)
-  assert.match(prompts['fix-correctness'], /--background --model gpt5\.6-sol --effort low --write/)
+  assert.match(prompts['fix-correctness'], /--background --model gpt-5\.6-sol --effort low --write/)
   // --background is the flag the whole protocol rests on: the companion hands the run to a
   // `detached: true` + `unref()`ed worker only under that flag, and without it the CLI is awaited
   // inside the Bash call and killed with it at the tool's 120s default.
@@ -416,7 +416,7 @@ test('on the codex provider the fixers DRIVE the CLI and never patch the code th
   // On codex the persona is replaced by general-purpose, which has no agent file to carry the
   // batching rule — so the brief has to.
   assert.match(prompts['fix-correctness'], /Batch independent tool calls/)
-  assert.match(logText, /fixers — codex gpt5\.6-sol \/ low, driven by haiku \/ medium/)
+  assert.match(logText, /fixers — codex gpt-5\.6-sol \/ low, driven by haiku \/ medium/)
 
   // And the claude provider must carry none of it, keeping its domain persona.
   const claude = await run(withFix({ config: CLAUDE_FIX_CONFIG }))
@@ -425,7 +425,7 @@ test('on the codex provider the fixers DRIVE the CLI and never patch the code th
 })
 
 test('the codex wrapper is tuned apart from the writer, and never dispatched untiered', async () => {
-  // Two agents, two jobs: gpt5.6-sol writes the patch, a Claude subagent drives the CLI and
+  // Two agents, two jobs: gpt-5.6-sol writes the patch, a Claude subagent drives the CLI and
   // collects the detached run. Tuning one must not move the other — and the wrapper's
   // failure mode is reporting a fix Codex applied as unfixed, which is why it cannot go untiered.
   const tuned = await run(withFix({
@@ -433,7 +433,7 @@ test('the codex wrapper is tuned apart from the writer, and never dispatched unt
   }))
   assert.equal(tuned.opts['fix-correctness'].model, 'opus')
   assert.equal(tuned.opts['fix-correctness'].effort, 'high')
-  assert.match(tuned.prompts['fix-correctness'], /--model gpt5\.6-sol --effort low --write/)
+  assert.match(tuned.prompts['fix-correctness'], /--model gpt-5\.6-sol --effort low --write/)
   // The review tracks carry their OWN constant, so tuning the wrapper cannot re-tier them — they
   // agree today, and this is what keeps that a coincidence rather than a coupling.
   assert.equal(tuned.opts['codex'].effort, 'medium')
@@ -442,7 +442,7 @@ test('the codex wrapper is tuned apart from the writer, and never dispatched unt
   // A row with no wrapper keys — an older config, or an agent that dropped them — must land on the
   // built-in pair rather than dispatching a wrapper with no model and no depth.
   const bare = await run(withFix({
-    config: { provider: 'codex', model: 'gpt5.6-sol', effort: 'low', sources: [], notes: [] },
+    config: { provider: 'codex', model: 'gpt-5.6-sol', effort: 'low', sources: [], notes: [] },
   }))
   assert.equal(bare.opts['fix-correctness'].model, 'haiku')
   assert.equal(bare.opts['fix-correctness'].effort, 'medium')
@@ -2535,6 +2535,24 @@ test('a diff that ticks completion is reported, whatever the verdict', async () 
   assert.deepEqual(out.planBookkeepingWritten, ['docs/fyl/todo.md'])
   assert.match(logText, /TICKS COMPLETION or writes a built: marker/)
   assert.match(logText, /git checkout -- docs\/fyl\/todo\.md/, 'and names the repair')
+})
+
+test('the resume ledger in .task-plans/ is never reported as bookkeeping', async () => {
+  // plan-ledger.py writes `reviewed:`, `slice …: done` and `build: green` into the plan on every
+  // task-run by design, and the caller reverts whatever this reports — which deletes the ledger.
+  const ledgerOnly = await run({
+    overrides: { 'bookkeeping-check': { files: ['/srv/wt/.task-plans/project-skeleton.md'], detail: 'build: green added' } },
+  })
+  assert.deepEqual(ledgerOnly.out.planBookkeepingWritten, [])
+  assert.doesNotMatch(ledgerOnly.logText, /TICKS COMPLETION/)
+  assert.doesNotMatch(ledgerOnly.logText, /could not check whether the diff writes plan bookkeeping/,
+    'a check that found only the ledger ran, and ran clean')
+
+  const mixed = await run({
+    overrides: { 'bookkeeping-check': { files: ['.task-plans/x.md', 'docs/fyl/todo.md'] } },
+  })
+  assert.deepEqual(mixed.out.planBookkeepingWritten, ['docs/fyl/todo.md'], 'the source doc is still reported')
+  assert.match(mixed.logText, /git checkout -- docs\/fyl\/todo\.md$|git checkout -- docs\/fyl\/todo\.md`/m)
 })
 
 test('a clean run reports no bookkeeping, and a dead check is not a clean one', async () => {

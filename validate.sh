@@ -81,9 +81,11 @@ for t in skills/spec-brainstorm/tests/check_spec.test.sh \
          skills/plan-run/tests/fanout.test.sh \
          skills/plan-run/tests/footprint-warn.test.sh \
          skills/plan-run/tests/merge-resolve.test.sh \
+         skills/plan-run/tests/wave-simulate.test.sh \
          skills/test-app-create/tests/tui-session.test.sh \
          skills/plan-report/tests/milestone_scope.test.sh \
          skills/plan-unblock/tests/resolve_scope.test.sh \
+         skills/task-run/tests/plan-ledger.test.sh \
          skills/ui-prototype/tests/designmd.test.sh \
          skills/ui-prototype/tests/build-compare.test.sh \
          skills/page-serve/tests/serve.test.sh \

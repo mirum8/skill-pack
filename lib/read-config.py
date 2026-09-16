@@ -42,8 +42,9 @@ PACK_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 PROVIDERS = ("claude", "codex")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
-# Only meaningful for the claude provider. A codex model name is validated by the Codex CLI, not
-# here — pinning its model list in this file would go stale the week it changes.
+# Only meaningful for the claude provider. A codex model name is checked against the list the
+# installed Codex CLI keeps for itself (see codex_models), never a list pinned here — that would go
+# stale the week it changes.
 CLAUDE_MODELS = ("fable", "opus", "sonnet", "haiku")
 
 # Every setting the pack reads, with what it falls back to. This table IS the vocabulary: a key
@@ -141,6 +142,21 @@ def codex_present(home=None):
         return direct
     cached = sorted(glob.glob(os.path.join(home, ".claude/plugins/cache/openai-codex/codex/*", COMPANION)))
     return cached[-1] if cached else ""
+
+
+# The slugs the installed Codex CLI offers this account, from the cache it refreshes as it runs. A
+# model outside it is rejected by the API with a 400 on every job, so a run stops at implement with
+# nothing written — and a one-character slip like `gpt5.6-sol` for `gpt-5.6-sol` reads correctly to
+# anyone reviewing the file. An unreadable or absent
+# cache returns () and the name is not judged at all: a CLI that has never run has no list, and
+# refusing every codex row on such a machine would be a guess in the other direction.
+def codex_models(home=None):
+    base = os.environ.get("CODEX_HOME") or os.path.join(home or os.path.expanduser("~"), ".codex")
+    try:
+        with open(os.path.join(base, "models_cache.json"), encoding="utf-8") as fh:
+            return tuple(m["slug"] for m in json.load(fh)["models"] if isinstance(m, dict) and m.get("slug"))
+    except (OSError, ValueError, KeyError, TypeError):
+        return ()
 
 
 # ------------------------------------------------------------------ the parser ---
@@ -285,6 +301,15 @@ def resolve(step="implement", repo=None, pack=None, home=None):
         # dispatched at all on claude, so resetting them would discard a setting for no reason and
         # make the returned row disagree with the file the user is looking at.
         values.update({k: fallback[k] for k in ("provider", "model", "effort")})
+    elif spec.get("provider") and values["provider"] == "codex" \
+            and (offered := codex_models(home)) and values["model"] not in offered:
+        # The same whole-row fallback as a missing plugin, for the same reason: the codex row cannot
+        # run as written, and a named Claude row that runs beats a codex row that 400s every job.
+        notes.append(
+            f"{origin.get('model', 'built-in')}: `steps.{step}.model` {values['model']!r} is not a model the "
+            f"installed Codex CLI offers ({', '.join(offered)}) — every job would be rejected, so falling back "
+            f"to provider {fallback['provider']!r}, model {fallback['model']!r}, effort {fallback['effort']!r}")
+        values.update({k: fallback[k] for k in ("provider", "model", "effort")})
     elif spec.get("provider") and values["provider"] == "claude" and values["model"] not in CLAUDE_MODELS:
         bad("model", f"{values['model']!r} is not one of {'|'.join(CLAUDE_MODELS)}")
 
@@ -303,6 +328,7 @@ def check(path):
         return 1
     with open(path, encoding="utf-8") as fh:
         tree, problems = parse(fh.read())
+    offered = codex_models()
     for step, spec in SPEC.items():
         notes = []
         values = flatten(tree, step, path, notes)
@@ -321,6 +347,11 @@ def check(path):
                     and values.get("provider", spec["provider"]["default"]) == "claude" \
                     and v not in CLAUDE_MODELS:
                 problems.append(f"steps.{step}.model {v!r} is not one of {'|'.join(CLAUDE_MODELS)}")
+            elif k == "model" and "provider" in spec and offered \
+                    and values.get("provider", spec["provider"]["default"]) == "codex" \
+                    and v not in offered:
+                problems.append(f"steps.{step}.model {v!r} is not a model the installed Codex CLI offers "
+                                f"({', '.join(offered)})")
         # `flatten` reports unknown TOP-LEVEL keys once per step it is called for; keep one copy.
         problems += [n for n in notes if n not in problems]
     for p in problems:

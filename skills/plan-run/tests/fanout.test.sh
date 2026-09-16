@@ -581,6 +581,40 @@ grep -q "^pu ok untracked-backlog" <<<"$out" && ok "and names the branch to land
 "$FAN" cleanup --id pu >/dev/null 2>&1
 
 echo
+echo "== a marker in a plan larger than the pipe buffer is still found =="
+# `git show | grep -q` under pipefail: grep exits on the match, git dies of SIGPIPE writing the rest,
+# and the pipeline fails ON A MATCH. At 1MB that is every run, not a flake.
+"$FAN" spawn --id pbig --dir "$TMP/wt-pbig" --base main --prompt x \
+       --marker-file todo.md --marker-prefix 'built: ' >/dev/null 2>&1
+( cd "$TMP/wt-pbig" && git checkout -q -b phase-big \
+  && { printf 'a\n<!-- built: phase-big -->\n'
+       printf '%.0sfiller line of the plan body, long enough to matter here\n' $(seq 20000); } > todo.md \
+  && git add -A && git commit -qm big ) >/dev/null 2>&1
+sfile=$(sed -n 's/^sentinel=//p' "$TMP"/fanout-*/pbig.rec)
+{ printf 'status=ok\n'; printf 'branch=phase-big\n'; } > "$sfile"
+out=$("$FAN" wait --id pbig --timeout 5 2>&1); rc=$?
+[[ $rc == 0 ]] && ok "a marked branch with a 1MB plan reports ok" \
+               || bad "a marked branch with a 1MB plan reports ok" "exit $rc: $out"
+grep -q "^pbig ok phase-big" <<<"$out" && ok "and names the branch to land" \
+                                       || bad "and names the branch to land" "$out"
+"$FAN" cleanup --id pbig >/dev/null 2>&1
+
+echo
+echo "== a marker file git cannot read on the branch is its own verdict, not no-marker =="
+"$FAN" spawn --id pmiss --dir "$TMP/wt-pmiss" --base main --prompt x \
+       --marker-file todo.md --marker-prefix 'built: ' >/dev/null 2>&1
+sfile=$(sed -n 's/^sentinel=//p' "$TMP"/fanout-*/pmiss.rec)
+{ printf 'status=ok\n'; printf 'branch=phase-never-created\n'; } > "$sfile"
+out=$("$FAN" wait --id pmiss --timeout 5 2>&1); rc=$?
+[[ $rc == 1 ]] && ok "a sentinel naming a branch git cannot read is failed" \
+               || bad "a sentinel naming a branch git cannot read is failed" "exit $rc: $out"
+grep -q "marker-unreadable" <<<"$out" && ! grep -q "no-marker" <<<"$out" \
+  && ok "and says git could not read it, rather than that the marker is absent" \
+  || bad "and says git could not read it, rather than that the marker is absent" "$out"
+rm -f "$sfile"
+"$FAN" cleanup --id pmiss >/dev/null 2>&1
+
+echo
 echo "== a missing sentinel times out; it never reads as done =="
 "$FAN" cleanup --id p2 >/dev/null 2>&1
 "$FAN" spawn --id p6 --dir "$TMP/wt-p6" --base main --prompt x \

@@ -36,7 +36,9 @@
 #   wait [--id U]... [--any] [--timeout S]
 #                          block until every live unit has a sentinel, then read
 #                          it AND verify the marker. A timeout is a stop naming
-#                          the stalled units, never "assume done".
+#                          the stalled units, never "assume done". A marker git
+#                          cannot find is `failed no-marker`; a branch or marker
+#                          file git cannot read at all is `failed marker-unreadable`.
 #                          --any returns as soon as ONE of them comes back and
 #                          reports only that unit, so the caller can cleanup and
 #                          refill the slot while the rest are still working --
@@ -647,7 +649,7 @@ sys.exit(0 if any(x.get("argv0")=="claude" or x.get("name")=="claude" for x in p
 # lies in a different direction: a sentinel can be written by a session that then
 # failed to commit, and a missing marker can just mean the unit is still working.
 unit_verdict() {
-  local id=$1 r s st branch mfile mprefix
+  local id=$1 r s st branch mfile mprefix blob
   r=$(rec "$id"); s=$(sentinel "$id")
   [ -e "$s" ] || { echo "live"; return; }
   st=$(field "$s" status)
@@ -662,7 +664,15 @@ unit_verdict() {
   fi
   mfile=$(field "$r" marker_file); mprefix=$(field "$r" marker_prefix)
   if [ -n "$mfile" ]; then
-    if ! git show "$branch:$mfile" 2>/dev/null | grep -q -- "$mprefix$branch"; then
+    # Captured, then matched from a here-string, for the reason preflight gives: piped into `grep -q`
+    # under pipefail, a plan past the pipe buffer kills `git show` with SIGPIPE on the match and a
+    # marked branch reads as unmarked. The read is checked on its own so a branch or file git cannot
+    # read -- a real failure with its own cause -- is never reported as a marker that is absent.
+    if ! blob=$(git show "$branch:$mfile" 2>&1); then
+      echo "failed marker-unreadable git could not read $branch:$mfile — ${blob%%$'\n'*}"
+      return
+    fi
+    if ! grep -qF -- "$mprefix$branch" <<<"$blob"; then
       echo "failed no-marker $branch carries no '$mprefix$branch' in $mfile — not landable"
       return
     fi

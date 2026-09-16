@@ -38,6 +38,9 @@ has() {
 # A HOME with no Codex plugin, so the codex branch is exercised deterministically rather than
 # depending on whether the machine running the tests happens to have the plugin installed.
 NOCODEX="$TMP/nocodex-home"; mkdir -p "$NOCODEX"
+# The Codex CLI's model list is read from $CODEX_HOME when it is set, so a developer's own value
+# would decide the model cases below instead of the HOME each case builds.
+unset CODEX_HOME
 # And one with the companion in place, built at the marketplace path check-prereqs.sh looks at.
 HASCODEX="$TMP/hascodex-home"
 mkdir -p "$HASCODEX/.claude/plugins/marketplaces/openai-codex/plugins/codex/scripts"
@@ -166,11 +169,11 @@ mkcfg "$CODEX/.config/skill-pack.yaml" <<'YAML'
 steps:
   implement:
     provider: codex
-    model: gpt5.6-sol
+    model: gpt-5.6-sol
     effort: low
 YAML
 ok "codex present: provider honoured"       "$(read_cfg "$HASCODEX" "$PACK" "$CODEX" provider)" codex
-ok "codex present: model passes through"    "$(read_cfg "$HASCODEX" "$PACK" "$CODEX" model)"    gpt5.6-sol
+ok "codex present: model passes through"    "$(read_cfg "$HASCODEX" "$PACK" "$CODEX" model)"    gpt-5.6-sol
 ok "codex present: effort honoured"         "$(read_cfg "$HASCODEX" "$PACK" "$CODEX" effort)"   low
 ok "codex present: nothing to report"       "$(read_cfg "$HASCODEX" "$PACK" "$CODEX" notes)"    '[]'
 # The whole row moves together — a codex model name means nothing to a Claude subagent, and
@@ -185,6 +188,41 @@ CACHED="$TMP/cached-home"
 mkdir -p "$CACHED/.claude/plugins/cache/openai-codex/codex/0.146.0/scripts"
 : > "$CACHED/.claude/plugins/cache/openai-codex/codex/0.146.0/scripts/codex-companion.mjs"
 ok "the version-cache path counts as installed" "$(read_cfg "$CACHED" "$PACK" "$CODEX" provider)" codex
+
+# --- a codex model the installed CLI does not offer -------------------------
+# No model list is pinned here, because it would go stale; the Codex CLI keeps its own in
+# models_cache.json and refreshes it as it runs. A name outside it is rejected by the API with a
+# 400 on every job, so honouring it is a run that stops at implement having written nothing. The
+# typo below is one character, which is the point: it reads correctly to anyone reviewing the file.
+SLUGS="$TMP/slugs-home"
+mkdir -p "$SLUGS/.claude/plugins/marketplaces/openai-codex/plugins/codex/scripts" "$SLUGS/.codex"
+: > "$SLUGS/.claude/plugins/marketplaces/openai-codex/plugins/codex/scripts/codex-companion.mjs"
+printf '{"models":[{"slug":"gpt-5.6-sol"},{"slug":"gpt-5.5"}]}' > "$SLUGS/.codex/models_cache.json"
+TYPO="$TMP/typo"
+mkcfg "$TYPO/.config/skill-pack.yaml" <<'YAML'
+steps:
+  implement:
+    provider: codex
+    model: gpt5.6-sol
+    effort: low
+YAML
+ok  "a model the CLI does not offer: provider falls back" "$(read_cfg "$SLUGS" "$PACK" "$TYPO" provider)" claude
+ok  "and the model and effort with it"                    "$(read_cfg "$SLUGS" "$PACK" "$TYPO" model)/$(read_cfg "$SLUGS" "$PACK" "$TYPO" effort)" opus/medium
+has "and the rejected name is quoted"                     "$(read_cfg "$SLUGS" "$PACK" "$TYPO" notes)" "'gpt5.6-sol'"
+has "beside the names the CLI does offer"                 "$(read_cfg "$SLUGS" "$PACK" "$TYPO" notes)" "gpt-5.6-sol"
+ok  "a model the CLI offers passes through"               "$(read_cfg "$SLUGS" "$PACK" "$CODEX" model)" gpt-5.6-sol
+ok  "and says nothing"                                    "$(read_cfg "$SLUGS" "$PACK" "$CODEX" notes)" '[]'
+ok  "CODEX_HOME is where the list is read from"           "$(CODEX_HOME="$SLUGS/.codex" read_cfg "$HASCODEX" "$PACK" "$TYPO" provider)" claude
+mkcfg "$TMP/check-typo.yaml" <<'YAML'
+steps:
+  fix:
+    provider: codex
+    model: gpt5.6-sol
+YAML
+HOME="$SLUGS" python3 "$READER" --check "$TMP/check-typo.yaml" >/dev/null 2>&1
+ok "--check refuses a codex model the CLI does not offer" "$?" 1
+HOME="$NOCODEX" python3 "$READER" --check "$TMP/check-typo.yaml" >/dev/null 2>&1
+ok "--check with no CLI model list cannot judge, and does not guess" "$?" 0
 
 # Both pipelines hand this reader's object back VERBATIM into a schema with
 # additionalProperties:false. A key the schema has no slot for is dropped by the agent returning it,
@@ -231,7 +269,7 @@ mkcfg "$WRAP/.config/skill-pack.yaml" <<'YAML'
 steps:
   implement:
     provider: codex
-    model: gpt5.6-sol
+    model: gpt-5.6-sol
     effort: low
     wrapperModel: opus
     wrapperEffort: high
@@ -240,7 +278,7 @@ YAML
 # key that was read apart from one that was ignored.
 ok "the wrapper model is configurable"      "$(field "$HASCODEX" "$PACK" "$WRAP" implement wrapperModel)"  opus
 ok "the wrapper effort is configurable"     "$(field "$HASCODEX" "$PACK" "$WRAP" implement wrapperEffort)" high
-ok "and tuning it leaves the writer alone"  "$(field "$HASCODEX" "$PACK" "$WRAP" implement model)"         gpt5.6-sol
+ok "and tuning it leaves the writer alone"  "$(field "$HASCODEX" "$PACK" "$WRAP" implement model)"         gpt-5.6-sol
 ok "and leaves the writer's effort alone"   "$(field "$HASCODEX" "$PACK" "$WRAP" implement effort)"        low
 # It is ALWAYS a Claude subagent, whatever the writer is — so a codex model name is wrong here even
 # under provider: codex, unlike `model`.
@@ -249,7 +287,7 @@ mkcfg "$BADWRAP/.config/skill-pack.yaml" <<'YAML'
 steps:
   implement:
     provider: codex
-    wrapperModel: gpt5.6-sol
+    wrapperModel: gpt-5.6-sol
 YAML
 ok  "a codex model is refused for the wrapper" "$(field "$HASCODEX" "$PACK" "$BADWRAP" implement wrapperModel)" haiku
 has "and named"                                "$(field_err "$HASCODEX" "$PACK" "$BADWRAP" implement wrapperModel)" "steps.implement.wrapperModel"
@@ -267,7 +305,7 @@ mkcfg "$BADMODEL/.config/skill-pack.yaml" <<'YAML'
 steps:
   implement:
     provider: claude
-    model: gpt5.6-sol
+    model: gpt-5.6-sol
 YAML
 ok  "a codex model under claude falls back" "$(read_cfg "$NOCODEX" "$PACK" "$BADMODEL" model)" opus
 has "and is named"                          "$(read_cfg "$NOCODEX" "$PACK" "$BADMODEL" notes)" "steps.implement.model"
@@ -325,12 +363,12 @@ steps:
     effort: medium
   fix:
     provider: codex
-    model: gpt5.6-sol
+    model: gpt-5.6-sol
     effort: low
     wrapperModel: sonnet
     wrapperEffort: medium
 YAML
-ok "fix: the shipped row is read"        "$(read_cfg "$HASCODEX" "$FIXPACK" "$EMPTY" model fix)"    gpt5.6-sol
+ok "fix: the shipped row is read"        "$(read_cfg "$HASCODEX" "$FIXPACK" "$EMPTY" model fix)"    gpt-5.6-sol
 ok "fix: and its effort"                 "$(read_cfg "$HASCODEX" "$FIXPACK" "$EMPTY" effort fix)"   low
 ok "fix: and its wrapper"                "$(read_cfg "$HASCODEX" "$FIXPACK" "$EMPTY" wrapperModel fix)" sonnet
 ok "fix: no notes on a clean read"       "$(read_cfg "$HASCODEX" "$FIXPACK" "$EMPTY" notes fix)"    '[]'
@@ -346,7 +384,7 @@ steps:
     effort: high
 YAML
 ok "fix: a project overrides one key"    "$(read_cfg "$HASCODEX" "$FIXPACK" "$FIXREPO" effort fix)"   high
-ok "fix: and inherits the rest"          "$(read_cfg "$HASCODEX" "$FIXPACK" "$FIXREPO" model fix)"    gpt5.6-sol
+ok "fix: and inherits the rest"          "$(read_cfg "$HASCODEX" "$FIXPACK" "$FIXREPO" model fix)"    gpt-5.6-sol
 ok "fix: including the provider"         "$(read_cfg "$HASCODEX" "$FIXPACK" "$FIXREPO" provider fix)" codex
 
 # codex asked for on a machine with no plugin: the WHOLE writer row moves, because a codex model
@@ -363,7 +401,7 @@ steps:
     modell: haiku
     effort: ultra
 YAML
-ok  "fix: a typo'd key is ignored"       "$(read_cfg "$HASCODEX" "$FIXPACK" "$FIXTYPO" model fix)"  gpt5.6-sol
+ok  "fix: a typo'd key is ignored"       "$(read_cfg "$HASCODEX" "$FIXPACK" "$FIXTYPO" model fix)"  gpt-5.6-sol
 has "fix: and named"                     "$(read_cfg "$HASCODEX" "$FIXPACK" "$FIXTYPO" notes fix)"  "steps.fix.modell"
 ok  "fix: a bad effort falls back"       "$(read_cfg "$HASCODEX" "$FIXPACK" "$FIXTYPO" effort fix)" medium
 has "fix: and the key is named"          "$(read_cfg "$HASCODEX" "$FIXPACK" "$FIXTYPO" notes fix)"  "steps.fix.effort"
@@ -411,7 +449,7 @@ PLANBAD="$TMP/planbad"
 mkcfg "$PLANBAD/.config/skill-pack.yaml" <<'YAML'
 steps:
   plan:
-    model: gpt5.6-sol
+    model: gpt-5.6-sol
     judgeModel: haiku
     judgeEffort: turbo
     provider: codex
@@ -457,7 +495,7 @@ steps:
     provider: claude
   fix:
     provider: claude
-    model: gpt5.6-sol
+    model: gpt-5.6-sol
 YAML
 python3 "$READER" --check "$TMP/badfix/.config/defaults.yaml" >/dev/null 2>&1
 ok "--check rejects a codex model under a claude fix row" "$?" 1
@@ -466,7 +504,7 @@ steps:
   implement:
     provider: claude
   plan:
-    model: gpt5.6-sol
+    model: gpt-5.6-sol
 YAML
 python3 "$READER" --check "$TMP/badplan/.config/defaults.yaml" >/dev/null 2>&1
 ok "--check rejects a codex model on the plan row" "$?" 1

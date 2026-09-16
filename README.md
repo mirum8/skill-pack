@@ -201,7 +201,7 @@ steps:
     wrapperEffort: medium #   (not the writer; see below)
   fix:                    # the three fixers in /r:task-review — same five keys
     provider: codex
-    model: gpt5.6-sol
+    model: gpt-5.6-sol
     effort: low
   fanout:
     maxUnits: 3           # 1..16 — units /r:plan-run and /r:issues-fix keep live under --herdr
@@ -233,7 +233,7 @@ patches; the two rows are independent and nothing enforces that for you.
 `model` and `effort` belong to the **selected provider** — under `claude` they are the subagent's
 own model and reasoning effort, under `codex` they become `--model` and `--effort` on the CLI call.
 The shipped defaults are `claude` / `opus` / `medium` for the implementers and
-`codex` / `gpt5.6-sol` / `low` for the fixers — Claude writes the change, Codex patches it.
+`codex` / `gpt-5.6-sol` / `low` for the fixers — Claude writes the change, Codex patches it.
 
 Nothing here fails a run. A missing file, a malformed line, an unknown key or a value outside its
 enum resolves to the built-in default and the run **logs which key was substituted and why** — a

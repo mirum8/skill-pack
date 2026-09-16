@@ -2768,7 +2768,8 @@ const bookkeeping = await agent(
      2. an added line introducing a completion stamp — \`built:\` on a heading, or similar
    Return files=[] when there are none, which is the normal answer. Do NOT report an item that was
    already \`- [x]\` and merely moved, and do NOT report a NEW unticked \`- [ ]\` — writing new
-   checklist items is ordinary. Only the flip to done, and only a stamp being ADDED.`,
+   checklist items is ordinary. Only the flip to done, and only a stamp being ADDED.
+   Ignore files under \`.task-plans/\` — that is the pipeline's own resume ledger, not bookkeeping.`,
   { label: 'bookkeeping-check', phase: 'End-verify', schema: {
       type: 'object', additionalProperties: false, required: ['files'],
       properties: {
@@ -2776,8 +2777,10 @@ const bookkeeping = await agent(
         detail: { type: 'string' },
       } }, ...GP, ...ECHO }).catch(() => null)
 // A dead check is NOT a clean one, but it must not manufacture a blockage either: report the gap.
-const planBookkeepingWritten = (bookkeeping && Array.isArray(bookkeeping.files) && bookkeeping.files.length)
-  ? bookkeeping.files : []
+// `.task-plans/` is task-run's resume ledger, stamped on every run by design; the caller reverts
+// whatever lands here, so reporting it deletes the ledger and the plan-review edits beside it.
+const planBookkeepingWritten = (bookkeeping && Array.isArray(bookkeeping.files))
+  ? bookkeeping.files.filter(f => !/(^|\/)\.task-plans\//.test(f)) : []
 if (planBookkeepingWritten.length) {
   log(`post-task-review: this run's diff TICKS COMPLETION or writes a built: marker in ${planBookkeepingWritten.join(', ')} — ` +
       `no agent on either side of this task may do that and the caller ticks after this review returns, so it is premature whatever this verdict says. ` +

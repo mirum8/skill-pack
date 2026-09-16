@@ -63,7 +63,7 @@ steps:
 
   implement:
     provider: codex       # claude | codex
-    model: gpt5.6-sol     # codex: passed through to the CLI; claude: fable|opus|sonnet|haiku
+    model: gpt-5.6-sol    # codex: passed through to the CLI; claude: fable|opus|sonnet|haiku
     effort: medium        # low | medium | high | xhigh | max
 
     # IMPL_RUN in task-run-implement.workflow.js is what a run uses when it cannot reach this file
@@ -113,7 +113,7 @@ steps:
   # override a value you can see right here. It is on you when you edit them.
   fix:
     provider: codex       # claude | codex
-    model: gpt5.6-sol     # codex: passed through to the CLI; claude: fable|opus|sonnet|haiku
+    model: gpt-5.6-sol    # codex: passed through to the CLI; claude: fable|opus|sonnet|haiku
     effort: low           # low | medium | high | xhigh | max
 
     # Under `provider: codex` only: the Claude subagent that DRIVES the CLI — it passes the finding

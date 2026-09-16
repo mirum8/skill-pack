@@ -48,6 +48,8 @@ bash skills/task-review/tests/worktree-deploy.test.sh       # main-vs-worktree +
 bash skills/test-app-create/tests/tui-session.test.sh       # the TUI driver's fail-closed contract
 bash skills/plan-report/tests/milestone_scope.test.sh       # milestone scope + the boundary predicate
 bash skills/plan-unblock/tests/resolve_scope.test.sh        # the Resolve-first parser + the gate
+bash skills/task-run/tests/plan-ledger.test.sh              # the resume ledger: matches, claims, the lock
+bash skills/plan-run/tests/wave-simulate.test.sh            # the wave dry-merge: conflict vs could-not-run
 bash hooks/tests/guard.test.sh                             # workflow-guard behaviour
 bash hooks/tests/normalize-cd-paths.test.sh                # the cd rewrite + every case it declines
 bash lib/tests/stats.test.sh                               # stats sink + hook + reporter
@@ -218,6 +220,27 @@ an empty room in front of it, and `--unattended` keeps queueing rather than disp
 `/r:spec-design` rewrite replaces wholesale, and that rewrite is exactly the follow-up a resolution
 tends to trigger. `--against` is what makes the stamp durable instead.
 
+**A stopped run resumes from a ledger in its plan file, and the ledger's judgements are a script.**
+Stops mid-phase are the common case, not the edge: the store holds 8 `plan-run` runs halted at
+`implement-stopped` against 4 that finished. So `.task-plans/<slug>.md` carries, beside `status:`, a
+`reviewed:` stamp written only after a real Codex plan review, a `slice <label>: done` line per
+implementer that returned clean, and `build: green` / `review: done` lines, each with a hash of what
+it covered. `task-run/scripts/plan-ledger.py` writes them and reads them back, and it alone decides
+what a resume may skip — a slice whose files still match, a build or review over an unchanged tree —
+because both wrong answers are confident ones: a slice called done over files that moved builds on
+work that is gone, and a tree whose changes nothing claimed read as clean builds on code nothing
+reviewed. That second case is a **stop** (`resume-unclaimed-tree`), never a guess in either direction:
+a Codex job that kept writing after a run was stopped left a whole uncompiled backend in a worktree,
+and neither building on it nor deleting it is a call a pipeline may make. An adopted full-tier plan
+with no stamp is reviewed again, because a plan file on disk is not evidence its review ran. An
+existing feature branch that does not contain base is a stop too (`branch-behind-base`): it is
+checked out as-is, so it would take the tree back past the commit holding the plan, and the ledger
+read over a missing plan comes back clean. The
+ledger lives in the plan and **never in the stats store**: the plan travels with the branch and dies
+with the worktree, while a store row outlives the tree it describes, answers for the next tree cut
+at the same path — the same shape as a Codex broker keyed by path — and is best-effort by design.
+Resume events are copied into the stats row as `resume` for measurement, and nothing reads them back.
+
 **Every workflow edit needs its control-flow test.** `tests/control-flow.test.mjs` executes the
 script with `agent()`/`parallel()`/`phase()`/`log()` stubbed and asserts the branches — what stops
 the run, what is retried, what reaches the handoff. It models both agent death shapes: `agent()`
@@ -378,7 +401,7 @@ stays that skill's store. Rules that are load-bearing:
   recorded fact. The table cannot yet compare **providers** — the mined effort is the *subagent's*,
   and on codex that is the driver's rather than the writer's — which is why the resolved row is
   written into the run payload as `implProvider`/`implModel`/`implEffort`. The shipped default is
-  codex/`gpt5.6-sol`/`medium`, driven by a haiku/medium wrapper, and it cannot agree with
+  codex/`gpt-5.6-sol`/`medium`, driven by a haiku/medium wrapper, and it cannot agree with
   `IMPL_RUN`: that fallback is claude/`opus`/`medium` and has no provider to set, so a codex row is
   unmirrorable there by construction. The workflow names the substitution in its log instead, which
   is what keeps an unreachable config visible rather than a silent tier change. `medium` is the
@@ -389,7 +412,7 @@ stays that skill's store. Rules that are load-bearing:
   `ui-fix-minor` — with the same five keys; `FIX_RUN` is their fallback. Not the readability
   refactor, which invokes `/r:code-refactor` and would have nothing to hand a CLI. They are the
   pack's second-largest write-side block (595M + 493M + 238M tokens), and the shipped row is
-  codex/`gpt5.6-sol`/`low` — the least-measured value in the pack, with no Codex fixer run yet.
+  codex/`gpt-5.6-sol`/`low` — the least-measured value in the pack, with no Codex fixer run yet.
   Two consequences to hold onto. A fixer must never run **deeper** than the implementer whose code
   it patches, and nothing enforces that across two independent rows — `task-review` does not read
   `steps.implement`, and a silent clamp would override a value the user can see in their own file.
@@ -486,7 +509,13 @@ reader owned by one skill stays that skill's reader. Rules that are load-bearing
 - **`provider: codex` is verified before it is honoured**, at the two paths `check-prereqs.sh`
   already looks in. Absent, the *whole row* falls back to claude/opus/medium: a codex model name
   means nothing to `agent()`, and carrying the codex effort across would re-tier the Claude path by
-  accident. All three substitutions are named.
+  accident. All three substitutions are named. The codex **model** is verified the same way, against
+  the slugs the installed CLI caches in `$CODEX_HOME/models_cache.json` — never a list pinned in the
+  reader, which would go stale. A name outside it takes the same whole-row fallback, because the API
+  rejects it with a 400 on every job and the run stops at implement with nothing written. The slip
+  this exists for is one character — `gpt5.6-sol` for `gpt-5.6-sol` — which reads correctly to every
+  human reviewer and nothing else in the pack would catch. No cache means no judgement, never a
+  refusal.
 - **`steps.plan` is the planning half, and it is three tiers in one row** — the planner, the
   explorers that map the code for it, and the judges that triage the plan review. One row because
   the three are chosen together: a deeper planner wants shallower judges, not deeper ones. The

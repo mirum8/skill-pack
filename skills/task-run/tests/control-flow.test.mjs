@@ -45,7 +45,7 @@ const DEFAULT_PLAN_CONFIG = { model: 'fable', effort: 'medium', exploreModel: 's
 // provider the defaults happen to ship. Its `wrapperModel` deliberately DIFFERS from
 // IMPL_CODEX_RUN's haiku: a fixture that repeats the fallback cannot tell "the config was read"
 // apart from "the config was ignored", which is the whole point of the assertion below.
-const CODEX_CONFIG = { provider: 'codex', model: 'gpt5.6-sol', effort: 'low',
+const CODEX_CONFIG = { provider: 'codex', model: 'gpt-5.6-sol', effort: 'low',
                        wrapperModel: 'sonnet', wrapperEffort: 'medium',
                        sources: ['/repo/.config/skill-pack.yaml'], notes: [] }
 const CLAUDE_CONFIG = { provider: 'claude', model: 'sonnet', effort: 'high',
@@ -86,7 +86,7 @@ function baseSource(over = {}) {
     buildTool: 'maven', buildCmd: 'mvn clean package', buildCmdFast: 'mvn package',
     runnerAgent: 'r:maven-build-runner',
     exploreAspects: ['controller + templates', 'existing tests'],
-    planPath: '.task-plans/issue-81-import.md', planStatus: 'none', branchExists: false,
+    planPath: '.task-plans/issue-81-import.md', planStatus: 'none', planReviewed: '', branchExists: false,
     ...over,
   }
 }
@@ -94,7 +94,7 @@ function baseSource(over = {}) {
 // `overrides` maps a label PREFIX to the value that label should return — or THROW, or a
 // function of the call count. Anything not overridden takes the happy-path default.
 async function run({ source = baseSource(), riskFlags = [], uiFiles = [], design = designText(),
-                     review, planfix, verdict, config, planConfig, citation, head, haltTree,
+                     review, planfix, verdict, config, planConfig, citation, head, haltTree, ledger,
                      args = { source: '#81' }, overrides = {}, build } = {}) {
   const logs = []
   const prompts = {}
@@ -105,10 +105,12 @@ async function run({ source = baseSource(), riskFlags = [], uiFiles = [], design
 
   const counts = {}
   const optsBy = {}
+  const seq = []
   let codexPass = 0
   const agent = async (prompt, opts = {}) => {
     const l = opts.label || ''
     counts[l] = (counts[l] || 0) + 1
+    seq.push(l)
     prompts[l] = prompt
     optsBy[l] = opts
     for (const [prefix, val] of Object.entries(overrides)) {
@@ -159,6 +161,14 @@ async function run({ source = baseSource(), riskFlags = [], uiFiles = [], design
     // A halt reads the TREE rather than believing the agents that halted. Unstubbed it finds the
     // uncommitted work a blocked slice had already written; `haltTree` is how a test kills the probe.
     if (l === 'halt-tree') return haltTree === undefined ? { filesPresent: ['OfferProvider.java', 'inquiry-card.html'] } : haltTree
+    // The resume ledger. Unstubbed it reads back an adopted plan with nothing recorded over a clean
+    // tree — the ordinary resume of a run that stopped before any slice finished.
+    if (l === 'ledger-read') return ledger === undefined
+      ? { planStatus: source.planStatus, reviewed: source.planReviewed || '', slices: [],
+          build: { recorded: false, matches: false }, review: { recorded: false, matches: false },
+          tree: [], unclaimed: [], error: '' }
+      : ledger
+    if (l.startsWith('ledger-mark')) return { written: true }
     if (l.startsWith('implement')) return { done: true, summary: 'returned VERSIONS_VIEW on error paths', filesChanged: ['AdminRatesController.java'] }
     if (l.startsWith('build#')) return build ? build(counts[l]) : { green: true }
     return {}
@@ -166,7 +176,7 @@ async function run({ source = baseSource(), riskFlags = [], uiFiles = [], design
 
   const wfArgs = args && typeof args === 'object' ? { packRoot: '/pack', ...args } : args
   const out = await makeWf()(wfArgs, agent, parallel, phase, log)
-  return { out, logs, counts, prompts, optsBy, logText: logs.join('\n') }
+  return { out, logs, counts, prompts, optsBy, seq, logText: logs.join('\n') }
 }
 
 const F = (n) => Array.from({ length: n }, (_, i) =>
@@ -789,11 +799,11 @@ test('the codex provider drives the CLI and keeps the slices, not the personas',
   })
   for (const l of ['implement:backend', 'implement:frontend']) {
     assert.equal(optsBy[l].agentType, 'general-purpose', `${l} must not keep a Claude persona`)
-    // The WRAPPER's tier, not the writer's: gpt5.6-sol/low goes to the CLI, sonnet/medium drives it.
+    // The WRAPPER's tier, not the writer's: gpt-5.6-sol/low goes to the CLI, sonnet/medium drives it.
     assert.equal(optsBy[l].model, 'sonnet', `${l} must carry the configured wrapper model`)
     assert.equal(optsBy[l].effort, 'medium', `${l} must carry the configured wrapper effort`)
     assert.match(prompts[l], /codex-companion\.mjs/)
-    assert.match(prompts[l], /--background --model gpt5\.6-sol --effort low --write/)
+    assert.match(prompts[l], /--background --model gpt-5\.6-sol --effort low --write/)
     // Without --background the CLI is awaited inside the Bash call and dies with it at the tool's
     // 120s default, over an implementer that averages 963s.
     assert.match(prompts[l], /--background is REQUIRED/)
@@ -834,7 +844,7 @@ test('the codex provider drives the CLI and keeps the slices, not the personas',
 })
 
 test('the codex wrapper is tuned apart from the writer, and never dispatched untiered', async () => {
-  // Two agents, two jobs: gpt5.6-sol writes the code, a Claude subagent drives the CLI and collects
+  // Two agents, two jobs: gpt-5.6-sol writes the code, a Claude subagent drives the CLI and collects
   // the detached run. Tuning one must not move the other — and the wrapper's failure mode
   // is halting the run over work Codex finished, which is why it cannot quietly become untiered.
   const tuned = await run({
@@ -845,20 +855,20 @@ test('the codex wrapper is tuned apart from the writer, and never dispatched unt
   assert.equal(tuned.optsBy['implement:backend'].model, 'opus')
   assert.equal(tuned.optsBy['implement:backend'].effort, 'high')
   // The writer's pair is untouched by that — it still reaches the CLI.
-  assert.match(tuned.prompts['implement:backend'], /--model gpt5\.6-sol --effort low --write/)
+  assert.match(tuned.prompts['implement:backend'], /--model gpt-5\.6-sol --effort low --write/)
   // The plan reviewer carries its OWN constant, so tuning the wrapper cannot re-tier it — they
   // agree today, and this is what keeps that a coincidence rather than a coupling. It is also
   // PINNED, not inherited: unnamed, its tier is whatever the caller happens to be running.
   assert.equal(tuned.optsBy['codex-plan-review#1'].effort, 'medium')
   assert.equal(tuned.optsBy['codex-plan-review#1'].model, 'haiku')
-  assert.match(tuned.logText, /codex gpt5\.6-sol \/ low, driven by opus \/ high/)
+  assert.match(tuned.logText, /codex gpt-5\.6-sol \/ low, driven by opus \/ high/)
 
   // A row with no wrapper keys — an older config, or an agent that dropped them — must land on the
   // built-in pair rather than dispatching a wrapper with no model and no depth.
   const bare = await run({
     source: baseSource({ buildTool: 'maven', hasBackend: true, hasFrontend: false }),
     review: OK_REVIEW, planfix: OK_FIX,
-    config: { provider: 'codex', model: 'gpt5.6-sol', effort: 'low', sources: [], notes: [] },
+    config: { provider: 'codex', model: 'gpt-5.6-sol', effort: 'low', sources: [], notes: [] },
   })
   assert.equal(bare.optsBy['implement:backend'].model, 'haiku')
   assert.equal(bare.optsBy['implement:backend'].effort, 'medium')
@@ -2163,33 +2173,220 @@ test('a bare non-JSON string arg is still recovered as the task source', async (
   assert.notEqual(out.stopped, 'no-source')
 })
 
-test('resume: a plan already at "implementing" skips planning and plan-review', async () => {
-  const { out, counts, logText } = await run({
-    source: baseSource({ planStatus: 'implementing', branchExists: true }),
-  })
+// ------------------------------------------------------------------- resume ---
+// A stopped run is picked up from the LEDGER in its plan file: a `reviewed:` stamp written after a
+// real Codex review, a `slice <label>:` line per implementer that returned clean, and `build:` /
+// `review:` lines over the whole tree. What may be skipped is decided by plan-ledger.py from hashes,
+// and what is left in the tree that no line claims stops the run rather than being built on.
+const STAMP = 'codex · 2 passes · 5 raised · 3 applied · 1 dropped · 2026-09-14T13:13Z'
+const NOTHING = { recorded: false, matches: false }
+const MATCHES = { recorded: true, matches: true }
+const LEDGER = (over = {}) => ({ planStatus: 'implementing', reviewed: STAMP, slices: [], build: NOTHING,
+  review: NOTHING, tree: [], unclaimed: [], error: '', ...over })
+const RESUME = (over = {}) => baseSource({ planStatus: 'implementing', branchExists: true, branchHasBase: true, planReviewed: STAMP, ...over })
+const implementLabels = (counts) => Object.keys(counts).filter((l) => l.startsWith('implement'))
+
+test('resume: an adopted plan carrying a review stamp skips planning and the plan review, and names the stamp', async () => {
+  const { out, counts, logText } = await run({ source: RESUME(), ledger: LEDGER() })
   assert.equal(counts['planner'], undefined)
   assert.equal(counts['codex-plan-review#1'], undefined)
   assert.equal(out.planReview.ran, false)
+  assert.equal(out.planReview.adoptedPlan, true, 'the caller needs a field, not just prose')
+  assert.ok(out.planReview.reason.includes(STAMP), 'the reason says which review it is standing on')
   assert.match(logText, /ADOPTING the existing/)
 })
 
-test('an adopted plan is not described as a resume the run cannot verify', async () => {
-  // A Workflow script is never told whether the runtime resumed it, so "this is a resume" and "a
-  // plan file from an earlier attempt is lying on disk" are indistinguishable from inside. The old
-  // reason picked one — "resume — the plan was reviewed in the original run" — and a FRESH run with
-  // no resumeFromRunId got it, having adopted the plan left by an attempt that halted with the
-  // feature unimplemented. The Codex plan challenge was skipped on the strength of a file.
-  const { out, logText } = await run({
-    source: baseSource({ planStatus: 'implementing', branchExists: true }),
-  })
-  assert.equal(out.planReview.adoptedPlan, true, 'the caller needs a field, not just prose')
-  assert.doesNotMatch(out.planReview.reason, /the plan was reviewed in the original run/)
-  assert.match(out.planReview.reason, /NOT challenged by Codex in THIS run/)
-  assert.match(out.planReview.reason, /cannot be determined from here/)
-  assert.match(out.planReview.reason, /delete the plan file/, 'and the one lever that works')
-  // The log has to say the same thing: a caller reading the transcript must not be told a resume
-  // happened when the run has no way of knowing that.
-  assert.match(logText, /This is a resume only if you meant it to be/)
+test('resume: a full-tier plan with NO review stamp is challenged by Codex before any code is written', async () => {
+  // A plan file with no stamp is a plan nothing recorded a review of: the attempt that wrote it may
+  // have halted inside the review, or before it. Skipping the challenge on the strength of the file
+  // is how an abandoned attempt's plan gets built unreviewed.
+  const { out, counts, seq } = await run({ source: RESUME({ planReviewed: '' }), ledger: LEDGER({ reviewed: '' }),
+    review: OK_REVIEW, planfix: OK_FIX, verdict: MIXED })
+  assert.equal(counts['planner'], undefined, 'the plan is adopted, not re-planned')
+  assert.equal(counts['codex-plan-review#1'], 1)
+  assert.equal(out.planReview.ran, true)
+  assert.equal(out.planReview.adoptedPlan, true)
+  assert.ok(seq.indexOf('codex-plan-review#1') < seq.findIndex((l) => l.startsWith('implement')))
+})
+
+test('resume below the full tier runs no plan review, stamp or not', async () => {
+  const { out, counts } = await run({ source: RESUME({ planReviewed: '', profile: 'standard' }), ledger: LEDGER({ reviewed: '' }) })
+  assert.equal(counts['codex-plan-review#1'], undefined)
+  assert.equal(out.planReview.ran, false)
+  assert.match(out.planReview.reason, /full-tier only/)
+})
+
+test('a real plan review stamps the plan before any code is written', async () => {
+  const { counts, prompts, seq } = await run({ review: OK_REVIEW, planfix: OK_FIX, verdict: MIXED })
+  assert.equal(counts['ledger-mark:reviewed'], 1)
+  assert.ok(prompts['ledger-mark:reviewed'].includes(
+    'python3 "/pack/skills/task-run/scripts/plan-ledger.py" mark --plan ".task-plans/issue-81-import.md" --base "main" --key reviewed --note "codex · 1 pass · 2 raised · 1 applied · 1 dropped"'),
+    prompts['ledger-mark:reviewed'])
+  assert.ok(seq.indexOf('ledger-mark:reviewed') < seq.findIndex((l) => l.startsWith('implement')))
+})
+
+test('no stamp when no Codex review ran', async () => {
+  const { counts } = await run({ source: baseSource({ profile: 'standard' }) })
+  assert.equal(counts['ledger-mark:reviewed'], undefined)
+})
+
+test('a fresh run never reads the ledger, and says it adopted nothing', async () => {
+  const { out, counts } = await run({ review: OK_REVIEW, planfix: OK_FIX })
+  assert.equal(counts['ledger-read'], undefined)
+  assert.equal(out.resume.adopted, false)
+})
+
+test('each slice is marked the moment it returns clean, with the files it wrote, and a green build is marked', async () => {
+  const { counts, prompts } = await run({ source: baseSource({ hasFrontend: true }), review: OK_REVIEW, planfix: OK_FIX })
+  assert.equal(counts['ledger-mark:slice:backend'], 1)
+  assert.equal(counts['ledger-mark:slice:frontend'], 1)
+  assert.match(prompts['ledger-mark:slice:backend'], /--key slice:backend --files "AdminRatesController\.java"/)
+  assert.equal(counts['ledger-mark:build'], 1)
+})
+
+test('a slice that halts is not marked, and the one that finished beside it is', async () => {
+  const { out, counts } = await run({ source: baseSource({ hasFrontend: true }), review: OK_REVIEW, planfix: OK_FIX,
+    overrides: { 'implement:frontend': { blockedOn: 'the plan names a template that does not exist', filesChanged: [] } } })
+  assert.equal(out.stopped, 'implement-blocked')
+  assert.equal(counts['ledger-mark:slice:backend'], 1, 'a resume must not redo the half that finished')
+  assert.equal(counts['ledger-mark:slice:frontend'], undefined)
+  assert.equal(counts['ledger-mark:build'], undefined)
+})
+
+test('resume: changes in the tree that no ledger line claims stop the run before any code is written', async () => {
+  // The shape this exists for: a Codex job that ran after the run was stopped left backend files in
+  // the tree. A resume that dispatches the implementers over them builds the task on code nothing in
+  // the pipeline wrote, reviewed or compiled.
+  const files = ['pom.xml', 'src/main/java/App.java']
+  const { out, counts } = await run({ source: RESUME(), ledger: LEDGER({ tree: files, unclaimed: files }) })
+  assert.equal(out.stopped, 'resume-unclaimed-tree')
+  assert.deepEqual(out.unclaimed, files)
+  assert.deepEqual(implementLabels(counts), [])
+  assert.equal(counts['build#1'], undefined)
+})
+
+test('resume: the tree is checked before a plan with no stamp is reviewed again', async () => {
+  // A resume that is going to stop on the tree must not first spend a Codex plan review: that review
+  // is the most expensive thing the adopted-plan path runs, and its verdict is thrown away by a stop
+  // that was decidable before it started.
+  const files = ['pom.xml', 'src/main/java/App.java']
+  const { out, counts, seq } = await run({ source: RESUME({ planReviewed: '' }), review: OK_REVIEW, planfix: OK_FIX,
+    ledger: LEDGER({ reviewed: '', tree: files, unclaimed: files }) })
+  assert.equal(out.stopped, 'resume-unclaimed-tree')
+  assert.equal(counts['codex-plan-review#1'], undefined)
+  assert.equal(counts['planner'], undefined)
+  assert.ok(seq.indexOf('branch') < seq.indexOf('ledger-read'), 'the tree is read on the feature branch')
+})
+
+test('resume: an unreadable ledger stops before the plan review too', async () => {
+  const { out, counts } = await run({ source: RESUME({ planReviewed: '' }), review: OK_REVIEW, planfix: OK_FIX,
+    overrides: { 'ledger-read': null } })
+  assert.equal(out.stopped, 'resume-ledger-unread')
+  assert.equal(counts['codex-plan-review#1'], undefined)
+})
+
+test('resume: a checkout that stays on base reads no ledger and stops as a branch failure', async () => {
+  const { out, counts } = await run({ source: RESUME(), overrides: { branch: { onBranch: 'main' } } })
+  assert.equal(out.stopped, 'branch-not-created')
+  assert.equal(counts['ledger-read'], undefined, 'the tree on base is not the tree the ledger describes')
+  assert.deepEqual(implementLabels(counts), [])
+})
+
+test('resume: a ledger that cannot be read stops the run — dead, throwing, or reporting an error', async () => {
+  for (const val of [null, THROW, LEDGER({ error: 'fatal: not a git repository' })]) {
+    const { out, counts } = await run({ source: RESUME(), overrides: { 'ledger-read': val } })
+    assert.equal(out.stopped, 'resume-ledger-unread', `for ${String(val && val.error || val)}`)
+    assert.deepEqual(implementLabels(counts), [])
+  }
+})
+
+test('an existing branch that does not contain base stops the run before anything is dispatched', async () => {
+  // The recorded shape: the phase branch was cut before the commit that preserved the plan on main.
+  // Checking it out as instructed deletes the plan file, and the ledger read over the missing file
+  // comes back clean — so the run adopted a plan that was not on disk and built on the old commit.
+  for (const source of [RESUME({ branchHasBase: false }), baseSource({ branchExists: true, branchHasBase: false })]) {
+    const { out, counts } = await run({ source, review: OK_REVIEW, planfix: OK_FIX })
+    assert.equal(out.stopped, 'branch-behind-base', `planStatus ${source.planStatus}`)
+    assert.equal(out.branch, 'issue-81-import')
+    assert.equal(out.base, 'main')
+    assert.equal(counts['branch'], undefined, 'the checkout that would delete the plan never runs')
+    assert.deepEqual(Object.keys(counts).filter((l) => l.startsWith('explore')), [])
+    assert.deepEqual(implementLabels(counts), [])
+  }
+})
+
+test('an existing branch whose ancestry went unreported is treated as not containing base', async () => {
+  const { out, counts } = await run({ source: RESUME({ branchHasBase: undefined }) })
+  assert.equal(out.stopped, 'branch-behind-base')
+  assert.equal(counts['branch'], undefined)
+})
+
+test('resume: a ledger read on the feature branch that finds no adopted plan stops the run', async () => {
+  // Whatever removed the plan between Phase 0's read on base and the read on the branch, the ledger
+  // then describes a tree with no plan in it, and every judgement it returns is about nothing.
+  for (const planStatus of ['none', 'reviewing']) {
+    const { out, counts } = await run({ source: RESUME({ planReviewed: '' }), review: OK_REVIEW, planfix: OK_FIX,
+      ledger: LEDGER({ planStatus, reviewed: '' }) })
+    assert.equal(out.stopped, 'resume-ledger-unread', `for planStatus ${planStatus}`)
+    assert.match(out.detail, new RegExp(planStatus))
+    assert.equal(counts['codex-plan-review#1'], undefined)
+    assert.deepEqual(implementLabels(counts), [])
+  }
+})
+
+test('resume: a slice recorded done whose files still match is not dispatched again', async () => {
+  const { out, counts } = await run({ source: RESUME({ hasFrontend: true }),
+    ledger: LEDGER({ slices: [{ label: 'backend', files: ['src/Svc.java'], matches: true }], tree: ['src/Svc.java'] }) })
+  assert.equal(out.stopped, undefined)
+  assert.equal(counts['implement:backend'], undefined)
+  assert.equal(counts['implement:frontend'], 1)
+  assert.deepEqual(out.resume.slicesSkipped, ['backend'])
+  assert.ok(out.implemented.some((s) => /backend/.test(s) && /earlier run/.test(s)), 'the handoff still accounts for it')
+  assert.equal(counts['build#1'], 1, 'a slice was dispatched, so the tree is new and the build runs')
+})
+
+test('resume: a slice recorded done whose files changed since is dispatched again', async () => {
+  const { out, counts } = await run({ source: RESUME(),
+    ledger: LEDGER({ slices: [{ label: 'backend', files: ['src/Svc.java'], matches: false }], tree: ['src/Svc.java'] }) })
+  assert.equal(counts['implement:backend'], 1)
+  assert.deepEqual(out.resume.slicesRerun, ['backend'])
+})
+
+test('resume: nothing left to implement and a matching build line skips the build', async () => {
+  const { out, counts } = await run({ source: RESUME(),
+    ledger: LEDGER({ slices: [{ label: 'backend', files: ['src/Svc.java'], matches: true }], tree: ['src/Svc.java'],
+      build: MATCHES, review: MATCHES }) })
+  assert.deepEqual(implementLabels(counts), [])
+  assert.equal(counts['build#1'], undefined)
+  assert.equal(out.buildGreen, true)
+  assert.equal(out.resume.buildSkipped, true)
+  assert.equal(out.resume.reviewDone, true, 'the caller skips a review whose tree is unchanged')
+})
+
+test('resume: a build line that no longer matches is rebuilt, and nothing reads as reviewed', async () => {
+  const { out, counts } = await run({ source: RESUME(),
+    ledger: LEDGER({ slices: [{ label: 'backend', files: ['src/Svc.java'], matches: true }], tree: ['src/Svc.java'],
+      build: { recorded: true, matches: false } }) })
+  assert.equal(counts['build#1'], 1)
+  assert.equal(out.resume.buildSkipped, false)
+  assert.equal(out.resume.reviewDone, false)
+})
+
+test('the resume reaches the stats row', async () => {
+  const { prompts } = await run({ source: RESUME({ hasFrontend: true }),
+    ledger: LEDGER({ slices: [{ label: 'backend', files: ['src/Svc.java'], matches: true }], tree: ['src/Svc.java'] }) })
+  const row = JSON.parse(prompts['stats'].match(/\{"kind":"implement".*\}/)[0])
+  assert.equal(row.resume.adopted, true)
+  assert.deepEqual(row.resume.slicesSkipped, ['backend'])
+})
+
+test('a ledger mark that dies costs the record, never the run', async () => {
+  for (const val of [null, THROW]) {
+    const { out, logText } = await run({ review: OK_REVIEW, planfix: OK_FIX, overrides: { 'ledger-mark': val } })
+    assert.equal(out.stopped, undefined)
+    assert.equal(out.buildGreen, true)
+    assert.match(logText, /could not record "slice:backend"/)
+  }
 })
 
 // ------------------------------------------------- agent() throws, not just dies ---
