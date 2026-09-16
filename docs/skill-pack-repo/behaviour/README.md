@@ -147,13 +147,13 @@ else's commits lands is a job, not a gate.
 | `test-app-create` | 110 | 51 | [`test-app-create.md`](test-app-create.md) |
 | `tests-write` | 44 | 41 | [`tests-write.md`](tests-write.md) |
 | `ui-prototype` | 85 | 35 | [`ui-prototype.md`](ui-prototype.md) |
-| **total** | **2307** | **1343** (58%) | |
+| **total** | **2308** | **1344** (58%) | |
 
 A snapshot, frozen with the register. `python3 tools/validate.py` prints the live totals on every
 run and `check_behaviour_register()` fails if a target loses its file, so this table going stale is
 visible rather than silent.
 
-**1343 of 2307 behaviours are held up by wording alone.** That is the number this register was
+**1344 of 2308 behaviours are held up by wording alone.** That is the number this register was
 built to produce, and the reason `/r:pack-compact` restores a file rather than patching it.
 
 The figure errs high by roughly ten entries: a first pass cleared every eval citation from

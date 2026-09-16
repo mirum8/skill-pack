@@ -272,15 +272,26 @@ flowchart TD
   *Enforced by:* —
   *Tested by:* —
 
+- **SB-pack-compact-037** — **The argument is resolved before the register is looked up, and the
+  three forms do not share a spelling.** A bare name is a skill (its `SKILL.md` and everything
+  under its `references/`); `agent:<name>` is `agents/<name>.md` whose register carries an
+  `agent-` prefix the argument does not; an explicit path resolves to the skill that owns it,
+  from the second path segment, not to itself. Taken verbatim, a bare argument misses the register
+  and the run refuses a target that is registered — the no-register refusal firing on the one
+  thing it exists to let through.
+  *States it:* `skills/pack-compact/SKILL.md`
+  *Enforced by:* —
+  *Tested by:* —
+
 ## Prose-only behaviours
 
-25 of 36: SB-pack-compact-002, SB-pack-compact-003, SB-pack-compact-005, SB-pack-compact-006,
+26 of 37: SB-pack-compact-002, SB-pack-compact-003, SB-pack-compact-005, SB-pack-compact-006,
 SB-pack-compact-007, SB-pack-compact-008, SB-pack-compact-009, SB-pack-compact-010,
 SB-pack-compact-011, SB-pack-compact-012, SB-pack-compact-013, SB-pack-compact-017,
 SB-pack-compact-018, SB-pack-compact-019, SB-pack-compact-020, SB-pack-compact-021,
 SB-pack-compact-022, SB-pack-compact-024, SB-pack-compact-028, SB-pack-compact-029,
 SB-pack-compact-030, SB-pack-compact-031, SB-pack-compact-032, SB-pack-compact-034,
-SB-pack-compact-036.
+SB-pack-compact-036, SB-pack-compact-037.
 
 The revert rule (SB-019) is the one worth staring at: it is the whole safety of the skill and
 nothing but the wording holds it up.

@@ -131,6 +131,20 @@
         "no States it: field was changed in the register",
         "the recorded row has filesReverted >= 1"
       ]
+    },
+    {
+      "id": 9,
+      "name": "resolves-an-agent-argument-to-its-prefixed-register",
+      "kind": "behaviour",
+      "prompt": "/r:pack-compact agent:bug-hunter-ui",
+      "expected_output": "The argument resolves to agents/bug-hunter-ui.md for the file and docs/skill-pack-repo/behaviour/agent-bug-hunter-ui.md for the register — the agent- prefix belongs to the register filename and not to the argument. The run proceeds to Step 1; it does not look for behaviour/agent:bug-hunter-ui.md and refuse a target that is registered.",
+      "files": [],
+      "fixture": null,
+      "assertions": [
+        "the run does not stop at the no-register refusal",
+        "the register read is docs/skill-pack-repo/behaviour/agent-bug-hunter-ui.md",
+        "the file under consideration is agents/bug-hunter-ui.md, not a skills/ directory"
+      ]
     }
   ]
 }

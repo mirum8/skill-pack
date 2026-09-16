@@ -71,9 +71,23 @@ Four preconditions, all of them cheap and all of them fatal:
   rewriting somebody's project.
 - **A clean working tree.** `git status --porcelain` must be empty. The revert in Step 4 is
   `git checkout -- <file>`, and it is only unambiguous when the diff is yours alone.
-- **A register for the target.** `docs/skill-pack-repo/behaviour/<target>.md` must exist. No
-  register, no rewrite — without one there is no statement of what the prose has to keep saying,
-  and a rewrite checked against the file it replaces only ever proves it copied itself.
+- **A register for the target.** Resolve the argument first — the three forms do not share a
+  spelling, and the register's filename is not the argument:
+
+  | argument | files it names | register |
+  |---|---|---|
+  | `plan-run` | `skills/plan-run/SKILL.md` **and everything under** `skills/plan-run/references/` | `behaviour/plan-run.md` |
+  | `agent:bug-hunter-ui` | `agents/bug-hunter-ui.md` | `behaviour/agent-bug-hunter-ui.md` |
+  | `skills/task-review/task-review.workflow.js` | that file alone | `behaviour/task-review.md`, from the second path segment |
+
+  An agent's register carries an `agent-` prefix its argument does not, and a path resolves to the
+  skill that owns it rather than to itself. Take a bare name as the target verbatim and the lookup
+  misses, so the run refuses a target that is registered — the refusal below firing on the one
+  thing it was built to let through.
+
+  Then: `docs/skill-pack-repo/behaviour/<resolved>.md` must exist. No register, no rewrite —
+  without one there is no statement of what the prose has to keep saying, and a rewrite checked
+  against the file it replaces only ever proves it copied itself.
 - **Not the vendored tree.** `skills/spec-brainstorm/references/html-effectiveness/` is
   third-party; its `LICENSE`, `CODE_OF_CONDUCT.md` and `SECURITY.md` stay byte-for-byte.
 
