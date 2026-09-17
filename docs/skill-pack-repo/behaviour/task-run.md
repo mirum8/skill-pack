@@ -46,7 +46,7 @@ flowchart TD
 
   subgraph P0S["phase('Source')"]
     P0["agent label: source<br/>GP · inherited model · effort medium<br/>schema SOURCE"]
-    P0 --> CFG["parallel:<br/>agent label: config (schema CONFIG)<br/>agent label: config-plan (schema PLAN_CONFIG)<br/>both GP · haiku/low"]
+    P0 --> CFG["parallel:<br/>agent label: config<br/>agent label: config-plan<br/>both GP · haiku/low · schema CONFIG_OUT<br/>parsed by parseCfg(step, out)"]
   end
 
   P0 --> SB{blocked?}
@@ -527,11 +527,28 @@ Two things the graph deliberately does **not** claim, because the suite contradi
   *Enforced by:* `skills/task-run/task-run-implement.workflow.js`
   *Tested by:* `skills/task-run/tests/control-flow.test.mjs`
 
-- **SB-task-run-030** — The plan row is read under its **own schema** (`PLAN_CONFIG`), never
-  `CONFIG`: that one requires `provider` and has no slot for the explorer and judge keys, so an
-  agent returning a plan row into it drops four settings and invents the rest — one returned its
-  own haiku/low as the planning row and the planner ran on it. The model enums are what stop an
-  invented model id from reaching `agent()`.
+- **SB-task-run-030** — Both rows come back as **one opaque `stdout` string** (`CONFIG_OUT`) and
+  are parsed by the script (`parseCfg`), never as a row with a field per setting. A schema field is
+  a question, and every field name a reader's schema exposes is a question a cheap agent can answer
+  about ITSELF: asked for `{model, effort}` the ECHO-tier reader returned its own haiku/low as the
+  planning row and the planner ran on it, and asked for `{provider, model, effort}` it answered
+  `model: "claude-haiku-4-5-20251001"` — an API id that is not a tier — with `read-config.py`'s
+  real JSON parked in the spare `step` field, so a `provider: codex` row resolved to claude. Both
+  runs logged `(from …/defaults.yaml)`, the note that exists to make a substitution visible
+  confirming a row the file never held.
+  *States it:* `skills/task-run/task-run-implement.workflow.js`
+  *Enforced by:* `skills/task-run/task-run-implement.workflow.js`
+  *Tested by:* `skills/task-run/tests/control-flow.test.mjs`
+
+- **SB-task-run-030a** — What proves the string is the reader's output and not the agent's own
+  answer is the **`step` field**: `read-config.py` always prints the step it resolved, so a
+  fabricated object fails it, and so does a row resolved for a different step. The JSON is cut out
+  of the surrounding text, so a reader that prefaces it with a sentence still counts. A rejected
+  answer and a dead agent both fall back to the constants and are **named apart** in the log — a
+  dead agent is fixed by re-running, a live agent answering something else is a prompt or a tier
+  problem — and neither may pass for a row read from the file. `parseCfg` re-validates nothing
+  else: `read-config.py` is the validator, and a second copy of its enums here would be a second
+  place to keep in step.
   *States it:* `skills/task-run/task-run-implement.workflow.js`
   *Enforced by:* `skills/task-run/task-run-implement.workflow.js`
   *Tested by:* `skills/task-run/tests/control-flow.test.mjs`

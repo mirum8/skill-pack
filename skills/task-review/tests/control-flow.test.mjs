@@ -57,6 +57,12 @@ const DEFAULT_FIX_CONFIG = { provider: 'codex', model: 'gpt-5.6-sol', effort: 'l
                              sources: ['/pack/.config/defaults.yaml'], notes: [] }
 const CLAUDE_FIX_CONFIG = { provider: 'claude', model: 'opus', effort: 'medium',
                             sources: ['/repo/.config/skill-pack.yaml'], notes: [] }
+// How the reader hands a row back: the stdout TEXT of read-config.py, which the script parses. The
+// fixtures above stay plain objects — what they describe is a resolved row, not a transport — and
+// this is the one place that knows the transport. `step` is part of what the script prints and part
+// of what it checks, so the stub prints it too. A fixture of `null` is a DEAD agent and stays null;
+// a test that wants a live agent answering something else returns that answer itself.
+const cfgOut = (step, row) => row === null || row === undefined ? row : { stdout: JSON.stringify({ step, ...row }) }
 
 // `overrides` maps a label PREFIX to what that label returns — a value, or a function of the
 // call count. Anything not overridden takes the happy-path default below.
@@ -82,7 +88,7 @@ async function run({ triage = baseTriage(), args = {}, overrides = {}, config = 
       return typeof val === 'function' ? val(counts[l]) : val
     }
     if (l === 'triage') return triage
-    if (l === 'config') return config
+    if (l === 'config') return cfgOut('fix', config)
     if (l === 'diff-pack') return { ok: true, path: '/tmp/review.patch', files: 1, lines: 40 }
     if (l === 'codex' || l === 'code-quality' || l.startsWith('find-bugs:')) return CLEAN
     if (l === 'fix-triage') return { correctness: [], readability: [] }
@@ -377,7 +383,7 @@ test('the fixers take steps.fix, and a config that cannot be read falls back rat
   const { opts, logText, out } = await run(withFix({ config: null }))
   assert.equal(opts['fix-correctness'].model, 'opus')
   assert.equal(opts['fix-correctness'].effort, 'medium')
-  assert.match(logText, /config could not be read — fixers fall back to opus\/medium/)
+  assert.match(logText, /config could not be read — the reader agent died; fixers fall back to opus\/medium/)
   assert.equal(out.reviewed, true)
 
   // And every note the reader returns is logged: a config that quietly does nothing is
@@ -386,6 +392,43 @@ test('the fixers take steps.fix, and a config that cannot be read falls back rat
     config: { ...CLAUDE_FIX_CONFIG, notes: ['`steps.fix.effort` \'deep\' is not one of low|medium|high — using \'medium\''] },
   }))
   assert.match(noted.logText, /config — .*is not one of low\|medium\|high/)
+})
+
+test('the fix reader is asked for a STRING, and a reader that answers with its own tier is rejected', async () => {
+  // A schema field is a question, and every field name a reader's schema exposes is a question a
+  // cheap agent can answer about ITSELF. Asked for `{provider, model, effort}` this reader
+  // returned its own tier with read-config.py's real JSON parked in the spare `step` field, and
+  // the run logged `(from .../defaults.yaml)` over a row the file never held — so `steps.fix`
+  // silently stopped reaching the fixers. An opaque `stdout` has nothing to self-report into, and
+  // the `step` the reader printed is what proves the string is the script's rather than the
+  // agent's.
+  const { opts } = await run(withFix())
+  assert.deepEqual(Object.keys(opts['config'].schema.properties), ['stdout'])
+  assert.deepEqual(opts['config'].schema.required, ['stdout'])
+
+  for (const answer of [
+    { stdout: JSON.stringify({ provider: 'claude', model: 'claude-haiku-4-5-20251001', effort: 'low', notes: [], sources: ['/repo'] }) },
+    { provider: 'claude', model: 'haiku', effort: 'low', notes: [], sources: [] },
+    { stdout: '' },
+  ]) {
+    const { opts: o, logText } = await run(withFix({ overrides: {
+      'fix-triage': { correctness: [finding()], readability: [] }, config: answer } }))
+    assert.equal(o['fix-correctness'].model, 'opus', 'the fixers stay on FIX_RUN')
+    assert.equal(o['fix-correctness'].effort, 'medium')
+    assert.match(logText, /config could not be read — the reader returned no read-config\.py output/)
+  }
+})
+
+test('a fix row wrapped in prose still reaches the fixers', async () => {
+  // The reader is cheap and often says what it did before saying what it read; refusing that
+  // answer would cost a real config read over a sentence nothing downstream reads.
+  const { opts, logText } = await run(withFix({ overrides: {
+    'fix-triage': { correctness: [finding()], readability: [] },
+    config: { stdout: 'Ran it from the repo root, which printed:\n' +
+      JSON.stringify({ step: 'fix', ...CLAUDE_FIX_CONFIG, effort: 'high' }) + '\nExit 0.' } } }))
+  assert.equal(opts['fix-correctness'].model, 'opus')
+  assert.equal(opts['fix-correctness'].effort, 'high')
+  assert.doesNotMatch(logText, /config could not be read/)
 })
 
 test('on the codex provider the fixers DRIVE the CLI and never patch the code themselves', async () => {

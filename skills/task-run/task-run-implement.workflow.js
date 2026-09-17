@@ -511,47 +511,38 @@ const BUILD = {
     preExistingFailures: { type: 'string' }, // already red on base -> NEVER ours to fix
   },
 }
-// What lib/read-config.py resolved for the implementers. `notes` is the load-bearing field: it
-// carries every substitution the reader made — a key outside its enum, a typo nobody reads, a
-// `provider: codex` on a machine with no Codex plugin — and this script logs every line of it.
-// Without that a typo'd setting is indistinguishable from a working one, which is exactly the
-// failure a config file invites.
-const CONFIG = {
+// How lib/read-config.py's output comes back: ONE STRING, parsed by this script. A schema field
+// is a question, and every field name a reader's schema exposes is a question a cheap agent can
+// answer about ITSELF. Asked for `{provider, model, effort}` and `{model, effort}` the ECHO-tier
+// reader twice returned its own tier instead of the script's: once as the planning row, so the
+// planner ran on haiku/low against a file that says fable/medium, and once as
+// `model: "claude-haiku-4-5-20251001"` — an API id that is not a tier at all — with the script's
+// real JSON parked in the spare `step` field. Both runs logged `(from .../defaults.yaml)`, so the
+// note that exists to make a substitution visible confirmed a row the file never held. A single
+// `stdout` string has nothing to self-report into.
+const CONFIG_OUT = {
   type: 'object', additionalProperties: false,
-  required: ['provider', 'model', 'effort'],
-  properties: {
-    step: { type: 'string' },
-    provider: { type: 'string', enum: ['claude', 'codex'] },
-    model: { type: 'string' },
-    effort: { type: 'string', enum: ['low', 'medium', 'high', 'xhigh', 'max'] },
-    // The Claude subagent that drives the Codex CLI under `provider: codex`. Not required: a row
-    // that predates these keys, or an agent that drops them, falls back to IMPL_CODEX_RUN rather
-    // than dispatching a wrapper with no model and no depth.
-    wrapperModel: { type: 'string' },
-    wrapperEffort: { type: 'string', enum: ['low', 'medium', 'high', 'xhigh', 'max'] },
-    sources: { type: 'array', items: { type: 'string' } },
-    notes: { type: 'array', items: { type: 'string' } },
-  },
+  required: ['stdout'],
+  properties: { stdout: { type: 'string' } },
 }
-// What lib/read-config.py prints for `--step plan`: no provider, and three tiers in one row. Its own
-// schema, never CONFIG — that one requires `provider` and has no slot for the explorer and judge
-// keys, so an agent returning a plan row into it drops four settings and invents the rest: one
-// returned its own haiku/low as the planning row, and the planner ran on it. The model enums are
-// what stop an invented full model id from reaching agent().
-const PLAN_CONFIG = {
-  type: 'object', additionalProperties: false,
-  required: ['model', 'effort'],
-  properties: {
-    step: { type: 'string' },
-    model: { type: 'string', enum: ['fable', 'opus', 'sonnet', 'haiku'] },
-    effort: { type: 'string', enum: ['low', 'medium', 'high', 'xhigh', 'max'] },
-    exploreModel: { type: 'string', enum: ['fable', 'opus', 'sonnet', 'haiku'] },
-    exploreEffort: { type: 'string', enum: ['low', 'medium', 'high', 'xhigh', 'max'] },
-    judgeModel: { type: 'string', enum: ['fable', 'opus', 'sonnet', 'haiku'] },
-    judgeEffort: { type: 'string', enum: ['low', 'medium', 'high', 'xhigh', 'max'] },
-    sources: { type: 'array', items: { type: 'string' } },
-    notes: { type: 'array', items: { type: 'string' } },
-  },
+// What proves the string came from the reader rather than from the agent: read-config.py always
+// prints the step it resolved, so a fabricated object fails `step`. The reader is also the
+// VALIDATOR — an out-of-enum key, a typo, a `provider: codex` with no Codex plugin all come back
+// as the built-in value with a line in `notes` — so this parse deliberately re-checks nothing it
+// would then own a second copy of. `notes` is the load-bearing field it carries out: without it a
+// typo'd setting is indistinguishable from a working one, which is the failure a config file
+// invites, and every line of it is logged below.
+//
+// The JSON is cut out of the surrounding text rather than parsed whole: a reader that prefaces it
+// with a sentence has still done its job, and refusing that answer would cost a real config read
+// over prose nothing reads.
+const parseCfg = (step, out) => {
+  const raw = out && typeof out.stdout === 'string' ? out.stdout : ''
+  const open = raw.indexOf('{'), close = raw.lastIndexOf('}')
+  if (open < 0 || close <= open) return null
+  let row = null
+  try { row = JSON.parse(raw.slice(open, close + 1)) } catch { return null }
+  return row && typeof row === 'object' && !Array.isArray(row) && row.step === step ? row : null
 }
 
 // --------------------------------------------------------------- helpers -----
@@ -1146,26 +1137,39 @@ log(`run-task-implement: ${src.kind} "${src.slug}" — tier ${profile} (${forced
 //
 // Two rows, two agents, one wave. `implement` decides who writes the code; `plan` decides the
 // planner, the explorers and the judges that come before it. Separate agents rather than one
-// reading twice, because each schema describes ONE resolved row — a combined shape would
+// reading twice, because each answer describes ONE resolved row — a combined shape would
 // have to be nullable in halves, and a half that came back empty would be indistinguishable from
 // one that resolved to the built-in values.
+//
+// The reader hands back the stdout TEXT and this script parses it (see CONFIG_OUT): the job is a
+// shell-out and a copy, and the one thing a settings row must never be is the reader's own tier.
 const readCfg = (step) => agent(
-  `Resolve the pack's ${step} settings. Run exactly this from the repo root and return the
-   object it prints on stdout, VERBATIM — do not re-derive, re-order or "correct" any field:
+  `Resolve the pack's ${step} settings. Run exactly this from the repo root:
 
      python3 "${PACK}/lib/read-config.py" --step ${step} --pack "${PACK}"
 
+   Return the line of JSON it printed in \`stdout\`, character for character. Do not parse it, do
+   not reformat or re-order it, do not "correct" a field, and do not fill any part of the answer
+   from your own model, effort or configuration — this script parses what you return, and a row
+   that describes YOU rather than the file is applied to the whole run and logged as though it
+   came from the file. If the command printed nothing, return the empty string.
+
    The script always exits 0 by design; a value it could not read comes back as the built-in
-   default with a line in \`notes\` saying so. Return \`notes\` even when it is empty.`,
-  { label: step === 'implement' ? 'config' : `config-${step}`, phase: 'Source', schema: step === 'plan' ? PLAN_CONFIG : CONFIG, ...GP, ...SINK })
-const [implCfg, planCfg] = await parallel([
+   default with a line in its own \`notes\` saying so, which this script reads out of the JSON.`,
+  { label: step === 'implement' ? 'config' : `config-${step}`, phase: 'Source', schema: CONFIG_OUT, ...GP, ...SINK })
+const [implOut, planOut] = await parallel([
   () => readCfg('implement').catch(() => null),
   () => readCfg('plan').catch(() => null),
 ])
+const implCfg = parseCfg('implement', implOut)
+const planCfg = parseCfg('plan', planOut)
 
 for (const note of (implCfg && implCfg.notes) || []) log(`run-task-implement: config — ${note}`)
 for (const note of (planCfg && planCfg.notes) || []) log(`run-task-implement: config — ${note}`)
-if (!implCfg) log(`run-task-implement: the config could not be read — implementers fall back to ${IMPL_RUN.model}/${IMPL_RUN.effort} on claude`)
+// Two causes, named apart: a dead agent is retried by re-running the pipeline, a reader that
+// answered with something other than read-config.py's output is a prompt or a tier problem. Both
+// fall back to the constants, and neither is allowed to pass for a row read from the file.
+if (!implCfg) log(`run-task-implement: the config could not be read — ${implOut ? 'the reader returned no read-config.py output' : 'the reader agent died'}; implementers fall back to ${IMPL_RUN.model}/${IMPL_RUN.effort} on claude`)
 const implProvider = (implCfg && implCfg.provider) || 'claude'
 // Under `claude` these are the writer's own model and depth. Under `codex` the writer's pair goes
 // to the CLI instead (see codexPreamble) and this dispatches the WRAPPER, which is configured
@@ -1189,7 +1193,7 @@ const pick = (a, b, key) => (planCfg && planCfg[a]) || b[key]
 const planRun = { model: pick('model', PLAN_RUN, 'model'), effort: pick('effort', PLAN_RUN, 'effort') }
 const exploreRun = { model: pick('exploreModel', EXPLORE_RUN, 'model'), effort: pick('exploreEffort', EXPLORE_RUN, 'effort') }
 const judgeRun = { model: pick('judgeModel', JUDGE_RUN, 'model'), effort: pick('judgeEffort', JUDGE_RUN, 'effort') }
-if (!planCfg) log(`run-task-implement: the plan config could not be read — planning falls back to planner ${PLAN_RUN.model}/${PLAN_RUN.effort}, explorers ${EXPLORE_RUN.model}/${EXPLORE_RUN.effort}, judges ${JUDGE_RUN.model}/${JUDGE_RUN.effort}`)
+if (!planCfg) log(`run-task-implement: the plan config could not be read — ${planOut ? 'the reader returned no read-config.py output' : 'the reader agent died'}; planning falls back to planner ${PLAN_RUN.model}/${PLAN_RUN.effort}, explorers ${EXPLORE_RUN.model}/${EXPLORE_RUN.effort}, judges ${JUDGE_RUN.model}/${JUDGE_RUN.effort}`)
 log(`run-task-implement: planning — planner ${planRun.model}/${planRun.effort}, explorers ${exploreRun.model}/${exploreRun.effort}, judges ${judgeRun.model}/${judgeRun.effort}${(planCfg && planCfg.sources || []).length ? ` (from ${planCfg.sources.join(', ')})` : ' (built-in)'}`)
 
 // --- Phase 1: map the code BEFORE planning it --------------------------------

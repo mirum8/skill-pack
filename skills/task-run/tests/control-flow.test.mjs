@@ -50,6 +50,15 @@ const CODEX_CONFIG = { provider: 'codex', model: 'gpt-5.6-sol', effort: 'low',
                        sources: ['/repo/.config/skill-pack.yaml'], notes: [] }
 const CLAUDE_CONFIG = { provider: 'claude', model: 'sonnet', effort: 'high',
                         sources: ['/repo/.config/skill-pack.yaml'], notes: [] }
+// IMPL_RUN in the script: what the implementers run when no row could be read. Named here so the
+// assertions below read as "the fallback", not as a second copy of a tier somebody might change.
+const IMPL_FALLBACK = { model: 'opus', effort: 'medium' }
+// How the reader hands a row back: the stdout TEXT of read-config.py, which the script parses.
+// The fixtures above stay plain objects — what they describe is a resolved row, not a transport —
+// and this is the one place that knows the transport. `step` is part of what the script prints and
+// part of what it checks, so the stub prints it too. A fixture of `null` is a DEAD agent and stays
+// null; a test that wants a live agent answering something else returns a raw string itself.
+const cfgOut = (step, row) => row === null || row === undefined ? row : { stdout: JSON.stringify({ step, ...row }) }
 
 // The explorers are schema-LESS too: an 8k-char brief plus a second parameter is the payload that
 // blew the StructuredOutput retry cap on three real runs, so the brief now comes back as plain
@@ -122,8 +131,8 @@ async function run({ source = baseSource(), riskFlags = [], uiFiles = [], design
     if (l === 'source') return source
     // What lib/read-config.py resolves from the SHIPPED .config/defaults.yaml when the project has
     // no file of its own — so the default this suite asserts against is the default that ships.
-    if (l === 'config') return config === undefined ? DEFAULT_CONFIG : config
-    if (l === 'config-plan') return planConfig === undefined ? DEFAULT_PLAN_CONFIG : planConfig
+    if (l === 'config') return cfgOut('implement', config === undefined ? DEFAULT_CONFIG : config)
+    if (l === 'config-plan') return cfgOut('plan', planConfig === undefined ? DEFAULT_PLAN_CONFIG : planConfig)
     if (l.startsWith('explore')) return exploreText(riskFlags, uiFiles)
     // Schema-less, like the explorers and the planner — its reply IS the section.
     if (l === 'ui-design') return design
@@ -538,6 +547,64 @@ test('a dead plan-config agent falls back to the constants and SAYS so', async (
   assert.match(logText, /the plan config could not be read/)
 })
 
+test('the config readers are asked for a STRING, not for a row with fields they could answer about themselves', async () => {
+  // The bug this shape exists to make impossible: asked for `{model, effort}` the ECHO-tier reader
+  // answered with its OWN haiku/low, the planner ran on it against a file that says fable/medium,
+  // and the run logged `(from .../defaults.yaml)` — the note that exists to make a substitution
+  // visible confirming a row the file never held. An opaque `stdout` has nothing to self-report
+  // into, so the assertion is on the schema's field NAMES rather than on any one run's values.
+  const { optsBy } = await run({ review: OK_REVIEW, planfix: OK_FIX })
+  for (const label of ['config', 'config-plan']) {
+    assert.deepEqual(Object.keys(optsBy[label].schema.properties), ['stdout'])
+    assert.deepEqual(optsBy[label].schema.required, ['stdout'])
+  }
+})
+
+test('a plan reader that answers with its OWN tier is not a settings row', async () => {
+  // Verbatim from the run that produced it, minus the paths: a well-formed plan row, sources
+  // naming the real file, and haiku/low — the reader describing itself. read-config.py always
+  // prints the step it resolved, so the missing `step` is what gives it away.
+  const { optsBy, logText } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    overrides: { 'config-plan': { stdout: '{"model":"haiku","effort":"low","sources":["/pack/.config/defaults.yaml"],"notes":[]}' } },
+  })
+  assert.equal(optsBy['planner'].model, 'fable', 'the planner runs on the constant, never on the reader')
+  assert.equal(optsBy['planner'].effort, 'medium')
+  assert.equal(optsBy['judge#1.1:coverage'].model, 'opus')
+  assert.match(logText, /the plan config could not be read — the reader returned no read-config\.py output/)
+})
+
+test("a reader that ignores the string schema, or prints nothing, is told apart from one that DIED", async () => {
+  // Three ways to come back empty-handed, two causes: a dead agent is fixed by re-running, a live
+  // agent answering something else is a prompt or a tier problem. Both fall back; neither may pass
+  // for a row read from the file.
+  for (const [answer, cause] of [
+    [{ model: 'haiku', effort: 'low' }, /returned no read-config\.py output/],
+    [{ stdout: '' }, /returned no read-config\.py output/],
+    [null, /the reader agent died/],
+  ]) {
+    const { optsBy, logText } = await run({
+      review: OK_REVIEW, planfix: OK_FIX, overrides: { 'config-plan': answer },
+    })
+    assert.equal(optsBy['planner'].model, 'fable')
+    assert.match(logText, cause)
+  }
+})
+
+test('a row is read out of an answer that came wrapped in prose', async () => {
+  // The reader is cheap and often says what it did before saying what it read. Refusing that
+  // answer would cost a real config read over a sentence nothing downstream reads, so the JSON is
+  // cut out of the text rather than parsed whole.
+  const { optsBy, logText } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    overrides: { 'config-plan': { stdout: 'Ran the reader from the repo root; it printed:\n' +
+      JSON.stringify({ step: 'plan', ...DEFAULT_PLAN_CONFIG, effort: 'xhigh' }) + '\nExit code 0.' } },
+  })
+  assert.equal(optsBy['planner'].model, 'fable')
+  assert.equal(optsBy['planner'].effort, 'xhigh')
+  assert.doesNotMatch(logText, /the plan config could not be read/)
+})
+
 test("every note the plan config returns is logged — a silent substitution is the whole failure", async () => {
   const { logText } = await run({
     review: OK_REVIEW, planfix: OK_FIX,
@@ -791,6 +858,42 @@ test('a dead config agent falls back to the built-in row rather than to nothing'
     assert.equal(optsBy['implement:backend'].agentType, 'r:java-backend-developer')
     assert.match(logText, /the config could not be read/)
   }
+})
+
+test('an implement reader that answers with its own identity leaves the implementers on the constant', async () => {
+  // Verbatim from the run that produced it: the reader answered `model` with its own API model id
+  // — which is not a tier at all — and parked read-config.py's real JSON in the spare `step`
+  // field, so a `provider: codex` row resolved to claude and the log still said it came from the
+  // file. `step` holding anything but the step that was asked for is what stops it here.
+  const selfReport = { stdout: JSON.stringify({
+    provider: 'claude', model: 'claude-haiku-4-5-20251001', effort: 'low',
+    sources: ['/repo'], notes: ['Output returned verbatim as requested.'],
+    step: JSON.stringify({ step: 'implement', provider: 'codex', model: 'gpt-5.6-sol', effort: 'medium' }),
+  }) }
+  const { optsBy, logText, prompts } = await run({
+    review: OK_REVIEW, planfix: OK_FIX, overrides: { config: selfReport },
+  })
+  assert.equal(optsBy['implement:backend'].model, IMPL_FALLBACK.model)
+  assert.equal(optsBy['implement:backend'].effort, IMPL_FALLBACK.effort)
+  assert.match(logText, /the config could not be read — the reader returned no read-config\.py output/)
+  assert.match(logText, /implementers — claude opus \/ medium/)
+  // And the run records the row it actually used, so `implement depth` never buckets a fallback
+  // as a configured tier.
+  const row = JSON.parse(prompts['stats'].match(/\{"kind":"implement".*\}/)[0])
+  assert.equal(row.implModel, IMPL_FALLBACK.model)
+  assert.notEqual(row.implModel, 'claude-haiku-4-5-20251001')
+})
+
+test('a reader that resolved the WRONG step is rejected rather than applied to this one', async () => {
+  // Both rows are read in one wave by the same prompt with one word changed, and the plan row has
+  // no `provider` at all — read as an implement row it would put the implementers on the planner's
+  // model. The step the reader printed has to be the step that was asked for.
+  const { optsBy, logText } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    overrides: { config: { stdout: JSON.stringify({ step: 'plan', ...DEFAULT_PLAN_CONFIG }) } },
+  })
+  assert.equal(optsBy['implement:backend'].model, IMPL_FALLBACK.model)
+  assert.match(logText, /the config could not be read/)
 })
 
 test('the config is read once, cheaply, and every substitution it made is logged', async () => {

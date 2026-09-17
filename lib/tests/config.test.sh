@@ -224,38 +224,55 @@ ok "--check refuses a codex model the CLI does not offer" "$?" 1
 HOME="$NOCODEX" python3 "$READER" --check "$TMP/check-typo.yaml" >/dev/null 2>&1
 ok "--check with no CLI model list cannot judge, and does not guess" "$?" 0
 
-# Both pipelines hand this reader's object back VERBATIM into a schema with
-# additionalProperties:false. A key the schema has no slot for is dropped by the agent returning it,
-# and a key the schema requires that the row lacks gets invented — a plan row read into the
-# implement schema came back as the config agent's own haiku/low, and the planner ran on it. Every
-# key the reader emits for a step must be a slot in the schema its pipeline reads that step with.
-schema_keys() {  # <workflow> <schema const>
-  python3 - "$1" "$2" <<'PY'
-import re, sys
-src = open(sys.argv[1]).read()
-block = re.search(r"^const " + sys.argv[2] + r" = \{\n(.*?)^\}", src, re.S | re.M).group(1)
-print(" ".join(re.findall(r"^    (\w+):", block, re.M)))
-PY
-}
+# Both pipelines carry this reader's stdout back as ONE STRING and parse it themselves, because a
+# schema field is a question and every settings field name a reader's schema exposes is a question
+# a cheap agent can answer about ITSELF: asked for `{model, effort}` the reader returned its own
+# haiku/low as the planning row and the planner ran on it, and asked for `{provider, model,
+# effort}` it answered with its own API model id and parked this reader's real JSON in the spare
+# `step` field. So the schema stays opaque, the parse checks the `step` this reader prints, and —
+# the part a string transport does NOT give for free — every key this reader emits for a step must
+# actually be CONSUMED by the pipeline that reads that step. A key nothing reads is a setting that
+# silently does nothing, which is the failure the schema slots used to guard.
 reader_keys() {  # <home> <step>
-  HOME="$1" python3 - "$2" <<'PY'
+  HOME="$1" python3 - "$2" <<'RK'
 import importlib.util, sys
 spec = importlib.util.spec_from_file_location("rc", "lib/read-config.py")
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 print(" ".join(m.resolve(sys.argv[1], repo="/nonexistent")))
-PY
+RK
 }
-for triple in "skills/task-run/task-run-implement.workflow.js CONFIG implement" \
-              "skills/task-run/task-run-implement.workflow.js PLAN_CONFIG plan" \
-              "skills/task-review/task-review.workflow.js CONFIG fix"; do
-  read -r wf schema step <<<"$triple"
-  have=" $(schema_keys "$wf" "$schema" 2>/dev/null) "; missing=
-  for k in $(reader_keys "$HASCODEX" "$step"); do [[ $have == *" $k "* ]] || missing+=" $k"; done
-  ok "$(basename "$wf" .workflow.js) $schema holds every --step $step key" "${missing:-none}" none
+schema_props() {  # <workflow> — the field names the reader's own schema exposes
+  python3 - "$1" <<'SP'
+import re, sys
+src = open(sys.argv[1]).read()
+block = re.search(r"^const CONFIG_OUT = \{\n(.*?)^\}", src, re.S | re.M).group(1)
+print(" ".join(re.findall(r"(\w+): \{ type: 'string' \}", block)))
+SP
+}
+for triple in "skills/task-run/task-run-implement.workflow.js implement implCfg" \
+              "skills/task-run/task-run-implement.workflow.js plan planCfg" \
+              "skills/task-review/task-review.workflow.js fix fixCfg"; do
+  read -r wf step var <<<"$triple"
+  src=$(cat "$wf"); unread=
+  for k in $(reader_keys "$HASCODEX" "$step"); do
+    # `step` is consumed by the parse itself; the rest is read off the row directly, or through
+    # task-run's pick() helper, which names the key it is picking.
+    [[ $k == step ]] && continue
+    [[ $src == *"$var.$k"* || $src == *"pick('$k'"* ]] || unread+=" $k"
+  done
+  ok "$(basename "$wf" .workflow.js) reads every --step $step key it is sent" "${unread:-none}" none
 done
-grep -q "schema: step === 'plan' ? PLAN_CONFIG : CONFIG" skills/task-run/task-run-implement.workflow.js \
-  && ok "the plan row is read with PLAN_CONFIG" yes yes \
-  || ok "the plan row is read with PLAN_CONFIG" no yes
+for wf in skills/task-run/task-run-implement.workflow.js skills/task-review/task-review.workflow.js; do
+  name=$(basename "$wf" .workflow.js)
+  ok "$name asks the reader for stdout and nothing else" "$(schema_props "$wf")" stdout
+  grep -q "row.step === step ? row : null" "$wf" \
+    && ok "$name accepts a row only for the step it asked for" yes yes \
+    || ok "$name accepts a row only for the step it asked for" no yes
+  # And no settings field name survives in a schema either script dispatches, which is the shape
+  # that invited the self-report in the first place.
+  leaked=$(grep -nE "^    (provider|effort|wrapperModel|wrapperEffort|exploreModel|judgeModel): \{ type: 'string'" "$wf" | head -1)
+  ok "$name declares no schema slot a reader could self-report into" "${leaked:-none}" none
+done
 
 # --- the wrapper is tuned apart from the writer ------------------------------
 # Under `provider: codex` two agents run: Codex writes the code, and a Claude subagent drives the

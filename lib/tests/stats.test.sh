@@ -215,8 +215,14 @@ ok "a label picked by a ternary still names its step" "$(cls "$BRANCH_PROMPT")" 
 # and a "first string in the value" read takes `implement` — out of the CONDITION. That banked 25
 # of these 11-second shell-outs as `implement` runs and pulled the pack's most expensive step from
 # 810s to 695s. A branch is a label; a condition never is.
-CONFIG_PROMPT='Resolve the pack'"'"'s implement settings. Run exactly this from the repo root and return the
-   object it prints on stdout, VERBATIM — do not re-derive, re-order or "correct" any field:'
+# The wording is the CURRENT prompt's, because the mapping is read from the shipped scripts: a
+# reworded prompt moves the mapping with it, and a fixture quoting a wording no script still
+# carries tests a chunk that cannot be matched.
+CONFIG_PROMPT='Resolve the pack'"'"'s implement settings. Run exactly this from the repo root:
+
+     python3 "/pack/lib/read-config.py" --step implement --pack "/pack"
+
+   Return the line of JSON it printed in `stdout`, character for character.'
 ok "the config reader is not counted as an implementer" "$(cls "$CONFIG_PROMPT")" config
 
 IMPL_PROMPT='READ THAT FILE FIRST — it holds

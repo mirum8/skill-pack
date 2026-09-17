@@ -23,7 +23,7 @@ flowchart TD
     TRIQ -- yes --> H1["STOP · stopped: 'triage-blocked'<br/>(a halt, never a skip)"]
     TRIQ -- no --> RNQ{"reviewNeeded?"}
     RNQ -- no --> SK["return { skipped: true, reason }<br/>doc/config-only diff"]
-    RNQ -- yes --> CFG["agent config<br/>GP · haiku/low<br/>lib/read-config.py --step fix"]
+    RNQ -- yes --> CFG["agent config<br/>GP · haiku/low · schema CONFIG_OUT<br/>lib/read-config.py --step fix<br/>parsed by parseCfg('fix', out)"]
     CFG --> PW["agent ui-prewarm (fire-and-forget)<br/>GP · haiku/low<br/>iff uiTouched && hasTestApp && surface not tui/cli"]
     PW --> DP["agent diff-pack<br/>GP · haiku/low<br/>iff profile != light && scope != all"]
   end
@@ -459,6 +459,19 @@ barrier**, so the teardown in the `finally` is reached from every exit path incl
   `reviewNeeded` gate — inside so `/r:issues-fix` and `/r:plan-run`, which come in by `scriptPath`
   and never load the markdown, cannot skip it; after the gate so a doc-only turn pays nothing.
   *States it:* `skills/task-review/SKILL.md`
+  *Enforced by:* `skills/task-review/task-review.workflow.js`
+  *Tested by:* `skills/task-review/tests/control-flow.test.mjs`
+
+- **SB-task-review-037a** — The row comes back as **one opaque `stdout` string** (`CONFIG_OUT`)
+  and is parsed by the script (`parseCfg`), never as a row with a field per setting — the same
+  shape and the same reason as `SB-task-run-030`, because the reader is one script and both
+  pipelines read it the same way. Asked for `{provider, model, effort}` the ECHO-tier reader
+  answered with its own tier and parked `read-config.py`'s real JSON in the spare `step` field,
+  while the log still said the row came from the file, so `steps.fix` silently stopped reaching the
+  fixers. The `step` the reader printed is what proves the string is the script's rather than the
+  agent's; a rejected answer and a dead agent both fall back to `FIX_RUN` and are named apart in
+  the log.
+  *States it:* `skills/task-review/task-review.workflow.js`
   *Enforced by:* `skills/task-review/task-review.workflow.js`
   *Tested by:* `skills/task-review/tests/control-flow.test.mjs`
 

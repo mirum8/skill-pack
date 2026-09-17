@@ -325,24 +325,34 @@ const DEPLOY = {
     handle: { type: 'string' },
   },
 }
-// What lib/read-config.py prints for `--step fix`. Mirrors the same schema in
-// task-run-implement.workflow.js: the reader is one script and both pipelines read it the same way.
-const CONFIG = {
+// How lib/read-config.py's output comes back for `--step fix`: ONE STRING, parsed by this script.
+// Mirrors task-run-implement.workflow.js, because the reader is one script and both pipelines read
+// it the same way — and both were bitten the same way. A schema field is a question, and every
+// field name a reader's schema exposes is a question a cheap agent can answer about ITSELF: asked
+// for `{provider, model, effort}`, the ECHO-tier reader returned its own tier, with the script's
+// real JSON parked in the spare `step` field, while the log still said `(from .../defaults.yaml)`.
+// A single `stdout` string has nothing to self-report into.
+const CONFIG_OUT = {
   type: 'object', additionalProperties: false,
-  required: ['provider', 'model', 'effort'],
-  properties: {
-    step: { type: 'string' },
-    provider: { type: 'string', enum: ['claude', 'codex'] },
-    model: { type: 'string' },
-    effort: { type: 'string', enum: ['low', 'medium', 'high', 'xhigh', 'max'] },
-    // The Claude subagent that drives the Codex CLI under `provider: codex`. Not required: a row
-    // that predates these keys, or an agent that drops them, falls back to FIX_CODEX_RUN rather
-    // than dispatching a wrapper with no model and no depth.
-    wrapperModel: { type: 'string' },
-    wrapperEffort: { type: 'string', enum: ['low', 'medium', 'high', 'xhigh', 'max'] },
-    sources: { type: 'array', items: { type: 'string' } },
-    notes: { type: 'array', items: { type: 'string' } },
-  },
+  required: ['stdout'],
+  properties: { stdout: { type: 'string' } },
+}
+// What proves the string came from the reader rather than from the agent: read-config.py always
+// prints the step it resolved, so a fabricated object fails `step`. The reader is also the
+// VALIDATOR — an out-of-enum key, a typo, a `provider: codex` with no Codex plugin all come back
+// as the built-in value with a line in `notes` — so this parse re-checks nothing it would then own
+// a second copy of. `notes` is what it carries out: without it a typo'd setting is
+// indistinguishable from a working one, and every line of it is logged where the row is resolved.
+//
+// The JSON is cut out of the surrounding text rather than parsed whole: a reader that prefaces it
+// with a sentence has still done its job.
+const parseCfg = (step, out) => {
+  const raw = out && typeof out.stdout === 'string' ? out.stdout : ''
+  const open = raw.indexOf('{'), close = raw.lastIndexOf('}')
+  if (open < 0 || close <= open) return null
+  let row = null
+  try { row = JSON.parse(raw.slice(open, close + 1)) } catch { return null }
+  return row && typeof row === 'object' && !Array.isArray(row) && row.step === step ? row : null
 }
 // The shared diff every hunter reads (Phase 0b). Deliberately a PATH and a couple of counts, never
 // the diff text itself: a schema field holding 40k characters of patch asks the model to re-emit it
@@ -1179,18 +1189,30 @@ log(`post-task-review: tier=${profile}, uiTouched=${uiTouched} (${TIERS.includes
 // this pipeline is: an agent runs the reader and hands back its JSON. The reader itself never
 // fails — it substitutes and says what it substituted — so the only thing that reaches the null
 // branch is a dead agent.
-const fixCfg = await agent(
-  `Resolve the pack's fixer settings. Run exactly this from the repo root and return the object it
-   prints on stdout, VERBATIM — do not re-derive, re-order or "correct" any field:
+//
+// The reader hands back the stdout TEXT and this script parses it (see CONFIG_OUT): the job is a
+// shell-out and a copy, and the one thing a settings row must never be is the reader's own tier.
+const fixOut = await agent(
+  `Resolve the pack's fixer settings. Run exactly this from the repo root:
 
      python3 "${PACK}/lib/read-config.py" --step fix --pack "${PACK}"
 
+   Return the line of JSON it printed in \`stdout\`, character for character. Do not parse it, do
+   not reformat or re-order it, do not "correct" a field, and do not fill any part of the answer
+   from your own model, effort or configuration — this script parses what you return, and a row
+   that describes YOU rather than the file is applied to every fixer in the review and logged as
+   though it came from the file. If the command printed nothing, return the empty string.
+
    The script always exits 0 by design; a value it could not read comes back as the built-in
-   default with a line in \`notes\` saying so. Return \`notes\` even when it is empty.`,
-  { label: 'config', phase: 'Triage', schema: CONFIG, ...GP, ...ECHO }).catch(() => null)
+   default with a line in its own \`notes\` saying so, which this script reads out of the JSON.`,
+  { label: 'config', phase: 'Triage', schema: CONFIG_OUT, ...GP, ...ECHO }).catch(() => null)
+const fixCfg = parseCfg('fix', fixOut)
 
 for (const note of (fixCfg && fixCfg.notes) || []) log(`post-task-review: config — ${note}`)
-if (!fixCfg) log(`post-task-review: the config could not be read — fixers fall back to ${FIX_RUN.model}/${FIX_RUN.effort} on claude`)
+// Two causes, named apart: a dead agent is retried by re-running the pipeline, a reader that
+// answered with something other than read-config.py's output is a prompt or a tier problem. Both
+// fall back to FIX_RUN, and neither is allowed to pass for a row read from the file.
+if (!fixCfg) log(`post-task-review: the config could not be read — ${fixOut ? 'the reader returned no read-config.py output' : 'the reader agent died'}; fixers fall back to ${FIX_RUN.model}/${FIX_RUN.effort} on claude`)
 const fixProvider = (fixCfg && fixCfg.provider) || 'claude'
 // Under `claude` these are the fixer's own model and depth. Under `codex` the fixer's pair goes to
 // the CLI instead (see codexFixPreamble) and this dispatches the WRAPPER, which is configured
