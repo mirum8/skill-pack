@@ -11,6 +11,8 @@ Sources this file was frozen from:
 | `skills/plan-run/references/plan-format.md` | the phase block contract, what counts as done, the write-back |
 | `skills/plan-run/references/concurrent-sessions.md` | the git mechanics of `--no-merge` / `--land` / `--herdr` |
 | `skills/plan-run/references/stats-fields.md` | every field of the stats row and the question it answers |
+| `skills/plan-run/references/unattended.md` | what `--unattended` changes, and what it must never soften |
+| `skills/plan-run/references/ask-channel.md` | the pack-maintainer channel: what belongs there, and the five rules |
 | `skills/plan-run/scripts/fanout.sh` | the fan-out: preflight, spawn, wait, status, cleanup |
 | `skills/plan-run/scripts/wave-simulate.sh` | the wave dry-merge `--land` runs before it merges anything |
 | `skills/plan-run/scripts/footprint-warn.py` | the history check behind the slice preflight |
@@ -178,7 +180,7 @@ flowchart TD
 
 - **SB-plan-run-013** — `--unattended` implies `--yes` and `--auto-resolve` and changes **only what
   counts as a reason to stop**; it does not loosen what counts as a real failure.
-  *States it:* `skills/plan-run/SKILL.md`
+  *States it:* `skills/plan-run/SKILL.md`, `skills/plan-run/references/unattended.md`
   *Enforced by:* —
   *Tested by:* —
 
@@ -270,7 +272,7 @@ flowchart TD
 
 - **SB-plan-run-026** — A **missing** `check_todo.py` at Step 0 is a named skip, not a stop — unlike
   the `--slice` preflight, where a missing checker stops the run outright.
-  *States it:* `skills/plan-run/SKILL.md`
+  *States it:* `skills/plan-run/SKILL.md`, `skills/plan-run/references/concurrent-sessions.md`
   *Enforced by:* —
   *Tested by:* —
 
@@ -396,7 +398,7 @@ flowchart TD
 - **SB-plan-run-044** — Under `--unattended` the blocked phases are dropped from the run list and
   the rest are built, with both halves named in the report: one unresolved question stops one phase,
   not the night.
-  *States it:* `skills/plan-run/SKILL.md`
+  *States it:* `skills/plan-run/SKILL.md`, `skills/plan-run/references/unattended.md`
   *Enforced by:* —
   *Tested by:* —
 
@@ -784,7 +786,8 @@ flowchart TD
 - **SB-plan-run-097** — When every item is ticked the heading is marked too and carries the branch
   as `<!-- built: phase-<slug> -->`. That marker is what `--land` maps a branch back to a phase by,
   since branches are named `phase-<slug>` and not `phase-<n>`.
-  *States it:* `skills/plan-run/references/plan-format.md`, `skills/plan-run/SKILL.md`
+  *States it:* `skills/plan-run/references/plan-format.md`, `skills/plan-run/SKILL.md`,
+  `skills/plan-run/references/concurrent-sessions.md`
   *Enforced by:* `skills/plan-run/scripts/fanout.sh`
   *Tested by:* `skills/plan-run/tests/fanout.test.sh`
 
@@ -1033,7 +1036,7 @@ flowchart TD
   refusal is named in the report. What degrades is the schedule, never where the work happens. A
   **missing** checker is still a stop, unattended or not — not knowing whether the slice is safe is a
   different thing from knowing it is not.
-  *States it:* `skills/plan-run/SKILL.md`
+  *States it:* `skills/plan-run/SKILL.md`, `skills/plan-run/references/unattended.md`
   *Enforced by:* —
   *Tested by:* —
 
@@ -1049,7 +1052,8 @@ flowchart TD
   on the mode: serially, print it and carry on, since the cost of being wrong is one merge conflict;
   under `--herdr`, **stop**, since the cost is a whole wave built over hours; under
   `--herdr --unattended`, run that wave one unit at a time, landed between, and name it.
-  *States it:* `skills/plan-run/SKILL.md`, `skills/plan-run/references/concurrent-sessions.md`
+  *States it:* `skills/plan-run/SKILL.md`, `skills/plan-run/references/concurrent-sessions.md`,
+  `skills/plan-run/references/unattended.md`
   *Enforced by:* —
   *Tested by:* —
 
@@ -1088,7 +1092,7 @@ flowchart TD
 - **SB-plan-run-136** — Under `--no-merge` exactly **two** steps of the loop change — 3.1 detaches
   and 3.6 stops after the commit. The re-check, both Workflows, the `Done when:` check, the tick and
   the single commit are unchanged.
-  *States it:* `skills/plan-run/SKILL.md`
+  *States it:* `skills/plan-run/SKILL.md`, `skills/plan-run/references/concurrent-sessions.md`
   *Enforced by:* —
   *Tested by:* —
 
@@ -1264,9 +1268,9 @@ flowchart TD
 - **SB-plan-run-156** — **Three units at a time by default, and the cap lives in the config** —
   `steps.fanout.maxUnits`, resolved by the script rather than by either SKILL.md, so a caller cannot
   forget it and there is one place to change it for both skills that drive the script. Three full
-  implement+review pipelines is already the machine's limit — `implement` alone measures **20.9M
-  tokens and 1022s per agent** — so the cap is raised as a measurement rather than a guess, and a
-  wave that spawned eight would thrash rather than finish sooner.
+  implement+review pipelines is already the machine's limit, so the cap is raised as a measurement
+  rather than a guess — `implement depth` in `lib/skill-stats.py` prints the current cost per agent
+  — and a wave that spawned eight would thrash rather than finish sooner.
   *States it:* `skills/plan-run/SKILL.md`
   *Enforced by:* `skills/plan-run/scripts/fanout.sh`, `lib/read-config.py`
   *Tested by:* `skills/plan-run/tests/fanout.test.sh`, `lib/tests/config.test.sh`
@@ -1351,7 +1355,7 @@ flowchart TD
   in the spec or an ADR, and a change that disagrees with it is the specification's to settle, by a
   person. Never edit it and never experiment against it — that experiment is work the phase does not
   name.
-  *States it:* `skills/plan-run/SKILL.md`
+  *States it:* `skills/plan-run/SKILL.md`, `skills/plan-run/references/concurrent-sessions.md`
   *Enforced by:* —
   *Tested by:* —
 
@@ -1761,7 +1765,7 @@ flowchart TD
   `python3 "${CLAUDE_PLUGIN_ROOT}/skills/plan-run/scripts/merge-resolve.py" --plan <plan>
   [--dry-run]` while `git merge` has left the tree conflicted; it stages what it resolves and leaves
   the rest unmerged for a person.
-  *States it:* `skills/plan-run/SKILL.md`
+  *States it:* `skills/plan-run/references/concurrent-sessions.md`
   *Enforced by:* `skills/plan-run/scripts/merge-resolve.py`
   *Tested by:* `skills/plan-run/tests/merge-resolve.test.sh`
 
@@ -1774,7 +1778,8 @@ flowchart TD
   when a longer name arrives. Measured on one real four-file conflict: **6 of 7 hunks resolve**, and
   the single refusal is the hunk where both sides rewrote one line, which resolved by picking a side
   drops a callback, compiles clean, and fails only in the tests.
-  *States it:* `skills/plan-run/SKILL.md`, `skills/plan-run/scripts/merge-resolve.py`
+  *States it:* `skills/plan-run/references/concurrent-sessions.md`,
+  `skills/plan-run/scripts/merge-resolve.py`
   *Enforced by:* `skills/plan-run/scripts/merge-resolve.py`
   *Tested by:* `skills/plan-run/tests/merge-resolve.test.sh`
 
@@ -1805,14 +1810,15 @@ flowchart TD
   rule was wrong here. The residual risk the rule cannot see is ordering: two sides adding statements
   at one point produce a union in some order, and only for declarations is that order certainly
   irrelevant. That is why the test run is not optional and why the flag is off by default.
-  *States it:* `skills/plan-run/SKILL.md`, `skills/plan-run/scripts/merge-resolve.py`
+  *States it:* `skills/plan-run/references/concurrent-sessions.md`,
+  `skills/plan-run/scripts/merge-resolve.py`
   *Enforced by:* —
   *Tested by:* —
 
 - **SB-plan-run-211** — **Both halves are reported, always** — every file resolved and every file
   handed over, by name. Silent auto-resolution is indistinguishable from a merge nobody had to think
   about.
-  *States it:* `skills/plan-run/SKILL.md`
+  *States it:* `skills/plan-run/references/concurrent-sessions.md`
   *Enforced by:* `skills/plan-run/scripts/merge-resolve.py`
   *Tested by:* `skills/plan-run/tests/merge-resolve.test.sh`
 
@@ -1828,7 +1834,7 @@ flowchart TD
 - **SB-plan-run-213** — `rerere` is turned on alongside it (`git config rerere.enabled true`): the
   conflicts this refuses are in the hub files every wave touches, so a resolution made once replays
   in the next wave.
-  *States it:* `skills/plan-run/SKILL.md`
+  *States it:* `skills/plan-run/references/concurrent-sessions.md`
   *Enforced by:* —
   *Tested by:* —
 
@@ -1837,21 +1843,21 @@ flowchart TD
 - **SB-plan-run-214** — `--unattended` changes one thing only — **what counts as a reason to stop** —
   and does not touch what counts as a reason to fail. Autonomy means not stopping over a premise that
   is fine, never building on one that is not true.
-  *States it:* `skills/plan-run/SKILL.md`
+  *States it:* `skills/plan-run/references/unattended.md`
   *Enforced by:* —
   *Tested by:* —
 
 - **SB-plan-run-215** — Four things remain **halts** under `--unattended` because they mean the next
   phase's premise is untrue: implement returning `{ stopped: … }`, a failed `Done when:`, a
   `blocked` per-phase re-check, and an unavailable `Workflow` tool (nothing can run at all).
-  *States it:* `skills/plan-run/SKILL.md`
+  *States it:* `skills/plan-run/references/unattended.md`
   *Enforced by:* —
   *Tested by:* —
 
 - **SB-plan-run-216** — A review that came back **red**, and a review that came back **blocked** with
   a track that did not run, each get **one retry and then halt**. A blocked review is **never banked
   as clean**.
-  *States it:* `skills/plan-run/SKILL.md`
+  *States it:* `skills/plan-run/references/unattended.md`
   *Enforced by:* —
   *Tested by:* —
 
@@ -1862,7 +1868,7 @@ flowchart TD
   time, landed between). The last two are the ones that pay for the flag: both are facts about
   *scheduling* with an obvious local response, and stopping a four-hour run over one is the pipeline
   refusing to do what a person would have done in a second.
-  *States it:* `skills/plan-run/SKILL.md`
+  *States it:* `skills/plan-run/references/unattended.md`
   *Enforced by:* —
   *Tested by:* —
 
@@ -1870,13 +1876,13 @@ flowchart TD
   unattended one collects the question, builds everything that does not depend on the answer, and
   reports the queue at the end — Resolve-first blockers, two candidate plans with nothing to choose
   between them, an ambiguous item mid-run.
-  *States it:* `skills/plan-run/SKILL.md`
+  *States it:* `skills/plan-run/references/unattended.md`
   *Enforced by:* —
   *Tested by:* —
 
 - **SB-plan-run-219** — **`/r:plan-unblock` is never dispatched under `--unattended`**: it closes
   entries by asking a person, and there is nobody here to ask.
-  *States it:* `skills/plan-run/SKILL.md`
+  *States it:* `skills/plan-run/references/unattended.md`
   *Enforced by:* —
   *Tested by:* —
 
@@ -1885,21 +1891,22 @@ flowchart TD
   nothing in the plan can settle), and the run finished. One line, under 200 characters, leading with
   what the user would act on. **Nothing else notifies** — not a phase completing, a wave landing, a
   conflict auto-resolved or a degrade to one-at-a-time; those are the report.
-  *States it:* `skills/plan-run/SKILL.md`
+  *States it:* `skills/plan-run/references/unattended.md`
   *Enforced by:* —
   *Tested by:* —
 
 - **SB-plan-run-221** — **Every workaround is named**: one report line per degrade, plus `degraded`
   and `questionsQueued` in the stats row. A degrade nobody hears about is indistinguishable from
   nothing having gone wrong.
-  *States it:* `skills/plan-run/SKILL.md`, `skills/plan-run/references/stats-fields.md`
+  *States it:* `skills/plan-run/references/unattended.md`,
+  `skills/plan-run/references/stats-fields.md`
   *Enforced by:* —
   *Tested by:* —
 
 - **SB-plan-run-222** — **Unattended never softens the bar**: a blocked review is not a pass, an
   auto-resolved merge still runs the full test suite and is discarded on red, and a halted phase is
   never ticked and never merged.
-  *States it:* `skills/plan-run/SKILL.md`
+  *States it:* `skills/plan-run/references/unattended.md`
   *Enforced by:* —
   *Tested by:* —
 
@@ -1909,21 +1916,21 @@ flowchart TD
   useless: a bug in the code the plan is producing goes to the plan or the project's backlog; a
   question about the *work* goes to the **orchestrator**; a step of the *pipeline* that is wrong goes
   to `--ask`.
-  *States it:* `skills/plan-run/SKILL.md`
+  *States it:* `skills/plan-run/references/ask-channel.md`
   *Enforced by:* —
   *Tested by:* —
 
 - **SB-plan-run-224** — **A report is never a halt and never a question**: send it and carry on with
   the same run. Never wait for a reply, never poll for one, and apply a reply only where it changes
   *how a pack step is run* — never what this run builds — naming it like any other workaround.
-  *States it:* `skills/plan-run/SKILL.md`
+  *States it:* `skills/plan-run/SKILL.md`, `skills/plan-run/references/ask-channel.md`
   *Enforced by:* —
   *Tested by:* —
 
 - **SB-plan-run-225** — **Never work around a pack defect silently**: the workaround goes in this
   run's own report to the user as well, in the words of what was done instead. A workaround nobody
   hears about is how a defect survives twenty runs.
-  *States it:* `skills/plan-run/SKILL.md`
+  *States it:* `skills/plan-run/references/ask-channel.md`
   *Enforced by:* —
   *Tested by:* —
 
@@ -1931,21 +1938,21 @@ flowchart TD
   `file:line`, what was ruled out, what was done instead, and which parts were observed versus
   inferred. The maintainer verifies every claim against the pack, so a verdict with nothing under it
   costs more to check than the defect costs to find.
-  *States it:* `skills/plan-run/SKILL.md`
+  *States it:* `skills/plan-run/references/ask-channel.md`
   *Enforced by:* —
   *Tested by:* —
 
 - **SB-plan-run-227** — **An expectation the pack contradicts is a report too**: "this looked like a
   malfunction and was not" is a real finding about the tooling's legibility, and it is cheap to
   answer.
-  *States it:* `skills/plan-run/SKILL.md`
+  *States it:* `skills/plan-run/references/ask-channel.md`
   *Enforced by:* —
   *Tested by:* —
 
 - **SB-plan-run-228** — **The maintainer does not touch this repo**: it replies with how to get past
   the defect, files major ones for its own user, and changes the pack only when that user says so —
   so nothing about `--ask` can change this run's diff.
-  *States it:* `skills/plan-run/SKILL.md`
+  *States it:* `skills/plan-run/references/ask-channel.md`
   *Enforced by:* —
   *Tested by:* —
 
@@ -1955,7 +1962,7 @@ flowchart TD
   it actionable. `fanout.sh` needs no change and no new environment variable — the address rides in
   the child's command line, which is also why it works on serial runs, and `FANOUT_ORCHESTRATOR`
   stays a different address for a different kind of message.
-  *States it:* `skills/plan-run/SKILL.md`
+  *States it:* `skills/plan-run/references/ask-channel.md`
   *Enforced by:* —
   *Tested by:* —
 

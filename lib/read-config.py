@@ -122,9 +122,9 @@ SPEC = {
     },
     # Shared by /r:plan-run and /r:issues-fix, which drive one fan-out script between them — so the
     # cap is one setting, not one per skill. The range rejects 0, negatives and a slipped digit; it
-    # is NOT a recommendation. Three full implement+review pipelines is already the machine's limit
-    # (implement alone measures 20.9M tokens and ~1022s per agent), and a wave that spawns more
-    # thrashes rather than finishing sooner. Raising it is a measurement, not a default.
+    # is NOT a recommendation. Three full implement+review pipelines is already the machine's
+    # limit, and a wave that spawns more thrashes rather than finishing sooner. Raising it is a
+    # measurement, not a default: `implement depth` in lib/skill-stats.py is the cost per agent.
     "fanout": {
         "maxUnits": {"default": "3", "int": (1, 16)},
     },

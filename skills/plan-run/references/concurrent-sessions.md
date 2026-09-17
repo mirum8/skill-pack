@@ -2,10 +2,10 @@
 
 A plan written by `/r:spec-design` carries a `**Depends on:**` edge on every leaf. Leaves that share
 no dependency land in the same derived **wave**, and the checker guarantees a wave's members name no
-file in common — those can be built at the same time.
+file in common — those can be built at the same time, one `/r:plan-run` session each.
 
-This file is the mechanics: what to type, and why each part is not negotiable. The reasoning lives
-in `SKILL.md`.
+This file is the mechanics: what to type, and why each part is not negotiable. **Read it before
+running either `--no-merge` or `--land`.** The decisions it implements live in `SKILL.md`.
 
 ## The one git fact everything follows from
 
@@ -26,7 +26,13 @@ Preparing worktree (detached HEAD 3f9a1c2)
 
 From there `git checkout -b phase-<slug>` works normally, and two such worktrees commit to two
 branches without touching each other. That is the basis of this mode: **concurrent sessions build
-and commit; they never merge.**
+and commit; they never merge**, and a separate `--land` pass merges from the primary tree.
+
+Inside the loop this changes two steps and no others. Step 3.1 becomes `git checkout --detach <base>`,
+since the branch name is unavailable in a worktree, and the tree must still be clean. Step 3.6 stops
+after the commit — no merge, no branch deletion — and reports the branch name. The re-check, both
+Workflows, the `Done when:` check, the tick and the single commit are unchanged: **a concurrent
+session is not a lesser run.**
 
 ## The recipe
 
@@ -63,30 +69,40 @@ FAN="${CLAUDE_PLUGIN_ROOT}/skills/plan-run/scripts/fanout.sh"
 "$FAN" cleanup --id phase-5                         # closes the workspace, removes the worktree
 ```
 
-`spawn` opens a herdr workspace holding a **full interactive `claude` session**, not `claude -p`: a
+`spawn` opens a herdr workspace holding a **full interactive `claude` session**, never `claude -p`: a
 human can watch it, answer a prompt inside it or take it over — the reason the fan-out goes through
 herdr rather than background processes.
+
+The `--marker-*` pair is what lets `wait` check the branch itself rather than trusting the session's
+own account. `--prompt` carries the unit's whole brief, and `--ask <session>` rides in it verbatim
+when this run was given one ([ask-channel.md](ask-channel.md)).
 
 **Every unit is spawned, whatever its wave.** A wave of one, a leaf the `--slice` preflight held
 back, a leaf `footprint-warn` flagged — each still gets its own worktree and its own workspace, and
 the orchestrator builds none of them. What a wave decides is how many are live at once, never
-whether a workspace opens. A unit running alone is landed **before the next worktree is cut**:
-`git worktree add --detach <base>` pins a tree to the base it was created from, so a queue of solo
-spawns with no merge between them is a concurrent wave wearing a queue — the one thing the preflight
-above exists to refuse.
+whether a workspace opens. The round trip and the context re-read are paid on purpose, and here is
+what they buy: every unit is reported the same way whatever its schedule (a sentinel **and** a
+marker, never one of them), every unit is watchable and take-overable in a workspace of its own, and
+the orchestrator's context never holds an implement+review.
+
+A unit running alone is landed **before the next worktree is cut**: `git worktree add --detach <base>`
+pins a tree to the base it was created from, so a queue of solo spawns with no merge between them is
+a concurrent wave wearing a queue — the one thing the preflight above exists to refuse. Serial under
+this flag means **one live unit, landed before the next is created**, never *spawned in order*, and
+the landing step then runs per unit rather than per wave.
 
 **Workspace trust is per path, and a worktree is a new path.** Left alone, every unit would open on
-the trust dialog and sit there until the wait timed out. So `spawn` copies the repo's own
-`hasTrustDialogAccepted` onto the worktree it just created, and `preflight` refuses when the repo
-itself carries no such decision: the fan-out inherits a judgement the user already made, never
-makes one on their behalf.
+the trust dialog, never read its prompt, and sit there until the wait timed out. So `spawn` copies
+the repo's own `hasTrustDialogAccepted` onto the worktree it just created, and `preflight` refuses
+when the repo itself carries no such decision: the fan-out inherits a judgement the user already
+made, never makes one on their behalf.
 
 An interactive session never exits, so **completion is reported, not observed**, and the report needs
 two independent signals:
 
 | signal | written by | catches |
 |---|---|---|
-| the sentinel at `FANOUT_SENTINEL` | Step 3.6 / 3.7 of the child's own run | a session still working, and a run that halted |
+| the sentinel at `FANOUT_SENTINEL` | Step 3.6 / 3.7 of the child's own run, as its very last action | a session still working, and a run that halted |
 | the `built: <branch>` marker on the branch | the child's tick, read by `wait` and by `--land` | a session that reported success and never committed |
 
 Neither alone is enough: a sentinel can be written by a run that then failed to commit, and a
@@ -94,16 +110,17 @@ missing marker can just mean the unit is not done yet.
 
 ## The alarm channel
 
-`spawn --orchestrator <name>` puts `FANOUT_ORCHESTRATOR` in the unit's environment, so a unit can
-`SendMessage` **upwards** to the session that spawned it. That direction needs no discovery, which
-is why it is the only one wired.
+Get the orchestrator's own session name from `ListAgents` — its first line names that session — and
+pass it to every `spawn` as `--orchestrator <name>`. That puts `FANOUT_ORCHESTRATOR` in the unit's
+environment, so a unit can `SendMessage` **upwards** to the session that spawned it. That direction
+needs no discovery, which is why it is the only one wired.
 
 Downwards there is **no address the multiplexer can supply.** `SendMessage` reaches a session by
-Claude Code's own name for it, and that name is unrelated to every handle herdr owns — the
-workspace label, the workspace id, the pane id and the agent name alike. The one honest way to get
-the channel back is for a unit to report **its own** `ListAgents` name in its first upward message:
-discovered, never assumed. So you can reach a unit only after it has spoken to you, and a unit
-blocked before it speaks is reachable by a human and nobody else.
+Claude Code's own name for it, and that name is unrelated to the `--id` you chose and to every handle
+herdr owns — the workspace label, the workspace id, the pane id and the agent name alike. The one
+honest way to get the channel back is for a unit to report **its own** `ListAgents` name in its first
+upward message: discovered, never assumed. So you can reach a unit only after it has spoken to you,
+and a unit blocked before it speaks is reachable by a human and nobody else.
 
 That is what replaces "message it and ask" for a silent unit: the orchestrator stops spawning and
 names the unit **and its workspace id**, which `status` prints for exactly this, and a person opens
@@ -112,9 +129,9 @@ it with `herdr workspace focus <id>` or `herdr agent attach <name>`.
 | a unit sends when | the orchestrator does |
 |---|---|
 | it is about to write a file outside its `Files:` | **record it** against that phase and reply "continue" — the declaration was written before the code existed, so this is the normal case, not a fault |
-| …and a second unit reports the same file | **halt the wave**: two clean bases about to edit one file is the collision the preflight exists to prevent |
+| …and a second unit reports the same file | **halt the wave**: two clean bases about to edit one file is the collision the preflight exists to prevent. Stop spawning, let the units in flight finish or stop them, and fix the plan's edges before re-running |
 | it is blocked on something the plan can answer | answer it — the orchestrator holds the whole plan |
-| a test it did not write is failing | it is a spec decision, not a phase decision — take it to a person |
+| a test it did not write is failing | it is a spec decision, not a phase decision — the unit **stops** and never edits the test, and the orchestrator takes it to a person |
 | it is halting | act on the sentinel; the message is what saves the other units an hour |
 
 Nothing else. Progress reports cost every other session a turn and turn a fan-out into a chat room.
@@ -131,12 +148,14 @@ about it in a minute rather than at the merge.
 **A message never closes a unit.** `wait` blocks on the sentinel and landing needs the marker,
 because a unit's own account is a claim and this pipeline lands evidence — a session can go idle
 having *declined* its work, which is exactly what completion-by-message would bank as a success.
-The orchestrator may answer and may ask read-only checks; it must not drive, and must not poll.
+The orchestrator may answer and may ask read-only checks — what branch a unit is on, whether it
+has touched a file; it must not drive, and must not poll.
 
 `cleanup` runs per unit **the moment that unit comes back ok**, not in a sweep at the end: a stale
 worktree is what the next `spawn` collides with, a finished workspace still open looks like a
 working one, and the freed slot admits the next leaf against the cap of three. **A failed or
-stalled unit is deliberately not cleaned up** — its workspace and worktree are the only evidence of
+stalled unit is deliberately not cleaned up** — workspace open, worktree in place, both named in the
+report. A stall is usually a question waiting for a human, and that state is the only evidence of
 what went wrong.
 
 Which is why the loop is `wait --any`, not `wait`. A bare `wait` blocks until every unit in the set
@@ -145,8 +164,16 @@ queued leaf sitting behind a unit that came back an hour ago. `--any` returns th
 says nothing about the rest, so the cleanup and the next `spawn` happen while the others are still
 working. Each verdict is handed back **once**: a failed unit keeps its slot by the rule above, and
 without that it would be re-reported on every later call while its wave-mates finished unseen.
-`status` reports everything regardless, and is the recovery path — but reading it on a timer to
-decide whether a unit is done is polling, which is the one thing the orchestrator must not do.
+`status` reports everything regardless, and is the recovery path for a caller that lost its place —
+but reading it on a timer to decide whether a unit is done is polling, which is the one thing the
+orchestrator must not do.
+
+**Once means once per sentinel.** A failed unit left standing can be resumed in place when what
+halted it is cleared, and the sentinel it writes then is handed back by `--any` like any other.
+Delete its old sentinel — the `sentinel=` line of the spawn output — before it resumes: with the old
+one still on disk, `--any` has nothing to wait for and answers "no unreported units" until the fresh
+one lands. **Never `cleanup` a live unit to re-arm the wait** — that removes the worktree the resumed
+run is working in.
 
 ## Which tree am I in
 
@@ -178,7 +205,8 @@ not worth blocking three sessions about to start.
 
 **If the checker cannot run, stop.** Everywhere else in this pack a missing tool is a named skip —
 here it is a halt, because nothing else verifies the slice, and the failure it prevents is two
-agents writing the same file at once.
+agents writing the same file at once. A refusal degrades under `--unattended`
+([unattended.md](unattended.md)); a missing checker never does.
 
 ## What the checker cannot know, and who asks instead
 
@@ -205,9 +233,8 @@ unasked.
 merge conflict, across a wave every hour the wave spent building.
 
 Two answers to an exit 2, and the report names both: run one leaf per package at a time — still a
-workspace each, just one live — or correct
-the `Files:` lines from the code that now exists. Step 3.6 does the second for every phase it
-commits, so this warning fades as the plan fills in.
+workspace each, just one live — or correct the `Files:` lines from the code that now exists. Step 3.6
+does the second for every phase it commits, so this warning fades as the plan fills in.
 
 ## `--land`, and why it reads a marker
 
@@ -251,15 +278,49 @@ What it carries forward is a **commit with both parents**, never the tree `merge
 the next `merge-tree` needs a commit to find a merge base and refuses a tree, and the second parent
 models the real `--no-ff` merge, so a branch cut from its wave-mate simulates the way it will
 land. And `merge-tree` exits 1 both on a conflict and when it could not run, so a failure that
-names no conflicted file is an **error, not a conflict** — reading it as one stops a clean wave
-with nothing merged and a report naming no files.
+names no conflicted file is an **error, not a conflict** — read as one it stops a clean wave with
+nothing merged and a report naming no files, and read as clean it lands a wave nothing cleared.
 
 ## Build between merges
 
-The merge loop runs the project's build after each merge and stops on red. A clean merge is not a
-compiling tree: two phases can add the same package-level symbol in different files — no file
-collides, both branches build alone, and the merged tree does not compile — and nothing else in the
-pipeline looks at the merged tree before the next branch lands on it.
+The merge loop runs the project's build after each merge and stops on red before the next branch
+lands. A clean merge is not a compiling tree: two phases can add the same package-level symbol in
+different files — no file collides, both branches build alone, and the merged tree does not compile.
+**The checker reasons about files; the language reasons about packages**, and only this build sees
+the difference; nothing else in the pipeline looks at the merged tree before the next branch lands
+on it.
+
+## `--auto-resolve` — the conflicts that are provably additive
+
+A wave's conflicts are mostly two phases adding wiring at the same point, and "keep both" is the
+answer to nearly all of them — but a side that quietly dropped a line reads exactly like a side that
+never had it, and the resolution that drops it **compiles clean** and fails only in the tests. So
+the decision is a script rather than a judgement:
+
+```sh
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/plan-run/scripts/merge-resolve.py" --plan <plan> [--dry-run]
+```
+
+Run it while `git merge` has left the tree conflicted. Each conflict is re-materialised with its
+merge **base** visible and asked one question: *does every base line still exist on both sides,
+ignoring whitespace?* Yes means neither side removed anything, so both sides are kept. No means a
+side rewrote shared code, and that file is left unmerged with the base still showing, for you.
+The base is the whole trick — without it "they added a field" and "they deleted a field" are the
+same picture — and whitespace matters as much: a formatter realigns a block when a longer name
+arrives, so a strict comparison reads a pure addition as a rewrite.
+
+**Then verify, and treat the verification as part of the resolution.** Format, run the build, run the
+**full** test suite. Green: commit the merge. Red: `git merge --abort` and hand the whole thing over
+— never patch up an auto-resolved merge, because the failure is the evidence that the rule was wrong
+here. The residual risk the rule cannot see is ordering: two sides adding statements at one point
+produce a union in some order, and only for declarations is that order certainly irrelevant. The
+test run covers that, which is why it is not optional and why this flag is off by default.
+
+**Report both halves, always** — every file resolved and every file handed over, by name. Silent
+auto-resolution is indistinguishable from a merge nobody had to think about.
+
+Turn on `rerere` as well (`git config rerere.enabled true`): the conflicts this refuses are in the
+hub files every wave touches, so a resolution made once replays in the next wave.
 
 ## The plan file
 

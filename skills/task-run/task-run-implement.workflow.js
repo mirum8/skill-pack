@@ -690,9 +690,9 @@ const DESIGN_RUN = { model: 'opus', effort: 'high' }
 // is a weak test rather than a formality, and setting blockedOn when the plan is wrong — so the
 // question is empirical. `implement depth` in lib/skill-stats.py answers it: it buckets every
 // implement run by the effort mined off its items and prints what the review found afterwards
-// beside it. The baseline it is measured against is `high`: 2.11 correctness and 3.48 readability
-// fixes per paired review, at 20.9M tokens and 1022s per implementer agent — the pack's most
-// expensive step. READ THAT TABLE before moving the default either way; a cheaper implementer that
+// beside it. The baseline it is measured against is its own `high` row — the pack's most expensive
+// step, in tokens, in seconds and in what the review found afterwards. READ THAT TABLE before
+// moving the default either way; a cheaper implementer that
 // pushes work into fix-correctness and end-verify-fix has moved cost rather than saved it. The
 // table cannot compare PROVIDERS yet, which is why the resolved row is written into the stats
 // payload: after a handful of codex runs it can bucket by provider instead of guessing.

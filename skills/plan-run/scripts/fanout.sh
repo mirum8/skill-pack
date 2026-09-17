@@ -92,9 +92,8 @@ set -euo pipefail
 # The cap comes from `steps.fanout.maxUnits` in the config, resolved here rather
 # than by either caller so a skill cannot forget it and there is one place to
 # change it. The default it resolves to is 3: three full implement+review
-# pipelines is already the machine's limit — implement alone measures 20.9M
-# tokens and ~1022s per agent — and a wider wave thrashes rather than finishing
-# sooner. Its stderr is NOT swallowed: the reader prints every substitution it
+# pipelines is already the machine's limit, and a wider wave thrashes rather
+# than finishing sooner. Its stderr is NOT swallowed: the reader prints every substitution it
 # made there, and a cap that quietly became something other than what the config
 # says is exactly what this fan-out must not do. The fallback below catches only
 # a pack with no lib/ beside it at all — an empty cap would make `-ge` succeed on

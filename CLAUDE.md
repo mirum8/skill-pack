@@ -392,9 +392,9 @@ stays that skill's store. Rules that are load-bearing:
   model and effort come from `steps.implement` in the config (below); `IMPL_RUN` in
   `task-run-implement.workflow.js` is the fallback, not the pin. The `implement depth` table is
   what decides whether the configured value holds: it buckets every implement run by the effort
-  mined off its items and prints the paired review's yield beside it. The `high` baseline it is
-  read against is 2.11 correctness and 3.48 readability fixes per paired review, at 20.9M tokens
-  and 1022s per implementer agent — the pack's most expensive step. Read the table before moving
+  mined off its items and prints the paired review's yield beside it. The baseline it is read
+  against is that table's own `high` row — the pack's most expensive step, in tokens, in seconds and
+  in the correctness and readability fixes per paired review. Read the table before moving
   the default either way, and read both halves: a cheaper implementer that pushes work into
   `fix-correctness` and `end-verify-fix` has moved cost, not saved it. The pairing is positional
   (same repo, the next pipeline-invoked review inside 12h), so it is a strong guess and never a

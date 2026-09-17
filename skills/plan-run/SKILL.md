@@ -63,12 +63,10 @@ between them: **ask** — the one place the run stops for input that isn't the g
   plan's `v1 (MVP)` block and leave `Advanced` for later.
 - **`--phases <n,n>`** → run exactly these phases, whatever their position — the primitive `--from`
   and `--to` are sugar over, and how one session takes a single leaf out of a wave.
-- **`--herdr`** → build every leaf in a session of its own: a detached worktree and a herdr workspace
-  per leaf, each holding a real interactive `claude` session, then land from here — the executor for
-  the command block `--dry-run` prints ([Running phases
-  concurrently](#running-phases-concurrently)). The wave decides only **how many run at once**; a
-  wave of one still gets its own workspace, and you build nothing yourself.
-  **Without it nothing about this skill changes**:
+- **`--herdr`** → build every leaf in a session of its own, a wave of one included: a detached
+  worktree and a herdr workspace per leaf, each holding a real interactive `claude` session, then
+  land from here — the executor for the command block `--dry-run` prints ([Running phases
+  concurrently](#running-phases-concurrently)). **Without it nothing about this skill changes**:
   the run is the serial one below, and no worktree is created. `--herdr` with `--no-merge` or
   `--land` is a contradiction — those two *are* the halves it drives — so refuse and name which one
   clashed.
@@ -80,15 +78,18 @@ between them: **ask** — the one place the run stops for input that isn't the g
   order. Runs only from the primary working tree; it builds after each merge and nothing else.
 - **`--auto-resolve`** → with `--land`, resolve the conflicts that are **provably** additive instead
   of stopping on them, then build and run the full test suite before accepting. Off by default;
-  everything it cannot prove is still handed to you.
+  everything it cannot prove is still handed to you. The rule, the verification and what it refuses
+  are in [references/concurrent-sessions.md](references/concurrent-sessions.md), beside `--land`.
 - **`--unattended`** → run without a person watching: work around everything that can be worked
   around, notify only when the run cannot continue. Implies `--yes` and `--auto-resolve`. It does
-  **not** loosen what counts as a real failure — see [Running unattended](#running-unattended).
+  **not** loosen what counts as a real failure — read
+  [references/unattended.md](references/unattended.md) before running one; it is the table of which
+  failures still halt and which are worked around.
 - **`--ask <session>`** → the address of a pack maintainer session watching the tooling: report
-  defects **in the pack** there and keep going ([`--ask <session>`](#--ask-session--reporting-a-defect-in-the-pack)).
-  It changes nothing about the run — a report is never a halt and never a question. **Pair it with
-  `--unattended`**, which otherwise works around a pack defect and leaves nobody able to fix it any
-  the wiser.
+  defects **in the pack** there and keep going. It changes nothing about the run — **a report is
+  never a halt and never a question**. **Pair it with `--unattended`**, which otherwise works around
+  a pack defect and leaves nobody able to fix it any the wiser. What belongs there, what does not,
+  and the five rules are in [references/ask-channel.md](references/ask-channel.md).
 - **`--no-reports`** → do not write a milestone report when a milestone finishes ([The milestone
   boundary](#the-milestone-boundary)). Everything else is unchanged: the phases still build, still
   merge and still tick.
@@ -247,10 +248,10 @@ Resolve first: none outstanding for these phases (1 open, blocks Phase 11, out o
   questions — but it **stops at the first phase that fails**, and reports the `--from N` to resume.
   Saying both halves is what makes it safe for the user to walk away.
 - **Under `--unattended`, say that instead**: the run works around a dirty base, a conflict it can
-  prove additive, and a wave the preflight refuses (that one runs one unit at a time); it stops on a failed
-  phase, and notifies only then. Print the table's halt column from [Running
-  unattended](#running-unattended) in one sentence — what will and will not fetch them back is what
-  they need before walking away.
+  prove additive, and a wave the preflight refuses (that one degrades to one unit at a time rather
+  than stopping); it stops on a failed phase, and notifies only then. Print the halt column of the
+  table in [references/unattended.md](references/unattended.md) in one sentence — what will and will
+  not fetch them back is what they need before walking away.
 - **When the plan has milestones**, add the milestone as a column and say which of them this run
   would finish — that is where a report will be written, and the gate is the place to say so
   (`--no-reports` if the user does not want them). A run that finishes no milestone says that too:
@@ -258,23 +259,25 @@ Resolve first: none outstanding for these phases (1 open, blocks Phase 11, out o
 - **Under `--herdr` only**, add the wave as a column — from the `check_todo.py` run Step 0 made,
   nothing new is computed — and say how many leaves will be built at once and how many at a time
   (the cap is three). Say plainly that **every** leaf gets a workspace, a wave of one included: a
-  run whose waves are all single-leaf still opens a session per phase, one at a time, and a user
-  reading "wave 1" beside every row would otherwise expect no fan-out at all.
+  user reading "wave 1" beside every row would otherwise expect no fan-out at all.
 
 ## Step 3 — Run the phases in order
 
 Work the run list **one phase at a time, in numeric order — never in parallel, never reordered**.
 Each phase is a re-check, two Workflow calls, a done-check and a finish, all in **your** (main)
 thread. Subagents have no `Agent` tool; only the main thread — and a `Workflow` script, which runs
-there — can spawn. Check, don't assume: `ToolSearch` cannot answer it (only deferred tools are
-indexed) and only a real call is evidence; nested spawning may return in a later release. If you
-can reach neither `Workflow` nor `Agent`, you are nested inside a subagent: stop and tell the user
-to re-run from a top-level session. Never re-run the fan-out inline and report success.
+there — can spawn. So **never hand either Workflow to a subagent**: nested there the pipeline
+cannot reach its own explorers, designer, planner, Codex reviewer, implementers or build runner, it
+collapses to a single context, and it still returns something that looks like success. Check, don't
+assume: `ToolSearch` cannot answer it (only deferred tools are indexed) and only a real call is
+evidence; nested spawning may return in a later release. If you can reach neither `Workflow` nor
+`Agent`, you are nested inside a subagent: stop and tell the user to re-run from a top-level
+session. Never re-run the fan-out inline and report success.
 
-This is the whole of Step 3 unless `--herdr` was passed. With it, **every** leaf is handed to a
-session of its own — a wave of one included — and you orchestrate rather than build any of them
-([`--herdr`, the driven form](#--herdr--the-driven-form)), but every phase still runs exactly the loop
-below inside its own session. For each phase:
+This is the whole of Step 3 unless `--herdr` was passed. With it, every leaf is handed to a session
+of its own and you orchestrate rather than build any of them ([`--herdr`, the driven
+form](#--herdr--the-driven-form)), but every phase still runs exactly the loop below inside its own
+session. For each phase:
 
 1. **Start from a clean base.** `git checkout <base>` and confirm `git status --porcelain` is empty.
    If a previous phase left the tree dirty, **do not plow ahead** — that is a halt (Step 3.7), not
@@ -323,10 +326,10 @@ below inside its own session. For each phase:
    forcing a tier there overrides a classifier that has read the code with a silence that has not.
    Let it classify.
 
-   The workflow maps the code, runs the UI/UX design phase if anything renders differently, plans on
-   Opus, has the **real Codex** challenge the plan, implements test-first through domain subagents
-   and drives the build green — then stops, leaving the uncommitted diff on the branch and returning
-   the handoff:
+   It maps the code, runs the UI/UX design phase if anything renders differently, plans on Opus,
+   has the **real Codex** challenge the plan, implements test-first through domain subagents and
+   drives the
+   build green — then stops, leaving the uncommitted diff on the branch and returning the handoff:
 
    ```
    { branch, base, profile, profileReason, profileForced, uiTouched, uiVisualChange, designIntent,
@@ -336,11 +339,8 @@ below inside its own session. For each phase:
 
    or `{ stopped: <reason>, … }` when it can't honestly continue — a **halt** (Step 3.7).
 
-   **Why a Workflow and not a subagent.** This pipeline *is* its subagents — explorers, designer,
-   planner, Codex plan reviewer, implementers, build runner — and a subagent cannot spawn any of
-   them; nested there it collapses to a single context and still reports success. Don't "simplify"
-   it by invoking `/r:task-run` through the Skill tool either — that loads a whole run into your
-   context, and by the fourth phase this loop would be compacting.
+   Don't "simplify" this by invoking `/r:task-run` through the Skill tool either — that loads a
+   whole run into your context, and by the fourth phase this loop would be compacting.
 
 4. **Review — the deterministic Workflow, with a self-check.** The implement half left the working
    tree on the phase's branch with the uncommitted diff:
@@ -359,8 +359,8 @@ below inside its own session. For each phase:
    **`baselineBuilt` — pass `true` only when the handoff says `buildGreen: true`, never on `"n/a"` or
    `false`.** The implement half has just run a clean, fully green build on this branch in this tree;
    without the flag the review repeats it — on a multi-module JVM project the most expensive step in
-   the loop, paid once per phase. `"n/a"` means no build ran at all, so passing it there would skip
-   the run's only clean build.
+   the loop, paid once per phase. Passing it on `"n/a"` would skip the run's only clean build; the
+   `build`/`localScan` bullet below has why `"n/a"` is never a pass.
 
    **Pass `profile`/`uiTouched` only when the handoff says `profileForced: true`.** Otherwise leave
    both out: the review classifies from the diff it is about to read, better evidence than a `Risk:`
@@ -384,12 +384,11 @@ below inside its own session. For each phase:
      nobody fixed. Outstanding is outstanding whether or not anyone attempted it, which is exactly
      why the review withholds `passed` here; a gate that reads only `blocked` merges the one state
      the pipeline went out of its way to distinguish from a pass.
-   - `build` or `localScan` **not green** — and `"n/a"` is not green. It means no build ran at all,
-     the same reading `baselineBuilt` already takes of it above. On a project whose build tool the
-     review does not detect, nothing is ever red because nothing is ever run, so a gate phrased as
-     "red" is vacuous exactly where it is most needed: measured, 33 recorded reviews returned
-     `build: "n/a"`, 31 of them over Go worktrees carrying 42k added lines that were reviewed
-     without a single compile or test.
+   - `build` or `localScan` **not green** — and **`"n/a"` is not green: it means no build ran at
+     all.** On a project whose build tool the review does not detect, nothing is ever red because
+     nothing is ever run, so a gate phrased as "red" is vacuous exactly where it is most needed:
+     measured, 33 recorded reviews returned `build: "n/a"`, 31 of them over Go worktrees carrying
+     42k added lines that were reviewed without a single compile or test.
    - `planBookkeepingWritten` non-empty — the diff already ticks a checkbox or writes a `built:`
      marker in the files it names, and the plan you are about to tick in Step 3.6 is the usual one.
      Never correct here whatever the verdict says: 3.6 ticks *after* this gate, from the criteria
@@ -420,13 +419,13 @@ below inside its own session. For each phase:
    `pytest -v`) and treat `--- SKIP:`, `SKIPPED`, `@Disabled` or an empty result set for a test the
    pattern names as a **red done-check**, not a pass.
 
-   This is not hypothetical and it is why the check is worded this way: a review fixer handed "this
-   test is vacuous" answered by inserting `t.Skip("env view render not yet implemented")` above the
-   unchanged body, and the phase's own gate — `go test -run 'TestRevealClearsOnClose'` — came back
-   green over a feature that did not exist. The fixers are now forbidden to do that, but this step
-   is the backstop, and a backstop that reads the same exit code the fixer just satisfied is not
-   one. A test that vanishes from a run is the same signal as a test that fails: the phase has not
-   been shown to work.
+   This is the failure the step is worded against: a review fixer handed "this test is vacuous"
+   answers by inserting `t.Skip("env view render not yet implemented")` above the unchanged body,
+   and the phase's own gate — `go test -run 'TestRevealClearsOnClose'` — comes back green over a
+   feature that does not exist. The review's fixers are forbidden to answer a finding that way, and
+   this step is the backstop behind that rule — a backstop that reads the same exit code the fixer
+   just satisfied is not one. A test that vanishes from a run is the same signal as a
+   test that fails: the phase has not been shown to work.
 
 6. **Finish.** With the review's fixes folded into the working tree, still uncommitted on the phase
    branch `<pb>`:
@@ -449,7 +448,7 @@ below inside its own session. For each phase:
      `git status --porcelain` non-empty. The implement half's contract is that it leaves the diff
      uncommitted so the reviewer reads it; a clean tree with HEAD moved off `<base>` means
      something inside the run committed, and the review then reads a diff of only your own later
-     edits and certifies a change it never saw. The handoff now names this as `treeCommitted: true`
+     edits and certifies a change it never saw. The handoff names this as `treeCommitted: true`
      alongside `headDetached`, but check it yourself when either arrives — `git reset --soft
      <base>` on the intended branch restores the documented shape with nothing lost.
    - **Confirm nobody else is holding the repo**, before the merge into base: `.git/MERGE_HEAD`
@@ -478,7 +477,8 @@ below inside its own session. For each phase:
      plan, and a single stray double-quote breaks the shell mid-commit.
    - **Idempotent merge into base:** if `git merge-base --is-ancestor <pb> <base>` it is already
      merged — skip. Otherwise `git checkout <base> && git merge --no-ff <pb>`, then delete the
-     branch. **If the merge conflicts, stop and surface it — never force it.** That is a halt.
+     branch. **A conflicting merge is a halt — surface it, never force it** ([`--land`](#--land--merging-what-the-concurrent-sessions-built)
+     step 6 has what to report).
 
      **Under `--no-merge`, stop here instead** — no merge, no branch deletion — and report the
      branch name; `--land` merges it from the primary tree later. Nothing earlier in this step
@@ -503,9 +503,10 @@ below inside its own session. For each phase:
      the report.
 
    **Under `--unattended`, four of those are worked around instead** — a conflict, a dirty base, a
-   refused slice, and a review or repo that was merely busy. The other four are still halts, because
-   they mean the next phase's premise is untrue. [Running unattended](#running-unattended) has the
-   table, and every workaround is named in the report and counted in `degraded`.
+   refused slice, and a review or repo that was merely busy. The other four are still halts,
+   because they mean the next phase's premise is untrue.
+   [references/unattended.md](references/unattended.md) has the table, and every workaround is named
+   in the report and counted in `degraded`.
    - **Never tick a phase that halted**, and never tick past it.
    - Report which phase stopped it, why, and the exact resume command:
      `/r:plan-run <plan> --from <n>`.
@@ -586,16 +587,15 @@ Everything else above is unchanged: same script, same subagent, same own-commit,
 Leaves in the same wave have no dependency between them and share no file, so they can be built at
 the same time — one `/r:plan-run` session each. What makes that safe is entirely mechanical, and
 [references/concurrent-sessions.md](references/concurrent-sessions.md) is the mechanics: the exact
-`git worktree` commands, the tree-detection test, the checker's three refusals and the loop `--land`
-uses to read a branch's marker. **Read it before running either `--no-merge` or `--land`** — here
-is why each rule exists, not what to type.
+`git worktree` commands, the tree-detection test, the checker's three refusals, the fan-out's own
+protocol and the loops `--land` runs. **Read it before running either `--no-merge` or `--land`** —
+here is why each rule exists, not what to type.
 
 **The git constraint that decides the shape.** A linked worktree cannot check out `<base>` by name
-while the primary tree holds it — git refuses with *"'main' is already used by worktree at …"* — so
-Step 3.6's `git checkout <base> && git merge --no-ff` **cannot run from a concurrent session at
-all**. *Detaching* is allowed: `git worktree add --detach <path> <base>` gives a clean tree at base
-without claiming the ref. That settles the shape: concurrent sessions build and commit, they never
-merge, and a separate `--land` pass merges from the primary tree.
+while the primary tree holds it, so Step 3.6's `git checkout <base> && git merge --no-ff` **cannot
+run from a concurrent session at all**; detaching claims no ref and is allowed. That settles the
+shape: concurrent sessions build and commit, they never merge, and a separate `--land` pass merges
+from the primary tree.
 
 **One session, one worktree, always.** Two sessions in one working directory destroy each other —
 each leaves an uncommitted tree the other is about to stage — and it is the first thing anyone will
@@ -614,12 +614,10 @@ try, so it is a preflight refusal rather than a warning.
    missing, say so and **stop anyway** — nothing else checks the slice, so a named skip is not good
    enough here.
 
-   **Under `--unattended` a refusal degrades rather than stops**: run that wave's leaves **one unit
-   at a time** — under `--herdr` still one spawned workspace each, landed before the next is cut, and
-   in numeric order — and name the refusal in the report. The refusal is about *concurrency* only,
-   and every leaf is still buildable. What degrades is the schedule, never where the work happens.
-   A missing checker is still a stop, unattended or not: not knowing whether the slice is safe is a
-   different thing from knowing it is not.
+   Under `--unattended` a **refusal** degrades rather than stops
+   ([references/unattended.md](references/unattended.md)); a **missing** checker is still a stop,
+   unattended or not, because not knowing whether the slice is safe is a different thing from
+   knowing it is not.
 
 3. **Ask history what the plan cannot know**, once the checker has cleared the slice:
 
@@ -634,10 +632,10 @@ try, so it is a preflight refusal rather than a warning.
 
    **Exit 2 is a risk, not an error.** Serially, print it and carry on: the cost of being wrong is
    one merge conflict. Under `--herdr`, **stop** — there the cost is the whole wave, built over hours
-   before anything discovers it. Under `--herdr --unattended`, run that wave one unit at a time
-   instead of stopping — a workspace each, landed between — and name it. Exit 0 covers both "looks clean" and "not enough history to judge", and it
-   says which; exit 1 is usage or git trouble and is a named skip, because this check improves the
-   preflight rather than being it.
+   before anything discovers it; under `--unattended` that stop degrades rather than halts
+   ([references/unattended.md](references/unattended.md)). Exit 0 covers both "looks clean" and "not
+   enough history to judge", and it says which; exit 1 is usage or git trouble and is a named skip,
+   because this check improves the preflight rather than being it.
 
    The two answers to a risk are in the report: run one leaf per package at a time, or correct the
    `Files:` lines from the code that now exists and re-run. Step 3.6 does the second for every phase from here
@@ -693,8 +691,10 @@ For each wave, in wave order:
    A wave decides the *schedule*, not where the work happens — a wave of one is one live unit rather
    than none. The round trip and the context re-read are paid on purpose, and here is what they buy:
    every unit is reported the same way whatever its schedule (a sentinel **and** a marker, never one
-   of them), every unit is watchable and take-overable in a workspace of its own, and your context
-   never holds an implement+review — the same reason both pipelines are `Workflow` scripts.
+   of them — a sentinel can be written by a run that then failed to commit, and a missing marker can
+   just mean the unit is still working), every unit is watchable and take-overable in a workspace of
+   its own, and your context never holds an implement+review — the same reason both pipelines are
+   `Workflow` scripts.
 
    **A solo wave lands before the next one spawns.** `git worktree add --detach <base>` pins a
    unit's tree to whatever `<base>` pointed at when the worktree was made, so a queue of solo spawns
@@ -704,11 +704,9 @@ For each wave, in wave order:
 2. **`check_todo.py --slice <n,n>`** over the wave's unbuilt leaves — the same preflight, with the
    same three refusals, and a missing checker is still a **stop**. Nothing else verifies the slice.
 3. **`fanout.sh preflight`.** It checks four things: herdr is reachable, this is the primary
-   tree, the tree is clean, and **the repo has been trusted in Claude Code**. Workspace trust is per
-   *path*, and a worktree is a new path — a session started in one opens on the trust dialog and
-   never reads its prompt. `spawn` copies the repo's own trust decision onto each worktree it makes,
-   which is why the repo must carry one: a fan-out may inherit a judgement the user already made,
-   never invent one.
+   tree, the tree is clean, and **the repo has been trusted in Claude Code**. It refuses a repo that
+   carries no trust decision of its own, because a fan-out may inherit a judgement the user already
+   made and never invent one.
 
    A non-zero exit is a **stop**, deliberately: elsewhere a missing tool is a named skip, but
    `--herdr` was typed on purpose, and quietly running serially instead would hand back something
@@ -724,8 +722,7 @@ For each wave, in wave order:
    ```
 
    The `--marker-*` pair lets `wait` check the branch itself rather than trusting the session's own
-   account. `[--ask <session>]` is there only when this run was given one, and it is passed through
-   **verbatim to every unit** ([`--ask <session>`](#--ask-session--reporting-a-defect-in-the-pack)).
+   account.
 5. **`wait --any`, then `cleanup` that unit and spawn the next — a loop, not one call.**
 
    ```sh
@@ -736,30 +733,24 @@ For each wave, in wave order:
    done
    ```
 
-   `--any` is what makes the window actually roll. A bare `wait` blocks until **every** unit in the
-   set has reported, so the three slots stay held until the slowest of the three is done and a
-   queued leaf waits behind a unit that finished an hour ago — batches, not a window. `--any`
-   returns the first unit back and says nothing about the others.
-
-   `cleanup` runs **the moment a unit comes back ok**: a stale worktree is what the next `spawn`
-   collides with, a finished workspace looks like a working one in the sidebar, and the freed slot
-   is what admits the next queued leaf.
+   `--any` is what makes the window actually roll: a bare `wait` blocks until **every** unit in the
+   set has reported, so the three slots stay held until the slowest is done and a queued leaf waits
+   behind a unit that finished an hour ago — batches, not a window. `cleanup` runs **the moment a
+   unit comes back ok**: a stale worktree is what the next `spawn` collides with, a finished
+   workspace looks like a working one in the sidebar, and the freed slot is what admits the next
+   queued leaf.
 
    **A verdict is handed back once.** A failed unit is left standing by the rule below, so it keeps
    its slot and stays live — without the once-only rule every later `--any` would hand back that
-   same failure while its wave-mates finished unseen. The script tracks it; `status` still reports
-   everything, and is how a caller that lost its place picks it up again. Do not poll `status` in
-   place of `--any`: deciding "is it done yet" by re-reading a report on a timer is the judgement
-   this script exists to take off you.
-
-   Once means once **per sentinel**. A failed unit left standing can be resumed in place when what
-   halted it is cleared, and the sentinel it writes then is handed back by `--any` like any other.
-   Delete its old sentinel (the `sentinel=` line of the spawn output) before it resumes: with the
-   old one still on disk, `--any` has nothing to wait for and answers "no unreported units" until
-   the fresh one lands. Never `cleanup` a live unit to re-arm the wait — that removes the worktree
-   the resumed run is working in. The resumed unit's implement half picks up from the ledger in its
-   plan file: finished slices are not redone, and a tree holding changes no step recorded stops it as
-   `resume-unclaimed-tree` for a person to decide.
+   same failure while its wave-mates finished unseen. **The script tracks it**, rather than asking
+   you to narrow the set by hand; `status` still reports everything, and is how a caller that lost
+   its place picks it up again. Do not poll `status` in place of `--any`:
+   deciding "is it done yet" by re-reading a report on a timer is the judgement this script exists
+   to take off you. Once means once **per sentinel**, which is what lets a failed unit be resumed in
+   place — [references/concurrent-sessions.md](references/concurrent-sessions.md) has the steps.
+   The resumed unit's implement half picks up from the ledger in its plan file: finished slices are
+   not redone, and a tree holding changes no step recorded stops it as `resume-unclaimed-tree` for a
+   person to decide.
 6. **A unit that failed or stalled is left standing** — workspace open, worktree in place, both named
    in the report. A stall is usually a question waiting for a human, and that state is the only
    evidence of what went wrong.
@@ -777,18 +768,24 @@ and the `--from N` that resumes — later waves depend on this one by constructi
 
 **Three at a time by default, and the cap lives in the config** — `steps.fanout.maxUnits`, resolved
 by the script itself, so there is one place to change it for both skills that drive it. Three full
-implement+review pipelines is already the machine's limit — `implement` alone measures 20.9M tokens
-and 1022s per agent — so raise it as a measurement rather than a guess. A project sets its own
+implement+review pipelines is already the machine's limit, so raise it as a measurement rather than
+a guess — `implement depth` in `lib/skill-stats.py` prints the current cost per agent. A project sets its own
 width in `.config/skill-pack.yaml`; the script names anything it had to substitute and never runs
 uncapped. A wave that spawned eight would thrash rather than finish sooner.
 
 ### The alarm channel
 
 Get your own session name from `ListAgents` — its first line names this session — and pass it to
-every `spawn` as `--orchestrator <name>`. Each unit then arrives holding
-`FANOUT_ORCHESTRATOR`, and can `SendMessage` **up** to you. Only that direction is wired,
-because only it needs no discovery: a unit knows who spawned it, while finding a unit from here
-means prefix-matching an unpredictable session name against every session on the machine.
+every `spawn` as `--orchestrator <name>`. Each unit then arrives holding `FANOUT_ORCHESTRATOR`, and
+can `SendMessage` **up** to you. Only that direction is wired, because only it needs no discovery: a
+unit knows who spawned it, while finding a unit from here means prefix-matching an unpredictable
+session name against every session on the machine. **You can reach a unit only after it has spoken
+to you** — its first upward message carries its own `ListAgents` name, and that is what makes it
+addressable; from then a message down carries either **stop**, or the answer to a question that unit
+asked. A unit that has *not* spoken is reachable by a person and nobody else, so a collision it needs
+to hear about is a **stop**, not a message: stop spawning and name the unit for a person to open
+([references/concurrent-sessions.md](references/concurrent-sessions.md) has the handle, the command
+and what to answer in each case).
 
 **What a unit is told to send** — the four cases under [Being a unit](#being-a-unit): an undeclared
 file, a question the plan can answer, a failing test it did not write, a halt. Each is something to
@@ -796,36 +793,24 @@ know *before* the timeout.
 
 **Hold the union of what they report, because you are the only one who can.** A unit sees its own
 worktree; you see the wave. Keep the set of files the units have claimed, and the phase that claimed
-each — the wave's real footprint, accumulating while it is still cheap to act on.
+each — the wave's real footprint, accumulating while it is still cheap to act on. That is also what
+separates the two messages that arrive identically and need opposite answers: **an undeclared file
+is recorded, a *claimed* one is a halt.** A phase reaching a file its `Files:` line does not name is
+the normal case, so the answer is "recorded, continue" — refusing it would refuse correct work. The
+same file from a **second** unit is the collision the preflight exists to prevent: stop spawning,
+let the units in flight finish or stop them, and fix the plan's edges before re-running.
 
-**What you may do with it.** Answer a question. Ask a read-only check — what branch it is on, whether
-it has touched a file. Three rules:
+Three rules bound the whole channel:
 
 - **A message never closes a unit.** `wait` blocks on the sentinel; landing needs the marker. A unit
   saying it is done is a *claim*, and this pipeline lands *evidence* — a session can go idle having
   declined its work, and completion-by-message would bank exactly that as a success.
 - **Ask, never drive.** A message that changes what a unit builds makes its run something other than
-  the `--no-merge` loop everything downstream assumes it ran.
+  the `--no-merge` loop everything downstream assumes it ran. It binds harder downwards, because a
+  message from the orchestrator reads as authority: never work, and never a correction to what a
+  unit is building.
 - **Don't poll.** That is what `wait` is for, and every message costs the receiving session a whole
   turn.
-
-**An undeclared file is recorded; a *claimed* one is a halt.** These arrive as the same message and
-need opposite answers. A phase reaching a file its `Files:` line does not name is the normal case,
-so the answer is "recorded, continue" — refusing it would refuse correct work. The same file
-arriving from a **second** unit is the collision the preflight exists to prevent: stop spawning,
-let the units in flight finish or stop them, and fix the plan's edges before re-running.
-
-**You can reach a unit only after it has spoken to you, and then for two things only.** There is no
-address the fan-out can hand you at spawn: `SendMessage` reaches a session by Claude Code's own name
-for it, which is unrelated to the `--id` you chose and to every handle herdr owns — label, workspace,
-pane, agent name alike. A unit's first upward message carries its own `ListAgents` name, and that is
-what makes it addressable. From then a `SendMessage` down carries either **stop**, or the answer to a
-question that unit asked. Never work, and never a correction to what it is building: "ask, never
-drive" binds this direction harder, because a message from the orchestrator reads as authority.
-
-**A unit that has not spoken is reachable by a person and nobody else** — so a collision it needs to
-hear about is a **stop**, not a message: stop spawning, name the unit and the `workspace=` id
-`status` prints beside it, and open it with `herdr workspace focus <id>`.
 
 ### Being a unit
 
@@ -865,27 +850,30 @@ checked out there). It builds after every merge, and nothing else.
 
 1. **Find the finished branches** — `phase-*` branches not yet ancestors of base.
 2. **Map each branch to its phase** by the marker the run wrote on the heading when it ticked the
-   phase (Step 3.6), read off the branch without checking anything out — branches are named
-   `phase-<slug>`, not `phase-<n>`, so the slug alone cannot say which phase a branch built.
+   phase (Step 3.6), read off the branch **without checking anything out** — the primary tree is
+   holding base and must keep holding it, and branches are named `phase-<slug>`, not `phase-<n>`, so
+   the slug alone cannot say which phase a branch built. The loop is in
+   [references/concurrent-sessions.md](references/concurrent-sessions.md).
 
    **A branch with no marker is not a finished phase — skip it and say so.** It is a halted run, or
    someone else's branch matching the glob; guessing which phase it was would merge unreviewed
    work.
-3. **Dry-merge the whole wave first, and merge nothing until it passes.** Simulate each branch in
-   ascending order against the base each earlier simulation produced, so it models the real
+3. **Dry-merge the whole wave first, and merge nothing until it passes.** Each branch is simulated
+   in ascending order against the base each earlier simulation produced, so it models the real
    sequence rather than a set of pairs:
 
    ```sh
    "${CLAUDE_PLUGIN_ROOT}/skills/plan-run/scripts/wave-simulate.sh" "$base" <branches in ascending phase order>
    ```
 
-   Exit 0 means the whole wave merges clean — go on to step 4. Exit 2 is a conflict: stop with
-   nothing merged and name the branch and the files it printed. Exit 1 means the simulation could
-   not run — stop and name git's error; it is **never** read as a conflict, and never as clean.
-
-   It writes no ref, working tree or index, so it costs seconds and risks nothing. A conflict here
-   stops the pass with **nothing merged** — merging until one is hit leaves a wave half-landed and a
-   base that differs from the one every remaining branch was built on.
+   **The exit code is the verdict, and all three readings matter.** Exit 0 means the whole wave
+   merges clean — go on to step 4. Exit 2 is a conflict: stop with **nothing merged** and name the
+   branch and the files it printed, because merging until one is hit leaves a wave half-landed and a
+   base that differs from the one every remaining branch was built on. Exit 1 means the simulation
+   could not run — stop and name git's error; it is **never** read as a conflict, and never as
+   clean. Read as a conflict it stops a wave that merges perfectly well; read as clean it lands a
+   wave nothing cleared. It writes no ref, working tree or index, so clearing a whole wave costs
+   seconds and risks nothing.
 
 4. **Merge in ascending phase order**, one at a time, then delete the branch. Ascending order is a
    valid dependency order, because the plan's numbering is a topological sort of the graph.
@@ -893,14 +881,13 @@ checked out there). It builds after every merge, and nothing else.
    compiling tree: two phases can each add the same package-level symbol in different files, so no
    file collides, both branches build alone, and the merged tree does not compile. **The checker
    reasons about files; the language reasons about packages**, and only this build sees the
-   difference. Detect the runner the way Step 3 does and run it; on red, stop with that branch
-   named.
+   difference. Detect the runner as Step 3 does; on red, stop with that branch named.
 6. **On a conflict, stop and surface it — never force it.** Report which branch, leave it in place
    and unmerged, and name the ones already landed. The merge is idempotent (step 1 skips anything
    already an ancestor), so re-running after a manual resolution is safe. With `--auto-resolve`, the
-   conflicts that are provably additive are resolved first and only the rest reach this step — see
-   [Auto-resolving the additive
-   conflicts](#--auto-resolve--resolving-the-conflicts-that-are-provably-additive).
+   conflicts that are provably additive are resolved first and only the rest reach this step — the
+   rule, the mandatory build-and-full-test verification, and the both-halves report are in
+   [references/concurrent-sessions.md](references/concurrent-sessions.md).
 
 Then, before the stats row, **check the milestone boundary** — [The milestone
 boundary](#the-milestone-boundary) — and write one report per milestone this landing finished, in
@@ -915,153 +902,6 @@ Then **record the run** — Step 4's stats line with `mode: "land"`, `landed` se
 why the wave collision check excludes it. Git merges ticks in separate regions cleanly; when two
 phases sit adjacent enough to conflict, the resolution is always **both sides' ticks**, since each
 branch ticked what it genuinely built.
-
-## `--auto-resolve` — resolving the conflicts that are provably additive
-
-A wave's conflicts are mostly two phases adding wiring at the same point, and "keep both" is the
-answer to nearly all of them — but a side that quietly dropped a line reads exactly like a side that
-never had it, and the resolution that drops it **compiles clean** and fails only in the tests. So
-the decision is a script rather than a judgement:
-
-```sh
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/plan-run/scripts/merge-resolve.py" --plan <plan> [--dry-run]
-```
-
-Run it while `git merge` has left the tree conflicted. Each conflict is re-materialised with its
-merge **base** visible and asked one question: *does every base line still exist on both sides,
-ignoring whitespace?* Yes means neither side removed anything, so both sides are kept. No means a
-side rewrote shared code, and that file is left unmerged with the base still showing, for you.
-The base is the whole trick — without it "they added a field" and "they deleted a field" are the
-same picture — and whitespace matters as much: a formatter realigns a block when a longer name
-arrives, so a strict comparison reads a pure addition as a rewrite.
-
-**Then verify, and treat the verification as part of the resolution.** Format, run the build, run the
-**full** test suite. Green: commit the merge. Red: `git merge --abort` and hand the whole thing over
-— never patch up an auto-resolved merge, because the failure is the evidence that the rule was wrong
-here. The residual risk the rule cannot see is ordering: two sides adding statements at one point
-produce a union in some order, and only for declarations is that order certainly irrelevant. The
-test run covers that, which is why it is not optional and why this flag is off by default.
-
-**Report both halves, always** — every file resolved and every file handed over, by name. Silent
-auto-resolution is indistinguishable from a merge nobody had to think about.
-
-Turn on `rerere` as well (`git config rerere.enabled true`): the conflicts this refuses are in the
-hub files every wave touches, so a resolution made once replays in the next wave.
-
-## Running unattended
-
-`--unattended` is for a run nobody is watching: a twelve-phase plan started before dinner, or a
-`--herdr` wave that will take hours. It changes one thing only — **what counts as a reason to stop**
-— and does not touch what counts as a reason to fail.
-
-**The rule it must not weaken.** Phase 5 is written against what Phase 4 produced, so a phase that
-genuinely failed still halts the run. Autonomy means not stopping over a premise that is fine, never
-building on one that is not true. This is the list of which is which:
-
-| what happened | premise broken | unattended |
-|---|---|---|
-| implement returned `{ stopped: … }` | yes | **halt** |
-| `Done when:` failed | yes | **halt** |
-| the per-phase re-check came back `blocked` | yes | **halt** |
-| the `Workflow` tool is unavailable | yes | **halt** — nothing can run at all |
-| the review came back **red** | yes | one retry, then halt |
-| the review came back **blocked** — a track did not run | not yet | one retry, then halt. **Never** banked as clean |
-| a merge conflict | no | `--auto-resolve`, then build + full tests; halt on what it refuses |
-| the base tree is dirty | no | snapshot to `refs/wip/pre-phase-<n>`, clean, continue |
-| `.git/MERGE_HEAD` — another session holds the repo | no | wait one poll, retry, then halt |
-| `--slice` refused the slice | no | run that wave **one unit at a time**, landed between |
-| `footprint-warn` returned 2 under `--herdr` | no | run that wave **one unit at a time**, landed between |
-
-The last two are the ones that pay for the flag: both are facts about *scheduling* with an obvious
-local response, and stopping a four-hour run over one is the pipeline refusing to do what a person
-would have done in a second.
-
-### Answer nothing, queue everything
-
-A question is not a halt. Where an attended run stops for input, an unattended one **collects the
-question, builds everything that does not depend on the answer, and reports the queue at the end**:
-
-- **`## Resolve first` blockers** (Step 1) — drop the phases they block out of the run list, build
-  the rest, and name them. Never dispatch `/r:plan-unblock`: it closes entries by asking a person,
-  and there is nobody here to ask.
-- **Two candidate plans with nothing to choose between them** (Step 0) — take the first by the
-  documented order and say which.
-- **An ambiguous item mid-run** — queue it and carry on.
-
-### What reaches the user, and what does not
-
-`PushNotification` pulls attention off whatever they are doing, so it fires on exactly three
-things:
-
-- **The run stopped and cannot continue** — the phase, the reason, the `--from N` that resumes.
-- **A person is needed** — a spec-pinned test failed, or a decision nothing in the plan can settle.
-- **The run finished** — phases built, phases skipped, questions queued.
-
-One line, under 200 characters, leading with what they would act on: `plan-run halted at Phase 7:
-done-when red. resume: --from 7` says more than "run failed". Nothing else notifies — not a phase
-completing, a wave landing, a conflict auto-resolved or a degrade to one-at-a-time. Those are the report.
-
-### Every workaround is named
-
-The report carries a line per degrade — "wave 13 ran one unit at a time: footprint-warn flagged
-`internal/ui`", "Phase 9's review was blocked and passed on retry", "base was dirty at Phase 4;
-snapshotted to `refs/wip/pre-phase-4`" — and the stats line carries `degraded` (how many) and
-`questionsQueued`. A degrade nobody hears about is indistinguishable from nothing having gone
-wrong.
-
-**Unattended never softens these**: a blocked review is not a pass, an auto-resolved merge still runs
-the full test suite and is discarded on red, and a halted phase is never ticked and never merged.
-
-## `--ask <session>` — reporting a defect in the pack
-
-`--ask <session>` means a pack maintainer session is watching the **tooling** at that address:
-report defects in the pack there and keep working. It works with or without `--herdr` — a serial run
-hits pack defects too — and it changes nothing else about the run.
-
-**What belongs there is a defect in the TOOLING, never in the project being built.** Three
-addresses, three different things, and mixing them is what makes each of them useless:
-
-- a bug in the code this plan is producing → the plan, or the project's own backlog;
-- a question about the *work* — a contradictory `Done when:`, a phase that reads as already built →
-  the **orchestrator** ([The alarm channel](#the-alarm-channel));
-- a step of the *pipeline* that is wrong → **here**. A step that cannot run, a bundled script
-  returning a confident wrong answer, a handoff field a caller cannot read, an instruction in a
-  skill that contradicts what the tool actually does.
-
-Five rules, and the first is what makes this safe to switch on:
-
-- **A report is never a halt, and never a question.** Send it and carry on with the same run you
-  would have had. Never wait for a reply and never poll for one. When a reply does arrive, apply the
-  workaround it gives only where it changes **how a pack step is run** — a flag, a command, a step
-  to skip and name — and never what this run builds; name it in your report like any other
-  workaround. If the defect genuinely stops the work, that is a halt on its own terms and the halt
-  rules above apply unchanged; the report is extra, not instead.
-- **Never work around a pack defect silently.** Working around it is usually right — report it *and*
-  keep going — but the workaround goes in this run's own report to the user as well, in the words of
-  what was done instead ([Every workaround is named](#every-workaround-is-named)). A workaround
-  nobody hears about is how a defect survives twenty runs.
-- **Send evidence, not a conclusion.** The exact error string, the run id, `file:line`, what you
-  already ruled out, and what you did instead. The maintainer verifies every claim against the pack
-  before changing anything, so a report that hands over a verdict with nothing under it costs more
-  to check than the defect costs to find — and a confident wrong diagnosis is worse than a raw
-  observation. Say plainly which parts you observed and which you inferred.
-- **An expectation the pack contradicts is a report too.** Some of what looks broken is designed — a
-  field empty because a tier does not fill it, a step that runs only at one profile. Report it in the
-  same shape and let the maintainer say which it is: "this looked like a malfunction and was not" is
-  a real finding about the tooling's legibility, and it is cheap to answer.
-- **The maintainer does not touch this repo.** It replies with how to get past the defect in this
-  run, files major ones for its user, and changes the pack only when its user says so. Nothing it
-  does lands in this working tree, so nothing about `--ask` can change this run's diff.
-
-**Under `--herdr`, pass `--ask <session>` through to every unit's own command line**, exactly as the
-spawn prompt already carries `--phases` and `--no-merge`. The unit is the first thing that touches
-the pipeline, so it is where a pack defect is seen first, and a report relayed through the
-orchestrator loses the detail that made it actionable.
-
-`fanout.sh` needs no change and no new environment variable: the address rides in the child's
-own command line, which is also why it works on serial runs. `FANOUT_ORCHESTRATOR` stays what
-it is — a different address for a different kind of message.
-
 
 ## Step 4 — Report
 
