@@ -42,7 +42,15 @@ ok "findings are exploded into rows"       "$(q "$D" "select count(*) from findi
 ok "a verdict round-trips"                 "$(q "$D" "select verdict from findings where track='security'")" dismissed
 ok "so does the file/line it points at"    "$(q "$D" "select file||':'||line from findings where track='logic'")" src/Foo.java:88
 ok "ts is stamped"                         "$(q "$D" "select substr(ts,1,2) from runs")" 20
-ok "repo is stamped"                       "$(q "$D" "select repo from runs")" skill-pack
+# `repo` is the git toplevel's basename, so it is asserted from a fixture repo whose name this test
+# controls. Reading it off the suite's own checkout asserts the directory the suite happens to sit
+# in, which under a git worktree is the worktree's name and never the repo's — so the pack's own
+# gate could not pass from any worktree, and every --herdr unit would halt on this line.
+SINK_ABS=$PWD/$SINK
+RD="$TMP/repo.db"; FIX="$TMP/acme-widgets"
+mkdir -p "$FIX" && git -C "$FIX" init -q
+printf '{"skill":"r:code-bugs"}' | (cd "$FIX" && python3 "$SINK_ABS" --db "$RD" >/dev/null 2>&1)
+ok "repo is stamped from the git root"     "$(q "$RD" "select repo from runs")" acme-widgets
 ok "event defaults to result"              "$(q "$D" "select event from runs")" result
 ok "a run_id is generated"                 "$(q "$D" "select length(run_id) from runs")" 36
 # The payload is kept verbatim so a field with no column of its own is still queryable — that is
