@@ -538,6 +538,36 @@ reader owned by one skill stays that skill's reader. Rules that are load-bearing
   skip them. In the review it sits after the `reviewNeeded` gate, so a doc-only turn pays nothing.
 - Its suite is `lib/tests/config.test.sh`, and it is the only one it gets.
 
+**`r-loop` lives in this repo but is built to leave it, so coupling to the pack only ever gets
+looser.** The driver is a Go module under `driver/` (`driver/cmd/r-loop`, packages under
+`driver/internal/`), specified in `docs/task-loop-driver/`. It is here because it cannot yet run
+without the pack and because its prompts still change in the same commits as its code — not
+because it belongs here. The repo's product is prose; a provider-agnostic TUI with its own MCP
+server, watchdog and release story is a second product sharing a working copy. So every edit is
+made as if the extraction were tomorrow: a `git filter-repo` plus a `go.mod` rename, and nothing
+else.
+
+Three rules keep that true. **The dependency runs one way** — the driver reads the pack, the pack
+never reads the driver. No `SKILL.md`, agent, hook or `lib/` script may call `r-loop`, import from
+`driver/`, or branch on whether the binary exists; a skill that grew a driver code path would have
+to be un-grown at extraction, in prose nobody re-reads. **Pack contact is narrow, named and
+file-shaped.** The driver shells out to `lib/read-config.py`, to
+`skills/plan-report/scripts/milestone_scope.py` and to
+`skills/plan-unblock/scripts/resolve_scope.py`, and falls back to `lib/loop-prompts/` and
+`lib/loop-providers/` — those five are the whole surface, each is a
+process boundary or a file read with an output shape the driver parses, and the list does not
+grow. Reaching into a skill's internals, or duplicating a pack judgement in Go, both end the same
+way: one of the two copies is wrong after the split and nothing fails. Where a shell-out is
+eventually ported into Go, the pack script stays as it is — the port removes a dependency, never
+moves a skill's logic into the driver. **Logic belongs to exactly one side.** The scope of a
+`## Resolve first` entry, what a milestone holds, how a config key resolves — those are the pack's,
+and the driver asks rather than re-deciding. Sequencing a run, owning a session, judging a
+sentinel are the driver's, and no skill acquires an opinion about them.
+
+The same asymmetry the rest of this file uses applies to the judgement call: loosening a coupling
+that turns out to have been fine costs a shell-out; tightening one costs a rewrite at the worst
+moment, with two repos and no test spanning them.
+
 **`docs/skill-pack-repo/behaviour/` states what the pack does, and `/r:pack-compact` rewrites
 prose against it.** One markdown file per skill and per bundled agent, each entry an `SB-` id, a
 behaviour in the present tense, and three fields: the prose file that *states it*, the code that
