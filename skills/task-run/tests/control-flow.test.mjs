@@ -95,6 +95,7 @@ function baseSource(over = {}) {
 // function of the call count. Anything not overridden takes the happy-path default.
 async function run({ source = baseSource(), riskFlags = [], uiFiles = [], design = designText(),
                      review, planfix, verdict, config, planConfig, citation, head, haltTree, ledger,
+                     planCheck, claim,
                      args = { source: '#81' }, overrides = {}, build } = {}) {
   const logs = []
   const prompts = {}
@@ -131,6 +132,24 @@ async function run({ source = baseSource(), riskFlags = [], uiFiles = [], design
     if (l === 'plan-write' || l === 'plan-status') return { written: true, path: source.planPath }
     // Only reached when plan-write reported failure: the run checks the disk before believing it.
     if (l === 'plan-check') return { exists: true, lastLine: PLAN_TEXT.split('\n').pop() }
+    // `plan-verify` / `plan-verify-again` relay plan_check.py. Unstubbed they report a clean plan,
+    // which is the shape that must leave the run exactly as it was before this phase existed.
+    // A function stub is handed the label, so a test can answer the re-run differently from the
+    // first pass — that gap is what proves the editor's claim, not the editor's own word for it.
+    if (l === 'plan-verify' || l === 'plan-verify-again') {
+      const d = planCheck === undefined ? { problems: [], citations: [] } : planCheck
+      return typeof d === 'function' ? d(l) : d
+    }
+    // `plan-cite#<n>:<file>` — the claim readers. The stub recovers which claims its batch holds by
+    // reading the numbered CITED lines out of the prompt, the same trick the judge/cite stubs use,
+    // so a `claim(where)` stub answers per claim rather than per agent. Unstubbed every claim is
+    // supported, which is what a plan whose citations hold looks like.
+    if (l.startsWith('plan-cite#')) {
+      const items = [...prompt.matchAll(/^\s*(\d+)\. CITED: (.+)$/gm)].map((m) => ({ n: Number(m[1]), where: m[2].trim() }))
+      const one = (where) => typeof claim === 'function' ? claim(where) : (claim === undefined ? { supported: true, why: 'the line says so' } : claim)
+      return { verdicts: items.map(({ n, where }) => ({ n, ...one(where) })) }
+    }
+    if (l === 'plan-ground-fix') return { applied: ['re-pointed the citation at the real line'] }
     if (l.startsWith('codex-plan-review')) { codexPass++; return typeof review === 'function' ? review(codexPass) : review }
     // `judge#<pass>.<batch>:<rubric>` — findings are BATCHED by rubric and one agent returns a
     // verdict per finding. The stub recovers which findings its batch holds by reading the
@@ -3004,4 +3023,266 @@ test('a dirty detached tree is detached but NOT reported as committed', async ()
   })
   assert.equal(out.headDetached, true)
   assert.equal(out.treeCommitted, false)
+})
+
+// ------------------------------------------- the plan-grounding pass (Phase 2b) ---
+// Two thirds of what the Codex review confirms is answerable without judgement — 191 of 281
+// confirmed findings sit in test-adequacy, coverage and grounding. This phase answers those before
+// the reviewer is dispatched. Everything below guards the same thing: it must never pass a plan off
+// as checked when it wasn't, and it must never halt a run over a plan defect.
+
+const CITED = (where, claim) => ({ where, resolvedAs: '', resolves: true, ambiguous: false, section: 'files to change', claim })
+
+test('the grounding pass runs at full, checks the plan, and leaves a clean plan alone', async () => {
+  const { out, counts, prompts } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    planCheck: { problems: [], citations: [CITED('src/A.java:10', 'A validates the upload')] },
+  })
+  assert.equal(counts['plan-verify'], 1)
+  assert.equal(out.planGround.ran, true)
+  assert.equal(out.planGround.checked, 1)
+  assert.equal(out.planGround.problems, 0)
+  assert.equal(out.planGround.unsupported, 0)
+  // Nothing to fix, so no editor and no second script run. A pass that edits a sound plan is the
+  // expensive half of this phase firing for nothing.
+  assert.equal(counts['plan-ground-fix'], undefined)
+  assert.equal(counts['plan-verify-again'], undefined)
+  // The script is driven with the flags it actually has, and the criteria ride in as JSON — without
+  // them the coverage half of the check SKIPS, and a skip that nobody notices is the whole failure
+  // the script's own contract is written against.
+  assert.match(prompts['plan-verify'], /plan_check\.py/)
+  assert.match(prompts['plan-verify'], /--check --repo \. --tier full --criteria/)
+  assert.match(prompts['plan-verify'], /rejected import keeps the versions table/)
+  assert.match(prompts['plan-verify'], /exits 1 whenever it reports a problem/)
+})
+
+test('it runs at STANDARD too — the tier that has never had any plan validation', async () => {
+  // standard writes a full planner-grade plan and then nothing checks it: the Codex review is
+  // full-tier only. This phase is the first reader that tier's plan has ever had.
+  const { out, counts, logText } = await run({
+    source: baseSource({ profile: 'standard' }),
+    planCheck: { problems: ['AC-2 has no coverage row naming a test'], citations: [] },
+  })
+  assert.equal(counts['plan-verify'], 1)
+  assert.equal(counts['codex-plan-review#1'], undefined, 'and still no Codex at this tier')
+  assert.equal(out.planGround.ran, true)
+  assert.equal(counts['plan-ground-fix'], 1)
+  // With no reviewer behind it, the log and the handoff are the only account anyone gets.
+  assert.match(logText, /the standard tier runs no Codex plan review/)
+})
+
+test('it does NOT run at the light tier', async () => {
+  // light's plan is a brief by design, and light runs one explorer where the risk quorum is already
+  // unreachable. There is not enough plan here to be worth checking.
+  const { counts, out } = await run({ source: baseSource({ profile: 'light', uiTouched: false, uiVisualChange: false }) })
+  assert.equal(counts['plan-verify'], undefined)
+  assert.equal(out.planGround.ran, false)
+})
+
+test('it does NOT run on a resume — the plan was not written by this run', async () => {
+  const { counts } = await run({
+    source: baseSource({ planStatus: 'implementing', planReviewed: '2026-09-01 codex' }),
+    review: OK_REVIEW, planfix: OK_FIX,
+  })
+  assert.equal(counts['plan-verify'], undefined)
+})
+
+test('a blocked checker does not stop the run — the plan goes to review unchecked, and says so', async () => {
+  // A plan defect was never fatal; it was found later and more expensively. A new halt in front of
+  // the planner would cost more than the review this phase is making cheaper.
+  const { out, counts, logText } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    overrides: { 'plan-verify': null },
+  })
+  assert.equal(counts['plan-verify'], 3, 'reliable() retries it, bounded at 3')
+  assert.equal(out.planGround.ran, false)
+  assert.match(out.planGround.reason, /could not be run/)
+  assert.match(logText, /the plan goes to review unchecked/)
+  assert.equal(out.stopped, undefined, 'and the run continues to the review')
+  assert.equal(counts['codex-plan-review#1'], 1)
+})
+
+test('a checker that THROWS is retried too, not fatal to the run', async () => {
+  const { out, counts } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    overrides: { 'plan-verify': THROW },
+  })
+  assert.equal(counts['plan-verify'], 3)
+  assert.equal(out.planGround.ran, false)
+  assert.equal(out.stopped, undefined)
+})
+
+test('script problems and unsupported claims both reach the editor, and the fix is re-checked', async () => {
+  let pass = 0
+  const { out, counts, prompts } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    planCheck: () => {
+      pass++
+      return pass === 1
+        ? { problems: ['files to change: `src/Gone.java:4` does not resolve (no such file)'],
+            citations: [CITED('src/A.java:10', 'A validates the upload'), CITED('src/B.java:20', 'B rejects an empty file')] }
+        : { problems: [], citations: [] }
+    },
+    claim: (where) => where.includes('B.java')
+      ? { supported: false, why: 'src/B.java:20 is a logger call', fix: 'cite src/B.java:41 instead' }
+      : { supported: true, why: 'it says so' },
+  })
+  assert.equal(out.planGround.checked, 2)
+  assert.equal(out.planGround.problems, 1)
+  assert.equal(out.planGround.unsupported, 1)
+  assert.equal(counts['plan-ground-fix'], 1)
+  // Both halves reach the editor: the script's deterministic findings and the reader's judgement.
+  assert.match(prompts['plan-ground-fix'], /THE CHECKER REPORTED/)
+  assert.match(prompts['plan-ground-fix'], /does not resolve/)
+  assert.match(prompts['plan-ground-fix'], /DO NOT SAY WHAT THE PLAN CLAIMS/)
+  assert.match(prompts['plan-ground-fix'], /cite src\/B\.java:41 instead/)
+  // THE EDITOR MAY NOT MOVE `status:`. plan-fix flips it in the same edit, which is right AFTER the
+  // review and wrong here — this plan has not been reviewed yet.
+  assert.match(prompts['plan-ground-fix'], /Do NOT touch the "status:" header/)
+  // The re-run is the only confirmation the fixes landed: the editor reports what it MEANT to do.
+  assert.equal(counts['plan-verify-again'], 1)
+  assert.deepEqual(out.planGround.outstanding, [])
+  assert.equal(out.planGround.applied.length, 1)
+})
+
+test('a fix that did not land is still outstanding — the editor is not taken at its word', async () => {
+  const stillBroken = { problems: ['files to change: `src/Gone.java:4` does not resolve (no such file)'], citations: [] }
+  const { out } = await run({ review: OK_REVIEW, planfix: OK_FIX, planCheck: stillBroken })
+  assert.equal(out.planGround.outstanding.length, 1)
+})
+
+test('a dead claim reader leaves its claims UNVERIFIED, never supported', async () => {
+  // Silence reading as agreement is the failure every track in this pack refuses. Here it would
+  // hand Codex a plan described as pre-checked when nothing checked it.
+  const { out, counts, logText } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    planCheck: { problems: [], citations: [CITED('src/A.java:10', 'A validates the upload')] },
+    overrides: { 'plan-cite#': null },
+  })
+  assert.equal(out.planGround.unverified, 1)
+  assert.equal(out.planGround.unsupported, 0, 'a dead reader is not a defect in the plan')
+  assert.match(logText, /UNVERIFIED \(the reader died\)/)
+  // Nothing to apply, so no editor: there is no fix for "nobody looked".
+  assert.equal(counts['plan-ground-fix'], undefined)
+  assert.equal(counts['plan-verify'], 1)
+})
+
+test('what the pass could NOT settle reaches Codex as a named weak spot', async () => {
+  const { prompts } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    planCheck: { problems: ['AC-3 has no coverage row naming a test'], citations: [] },
+  })
+  assert.match(prompts['codex-plan-review#1'], /KNOWN WEAK SPOTS/)
+  assert.match(prompts['codex-plan-review#1'], /AC-3 has no coverage row/)
+  assert.match(prompts['codex-plan-review#1'], /These are not\n     findings/)
+})
+
+test('a plan the pass settled adds NOTHING to the Codex prompt', async () => {
+  // The weak-spot note earns its place by being rare. A preamble on every review is a preamble
+  // nobody reads, and it would compete with the rubric for the reviewer's attention.
+  const { prompts } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    planCheck: { problems: [], citations: [CITED('src/A.java:10', 'A validates the upload')] },
+  })
+  assert.doesNotMatch(prompts['codex-plan-review#1'], /KNOWN WEAK SPOTS/)
+})
+
+test('claims are batched by the FILE they cite, so one reader opens one file once', async () => {
+  const cites = [
+    CITED('src/A.java:10', 'A validates the upload'),
+    CITED('src/A.java:44', 'A re-renders the fragment'),
+    CITED('src/B.java:20', 'B rejects an empty file'),
+  ]
+  const { counts } = await run({ review: OK_REVIEW, planfix: OK_FIX, planCheck: { problems: [], citations: cites } })
+  const readers = Object.keys(counts).filter((l) => l.startsWith('plan-cite#'))
+  assert.equal(readers.length, 2, 'two files, two readers — never one agent per claim')
+  assert.ok(readers.some((l) => l.endsWith('src/A.java')), `batched by file, got ${readers}`)
+})
+
+test('a citation the script could not resolve is never sent to a reader', async () => {
+  // It is already a problem the script named. A reader would spend a dispatch to answer "I could
+  // not find it", which is what the script just said.
+  const { counts, out } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    planCheck: { problems: ['files to change: `src/Gone.java:4` does not resolve (no such file)'],
+                 citations: [{ where: 'src/Gone.java:4', resolvedAs: '', resolves: false, ambiguous: false, section: 'files to change', claim: 'Gone validates it' }] },
+  })
+  assert.equal(Object.keys(counts).filter((l) => l.startsWith('plan-cite#')).length, 0)
+  assert.equal(out.planGround.checked, 0)
+  assert.equal(counts['plan-ground-fix'], 1, 'but the script problem still reaches the editor')
+})
+
+test('a blocked editor is logged and the run carries on to the review', async () => {
+  const { out, counts, logText } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    planCheck: { problems: ['AC-2 has no coverage row naming a test'], citations: [] },
+    overrides: { 'plan-ground-fix': null },
+  })
+  assert.match(logText, /the plan grounding editor was blocked/)
+  assert.equal(counts['codex-plan-review#1'], 1)
+  assert.equal(out.stopped, undefined)
+})
+
+// ------------------------------------------------- the test-reading explorer (C) ---
+
+test('a fixed explorer reads the real tests, and its brief reaches the planner', async () => {
+  const { counts, prompts } = await run({ review: OK_REVIEW, planfix: OK_FIX })
+  assert.equal(counts['explore-tests'], 1)
+  assert.match(prompts['explore-tests'], /QUOTE the actual test bodies/)
+  assert.match(prompts['explore-tests'], /\[RED\]/)
+  assert.match(prompts['planner'], /--- the existing tests, quoted ---/)
+})
+
+test('it does not run at the light tier', async () => {
+  const { counts } = await run({ source: baseSource({ profile: 'light', uiTouched: false, uiVisualChange: false }) })
+  assert.equal(counts['explore-tests'], undefined)
+})
+
+test('THE TEST READER DOES NOT VOTE — a lone aspect explorer still escalates on one flag', async () => {
+  // The quorum is `liveBriefs.length > 1 ? 2 : 1`: with one reader there is no second opinion to be
+  // had, so a single well-formed flag escalates. The test reader is dispatched in the same wave and
+  // must not turn that one reader into two — it maps tests, not risk surfaces, and a bar raised by
+  // a reader with no vote would silently cost the escalation exactly where a miss is most expensive.
+  const { out } = await run({
+    source: baseSource({ profile: 'standard', exploreAspects: ['the whole change'] }),
+    riskFlags: [{ surface: 'auth', where: 'src/SecurityConfig.java:40', why: 'adds a permit rule for the new route' }],
+    review: OK_REVIEW, planfix: OK_FIX,
+  })
+  assert.equal(out.profile, 'full')
+  assert.equal(out.profileEscalated, true)
+})
+
+test('and the test brief reaches the planner exactly once', async () => {
+  // The other half of keeping it out of `liveBriefs`: a reader counted there would be pasted into
+  // briefText as a numbered brief AND appended as the quoted tests, doubling the most expensive
+  // block in the planner's context.
+  const { prompts } = await run({ review: OK_REVIEW, planfix: OK_FIX })
+  // The DASHED delimiter, not the bare phrase: the planner prompt names the section in prose too,
+  // so matching the phrase counts the instruction as if it were the brief.
+  const hits = prompts['planner'].split('--- the existing tests, quoted ---').length - 1
+  assert.equal(hits, 1)
+  // And the aspect briefs are still numbered from the aspect explorers alone.
+  assert.match(prompts['planner'], /--- brief 2 ---/)
+  assert.doesNotMatch(prompts['planner'], /--- brief 3 ---/)
+})
+
+test('a dead test reader is NAMED, and the run plans on without it', async () => {
+  const { counts, logText, prompts } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    overrides: { 'explore-tests': null },
+  })
+  assert.equal(counts['explore-tests'], 3, 'reliable() retries it, bounded at 3')
+  assert.match(logText, /the TDD plan is written without the existing tests in front of it/)
+  assert.doesNotMatch(prompts['planner'], /--- the existing tests, quoted ---/)
+})
+
+test('a dead test reader does not cost the run its code map', async () => {
+  // It is dispatched in the same wave as the aspect explorers and sliced back off afterwards. A
+  // split that lost an aspect brief would plan against unread code and never say so.
+  const { out, logText } = await run({
+    review: OK_REVIEW, planfix: OK_FIX,
+    overrides: { 'explore-tests': null },
+  })
+  assert.equal(out.stopped, undefined)
+  assert.doesNotMatch(logText, /explorer slice\(s\) came back unusable/)
 })

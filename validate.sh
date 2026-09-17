@@ -86,6 +86,7 @@ for t in skills/spec-brainstorm/tests/check_spec.test.sh \
          skills/plan-report/tests/milestone_scope.test.sh \
          skills/plan-unblock/tests/resolve_scope.test.sh \
          skills/task-run/tests/plan-ledger.test.sh \
+         skills/task-run/tests/plan_check.test.sh \
          skills/ui-prototype/tests/designmd.test.sh \
          skills/ui-prototype/tests/build-compare.test.sh \
          skills/page-serve/tests/serve.test.sh \

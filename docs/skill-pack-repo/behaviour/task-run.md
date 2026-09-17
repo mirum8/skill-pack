@@ -8,8 +8,10 @@ It is **two prose files, one pipeline and one script**:
 | `skills/task-run/SKILL.md` | the front door, Step 5 (`/r:task-review`), Step 6 (finish), resume & concurrency |
 | `skills/task-run/task-run-implement.workflow.js` | Steps 0–4 — source, explore, design, plan, plan review, implement, build |
 | `skills/task-run/scripts/plan-ledger.py` | the resume ledger in the plan's header — what a stopped run finished, and whether the tree still holds it |
+| `skills/task-run/scripts/plan_check.py` | the plan's own claims against the tree — citations, coverage rows, test tags — before a reviewer is paid to ask |
 | `skills/task-run/tests/control-flow.test.mjs` | the branches of that script, with `agent()`/`parallel()` stubbed |
 | `skills/task-run/tests/plan-ledger.test.sh` | the ledger's match, claim and lock — the judgements that fail by being confidently wrong |
+| `skills/task-run/tests/plan_check.test.sh` | both directions of the plan checker — a sound plan must come back clean, an unsound one must not |
 
 The script is the single encoding of Steps 0–4. `SKILL.md` delegates to it and must not restate
 the graph; there is no prose fallback engine, because a context with no `Workflow` tool has no
@@ -1955,6 +1957,80 @@ Two things the graph deliberately does **not** claim, because the suite contradi
   *States it:* `lib/read-config.py`
   *Enforced by:* `lib/read-config.py`
   *Tested by:* `lib/tests/config.test.sh`
+
+- **SB-task-run-174** — Between the scribe that writes the plan and the reviewer that challenges it,
+  a **grounding pass** checks the plan's own claims against the tree. It runs at `full` **and at
+  `standard`** — the tier whose planner-grade plan nothing has ever checked, since the Codex review
+  is full-tier only — and not at `light`, and not on a resume, where the plan was not written by
+  this run. It exists because two thirds of what the review confirms needs no judgement: over the
+  23 runs carrying rubric and severity the triage confirms **12.2 plan defects a run**, and
+  test-adequacy (91), coverage (58) and grounding (42) are **191 of 281** — all answerable against
+  the repo. Only `risk` needs a reviewer.
+  *States it:* `skills/task-run/task-run-implement.workflow.js`
+  *Enforced by:* `skills/task-run/task-run-implement.workflow.js`
+  *Tested by:* `skills/task-run/tests/control-flow.test.mjs`
+
+- **SB-task-run-175** — The pass is **two halves with one script between them**.
+  `skills/task-run/scripts/plan_check.py` decides what is **deterministic** — does a cited file
+  exist, does the line exist, has every acceptance criterion a coverage row naming a real test, is
+  every test entry tagged, is every required section present. The **claim readers** then decide
+  whether a line that resolves **says what the plan claims**, which is the review's own citation
+  lane (measured at 94–99% precision on grounding, test-adequacy and ui-design) run on the plan
+  before Codex rather than on Codex's findings afterwards. They batch by the **file** a claim cites,
+  through the same `batchesFor` the review triage uses, so one reader opens one file once.
+  *States it:* `skills/task-run/scripts/plan_check.py`
+  *Enforced by:* `skills/task-run/task-run-implement.workflow.js`
+  *Tested by:* `skills/task-run/tests/plan_check.test.sh`
+
+- **SB-task-run-176** — `plan_check.py` takes a positional plan path and one of `--report` (always
+  exits 0) or `--check` (**exits 1 when it reports a problem** — a check that cannot fail is not a
+  check), plus `--criteria` as a JSON array, `--repo` and `--tier`. **Five things fail closed**: an
+  unresolvable citation is a problem; a criterion with no row, or a row whose test cell names no
+  test, is uncovered; a `[RED]` entry saying nothing about the current code is unverified; an
+  untagged entry is untagged and **never** GREEN; and **no `--criteria` SKIPS the coverage check and
+  says so**, never reporting it clean. A **bare basename** resolves when the tree carries exactly one
+  file of that name and is reported **ambiguous**, not broken, when it carries several — plans cite
+  `rail.go:72` constantly, and reading those against the repo root alone called 2170 of 3574
+  references across 48 real plans broken. A **full path** that misses is a moved file and is never
+  re-pointed at a same-named sibling.
+  *States it:* `skills/task-run/scripts/plan_check.py`
+  *Enforced by:* `skills/task-run/scripts/plan_check.py`
+  *Tested by:* `skills/task-run/tests/plan_check.test.sh`
+
+- **SB-task-run-177** — **Nothing in the pass stops the run.** A blocked checker, a blocked editor
+  or a dead reader is logged and the plan goes to review anyway: a plan defect was never fatal, it
+  was found later and more expensively. A **dead claim reader leaves its claims UNVERIFIED, never
+  supported**, and unverified claims go to no editor — there is no fix for "nobody looked". What the
+  pass could not settle rides into the Codex prompt as **named weak spots**, and a plan it settled
+  adds nothing there at all. The editor is its **own** agent and **may not touch the `status:`
+  header**: `plan-fix` flips it in the same edit, which is right after the review and wrong here.
+  After it runs, the script runs **again** — the editor reports what it meant to do, and the gap
+  between that and the file is what this step closes.
+  *States it:* `skills/task-run/task-run-implement.workflow.js`
+  *Enforced by:* `skills/task-run/task-run-implement.workflow.js`
+  *Tested by:* `skills/task-run/tests/control-flow.test.mjs`
+
+- **SB-task-run-178** — A **fixed fourth explorer quotes the existing tests** rather than mapping
+  them, at `standard` and `full` only. Every other brief is capped at 200 lines and forbidden to
+  paste code; this one is the exception because the planner tags each test `[RED]` or `[GREEN]`
+  against the current code and has otherwise never read a test — and test-adequacy is the largest
+  and most certain defect class in the store, **91 confirmed against 1 dismissed, 52 of them major**.
+  It is dispatched in the same wave as the aspect explorers and **kept out of `liveBriefs`**: the
+  risk-flag quorum is `liveBriefs.length > 1 ? 2 : 1`, and a reader with no vote must not raise the
+  bar every flag has to clear. A dead one is **named**, and the run plans without it.
+  *States it:* `skills/task-run/task-run-implement.workflow.js`
+  *Enforced by:* `skills/task-run/task-run-implement.workflow.js`
+  *Tested by:* `skills/task-run/tests/control-flow.test.mjs`
+
+- **SB-task-run-179** — The planner keys the coverage contract's first column **`AC-1`, `AC-2`, … in
+  the order the criteria were given**, and the test cell must NAME a test. Plans key that table two
+  ways in the wild — an id, or a paraphrase — and a paraphrase cannot be matched to a criterion
+  without judgement. So `plan_check.py` **chooses** a mode and **reports which one it used**: with
+  ids it matches; without them it counts rows, which catches a missing row and cannot catch a
+  misaligned one, and says exactly that in `coverage.note`.
+  *States it:* `skills/task-run/task-run-implement.workflow.js`
+  *Enforced by:* `skills/task-run/scripts/plan_check.py`
+  *Tested by:* `skills/task-run/tests/plan_check.test.sh`
 
 ---
 

@@ -79,6 +79,7 @@ export const meta = {
     { title: 'Explore',     detail: 'read-only fan-out over the change surface', model: 'sonnet' },
     { title: 'Design',      detail: 'UI/UX spec via frontend-design, iff the visuals change', model: 'opus' },
     { title: 'Plan',        detail: 'Fable planner, written to .task-plans/', model: 'fable' },
+    { title: 'Plan-check',  detail: 'the plan\'s own citations and coverage, against the tree', model: 'haiku' },
     { title: 'Plan-review', detail: 'Codex challenge + one bounded re-review' },
     { title: 'Implement',   detail: 'branch + test-first domain subagents' },
     { title: 'Build',       detail: 'build with tests, bounded retry' },
@@ -326,6 +327,57 @@ const REVIEW = {
 //
 // The batch is the unit of DISPATCH, never of judgement — hence an array of verdicts keyed back to
 // each finding, rather than one verdict for the group.
+// What plan_check.py prints. Only the fields this script branches on: the rest of its report is for
+// a human reading the run log. `citations` is the input to the claim readers below, so it carries
+// the claim the plan makes about each line as well as the line itself.
+const PLAN_CHECK = {
+  type: 'object', additionalProperties: true,
+  required: ['problems'],
+  properties: {
+    problems: { type: 'array', items: { type: 'string' } },
+    citations: {
+      type: 'array',
+      items: {
+        type: 'object', additionalProperties: true,
+        required: ['where', 'resolves'],
+        properties: {
+          where: { type: 'string' },
+          resolvedAs: { type: 'string' },
+          resolves: { type: 'boolean' },
+          ambiguous: { type: 'boolean' },
+          section: { type: 'string' },
+          claim: { type: 'string' },
+        },
+      },
+    },
+  },
+}
+
+// One verdict per PLAN CLAIM, the mirror of VERDICTS below. The field is `supported` rather than
+// `real` on purpose: here the item under judgement is the plan's own assertion, so `real: true`
+// would mean the opposite of what it means thirty lines down, and a reader of either prompt would
+// have to hold which way round it is. `supported` is false when the cited line does not say what
+// the plan claims — that is the defect.
+const CLAIM_VERDICTS = {
+  type: 'object', additionalProperties: false,
+  required: ['verdicts'],
+  properties: {
+    verdicts: {
+      type: 'array',
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['n', 'supported', 'why'],
+        properties: {
+          n: { type: 'integer' },
+          supported: { type: 'boolean' },
+          why: { type: 'string' },
+          fix: { type: 'string' },   // what the plan should say instead; only meaningful when unsupported
+        },
+      },
+    },
+  },
+}
+
 const VERDICTS = {
   type: 'object', additionalProperties: false,
   required: ['verdicts'],
@@ -531,6 +583,33 @@ async function reliable(label, phaseName, run) {
 // so without it `impls.every(blocked)` is FALSE when every implementer died, and the run goes on
 // to build code nobody wrote. Every call site treats blocked() as "this track is bad".
 const blocked = (x) => !x || !!(x.blocked || x.ran === false)
+
+// Batching for the citation readers, at module scope because TWO passes use it: the plan
+// verification below, which checks the plan's OWN citations before Codex ever sees them, and the
+// review triage further down, which checks the citations in Codex's findings. One batcher, because
+// the unit of work is the same in both — the CODE a claim points at. Grouping by anything else made
+// a rubric with one minor finding buy a whole batch, measured at 8.0 batches a run for ~15.5 items.
+const CHUNK = 5
+// The file half of a `file:LINE`. Deliberately loose about the line — an item citing a file with no
+// line still groups with its neighbours, which is the whole point of grouping by code.
+const fileOf = (w) => {
+  const m = /([^\s:()[\]<>"'`,]+\.[A-Za-z0-9_]+)/.exec(String(w || ''))
+  return m ? m[1] : ''
+}
+// `group` is the fallback key for an item that cites no file — the rubric that raised it, or the
+// section it came from. The best proxy left, and never a shared bucket: two items grouped under a
+// key neither of them is about would be read together by a reader that can open neither.
+const batchesFor = (items, lane, whereOf = (f) => f.where, groupOf = (f) => f.rubric || f.section) => {
+  const out = []
+  const keyOf = (f) => fileOf(whereOf(f)) || groupOf(f) || 'other'
+  for (const key of [...new Set(items.map(keyOf))]) {
+    const group = items.filter((f) => keyOf(f) === key)
+    // A file that ran long is split rather than allowed to swallow the pass: one reader with twelve
+    // items is back to being the serial step this replaced.
+    for (let i = 0; i < group.length; i += CHUNK) out.push({ lane, key, items: group.slice(i, i + CHUNK) })
+  }
+  return out
+}
 
 // A `*`-tools type: it has Skill/Bash/Read/Write/Edit but NOT `Agent` — no agent
 // spawned from this script can fan out beneath itself. Every fan-out is therefore
@@ -1121,7 +1200,27 @@ log(`run-task-implement: planning — planner ${planRun.model}/${planRun.effort}
 phase('Explore')
 const aspects = (src.exploreAspects || []).slice(0, 3)
 const askedAspects = aspects.length ? aspects : ['the files this task will touch, their conventions, and the tests that cover them']
-const briefs = await parallel(askedAspects
+// ONE FIXED SLICE BESIDE THE THREE, and it returns the tests THEMSELVES rather than a map of them.
+//
+// Every other brief is capped at 200 lines and told to cite `path:LINE` with a sentence rather than
+// paste the code, which is right: the planner reasons about the code it is changing and a paste
+// would crowd out the files it has to think about. Tests are the exception, and the store says so.
+// test-adequacy is the largest class of confirmed plan defect and the most certain one — 91
+// confirmed against 1 dismissed, 52 of them major — and the reason is structural rather than
+// hortatory: the planner writes a TDD plan, tags each test [RED] or [GREEN] against the current
+// code, and has never read a test. A test plan derived from a summary of tests is a guess, and no
+// amount of prose in the planner prompt turns a guess into a reading.
+//
+// It runs at standard and full, never at light: light's plan is a brief by design, and light runs
+// ONE explorer, where the risk-flag quorum below is already unreachable.
+//
+// It is dispatched in the SAME parallel wave as the aspect explorers — the wall clock is the
+// slowest one either way — but deliberately kept OUT of `briefs` and so out of `liveBriefs`. The
+// quorum is `liveBriefs.length > 1 ? 2 : 1`, so a fourth brief in that array would silently raise
+// the bar every risk flag has to clear, and this reader maps tests rather than risk surfaces: it
+// has no vote to cast and must not change the price of anyone else's.
+const wantsTestBrief = profile !== 'light'
+const exploreWave = await parallel([...askedAspects
   .map((aspect, i) => () => reliable(`explore#${i + 1}`, 'Explore', async () => parseExplore(await agent(
     `Read-only exploration for this task: ${src.taskIntent}
 ${inRepo}
@@ -1189,7 +1288,37 @@ ${inRepo}
     // The label carries the slice INDEX, not just its first 24 characters. Three explorers on one
     // task routinely share an opening phrase ("Map the calculator…"), and when they do, three
     // identical rows in the progress tree make the one that died unidentifiable.
-    { label: `explore#${i + 1}:${aspect.slice(0, 24)}`, phase: 'Explore', agentType: 'Explore', ...exploreRun })))))
+    { label: `explore#${i + 1}:${aspect.slice(0, 24)}`, phase: 'Explore', agentType: 'Explore', ...exploreRun })))),
+  ...(wantsTestBrief ? [() => reliable('explore-tests', 'Explore', () => agent(
+    `Read-only: find the tests that already cover the behaviour this task changes, and SHOW them.
+
+     Task: ${src.taskIntent}
+${inRepo}
+     Locate the test files covering the code this change touches. Then, for the handful that matter
+     most, QUOTE the actual test bodies — the setup, the assertions, the helpers and fixtures they
+     use — not a description of them. A planner is about to write a TDD plan against this and tag
+     each test [RED] (it must fail against the current code) or [GREEN] (it passes today and guards
+     existing behaviour). It cannot tag honestly from a summary, which is why this slice pastes code
+     where every other brief is forbidden to.
+
+     Lead with the three or four tests closest to the change and quote those in full. After them,
+     list the remaining relevant test files as \`path:LINE\` with one line each on what they cover.
+     Also say, in a sentence each: what the project's test conventions are (naming, table-driven or
+     not, the assertion library, how fixtures and fakes are built), and what a NEW test for this
+     area would have to do to run at all.
+
+     If this area has no tests, say so plainly and name the nearest comparable suite the planner
+     should model a new one on. "There are no tests here" is a real and useful answer — inventing a
+     shape nobody uses is not.
+
+     Keep it under 300 lines. Your reply IS the brief: plain markdown, no JSON, no trailers.${BATCH_CLAUSE}`,
+    { label: 'explore-tests', phase: 'Explore', agentType: 'Explore', ...exploreRun }))] : []),
+])
+
+// The aspect explorers and the test reader are split back apart HERE, before anything counts them.
+// Only the aspect briefs vote on the tier; the test brief is context for the planner alone.
+const briefs = wantsTestBrief ? exploreWave.slice(0, -1) : exploreWave
+const testBrief = wantsTestBrief ? exploreWave[exploreWave.length - 1] : null
 
 const liveBriefs = briefs.filter((b) => b && !blocked(b) && b.brief)
 // Two accountings that would otherwise be silent. A slice that came back unusable is a hole in the code map
@@ -1208,7 +1337,16 @@ if (!liveBriefs.length) {
   log('run-task-implement: every explorer came back blocked — refusing to plan against unread code')
   return { stopped: 'explore-blocked' }
 }
-const briefText = liveBriefs.map((b, i) => `--- brief ${i + 1} ---\n${b.brief}`).join('\n\n')
+// A dead test reader is NAMED, not silently absent. Without this the planner writes its [RED]/
+// [GREEN] tags from a summary exactly as it did before and nothing in the run says why — which is
+// the shape that makes a measured change unreadable afterwards.
+const testBriefText = (typeof testBrief === 'string' && testBrief.trim())
+  ? `\n\n--- the existing tests, quoted ---\n${testBrief.trim()}`
+  : ''
+if (wantsTestBrief && !testBriefText) {
+  log('run-task-implement: the test-reading explorer came back unusable — the TDD plan is written without the existing tests in front of it')
+}
+const briefText = liveBriefs.map((b, i) => `--- brief ${i + 1} ---\n${b.brief}`).join('\n\n') + testBriefText
 
 // Phase 0 classified from the task DESCRIPTION, before anyone had opened the code. Now someone
 // has. A riskFlag means the change itself adds or alters one of the five surfaces named in the
@@ -1617,6 +1755,14 @@ const resume = { adopted: !!resuming, reviewedEarlier, slicesSkipped: [], slices
 let branchOn = ''
 let branchDrifted = false
 
+// The plan-grounding pass's tally, declared HERE for the same reason as the two above and not down
+// at Phase 2b where it is filled in: recordRun reads it, every stop above that phase calls
+// recordRun, and a const still in its temporal dead zone throws inside the try/catch that exists
+// to stop bookkeeping costing a run its result — losing the entire row, silently. So it is a
+// mutable object declared above the sink, zeroed, and filled in when the phase runs. A run that
+// stopped before the phase records zeros, which is the truth about it.
+const planGround = { ran: false, checked: 0, problems: 0, unsupported: 0, unverified: 0, applied: [], outstanding: [], reason: '' }
+
 // One row per run, recorded whether the run FINISHES or STOPS. A stop is the outcome most worth
 // measuring — it spent explorers, a planner and (at full tier) a Codex plan review and produced no
 // diff — and while the sink sat below the handoff every one of them was invisible: one Go project
@@ -1647,6 +1793,11 @@ const recordRun = async ({ stopped = '', buildGreen = 'n/a' } = {}) => {
       profileEscalated,
       profileReason: (src.profileReason || '').slice(0, 200),
       explorers: aspects.length || 1,
+      // Recorded BESIDE `explorers` and never folded into it: that number is the aspect fan-out and
+      // every historical row means it that way, so adding one to it would make every run before
+      // this change incomparable to every run after. This says whether the planner had the real
+      // tests in front of it when it wrote its [RED]/[GREEN] tags.
+      testBriefRead: !!testBriefText,
       uiTouched,
       // The two things worth measuring about the design gate, for the same reason profileEscalated
       // is recorded: uiEscalated says how often the description-based guess was wrong, and
@@ -1681,6 +1832,21 @@ const recordRun = async ({ stopped = '', buildGreen = 'n/a' } = {}) => {
       planReviewRan: !!planReview.ran,
       planApplied: planReview.applied.length,
       planDropped: planReview.dropped.length,
+      // The cheap pass in front of the reviewer, recorded so the question it was built to answer
+      // can be settled from rows rather than argued: did catching the mechanical classes early
+      // move `findings` above? Read them together — `planGroundApplied` rising while
+      // test-adequacy, coverage and grounding fall is the change working. All four falling,
+      // `risk` included, is the reviewer having gone quiet rather than the plan having improved,
+      // which is the failure worth watching for.
+      planGroundRan: !!planGround.ran,
+      planGroundChecked: planGround.checked,
+      planGroundProblems: planGround.problems,
+      planGroundUnsupported: planGround.unsupported,
+      // A dead reader is its own number. Folded into `unsupported` it would read as a plan defect;
+      // folded into nothing it would read as a clean claim.
+      planGroundUnverified: planGround.unverified,
+      planGroundApplied: planGround.applied.length,
+      planGroundOutstanding: planGround.outstanding.length,
       resume,
       // One row per finding Codex raised against the plan, with the judges' verdict. The two counts
       // above say how many landed and how many were thrown out; these say WHICH rubric keeps
@@ -1879,6 +2045,11 @@ ${uiDesignNote}
                  satisfy it. This is the tag that proves the change does something.
            [GREEN] it passes today — a regression guard that locks behaviour the change must not
                  break. A legitimate and common tag; it is only dishonest when it is labelled RED.
+         THE EXISTING TESTS ARE QUOTED IN THE BRIEFS ABOVE, under "the existing tests, quoted" —
+         read them before you tag anything. Tag against what you can see there and in the code, and
+         give every [RED] the clause that justifies it: the file:LINE that fails it, or the plain
+         statement that what it needs does not exist yet. A [RED] that only describes its own
+         assertions has made no claim about today's code at all, and is checked as such.
          Tag by what the code does, not by what would look better. A plan that calls a green guard
          a red gate produces a suite that appears to prove a fix while it only re-states existing
          behaviour — and the implementer, who runs these tests before writing anything, will find
@@ -1888,6 +2059,13 @@ ${uiDesignNote}
        - Coverage contract — one row per acceptance criterion:
          criterion -> where it's implemented -> the test that proves it -> the verification step.
          A criterion with no test behind it is not covered.
+         KEY THE FIRST COLUMN \`AC-1\`, \`AC-2\`, … in the order the criteria are listed above, one
+         id per criterion. It is what a checker matches your rows against, and a table keyed by a
+         paraphrase of the criterion can only be counted, not matched — so a row that quietly
+         covers the wrong criterion reads as complete. Put the id first; the criterion's words may
+         follow it in the same cell.
+         The test cell must NAME the test. A sentence about how the criterion is proven names
+         nothing anyone can run, and is read as no test at all.
 
        BEFORE YOU RETURN, DEEPEN ONCE: re-open the 3-5 files most critical to the approach you
        just chose and pressure-test the draft against the real code. Does the approach actually
@@ -2024,6 +2202,172 @@ ${uiDesignNote}
     log(`run-task-implement: plan-write reported failure${wrote.note ? ` ("${String(wrote.note).slice(0, 120)}")` : ''} but ${planPath} ends on the planner's last line — the plan is intact, continuing`)
   }
 }
+
+// --- Phase 2b: the plan's own claims, checked before a reviewer is paid for it -----------------
+//
+// Two thirds of what the Codex review confirms is answerable without judgement. Measured over the
+// 23 runs carrying rubric and severity, the triage confirms 12.2 plan defects a run —
+// test-adequacy 91, risk 62, coverage 58, grounding 42 — and three of those four are questions
+// about whether the plan's own claims line up with the tree. Only `risk` needs a reviewer. So the
+// cheap classes are answered here, by a script and a haiku reader, and Codex is left the class it
+// is actually for.
+//
+// TWO HALVES, and the split is the point. `plan_check.py` decides whether a citation RESOLVES —
+// does the file exist, does the line exist, is there a coverage row for every criterion, is every
+// test tagged. The claim readers then decide whether a resolving line SAYS WHAT THE PLAN CLAIMS.
+// The first is deterministic and belongs in a script; the second is the review's own citation lane,
+// which the store measures at 94-99% precision on grounding, test-adequacy and ui-design. Running
+// that lane on the plan's claims BEFORE Codex, rather than only on Codex's findings afterwards, is
+// the whole saving.
+//
+// IT RUNS AT `standard` TOO, and that is not a bonus — `standard` writes a full planner-grade plan
+// today and then nothing whatsoever checks it, because the Codex review is full-tier only. This is
+// the first validation that tier has ever had.
+//
+// NOTHING HERE STOPS THE RUN. A plan defect was never fatal; it was found later and more
+// expensively. What cannot be fixed is carried into the Codex prompt as a named weak spot, and at
+// `standard`, where there is no Codex, into the log and the handoff. A new halt in front of the
+// planner would cost more than the review it is making cheaper.
+// `planGround` itself is declared above recordRun — see the note there.
+if (!resuming && (profile === 'full' || profile === 'standard')) {
+  phase('Plan-check')
+  const CHECK_PY = `${PACK}/skills/task-run/scripts/plan_check.py`
+  const checkArgs = `${shellArg(planPath)} --check --repo . --tier ${profile} --criteria ${shellArg(JSON.stringify(src.criteria || []))}`
+  const runCheck = (label) => reliable(label, 'Plan-check', () => agent(
+    `Check the plan at ${planPath} against the repo. Run exactly this from the repo root and return
+     the JSON it prints EXACTLY as printed — every field, unchanged. Do not re-derive, re-order or
+     "correct" anything, and change no file:
+
+       python3 "${CHECK_PY}" ${checkArgs}
+
+     It exits 1 whenever it reports a problem, which is the gate doing its job and NOT a failure of
+     yours — return the JSON either way.`,
+    { label, phase: 'Plan-check', schema: PLAN_CHECK, ...GP, ...ECHO }))
+
+  const report = await runCheck('plan-verify')
+  if (blocked(report)) {
+    planGround.reason = 'the plan checker could not be run'
+    log(`run-task-implement: ${planGround.reason} — the plan goes to review unchecked`)
+  } else {
+    planGround.ran = true
+    const problems = Array.isArray(report.problems) ? report.problems : []
+    planGround.problems = problems.length
+    // Only claims whose line the reader can actually open. One that does not resolve is already a
+    // problem the script named, and sending it to a reader would buy an "I could not find it"
+    // verdict at the cost of a dispatch.
+    const claims = (report.citations || []).filter((c) => c && c.resolves && (c.claim || '').trim())
+    planGround.checked = claims.length
+    log(`run-task-implement: plan check — ${problems.length} problem(s) from the script, ${claims.length} resolving claim(s) to verify`)
+
+    const verdicts = new Map()
+    if (claims.length) {
+      const batches = batchesFor(claims, 'claim', (c) => c.resolvedAs || c.where, (c) => c.section)
+      const out = await parallel(batches.map((b, bi) => () => {
+        const label = `plan-cite#${bi + 1}:${b.key}`
+        return reliable(label, 'Plan-check', () => agent(
+          `Check ${b.items.length === 1 ? 'ONE claim' : `these ${b.items.length} claims`} the plan at ${planPath} makes about the code, against the
+           line each one cites. This is a LOOKUP, not a judgement call: open the cited line, read it,
+           and say whether it says what the plan claims. You are not editing the plan, and you are
+           not reviewing the plan's approach — only whether these specific lines say what it says
+           they say.
+
+           CLAIMS:
+${b.items.map((c, n) => `           ${n + 1}. CITED: ${c.resolvedAs || c.where}\n              THE PLAN SAYS: ${c.claim}`).join('\n')}
+
+           They mostly point at the same file, so open it ONCE and answer all of them from it —
+           enough around each line to read it honestly, the function it sits in rather than the
+           whole file. Do NOT go exploring the codebase: everything you need is the lines above.
+
+           Return one verdict per claim, with 'n' set to its number above:
+           - supported=true when the cited line says what the plan claims. Put the evidence in
+             'why'.
+           - supported=false when it does not — the line has moved, says something else, or does
+             not carry the behaviour the plan rests on it for. 'why' is the evidence, and in 'fix'
+             write what the plan should say instead, concretely enough that someone editing the plan
+             can apply it without re-doing your reading.
+           A plan claim is not a Codex finding: you are checking the plan, not a critique of it.${BATCH_CLAUSE}`,
+          { label, phase: 'Plan-check', schema: CLAIM_VERDICTS, ...GP, ...CITATION_RUN }))
+      }))
+      batches.forEach((b, bi) => {
+        const r = out[bi]
+        if (blocked(r) || !Array.isArray(r.verdicts)) return
+        for (const v of r.verdicts) {
+          const c = b.items[Number(v.n) - 1]
+          if (c) verdicts.set(c, v)
+        }
+      })
+    }
+
+    // A reader that died leaves its claims UNVERIFIED — never "supported". Silence reading as
+    // agreement is the failure every track in this pack is built to refuse, and here it would hand
+    // Codex a plan described as pre-checked when nothing checked it.
+    const unsupported = claims.filter((c) => { const v = verdicts.get(c); return v && v.supported === false })
+    const unverified = claims.filter((c) => { const v = verdicts.get(c); return !v || typeof v.supported !== 'boolean' })
+    planGround.unsupported = unsupported.length
+    planGround.unverified = unverified.length
+    if (unverified.length) {
+      log(`run-task-implement: plan check — ${unverified.length} claim(s) UNVERIFIED (the reader died); they are carried to the review rather than treated as sound`)
+    }
+
+    if (problems.length || unsupported.length) {
+      log(`run-task-implement: plan check — ${problems.length} problem(s) + ${unsupported.length} unsupported claim(s) going to the editor`)
+      // Its OWN editor, not plan-fix. That one flips `status:` to "implementing" in the same edit,
+      // which is right where it sits — after the review — and wrong here, where the plan has not
+      // been reviewed yet.
+      const fixed = await reliable('plan-ground-fix', 'Plan-check', () => agent(
+        `Fix these grounding problems in ${planPath}. Each was checked against the real code already,
+         so fold it in rather than re-litigating it.
+         ${problems.length ? `\n         THE CHECKER REPORTED:\n${problems.map((p) => `         - ${p}`).join('\n')}` : ''}
+         ${unsupported.length ? `\n         THESE CITED LINES DO NOT SAY WHAT THE PLAN CLAIMS:\n${unsupported.map((c) => {
+           const v = verdicts.get(c)
+           return `         - ${c.resolvedAs || c.where} — the plan says: ${c.claim}\n           WHY NOT: ${v.why || '(no reason given)'}${v.fix ? `\n           FIX: ${v.fix}` : ''}`
+         }).join('\n')}` : ''}
+
+         Edit ONLY ${planPath}. Do NOT touch the "status:" header — this plan has not been reviewed
+         yet, and that line is the review's to move. Do not edit the task's source document either:
+         it belongs to the caller.
+
+         Correct the citations, add the missing coverage rows, tag the untagged tests, and give each
+         [RED] the sentence about the current code that justifies calling it red. Where a citation
+         cannot be repaired because the code it described is simply not there, say so in
+         "Assumptions & risks" rather than inventing a line number — a plausible wrong citation is
+         worse than an admitted gap, because the reviewer after you will check it.
+         Record in 'applied' what actually landed, in the plan's own words.`,
+        { label: 'plan-ground-fix', phase: 'Plan-check', schema: PLANFIX, ...GP, ...EDIT_RUN }))
+      if (blocked(fixed)) {
+        planGround.reason = 'the plan grounding editor was blocked'
+        log(`run-task-implement: ${planGround.reason} — ${problems.length + unsupported.length} finding(s) went unapplied`)
+      } else {
+        planGround.applied = fixed.applied || []
+        // Re-run the script over what the editor left. This is the only confirmation that the
+        // citations now resolve, and it is cheap — the editor reports what it MEANT to do, and the
+        // gap between that and the file is exactly what this step exists to close.
+        const again = await runCheck('plan-verify-again')
+        if (!blocked(again)) {
+          planGround.outstanding = (again.problems || []).slice(0, 20)
+          log(`run-task-implement: plan check — ${planGround.applied.length} fix(es) applied, ${planGround.outstanding.length} problem(s) still outstanding`)
+        }
+      }
+    }
+    // Whatever survived, said out loud at `standard` too — there is no Codex behind it there, so
+    // the log and the handoff are the only readers it will ever get.
+    if (profile !== 'full' && (planGround.outstanding.length || planGround.unverified)) {
+      log(`run-task-implement: ${planGround.outstanding.length} plan problem(s) and ${planGround.unverified} unverified claim(s) remain, and the ${profile} tier runs no Codex plan review — they reach the caller in the handoff`)
+    }
+  }
+}
+
+// What the Codex reviewer is told about all of the above. Not a summary of the check — a list of
+// the spots it could NOT settle, so the expensive reader spends its attention there instead of
+// re-deriving what a script already answered.
+const groundNote = (planGround.outstanding.length || planGround.unverified)
+  ? `
+
+     KNOWN WEAK SPOTS, already checked and NOT settled before you were dispatched. These are not
+     findings — they are where a cheap pass ran out of road, and they are worth your attention
+     first:
+${planGround.outstanding.map((p) => `       - ${p}`).join('\n')}${planGround.unverified ? `\n       - ${planGround.unverified} cited line(s) could not be verified at all (the reader died), so treat this plan's citations as unchecked` : ''}`
+  : ''
 
 // --- Phase 3: Codex challenges the plan (full tier only) ---------------------
 // Before a line of code is written. There is no diff yet, so this reviews the plan DOCUMENT —
@@ -2198,7 +2542,7 @@ ${checks.map((c, i) => `     ${i + 1}. ${c}`).join('\n')}
      CLI default happens to be. Medium is the right level for THIS job: the rubric below is a
      fixed five-item checklist against a document and the code it cites, which is concrete checking
      rather than open-ended reasoning, and at high this step routinely ran 16-26 minutes to produce
-     the same critique. ${rubric}${delta(prior)}
+     the same critique. ${rubric}${groundNote}${delta(prior)}
 
      Set ran=true ONLY if the real Codex actually produced a critique. If the CLI is missing, the
      job failed, or it timed out and moved to the background and you could not collect the
@@ -2302,28 +2646,12 @@ ${checks.map((c, i) => `     ${i + 1}. ${c}`).join('\n')}
     // whatever rubric raised them; a finding with no file falls back to grouping by rubric, which
     // is the best proxy left. What none of this does is judge LESS: every finding still gets its
     // own verdict, its own evidence and its own changesApproach flag.
-    const CHUNK = 5
     const CITATION_RUBRICS = new Set(['grounding', 'test-adequacy', 'ui-design'])
-    // The file half of a `file:LINE`. Deliberately loose about the line — a finding citing a file
-    // with no line still groups with its neighbours, which is the whole point of grouping by code.
-    const fileOf = (w) => {
-      const m = /([^\s:()[\]<>"'`,]+\.[A-Za-z0-9_]+)/.exec(String(w || ''))
-      return m ? m[1] : ''
-    }
     // `looksLikeEvidence` is the same gate the explorers' risk flags pass through — a citation has
     // to name a path or an extension and be long enough to mean something. One test, not two.
+    // `batchesFor`, `fileOf` and `CHUNK` are at module scope: the plan verification pass above
+    // batches its own work the same way, by the code a claim points at.
     const laneOf = (f) => (CITATION_RUBRICS.has(f.rubric) && looksLikeEvidence(f.where)) ? 'citation' : 'judge'
-    const batchesFor = (findings, lane) => {
-      const out = []
-      const keyOf = (f) => fileOf(f.where) || (f.rubric || 'other')
-      for (const key of [...new Set(findings.map(keyOf))]) {
-        const group = findings.filter((f) => keyOf(f) === key)
-        // A file that ran long is split rather than allowed to swallow the pass: one reader with
-        // twelve findings is back to being the serial step this replaced.
-        for (let i = 0; i < group.length; i += CHUNK) out.push({ lane, key, items: group.slice(i, i + CHUNK) })
-      }
-      return out
-    }
 
     const citePrompt = (b) => `Check ${b.items.length === 1 ? 'ONE finding' : `these ${b.items.length} findings`} from Codex's review of the plan at ${planPath} against the
          line each one cites. This is a LOOKUP, not a judgement call: open the cited line, read it,
@@ -3075,6 +3403,12 @@ return {
   // The caller carries `applied` into the PR body; `dropped` is there so a dismissal can be
   // questioned instead of disappearing.
   planReview,
+  // What the cheap pass in front of the review settled, and what it could not. The caller reads
+  // `outstanding` and `unverified`: at `full` these also reached Codex as named weak spots, but at
+  // `standard` there IS no Codex, and this object is the only account anyone gets of whether the
+  // plan's citations hold. `ran:false` with a `reason` means the check itself could not run, which
+  // is not the same as a plan that passed it.
+  planGround,
   // What this run took from the plan's ledger. `reviewDone` is true only when nothing was
   // re-dispatched and a passed review was recorded over this exact tree — the caller skips Step 5
   // on it, and on nothing weaker.

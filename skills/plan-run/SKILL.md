@@ -327,15 +327,21 @@ session. For each phase:
    Let it classify.
 
    It maps the code, runs the UI/UX design phase if anything renders differently, plans on Opus,
-   has the **real Codex** challenge the plan, implements test-first through domain subagents and
-   drives the
+   checks the plan's own citations and coverage against the tree, has the **real Codex** challenge
+   the plan, implements test-first through domain subagents and drives the
    build green — then stops, leaving the uncommitted diff on the branch and returning the handoff:
 
    ```
    { branch, base, profile, profileReason, profileForced, uiTouched, uiVisualChange, designIntent,
      taskIntent, criteria, planPath, buildGreen: true | "n/a",   // "n/a" = no build ran, NOT a pass
-     planReview: { ran, passes, raised, applied, dropped } }
+     planReview: { ran, passes, raised, applied, dropped },
+     planGround: { ran, checked, problems, unsupported, unverified, applied, outstanding, reason } }
    ```
+
+   `planGround` is the cheap pass that runs **before** the review, at `full` and `standard` alike.
+   Read `outstanding` and `unverified` at **`standard`**: there is no Codex behind them at that tier,
+   so this is the only account anyone gets of whether the plan's citations hold. `ran: false` with a
+   `reason` means the check could not run — which is not the same as a plan that passed it.
 
    or `{ stopped: <reason>, … }` when it can't honestly continue — a **halt** (Step 3.7).
 
