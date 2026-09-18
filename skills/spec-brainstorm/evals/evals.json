@@ -370,6 +370,41 @@
           "text": "The stats row records mode: continue with restructured: true"
         }
       ]
+    },
+    {
+      "id": 7,
+      "kind": "behaviour",
+      "name": "continue-offers-silent-decisions-back",
+      "prompt": "/r:spec-brainstorm --continue",
+      "fixture": null,
+      "persona": "Backend lead who built the plan from this spec last month. Answers only what is asked. Truths that only come out if asked: they never agreed to one deployable — they assumed it would be split later — and they would pick a separate worker process for matching if given the choice; every other defaulted decision is fine as written.",
+      "expected_output": "The notes carry a ## Decisions log where most entries read 'proposed; accepted without objection' and the decisions coverage row says answered. The run treats those entries as defaulted, says how many it found and names the costliest, and puts them through the decision review: one multiSelect triage call grouped by altitude, then a single-select question for each picked one with the recommendation first. Untouched entries become chosen ('reviewed, kept'); the reversed topology gets a new ADR, the old one is marked superseded and stays. The confirm gate names the ADRs and the Parts 4/5/7 sections that change, writes nothing before a yes, and the hand-off says the existing todo.md was built on the old answer.",
+      "assertions": [
+        {
+          "id": "finds_silent",
+          "text": "Identifies the 'accepted without objection' decisions as defaulted and says how many, rather than treating them as settled"
+        },
+        {
+          "id": "triage_multiselect",
+          "text": "Offers them back as a multiSelect AskUserQuestion triage, not as a prose list or one question each"
+        },
+        {
+          "id": "asks_picked",
+          "text": "Asks each picked decision single-select with the recommendation first and the cost of each option"
+        },
+        {
+          "id": "supersedes",
+          "text": "A reversed decision gets a new ADR and the old one is marked superseded, never deleted or edited in place"
+        },
+        {
+          "id": "gate_first",
+          "text": "Names the changed ADRs and sections and waits for a yes before touching spec.html"
+        },
+        {
+          "id": "plan_warning",
+          "text": "The hand-off says the plan beside the spec needs /r:spec-design re-run"
+        }
+      ]
     }
   ]
 }

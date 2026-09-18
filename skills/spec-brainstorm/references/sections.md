@@ -274,8 +274,10 @@ Each is an `<h3>` in this shape:
 
 Six fields, and the two that carry the weight are **Alternatives** and **Consequences**.
 
-- **`Status`** — accepted · proposed · superseded by ADR-n. A superseded ADR stays in the
-  document; deleting it destroys the only record of why the earlier answer stopped working.
+- **`Status`** — accepted · proposed · superseded by ADR-n. `accepted` only when the log entry is
+  `chosen`, `corrected` or `overruled`; a `defaulted` entry is written `proposed`, so a reader can
+  tell a decision the user made from one they never saw. A superseded ADR stays in the document;
+  deleting it destroys the only record of why the earlier answer stopped working.
 - **`Context`** — the forces, in two or three sentences, naming the Part 3 characteristic or the
   Part 1 story that pushed on this. An ADR whose context names neither is one nobody can check.
 - **`Decision`** — one sentence, active voice, present tense.
@@ -290,8 +292,9 @@ Six fields, and the two that carry the weight are **Alternatives** and **Consequ
 
 `interview-notes.md` carries a `## Decisions` log written **as the interview runs**
 (`interview.md` §10). Every `propose→correct` the user corrected, every `default→veto` they
-vetoed or let stand, and every objection they overruled is a decision with a real context and a
-real alternative, captured while both were still true. Assemble this part from that log.
+vetoed or kept, and every objection they overruled is a decision with a real context and a
+real alternative, captured while both were still true. Assemble this part from that log, and take
+each ADR's `Status` from the entry's marker.
 
 **Never invent this part at write time.** An ADR reconstructed afterwards has a fabricated
 Alternatives field — the option you would have rejected, not the one on the table — and a reader

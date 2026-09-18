@@ -16,6 +16,7 @@ This file owns the question rules, the round structure and the coverage floor.
 10. Persisting the interview
 11. The coverage floor
 12. Failure modes
+13. The decision review
 
 ---
 
@@ -39,7 +40,7 @@ This decides the *form* of every question:
 | Scope, users, the one case | expensive — the whole document is wrong | **Open question.** Genuinely ask. |
 | **Driving characteristics** | expensive — every part below Part 3 is optimised for the wrong thing | **Forced trade-off.** Make them choose between two things they want. |
 | Domain model, components, unhappy endings | moderate — a section gets rewritten | **Propose, then correct.** State it as fact. |
-| API conventions, stack, error format | cheap — one line to change later | **Default and veto.** Assert it, invite objection, silence is agreement. |
+| API conventions, stack, error format | cheap — one line to change later | **Default and veto.** Assert it as the recommended option and let them veto it in a click. A default nobody answered is `defaulted`, never agreed. |
 
 People correct far better than they compose. *"What are your entities?"* returns a vague
 list. *"I count `Invoice`, `GoodsReceipt`, `PurchaseOrder`, `MatchResult` — which do you own
@@ -124,8 +125,9 @@ can be compared side by side.
 playback and the open questions; the call carries the choices. The tool takes at most four
 questions of two to four options, which sits under the batch ceiling — so when more than four
 choices are live, take the four with the most leverage (Rule 1 already ranks them) and let the rest
-ride as defaults recorded `assumed`. Nothing is lost: `--continue` offers every `assumed` row back,
-while a seventh question in the same breath is what makes people quit.
+ride as defaults logged `defaulted`. Nothing is lost: the decision review (§13) puts every one of
+them back in front of the user before the write gate, as a tick-list rather than a seventh question
+in the same breath — which is what makes people quit.
 
 A choice with one real option is a default, not a decision — record it and move on rather than
 calling the tool. And never call it twice on the same decision: a second prompt after an answer is
@@ -289,8 +291,10 @@ optimising for", and writing it down stops the argument being had again in month
    `{code, message, details}` with a stable machine-readable `code`; every list endpoint
    paginated, cursor, default 50. Push back on any of the three."
 
-Each of these is a proposal with a live alternative — the shape of an ADR. Log each outcome,
-corrected or accepted, in `## Decisions` (§10) as it lands.
+Each of these is a proposal with a live alternative — the shape of an ADR. Ask the ones with named
+options through the tool (§2), and log each outcome in `## Decisions` (§10) as it lands, marked with
+how it settled: `chosen`, `corrected`, `overruled`, or `defaulted` when it rode as a default nobody
+answered.
 
 ### Round 7 — technology and constraints
 
@@ -336,7 +340,9 @@ write them in marked `Assumed — not confirmed`, and let the user correct one l
 care.
 
 **Show progress** at the top of each round, and end every round with a ≤7-bullet assumption
-block and "silence = agreement".
+block. Never close it with "silence = agreement": what the user did not answer is logged
+`defaulted` and comes back in the decision review (§13), because a veto invited in prose and not
+given is indistinguishable from a veto nobody noticed.
 
 ---
 
@@ -490,7 +496,7 @@ status: interviewing      # interviewing | generated-partial | generated
 - stack-and-constraints: answered (round 7) — Java 21 / Spring Boot 3.4.1, on-prem, 4 engineers
 - integrations: answered (round 4) — SAP and the bank SFTP drop, neither changeable
 - failure-behaviour: answered (round 2) — unmatched invoices queue for a buyer, no auto-reject
-- decisions: answered (rounds 5–7) — 6 logged below, 2 of them corrections
+- decisions: assumed — 6 logged below, 2 corrections; 1 still defaulted, see §13
 - stories-and-v1: open
 - rollout: n/a — nothing exists today
 
@@ -499,16 +505,19 @@ status: interviewing      # interviewing | generated-partial | generated
 
 ## Decisions
 <!-- one per decision that had a live alternative: what was proposed, what happened, what else
-     was on the table, and the force that decided it. This becomes Part 6 verbatim. -->
-- **One deployable, modules inside it** — proposed; accepted without objection. Alternative on
+     was on the table, the force that decided it, and how it settled:
+     chosen | corrected | overruled | defaulted. This becomes Part 6 verbatim. -->
+- **One deployable, modules inside it** — proposed; picked in the decision review. Alternative on
   the table: a service per module, which they'd read about. Decided by team size (4 engineers)
-  and by `match within 30s` not needing independent scaling. *(round 6)*
+  and by `match within 30s` not needing independent scaling. *(round 6 · chosen)*
 - **Matching owns `MatchResult`** — proposed that Settlement own it; **corrected** — Matching
   writes it, Settlement only reads. Their reason: a re-match must not need Settlement to be up.
-  *(round 6)*
+  *(round 6 · corrected)*
 - **Eventual consistency between Matching and Settlement** — proposed; **overruled**. They
   require the ledger write and the payment instruction in one transaction. Objection made once
-  and withdrawn; accepted risk recorded in Risks. *(round 6)*
+  and withdrawn; accepted risk recorded in Risks. *(round 6 · overruled)*
+- **Cursor paging, default 50** — proposed; the user stopped the review before it was shown.
+  Alternative: offset paging. Decided by lists growing past 10k rows. *(round 6 · defaulted)*
 
 ## Assumptions (not confirmed)
 - REST plus webhooks — no existing API convention was named. Breaks if: … Confirm with: …
@@ -523,14 +532,22 @@ a third shape.
 
 ### The Decisions log is written live, and that is the whole point
 
-Append to `## Decisions` **the moment a decision lands**, not at generate time. Three things go
+Append to `## Decisions` **the moment a decision lands**, not at generate time. Four things go
 in it, each already happening in the interview:
 
 - a **propose→correct** the user corrected — their correction is the decision, your proposal is
   the alternative;
-- a **default→veto** they vetoed, or let stand after being told what it costs;
+- a **default→veto** they vetoed, or kept in a click after being told what it costs;
 - an **objection you made and they overruled** (§8) — the decision is theirs, the alternative is
-  yours, and the accepted risk is the consequence.
+  yours, and the accepted risk is the consequence;
+- a **default nobody answered** — logged `defaulted`. It still has a real alternative and a real
+  force, so it is still an ADR, but one the user never chose; Part 6 writes it with
+  `Status proposed`, and the decision review (§13) is how it becomes theirs.
+
+**Silence is never a decision.** A proposal met with no reply is `defaulted`, however obvious it
+looked — "accepted without objection" reads exactly like a choice, and a log full of them produces
+a Part 6 of fifty ADRs the user made two of. While any entry is `defaulted`, the `decisions`
+coverage row is `assumed`; `check_spec.py` reports the two disagreeing.
 
 `sections.md` §8 turns this log into Part 6. Assembling that part from memory afterwards
 produces ADRs with invented alternatives: the option you would reject today, not the one live
@@ -597,7 +614,7 @@ script as a row you skipped. Copy them verbatim.
 | `stack-and-constraints` | language, storage, hosting, team size, deadline |
 | `integrations` | which external systems it talks to, and which cannot be changed |
 | `failure-behaviour` | what the user sees when a dependency is down or a case can't complete |
-| `decisions` | every choice that had a live alternative is in the `## Decisions` log with the option not taken |
+| `decisions` | every choice that had a live alternative is in the `## Decisions` log with the option not taken — `assumed` while any entry is still `defaulted` |
 | `stories-and-v1` | the stories, and which ship first |
 
 **Add `rollout`** whenever anything already exists: the migration shape, and how to undo it.
@@ -636,6 +653,7 @@ difference is whether the reader knows.
 | **Adjective accepted as a characteristic** — "highly available", "fast" | Does the row carry a number and a way to measure it? | Force the trade-off (§1, rule 2), then read the number back |
 | **Everything is driving** — five ranked characteristics | Could any later decision point at one of these to justify itself? | Ask which two they'd sacrifice; three is the ceiling |
 | **Unlogged decision** — a correction or veto that never reached `## Decisions` | Diff the log against the round you just finished | Append it now, with the alternative that was live — an ADR written later invents one |
+| **Silence logged as a choice** — "accepted without objection" | Did the user click, say or pick it? | Log it `defaulted` and put it in the decision review (§13) |
 | Restating without deciding | Does the checkpoint contain a decision, or a paraphrase? | Every bullet is a decision or a number |
 | Infinite hedging | Count open questions with no default | Every unknown gets a default |
 | Register mismatch | Match vocabulary to the user's own first message | Define a term inline, once, only if you must use it |
@@ -643,3 +661,44 @@ difference is whether the reader knows.
 
 Failure to probe is the dominant real-world failure of AI interviewers — an adjective accepted
 at face value becomes a requirement nobody can test.
+
+---
+
+## 13. The decision review
+
+Run it whenever `## Decisions` holds a `defaulted` entry: before the Step 3 write gate on a first
+pass, and as part of the gap list on `--continue`. It is how a decision the user never saw becomes
+one they chose — in two calls, not fifty questions.
+
+**1. Rank.** Collect every `defaulted` entry and order it by what it costs to reverse, using the
+Rule 2 table: style and topology, component ownership, storage and sync-versus-async first; API
+conventions, formats and library picks last.
+
+**2. Triage — one call, `multiSelect`.** Up to four questions, one per altitude group (`header`:
+`Topology`, `Ownership`, `Data`, `Conventions` — whichever have entries), each listing up to four
+decisions as options. The question is *"Which of these do you want to decide yourself?"*; each
+option's `label` is the decision in a few words and its `description` names what it commits to and
+the alternative that was live. Sixteen decisions per call. With more, run a second triage call and
+say before it how many remain and that stopping here keeps the rest as `proposed`.
+
+**3. Ask the picked ones.** A single-select question each, at most four per call: the options that
+were live, each `description` carrying its cost, your recommendation first and labelled
+`(Recommended)`, `preview` where the options are two shapes of a contract. An answer is final —
+never re-ask it (§8).
+
+**4. Log what happened**, on the entry itself:
+
+| What happened | Marker | Evidence |
+|---|---|---|
+| picked in triage, answered with your recommendation | `chosen` | "decided in review" |
+| picked in triage, answered with another option | `corrected` | their option; yours becomes the alternative |
+| shown in triage and left unticked | `chosen` | "reviewed in triage, kept" — they saw it and let it stand in a click |
+| never shown, because the user stopped the review | `defaulted` | unchanged |
+
+Then re-derive the `decisions` coverage row: `answered` once no entry is `defaulted`, `assumed`
+while any is.
+
+**A corrected decision moves the document.** An answer that reverses a default reaches whatever was
+built on it — a different owner changes the component table, a different topology changes Part 5.
+Carry it into the gate's list of sections that will change, and on `--continue` supersede the old
+ADR rather than editing it (`sections.md` §8).

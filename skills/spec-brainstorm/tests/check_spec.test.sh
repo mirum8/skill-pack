@@ -317,6 +317,59 @@ says "an ADR with no Alternatives field is reported" "no Alternatives"
 mutant '/adr-1">ADR-1/d'
 says "a Decisions part with no ADR is reported" "carries no ADR"
 
+echo
+echo "== a decision nobody chose is not a settled decision =="
+good_notes
+cat >> "$TMP/interview-notes.md" <<'EOF'
+- **One deployable** — proposed; nobody answered. Alternative on the table: a service per
+  module. Decided by team size. *(round 2 · defaulted)*
+EOF
+spec <<EOF
+$GOOD_SPEC
+EOF
+says "a defaulted decision under a decisions row marked answered is reported" "defaulted"
+
+mutant 's|<b>Status</b> accepted|<b>Status</b> proposed|'
+says "a proposed ADR under a decisions row marked answered is reported" "proposed"
+
+notes <<'EOF'
+mode: full
+scope: new-service
+status: generated-partial
+
+## Coverage
+- users-and-job: answered (round 1) — finance ops staff, daily
+- core-flow: answered (round 1) — request, review, transfer
+- process: answered (round 2) — reviewed above 10k
+- domain-model: answered (round 2) — payout, merchant, balance
+- scale: answered (round 2) — under 1k payouts a day
+- anti-scope: answered (round 3) — no multi-currency
+- arch-characteristics: answered (round 2) — chose holding over rejecting; transfer within 60s
+- boundaries: answered (round 2) — one service, Payouts owns the payout
+- style-and-topology: answered (round 2) — layered, one deployable
+- api: answered (round 3) — REST over JSON
+- stack-and-constraints: answered (round 1) — existing Spring stack
+- integrations: answered (round 2) — the bank transfer API
+- failure-behaviour: answered (round 3) — retry then hold
+- decisions: assumed — 1 of 1 defaulted, never put to the user
+- stories-and-v1: answered (round 3) — merchant request ships first
+
+## Answers
+Round 1 — finance ops staff run this daily on the existing Spring stack.
+Round 2 — a payout belongs to a merchant and draws down a balance; the bank transfer API moves it.
+Round 2 — scale is under 1k payouts a day and the boundaries are one service, layered.
+Round 2 — arch-characteristics: hold rather than reject, and a transfer within 60s.
+Round 3 — REST over JSON, no multi-currency, the merchant request story ships first.
+Round 3 — failure-behaviour is retry then hold for manual review.
+
+## Decisions
+- **Hold rather than reject when the bank is down** — proposed rejecting; nobody answered.
+  Alternative on the table: reject and let the merchant retry. *(round 2 · defaulted)*
+EOF
+sed 's|<b>Status</b> accepted|<b>Status</b> proposed|' <<<"$GOOD_SPEC" > "$TMP/spec.html"
+silent "a defaulted decision recorded honestly as assumed is not reported" "defaulted|proposed"
+exits  "an honestly partial spec exits 0" 0
+
 
 echo "== a missing spec.html is a problem, not a clean run =="
 rm -f "$TMP/spec.html"

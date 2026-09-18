@@ -487,6 +487,29 @@ def check_interview(t, out):
     return explained
 
 
+def check_defaulted(notes, spec, out):
+    """interview.md §10: a proposal nobody answered is `defaulted`, and its ADR says `proposed`.
+    Either one under a `decisions` row that claims to be settled is a choice the user never made
+    reading as one they did — and `--continue` never offers a settled row back."""
+    log = re.search(r"^##\s*Decisions\s*$(.*?)(?=^##\s|\Z)", notes, re.M | re.S)
+    defaulted = len(re.findall(r"\bdefaulted\b", log.group(1), re.I)) if log else 0
+    blk = part(spec, "decision") or ""
+    proposed = len(re.findall(r"Status\s*:?\s*proposed\b", strip(blk), re.I))
+    if not defaulted and not proposed:
+        return
+    cov = re.search(r"^##\s*Coverage\s*$(.*?)(?=^##\s|\Z)", notes, re.M | re.S)
+    row = re.search(r"^\s*-\s*decisions\s*:\s*(.+?)\s*$", cov.group(1), re.M) if cov else None
+    verdict = split_row(row.group(1))[0] if row else ""
+    if verdict in UNSETTLED:
+        return
+    what = ", ".join(f"{n} {w}" for n, w in ((defaulted, "defaulted log entries"),
+                                             (proposed, "proposed ADRs")) if n)
+    out("interview-notes.md",
+        f"{what} under a decisions row marked '{verdict or 'unset'}' — a decision nobody chose is "
+        f"not settled. Mark the row 'assumed' so /r:spec-brainstorm --continue offers them back, "
+        f"or run the decision review and record what the user picked")
+
+
 def main():
     d = Path(sys.argv[1] if len(sys.argv) > 1 else ".")
     if not d.is_dir():
@@ -506,8 +529,10 @@ def main():
     if not spec:
         out("spec.html", "missing")
 
-    explained = check_interview(read("interview-notes.md"), out)
+    notes = read("interview-notes.md")
+    explained = check_interview(notes, out)
     check_spec(spec, explained, out)
+    check_defaulted(notes, spec, out)
 
     if not problems:
         print(f"clean — {d}")

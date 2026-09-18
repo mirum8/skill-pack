@@ -513,11 +513,22 @@ graph TD
 
 - **SB-spec-brainstorm-058** — The gap list is: every `open` row · every `assumed` row · every row
   just downgraded · every `Assumed — not confirmed` line · every open question the user could answer
-  in one sentence. All of them are asked, batched, and an `assumed` row goes through
+  in one sentence · every `defaulted` decision, which goes through the decision review rather than
+  a question each. All of them are asked, batched, and an `assumed` row goes through
   `AskUserQuestion` with the assumption as the recommended option — a sweep of them is the one
   place `multiSelect` is right, since the rows are independent and objecting to two of seven is one
   answer, not two.
   *States it:* `skills/spec-brainstorm/SKILL.md`, `skills/spec-brainstorm/references/interview.md`
+  *Enforced by:* —
+  *Tested by:* —
+
+- **SB-spec-brainstorm-164** — `--continue` also **audits `## Decisions`**: an entry with no settled
+  marker whose wording says nobody answered — "accepted without objection", "no objection", "let
+  stand", "not discussed" — is `defaulted`, and the count is said out loud. Silence is not
+  evidence, so offering such a decision back is not re-asking a settled row. A decision the review
+  reverses is named at the confirm gate by ADR number; the old ADR is marked `superseded by ADR-n`
+  and stays, and the hand-off says a plan beside the spec was built on the old answer.
+  *States it:* `skills/spec-brainstorm/SKILL.md`
   *Enforced by:* —
   *Tested by:* —
 
@@ -849,13 +860,34 @@ graph TD
   *Tested by:* —
 
 - **SB-spec-brainstorm-098** — **The `## Decisions` log is written the moment a decision lands, not
-  at generate time.** Three things go in it: a propose→correct the user corrected (their correction
-  is the decision, your proposal the alternative), a default→veto they vetoed or let stand after
-  being told the cost, and an objection you made and they overruled. The **force** that settled it —
+  at generate time.** Four things go in it: a propose→correct the user corrected (their correction
+  is the decision, your proposal the alternative), a default→veto they vetoed or kept in a click
+  after being told the cost, an objection you made and they overruled, and a default nobody
+  answered. Each entry carries how it settled: `chosen`, `corrected`, `overruled` or `defaulted`. The **force** that settled it —
   the characteristic, story or constraint — is logged with the outcome; an ADR whose context names
   none of those is one nobody can check later. A decision recorded five rounds later has lost what
   made it worth recording.
   *States it:* `skills/spec-brainstorm/references/interview.md`, `skills/spec-brainstorm/references/sections.md`
+  *Enforced by:* —
+  *Tested by:* —
+
+- **SB-spec-brainstorm-162** — **Silence is never a decision.** A proposal met with no reply is
+  logged `defaulted`, and its ADR is written `Status proposed`; `accepted` is only for an entry
+  marked `chosen`, `corrected` or `overruled`. While any entry is `defaulted` the `decisions`
+  coverage row is `assumed`, and `check_spec.py` reports a `defaulted` entry or a `proposed` ADR
+  under a `decisions` row that claims to be settled.
+  *States it:* `skills/spec-brainstorm/references/interview.md`, `skills/spec-brainstorm/references/sections.md`, `skills/spec-brainstorm/SKILL.md`
+  *Enforced by:* `skills/spec-brainstorm/scripts/check_spec.py`
+  *Tested by:* `skills/spec-brainstorm/tests/check_spec.test.sh`
+
+- **SB-spec-brainstorm-163** — **The decision review** runs whenever `## Decisions` holds a
+  `defaulted` entry: before the Step 3 write gate, and inside `--continue`'s gap list. Entries are
+  ranked by cost to reverse, triaged in one `multiSelect` call (up to four altitude groups of up to
+  four decisions — "which do you want to decide yourself?"), and each picked one is asked
+  single-select with the recommendation first. A picked one is logged `chosen` or `corrected`, one
+  shown and left unticked `chosen` as "reviewed, kept", and one never shown because the user stopped
+  stays `defaulted`.
+  *States it:* `skills/spec-brainstorm/references/interview.md`, `skills/spec-brainstorm/SKILL.md`
   *Enforced by:* —
   *Tested by:* —
 
@@ -1262,7 +1294,7 @@ graph TD
   `${CLAUDE_PLUGIN_ROOT}/lib/record-run.py`, **counts only** — never a topic, a section title or a
   question the user answered. The payload keys are `skill`, `mode`, `rounds`, `questionsAsked`,
   `rowsAsked`, `rowsAssumed`, `openQuestions`, `sections`, `diagrams`, `adrs`, `adrsFromLog`,
-  `drivingCharacteristics`, `restructured`, `researchRan`, `checkerProblems`, `wrote`,
+  `decisionsDefaulted`, `decisionsReviewed`, `decisionsChanged`, `drivingCharacteristics`, `restructured`, `researchRan`, `checkerProblems`, `wrote`,
   `blockedReason`.
   *States it:* `skills/spec-brainstorm/SKILL.md`
   *Enforced by:* `lib/record-run.py`
@@ -1397,9 +1429,9 @@ SB-spec-brainstorm-001, 004, 005, 006, 007, 008, 010, 011, 012, 013, 014, 016, 0
 065, 067, 068, 069, 070, 071, 072, 073, 074, 075, 076, 077, 078, 079, 080, 081, 082, 083, 085, 087,
 088, 089, 091, 092, 093, 094, 096, 098, 101, 102, 103, 105, 106, 107, 109, 110, 111, 112, 113, 114,
 116, 120, 122, 123, 124, 125, 128, 138, 140, 141, 145, 146, 147, 148, 149, 151, 152, 155, 156, 157,
-158, 159, 160.
+158, 159, 160, 163, 164.
 
-**99 of 161 entries.** The concentration is exactly where it would be expected: the interview
+**101 of 164 entries.** The concentration is exactly where it would be expected: the interview
 protocol and the research playbook are instructions to a model with no artifact to check them
 against, while everything the document *renders* — the seven parts, the ownership rule, the ADR
 fields, the story handles — is held by `check_spec.py` and its suite.

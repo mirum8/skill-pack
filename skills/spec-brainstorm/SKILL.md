@@ -169,6 +169,11 @@ first.
 
 ## Step 3 — write the document
 
+**First, the decision review, if `## Decisions` holds any `defaulted` entry** —
+`references/interview.md` §13. Every default that rode through a round without an answer is put
+back as a tick-list, and the ones the user picks are asked properly. Skipping it writes a Part 6
+of decisions the user never saw under a heading that says they made them.
+
 **Stop. Show the plan and wait for a yes before writing anything** — the sections under each of
 the seven parts, the diagrams, the decisions you'll write up as ADRs, and anything you defaulted
 rather than asked. Writing first and summarizing afterwards is not confirmation.
@@ -207,7 +212,8 @@ than three driving characteristics, a characteristic that is an adjective with n
 entity owned by two components, an `ADR-n` referenced but never written, unversioned technology,
 placeholder text, filler prose, a story with no acceptance criteria, a v1 line naming a story that
 isn't defined, a claim about existing code with no `path:line`, a coverage row settled with no
-evidence, and — under `--explain` — confidence tags that stopped partway or cite no source — all
+evidence, a `defaulted` decision or a `proposed` ADR under a `decisions` row that claims to be
+settled, and — under `--explain` — confidence tags that stopped partway or cite no source — all
 invisible on a read-through, which is why they belong to a script.
 
 Then six judgments a script cannot make. Be willing to delete your own work.
@@ -256,8 +262,18 @@ put it in the gap list, and **say which rows you downgraded**:
 > asked — the document names SAP and a bank SFTP drop, and that looks inferred rather than told.
 > I'm putting the row back on the list."
 
+**Audit `## Decisions` the same way.** An entry with no settled marker whose own wording says the
+user never answered — "accepted without objection", "no objection", "let stand", "not discussed",
+"silence" — is `defaulted`. So is one marked `accepted` whose Answers trail shows no reply. Mark
+them, say how many you found, and name the costliest few:
+
+> "Of 27 logged decisions, 14 were accepted without an answer — including one deployable, async
+> matching and who owns `MatchResult`. They go into the decision review with the rest."
+
 The gap list is therefore: every `open` row · every `assumed` row · every row you just downgraded ·
-every `Assumed — not confirmed` line · every open question the user could answer in one sentence.
+every `Assumed — not confirmed` line · every open question the user could answer in one sentence ·
+every `defaulted` decision, which goes through the decision review (`references/interview.md` §13)
+rather than a question each.
 Ask about all of them. Batch them, but ask them — and an `assumed` row is a default offered for
 veto, which is a click, so it goes through `AskUserQuestion` with the assumption as the
 recommended option. A sweep of them is the one place `multiSelect` is right: the rows are
@@ -305,6 +321,8 @@ two — so it devalues every genuine ADR beside it.
 Four rules make resuming safe:
 
 1. **Never re-ask a row with evidence behind it.** Quote their earlier answer when you build on it.
+   Silence is not evidence: a decision logged as accepted with no answer behind it is `defaulted`,
+   and offering it back is not re-asking.
 2. **Defaulted assumptions are fair game.** Offer every `assumed` row back as a question — that's
    most of the value of continuing.
 3. **Open questions get re-triaged.** Anything the user can answer in one line is a question.
@@ -340,6 +358,10 @@ for a yes:
 > async), the v1 line (two stories deferred), and Risks (one accepted). Story names unchanged.
 > Nothing left open. Apply?"
 
+A decision the review changed is named at this gate by ADR number, with the Parts 4, 5 and 7
+sections it reaches. A kept one flips its ADR from `proposed` to `accepted`; a reversed one gets a
+new ADR, and the old one is marked `superseded by ADR-n` and stays.
+
 On yes, **update in place** — rewrite only the sections those answers touch, refresh the coverage
 ledger with its verdicts, and set the status. Never regenerate from scratch, never mint a second
 folder, never rewrite a section no new answer affected.
@@ -370,7 +392,9 @@ Summarize the folder, the mode used, the sections and diagrams included, every r
 ```
 
 which turns the document into a phased plan beside it. Offer to refine any section or diagram first
-— cheaper now than after the plan is built on it.
+— cheaper now than after the plan is built on it. When a `todo.md` already sits beside the spec and
+this run reversed a decision, say that the plan was built on the old answer and that re-running the
+same command rewrites it with every built phase frozen.
 
 ## Step 6 — record the run
 
@@ -383,7 +407,8 @@ every spec was one somebody wanted.
 python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
 {"skill":"r:spec-brainstorm","mode":"full","rounds":0,"questionsAsked":0,
  "rowsAsked":0,"rowsAssumed":0,"openQuestions":0,"sections":0,"diagrams":0,
- "adrs":0,"adrsFromLog":0,"drivingCharacteristics":0,"restructured":false,
+ "adrs":0,"adrsFromLog":0,"decisionsDefaulted":0,"decisionsReviewed":0,"decisionsChanged":0,
+ "drivingCharacteristics":0,"restructured":false,
  "researchRan":"skipped","checkerProblems":0,"wrote":false,"blockedReason":null}
 STATS_JSON
 ```
@@ -405,6 +430,14 @@ question would have settled, and the guesses reach the plan and then the code.
 carries; `adrsFromLog` how many trace to a line written in `## Decisions` during the interview.
 Equal is the design working; `adrs` well above `adrsFromLog` means Part 6 is reconstructed at
 write time, which the finished file cannot show.
+
+**`decisionsDefaulted` is how many decisions went into the review, `decisionsReviewed` how many the
+user picked to decide, `decisionsChanged` how many of those came out different.** It is the check on
+the review itself: `adrs` far above `decisionsDefaulted` plus the questions asked means proposals
+are being logged as choices again, and `decisionsChanged` near zero across many runs means the
+defaults are good enough that the review is only a formality — worth knowing either way.
+`decisionsDefaulted` counts what was left `defaulted` after the review, so it is the number that
+stays unchosen in the document.
 
 **`drivingCharacteristics` should be 2 or 3.** One means round 5 produced a single number and
 nothing was traded; more than three means the forced trade-off was asked and not enforced, and
@@ -440,6 +473,8 @@ what was written. Never retry it.
 - Never ask a settled choice in prose. If you can name its two to four options, it goes through
   `AskUserQuestion` — a numbered line in a paragraph is answered with "whatever you think".
 - Never ask what you could decide yourself and record as an assumption.
+- Never log a proposal nobody answered as accepted. It is `defaulted`, its ADR is `proposed`, and
+  the decision review puts it back in front of the user before anything is written.
 - Never ask what a grep, a read or a fetch could answer. State what you found.
 - Never accept an adjective as a requirement. Reflect it back as a number or a rule.
 - Never state a price, quota, limit or version you did not read this session.
