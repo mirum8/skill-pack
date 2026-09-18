@@ -278,6 +278,11 @@ labelled `(Recommended)`; put a few lines of each shape in `preview` when the op
 schemas or two endpoint contracts. **Give a recommendation.** A question with no lean makes the
 user do the analysis you just did.
 
+**Write every question in plain English at B2 level** — here and at the gate: short sentences,
+common words, no idioms, a technical term explained in a few words the first time. Keep the real
+table names, status codes and costs; plain is not vague. A question the user has to read twice
+gets "whatever you think", and the choice is made silently after all.
+
 An answer that differs from the draft is applied to pass 2 before pass 3 starts: rewrite the
 contracts it touches, and re-cut the leaves if it moved the split.
 

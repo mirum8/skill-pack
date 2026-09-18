@@ -891,6 +891,13 @@ graph TD
   *Enforced by:* —
   *Tested by:* —
 
+- **SB-spec-brainstorm-165** — **Every question is written in plain English at B2 level** — the
+  tool's question text, labels and descriptions, and the prose questions: short sentences, common
+  words, no idioms, a technical term explained once, real names, numbers and costs kept.
+  *States it:* `skills/spec-brainstorm/SKILL.md`, `skills/spec-brainstorm/references/interview.md`
+  *Enforced by:* —
+  *Tested by:* —
+
 - **SB-spec-brainstorm-099** — The ledger records **how** a row was settled, with six verdicts:
   `answered (round n)` · `repo` · `research` · `n/a` · `assumed` · `open`. The first four owe an
   evidence clause after the dash; if you cannot write the evidence clause the verdict is `assumed`,
@@ -1429,9 +1436,9 @@ SB-spec-brainstorm-001, 004, 005, 006, 007, 008, 010, 011, 012, 013, 014, 016, 0
 065, 067, 068, 069, 070, 071, 072, 073, 074, 075, 076, 077, 078, 079, 080, 081, 082, 083, 085, 087,
 088, 089, 091, 092, 093, 094, 096, 098, 101, 102, 103, 105, 106, 107, 109, 110, 111, 112, 113, 114,
 116, 120, 122, 123, 124, 125, 128, 138, 140, 141, 145, 146, 147, 148, 149, 151, 152, 155, 156, 157,
-158, 159, 160, 163, 164.
+158, 159, 160, 163, 164, 165.
 
-**101 of 164 entries.** The concentration is exactly where it would be expected: the interview
+**102 of 165 entries.** The concentration is exactly where it would be expected: the interview
 protocol and the research playbook are instructions to a model with no artifact to check them
 against, while everything the document *renders* — the seven parts, the ownership rule, the ADR
 fields, the story handles — is held by `check_spec.py` and its suite.

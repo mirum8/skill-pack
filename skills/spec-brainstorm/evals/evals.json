@@ -403,6 +403,10 @@
         {
           "id": "plan_warning",
           "text": "The hand-off says the plan beside the spec needs /r:spec-design re-run"
+        },
+        {
+          "id": "plain_english",
+          "text": "Question text, option labels and descriptions are plain B2-level English: short sentences, common words, no idioms, real names and numbers kept"
         }
       ]
     }

@@ -419,6 +419,13 @@ flowchart TD
   *Enforced by:* —
   *Tested by:* —
 
+- **SB-spec-design-131** — Every design question, in Step 3.5 and at the gate, is written in
+  **plain English at B2 level**: short sentences, common words, no idioms, a technical term
+  explained once, the real table names, status codes and costs kept.
+  *States it:* `skills/spec-design/SKILL.md`
+  *Enforced by:* —
+  *Tested by:* —
+
 - **SB-spec-design-049** — Each question states the decision, the options, what each costs, and
   **which one it would take and why**. A question with no lean makes the user redo the analysis the
   skill just did.
@@ -1074,7 +1081,7 @@ flowchart TD
 ## Prose-only behaviours
 
 Held up by wording alone — no *Enforced by:* and no *Tested by:* — so nothing fails if one quietly
-stops being true. **72 of 130 entries**, and they cluster: the three steps where a person is in the
+stops being true. **73 of 131 entries**, and they cluster: the three steps where a person is in the
 loop (the Codex challenge, the gate, the hand-off) are prose-only end to end.
 
 - **Invocation and flags** — 003, 004, 005, 006, 007, 008, 009. Nothing reads the flags but the
@@ -1088,7 +1095,7 @@ loop (the Codex challenge, the gate, the hand-off) are prose-only end to end.
 - **Step 3, what a contract is** — 040, 041, 043, 044, 045, 130. `check_todo.py` never reads the
   contracts file's *content*, so a `file:LINE` reference, a reuse map or a page of pseudocode inside
   `tech-design.md` passes every check in the pack.
-- **Step 3.5, the design questions** — 046, 047, 048, 049, 050. Whether the bar was applied is
+- **Step 3.5, the design questions** — 046, 047, 048, 049, 050, 131. Whether the bar was applied is
   visible only as `designChoicesAsked` in a row the same run writes about itself.
 - **Step 6.5, the Codex challenge — the whole step** — 065, 066, 067, 068, 069, 070, 071, 072, 073.
   Nothing verifies that the review ran, that `--background` was passed, that the rubric stayed at

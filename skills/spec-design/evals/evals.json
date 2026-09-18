@@ -364,6 +364,10 @@
         {
           "id": "recorded_if_unanswered",
           "text": "Under --yes the recommended option is taken and recorded in Open questions with its alternative, never silently applied"
+        },
+        {
+          "id": "plain_english",
+          "text": "Question text, option labels and descriptions are plain B2-level English: short sentences, common words, no idioms, real names and numbers kept"
         }
       ]
     },

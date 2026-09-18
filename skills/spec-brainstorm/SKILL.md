@@ -130,7 +130,9 @@ a silence you have to read as agreement, which is indistinguishable from a veto 
 Prose keeps what has no honest option list: the scope, the users, the one case, and a list to edit.
 The prose carries the reasoning and the open questions, then one call carries the round's choices —
 recommendation first and labelled `(Recommended)`, each option's description naming its cost, no
-authored "Other". `references/interview.md` §2 has the mapping and the four-question ceiling.
+authored "Other". Every question — in the tool or in prose — is written in plain English at B2
+level: short sentences, common words, a technical term explained once, real names and numbers
+kept. `references/interview.md` §2 has the mapping and the four-question ceiling.
 
 **Decide by default, and say that you guessed.** A wrong guess costs one sentence of correction —
 cheaper than asking almost every time. A decision you made goes into the coverage ledger as

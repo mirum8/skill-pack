@@ -121,6 +121,13 @@ that is where "I don't know" (§9) and the answer you didn't foresee arrive. Whe
 different *shapes* of a contract, an API or a schema, put a few lines of each in `preview` so they
 can be compared side by side.
 
+**Every question is written in plain English at B2 level** — the question text, each option's
+`label` and `description`, and the prose questions too. Short sentences, one idea each, common
+words, no idioms, no stacked clauses. A technical term that has to stay is explained in a few words
+the first time it appears. Plain does not mean vague: keep the real names, numbers, versions and
+costs — "Postgres 16, one table per entity" beats "a relational store". A question the user has to
+read twice is answered with "whatever you think", which is the failure the tool exists to prevent.
+
 **The prose comes first, then one call for the round.** The message carries the reasoning, the
 playback and the open questions; the call carries the choices. The tool takes at most four
 questions of two to four options, which sits under the batch ceiling — so when more than four
@@ -656,7 +663,7 @@ difference is whether the reader knows.
 | **Silence logged as a choice** — "accepted without objection" | Did the user click, say or pick it? | Log it `defaulted` and put it in the decision review (§13) |
 | Restating without deciding | Does the checkpoint contain a decision, or a paraphrase? | Every bullet is a decision or a number |
 | Infinite hedging | Count open questions with no default | Every unknown gets a default |
-| Register mismatch | Match vocabulary to the user's own first message | Define a term inline, once, only if you must use it |
+| Register mismatch — a question in dense or idiomatic English | Could a B2 reader answer it on the first read? | Short sentences, common words; define a term inline, once, only if you must use it |
 | Monologue | Is question text over ~150 words? | Cut the preamble, lead with the question |
 
 Failure to probe is the dominant real-world failure of AI interviewers — an adjective accepted
