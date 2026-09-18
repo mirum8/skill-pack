@@ -24,7 +24,7 @@ flowchart TD
   S2 --> SH{"--shallow?"}
   SH -- "yes: skip passes 2 and the design questions" --> S4["Step 4 — pass 3: the leaf checklists"]
   SH -- "no" --> S3["Step 3 — pass 2: contracts into tech-design.md"]
-  S3 --> S35["Step 3.5 — collect the design choices you cannot settle"]
+  S3 --> S35["Step 3.5 — ask the design choices you cannot settle, before pass 3 and Codex"]
   S35 --> S4
   S4 --> S5["Step 5 — write each leaf"]
   S5 --> S6["Step 6 — unbuildable work to an unnumbered '## Resolve first'"]
@@ -105,9 +105,9 @@ flowchart TD
   *Enforced by:* —
   *Tested by:* —
 
-- **SB-spec-design-009** — `--yes` skips the Step 8 gate. It does **not** skip the Step 3.5
-  questions: an unresolved design choice is recorded in Open questions with the option taken and
-  why, so the decision stays visible when nobody was there to make it.
+- **SB-spec-design-009** — `--yes` skips the Step 8 gate and the Step 3.5 questions, but not their
+  record: every design choice that would have been asked is recorded in Open questions with the
+  option taken and why, so the decision stays visible when nobody was there to make it.
   *States it:* `skills/spec-design/SKILL.md`
   *Enforced by:* —
   *Tested by:* —
@@ -379,6 +379,14 @@ flowchart TD
   *Enforced by:* —
   *Tested by:* —
 
+- **SB-spec-design-130** — Pass 2 keeps **a list of the contract-level choices it made on its
+  own** — the ones the documents did not settle and that fall below the Step 3.5 bar — one line
+  each: the choice, the alternative, why. The gate shows it; it is the only place those calls are
+  visible before an implementer builds on them. `--shallow` has no pass 2 and no list.
+  *States it:* `skills/spec-design/SKILL.md`
+  *Enforced by:* —
+  *Tested by:* —
+
 - **SB-spec-design-045** — The stack is never re-decided. The documents chose it.
   *States it:* `skills/spec-design/SKILL.md`
   *Enforced by:* —
@@ -386,25 +394,27 @@ flowchart TD
 
 ## Step 3.5 — the design choices it cannot settle
 
-- **SB-spec-design-046** — A choice is asked about only when **all three** hold: the documents do
-  not settle it (read, and the answer is absent — not merely vague, and never a decision the spec
-  already made); two or more options are defensible and reasonable engineers would disagree; and the
-  choice changes the plan — the contracts, how leaves split, the graph, or the v1 line.
+- **SB-spec-design-046** — A choice is asked about when **both** hold: the documents do not settle
+  it (read, and the answer is absent — not merely vague, and never a decision the spec already
+  made), and the choice changes the plan — the contracts, how leaves split, the graph, or the v1
+  line. It must also be a real choice, with two options a reasonable engineer could defend; one
+  real option is a default and goes on the Step 3 list instead.
   *States it:* `skills/spec-design/SKILL.md`
   *Enforced by:* —
   *Tested by:* —
 
 - **SB-spec-design-047** — Naming, column order, whether a helper is static, which test framework
   the repo already uses, anything the code or `CLAUDE.md` answers by looking, are **not** design
-  questions. If it would not go in a design review it is not asked: six questions per plan and the
-  user stops reading.
+  questions. If it would not go in a design review it is not asked.
   *States it:* `skills/spec-design/SKILL.md`
   *Enforced by:* —
   *Tested by:* —
 
-- **SB-spec-design-048** — The questions are carried to Step 8 and asked **together, once, at the
-  gate**, alongside the decomposition — one interruption for both, because an answer that changes
-  the contracts usually changes the split too.
+- **SB-spec-design-048** — The questions are asked **right after pass 2, before pass 3 and the
+  Codex review**, through `AskUserQuestion`, at most four per call and the most leverage first —
+  more than four means a second call, never a cut. A question held to the gate arrives after the
+  checklists and the review have built on the guess. An answer that differs from the draft is
+  applied to pass 2 before pass 3 starts.
   *States it:* `skills/spec-design/SKILL.md`
   *Enforced by:* —
   *Tested by:* —
@@ -831,7 +841,7 @@ flowchart TD
 
 - **SB-spec-design-100** — **Nothing is written to disk before the gate.** It shows the milestones,
   the leaf titles, the graph, the wave table, what Codex raised and what was done about it, and the
-  open design choices from Step 3.5 — then stops for a yes.
+  Step 3.5 answers the plan is built on — then stops for a yes.
   *States it:* `skills/spec-design/SKILL.md`
   *Enforced by:* —
   *Tested by:* —
@@ -843,10 +853,12 @@ flowchart TD
   *Enforced by:* —
   *Tested by:* —
 
-- **SB-spec-design-102** — The decomposition and the design choices go in the **same interruption**,
-  because they are one decision seen twice: a choice that changes the contracts usually changes
-  which leaves exist. Discrete options are put through `AskUserQuestion`, each carrying the
-  recommendation and what it costs.
+- **SB-spec-design-102** — After the decomposition the gate shows **the choices the skill made on
+  its own** — the Step 3 list — as `multiSelect` questions: which of these does the user want to
+  decide? Each ticked one is asked as in Step 3.5; an answer that changes a contract re-runs passes
+  2 and 3 for that milestone and `check_todo.py`, and Codex reviews again only when the
+  decomposition changed. Nothing ticked is reported as seen and kept, and an empty list is said in
+  one line.
   *States it:* `skills/spec-design/SKILL.md`
   *Enforced by:* —
   *Tested by:* —
@@ -991,10 +1003,11 @@ flowchart TD
   *Enforced by:* —
   *Tested by:* —
 
-- **SB-spec-design-122** — `designChoicesAsked` calibrates the Step 3.5 bar, which is meant to be
-  narrow: several questions per plan means the bar is too low, zero across many plans means it is
-  too high and choices a human would have wanted are being made silently.
-  `designChoicesRecorded` counts the ones that went to Open questions instead of being answered.
+- **SB-spec-design-122** — `designChoicesAsked` calibrates the Step 3.5 bar: zero across many
+  plans means it is too high and choices a human would have wanted are being made silently, read
+  beside `designChoicesRecorded`, which counts the ones that went to Open questions instead of being
+  answered. `silentChoicesListed` against `silentChoicesRevisited` judges the line between Step 3.5
+  and the Step 3 list: revisited often means those choices belong in Step 3.5.
   *States it:* `skills/spec-design/references/stats-fields.md`
   *Enforced by:* —
   *Tested by:* —
@@ -1061,7 +1074,7 @@ flowchart TD
 ## Prose-only behaviours
 
 Held up by wording alone — no *Enforced by:* and no *Tested by:* — so nothing fails if one quietly
-stops being true. **71 of 129 entries**, and they cluster: the three steps where a person is in the
+stops being true. **72 of 130 entries**, and they cluster: the three steps where a person is in the
 loop (the Codex challenge, the gate, the hand-off) are prose-only end to end.
 
 - **Invocation and flags** — 003, 004, 005, 006, 007, 008, 009. Nothing reads the flags but the
@@ -1072,7 +1085,7 @@ loop (the Codex challenge, the gate, the hand-off) are prose-only end to end.
   (022, 024, 079–081); what is not is the draft staying in a scratch directory, the shape
   classification, and every inferred field being named as inferred.
 - **Step 2, sizing and grouping** — 030, 031, 033, 034.
-- **Step 3, what a contract is** — 040, 041, 043, 044, 045. `check_todo.py` never reads the
+- **Step 3, what a contract is** — 040, 041, 043, 044, 045, 130. `check_todo.py` never reads the
   contracts file's *content*, so a `file:LINE` reference, a reuse map or a page of pseudocode inside
   `tech-design.md` passes every check in the pack.
 - **Step 3.5, the design questions** — 046, 047, 048, 049, 050. Whether the bar was applied is

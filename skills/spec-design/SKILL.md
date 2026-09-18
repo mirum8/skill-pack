@@ -70,9 +70,9 @@ checklist, so it reaches the implementer through the path that already exists.
 
 - **`--shallow`** — stop after pass 1: the build order alone, no design contracts (Step 4). It
   writes no `tech-design.md`, and says so rather than leaving a stale one beside a fresh plan.
-- **`--yes`** — skip the gate (Step 8). It does not skip the questions in Step 3.5: an unresolved
-  design choice is recorded in Open questions with the option taken and why, so the decision stays
-  visible when nobody was there to make it.
+- **`--yes`** — skip the gate (Step 8) and the questions in Step 3.5, but not their record: every
+  design choice that would have been asked is recorded in Open questions with the option taken and
+  why, so the decision stays visible when nobody was there to make it.
 
 ## Step 1 — find and read the documents
 
@@ -218,6 +218,12 @@ until the leaves exist you cannot tell shared from local.
 Write only what is shared. A contract used by exactly one leaf belongs in that leaf's items, not
 in `tech-design.md` — hoisting it adds a hop for the reader and reaches nobody extra.
 
+**Keep a list of the choices you made on your own.** Every contract-level call this pass makes that
+the documents did not settle and that falls below the Step 3.5 bar — a table shape, soft or hard
+delete, an idempotency mechanism, a stub for an integration, which module owns a concept the spec
+names once — goes on it, one line each: the choice, the alternative, why. It is what the gate shows
+in Step 8, and the only place those calls are visible before an implementer builds on them.
+
 **Two files, one document.** The plan is the spine — what runs, in what order. `tech-design.md` is what a
 human reads to decide whether the design is *right*; no tool reads it, which is why Step 7 checks
 the two against each other. A milestone heading in the plan may carry one pointer line for the
@@ -234,18 +240,26 @@ reuse map is explicitly "the evidence you explored rather than imagined". Approa
 algorithms and pseudocode are out for the same reason: a diff plan against a codebase that does
 not exist yet.
 
-## Step 3.5 — ask about the design choices you cannot settle
+## Step 3.5 — ask about the design choices you cannot settle, now
 
-Pass 2 makes real decisions, and some the documents do not determine. **Where a choice is
-genuinely open and the answer would change the plan, ask — do not pick one quietly.**
+Pass 2 makes real decisions, and some the documents do not determine. **Where a choice is open and
+the answer would change the plan, ask — do not pick one quietly.**
 
-The bar is all three, together:
+**Ask here, right after pass 2 — before pass 3 and before the Codex review.** Pass 3 turns the
+contracts into checklist items and Codex reviews the result, so a question held back to the gate
+arrives after both have built on your guess: an answer then means rewriting items and re-reviewing,
+and the cheaper path is to let the guess stand. Asked here, the answer is what the checklists are
+derived from and what Codex reads.
+
+The bar is two things, together:
 
 1. **The documents do not settle it.** Not "they are vague" — you have read them and the answer is
    absent. A decision the spec already made is not open, however much you would have chosen
    differently.
-2. **Two or more options are defensible**, and reasonable engineers on this project would disagree.
-3. **The choice changes the plan** — the contracts, how leaves split, the graph, or the v1 line.
+2. **The choice changes the plan** — the contracts, how leaves split, the graph, or the v1 line.
+
+It also has to be a choice: at least two options a reasonable engineer on this project could
+defend. One real option is a default — it goes on the Step 3 list, not here.
 
 What that looks like: sync call versus a queue between two modules · one table with a type column
 versus separate tables · idempotency by unique constraint versus an outbox · soft delete versus
@@ -254,14 +268,18 @@ concept the spec names only once.
 
 **What it is not.** Naming, column order, whether a helper is static, which test framework the repo
 already uses, anything the code or `CLAUDE.md` answers by looking. If you would not put it in a
-design review, do not ask about it — six questions per plan and the user stops reading.
+design review, do not ask about it.
 
-**Ask them together, once, at the gate.** Carry each open choice into Step 8 and put it to the user
-alongside the decomposition — one interruption for both, and they are related: an answer that
-changes the contracts often changes the split too.
+**Ask with `AskUserQuestion`**, at most four per call, the most leverage first — a choice that
+changes the split before one that changes a column. More than four means a second call, not a
+cut: a choice that met the bar and was dropped for space is a silent decision. Each question
+carries the decision, the options with what each costs in its `description`, and your pick first,
+labelled `(Recommended)`; put a few lines of each shape in `preview` when the options are two
+schemas or two endpoint contracts. **Give a recommendation.** A question with no lean makes the
+user do the analysis you just did.
 
-State each one as: the decision · the options · what each costs · which you would take and why.
-**Give a recommendation.** A question with no lean makes the user do the analysis you just did.
+An answer that differs from the draft is applied to pass 2 before pass 3 starts: rewrite the
+contracts it touches, and re-cut the leaves if it moved the split.
 
 **Never invent an answer to a question you decided was worth asking.** If the run is unattended
 (`--yes`), or the user declines to choose, take your recommended option, build the plan on it, and
@@ -457,15 +475,20 @@ what was actually built?):
 ## Step 8 — the gate
 
 **Before writing anything to disk, show the decomposition and wait.** Milestones, leaf titles,
-the graph, the wave table, **what Codex raised and what you did about it (Step 6.5)** — **and the
-open design choices from Step 3.5** — then stop for a yes. Say plainly when the Codex review was
+the graph, the wave table, **what Codex raised and what you did about it (Step 6.5)**, and the
+Step 3.5 answers the plan is built on — then stop for a yes. Say plainly when the Codex review was
 skipped for want of the plugin; an unreviewed plan and a reviewed-and-clean one must not look
 alike at the one moment a human is deciding.
 
-Both go in the same interruption because they are the same decision seen twice: a design choice
-that changes the contracts usually changes which leaves exist. Ask the design questions with
-`AskUserQuestion` where the options are discrete; each one carries your recommendation and what it
-costs.
+**Then the choices you made on your own** — the Step 3 list, as one `AskUserQuestion` call of up
+to four `multiSelect` questions grouped by milestone or kind, each listing up to four choices:
+*"Which of these do you want to decide yourself?"* Each option's `description` names the
+alternative and why you took this one. Nothing ticked means they were seen and kept — say so in
+the report. Each ticked one is then asked as in Step 3.5, recommendation first. An answer that
+changes a contract re-runs pass 2 and pass 3 for that milestone and `check_todo.py` over the draft;
+Codex reviews again only under Step 6.5's rule, when the decomposition itself changed. An empty
+list is said in one line rather than skipped: "no choices made below the bar" and "the list was
+never shown" must not look alike. `--shallow` has no pass 2 and so no list.
 
 Every later pass hangs off the decomposition, and this is the cheapest moment to fix it: a
 re-split before writing costs one message; after writing, the whole document. One gate, here, and
@@ -541,7 +564,8 @@ where every plan was a good one.
 python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
 {"skill":"r:spec-design","mode":"full","docsRead":0,"hadRequirements":false,
  "milestones":0,"leaves":0,"waves":0,"maxWaveWidth":0,
- "designChoicesAsked":0,"designChoicesRecorded":0,"checkerProblems":0,"openQuestions":0,
+ "designChoicesAsked":0,"designChoicesRecorded":0,"silentChoicesListed":0,
+ "silentChoicesRevisited":0,"checkerProblems":0,"openQuestions":0,
  "codexReview":"ran","codexRaised":0,"codexApplied":0,"codexDismissed":0,
  "inputShape":"none","leavesFrozen":0,"leavesResplit":0,"leavesAdded":0,"leavesDropped":0,
  "fieldsInferred":0}
@@ -554,7 +578,7 @@ one's would report the bar as stricter than it is. A `rewrite` is a full run ove
 — every field a `full` run has, plus the migration counts.
 
 **What every remaining field is for** — the rewrite counts, `maxWaveWidth`,
-`designChoicesAsked`, `codexReview`, `checkerProblems`, and the cross-skill pair against
+`designChoicesAsked`, the silent-choice pair, `codexReview`, `checkerProblems`, and the cross-skill pair against
 `/r:plan-run` — is in [references/stats-fields.md](references/stats-fields.md). Read it while
 filling the line in: a field written without knowing what question it answers gets a plausible
 number instead of a true one.
@@ -589,8 +613,12 @@ the only thing that will ever notice it drifting.
   Never point it at `/r:code-adversarial` or a `run.sh` — those review a diff and there is none.
 - Never apply a Codex finding without verifying it against the documents and the real code, and
   never rewrite the plan for a minor or stylistic one.
-- Never silently resolve a design choice that met the Step 3.5 bar. Ask, or record the decision and
-  its alternative in Open questions. Never both silently decide and leave no trace.
+- Never silently resolve a design choice that met the Step 3.5 bar. Ask it right after pass 2, or,
+  under `--yes`, record the decision and its alternative in Open questions. Never both silently
+  decide and leave no trace.
+- Never hold a Step 3.5 question back to the gate. By then pass 3 and Codex have built on the guess.
+- Never make a contract-level choice without putting it on the Step 3 list — the gate shows that
+  list, and it is the only place the choice is visible before it is built.
 - Never re-decide the stack. The documents chose it.
 - Never write `file:LINE` or a reuse map — those are `/r:task-run`'s planner's, written against
   real code.

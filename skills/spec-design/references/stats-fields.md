@@ -8,7 +8,7 @@ written without knowing what question it answers gets a plausible number instead
 
 1. The rewrite fields
 2. `maxWaveWidth`
-3. `designChoicesAsked`
+3. `designChoicesAsked`, and the silent-choice pair
 4. `codexReview`
 5. `checkerProblems`
 6. The cross-skill pair
@@ -29,11 +29,17 @@ decomposition is too linear or this project's work is, and both are worth knowin
 it says whether that is a long chain or a wide one.
 
 **`designChoicesAsked` calibrates the Step 3.5 bar, and it is the field most likely to be read
-angrily.** The bar is meant to be narrow. Several questions per plan means it is too low and the
-skill spends attention it should spend deciding; zero across many plans means it is too high and
-choices a human would have wanted are made silently. `designChoicesRecorded` counts the ones that
-went to Open questions instead of being answered — under `--yes`, or when the user declined to
-choose.
+angrily.** These are asked right after pass 2. Several per plan is expected on a spec that leaves the
+contracts open; zero across many plans means the bar is too high and choices a human would have
+wanted are made silently. Read it beside `designChoicesRecorded`: 1 asked against 5 recorded is a
+plan whose design was chosen by the skill, whatever the Open questions list says. `designChoicesRecorded` counts the ones that went to Open
+questions instead of being answered — under `--yes`, or when the user declined to choose.
+
+**`silentChoicesListed` against `silentChoicesRevisited` judges the line between the two.**
+`silentChoicesListed` is the Step 3 list shown at the gate; `silentChoicesRevisited` how many the
+user ticked to decide. Revisited near zero over many plans means the bar sits in the right place
+and the list is a cheap receipt; revisited often means the bar is too high — those choices belong
+in Step 3.5, where they are asked before pass 3 builds on them rather than after.
 
 **`codexReview` is `ran` | `skipped` | `blocked`, and it is the field that stops a missing plugin
 reading as a clean plan.** `skipped` means Codex is not installed; `blocked` means it is and the

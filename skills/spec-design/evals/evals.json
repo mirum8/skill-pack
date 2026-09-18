@@ -347,15 +347,15 @@
       "name": "open-design-choice-is-asked-not-guessed",
       "prompt": "/r:spec-design docs/billing/spec.html",
       "fixture": null,
-      "expected_output": "The spec names an idempotency requirement but never says how. That meets the bar — undetermined, two defensible options, and it changes the contracts — so the choice (unique constraint vs outbox) is put to the user at the gate with a recommendation and what each costs, rather than picked silently. Naming, column order and test-framework choices are NOT asked about.",
+      "expected_output": "The spec names an idempotency requirement but never says how. That meets the bar — undetermined, and it changes the contracts — so the choice (unique constraint vs outbox) is put to the user through AskUserQuestion right after pass 2, with a recommendation and what each costs, before the leaf checklists are written and before the Codex review. Naming, column order and test-framework choices are NOT asked about.",
       "assertions": [
         {
           "id": "asks",
-          "text": "The undetermined design choice is put to the user at the gate, with the options and a recommendation"
+          "text": "The undetermined design choice is put to the user through AskUserQuestion, with the options, what each costs and a recommendation"
         },
         {
-          "id": "one_interruption",
-          "text": "It is asked together with the decomposition, not as a separate round of questions"
+          "id": "asked_before_pass_3",
+          "text": "It is asked after the contracts are drafted and before the leaf checklists and the Codex review — not held back to the final gate"
         },
         {
           "id": "no_trivia",
@@ -493,6 +493,32 @@
         {
           "id": "numbers_are_document_order",
           "text": "Phase numbers follow the order the backlog was written in, not a re-prioritisation"
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "kind": "behaviour",
+      "name": "silent-choices-listed-at-the-gate",
+      "prompt": "/r:spec-design docs/billing/spec.html",
+      "fixture": null,
+      "expected_output": "Pass 2 makes several contract-level calls the spec does not settle but that fall below the Step 3.5 bar — soft vs hard delete of a draft invoice, a stubbed tax integration in v1, one table with a type column for line items. The gate shows them as a multiSelect AskUserQuestion ('which of these do you want to decide yourself?'), each option naming the alternative and why this one was taken. A ticked one is asked with a recommendation; an answer that changes a contract re-runs passes 2 and 3 for that milestone and check_todo.py before anything is written.",
+      "assertions": [
+        {
+          "id": "lists_silent_choices",
+          "text": "The gate lists the contract-level choices made without asking, each with its alternative, as a multiSelect question"
+        },
+        {
+          "id": "asks_ticked",
+          "text": "Each ticked choice is asked with options, costs and a recommendation"
+        },
+        {
+          "id": "reruns_on_change",
+          "text": "An answer that changes a contract updates tech-design.md and the affected leaves and re-runs check_todo.py before writing"
+        },
+        {
+          "id": "kept_is_reported",
+          "text": "Choices left unticked are reported as seen and kept, not as never shown"
         }
       ]
     }
