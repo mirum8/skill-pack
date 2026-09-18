@@ -894,10 +894,11 @@ graph TD
 - **SB-spec-brainstorm-165** — **Every question is written in plain English at B2 level** — the
   tool's question text, labels and descriptions, and the prose questions: short sentences, common
   words, no idioms, a technical term explained once, real names, numbers and costs kept. Every
-  question also **carries its own context**, because the prose before a tool call is often
-  collapsed: no section name, coined term or ADR number unexplained; the question says what a tick
-  does on a `multiSelect`; each description says what was assumed, where it is used and what
-  changes if it is wrong.
+  question also **carries its own context in short sentences**, because the prose before a tool
+  call is often collapsed: sentences of 15 words or fewer; no section name, coined term, field,
+  tool or ADR number without its plain meaning; no symbols in a label; the question at most three
+  sentences saying what a tick does; the label at most five plain words; each description three
+  short lines — `Now:`, `Other option:`, `Cost:`.
   *States it:* `skills/spec-brainstorm/SKILL.md`, `skills/spec-brainstorm/references/interview.md`
   *Enforced by:* —
   *Tested by:* —

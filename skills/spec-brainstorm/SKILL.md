@@ -132,10 +132,10 @@ The prose carries the reasoning and the open questions, then one call carries th
 recommendation first and labelled `(Recommended)`, each option's description naming its cost, no
 authored "Other". Every question — in the tool or in prose — is written in plain English at B2
 level: short sentences, common words, a technical term explained once, real names and numbers
-kept. **And every question carries its own context**, because the prose before the call is often
-collapsed: no section name, coined term or ADR number without saying what it means, and each
-option's description says what was assumed, where it is used and what changes if it is wrong
-(`references/interview.md` §2). `references/interview.md` §2 has the mapping and the four-question ceiling.
+kept. **And every question carries its own context in short sentences**, because the prose before
+the call is often collapsed: sentences of 15 words or fewer, no internal name without its plain
+meaning, a label of at most five plain words, and each description as three short lines —
+`Now:`, `Other option:`, `Cost:` (`references/interview.md` §2). `references/interview.md` §2 has the mapping and the four-question ceiling.
 
 **Decide by default, and say that you guessed.** A wrong guess costs one sentence of correction —
 cheaper than asking almost every time. A decision you made goes into the coverage ledger as

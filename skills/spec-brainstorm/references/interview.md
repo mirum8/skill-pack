@@ -128,36 +128,46 @@ the first time it appears. Plain does not mean vague: keep the real names, numbe
 costs — "Postgres 16, one table per entity" beats "a relational store". A question the user has to
 read twice is answered with "whatever you think", which is the failure the tool exists to prevent.
 
-**Every question carries its own context, because the prose before it is not seen.** The tool
-shows the question, the labels and the descriptions; the message above the call is often collapsed
-by then, and the user may be coming back to this spec after weeks. So a question never leans on the
-document's own shorthand — a section name ("pre-mortem", "Part 5"), a coined term ("the land gate",
-"the tree"), an ADR number — without saying in everyday words what it means. Context beats
-brevity: a clear question of three sentences is better than a short one nobody can answer.
+**Every question carries its own context, in short sentences.** The tool shows only the
+question, the labels and the descriptions; the message above the call is often collapsed, and the
+user may come back to this spec after weeks. Both failures are real: a label in the document's
+shorthand cannot be answered, and a description that packs everything into two long sentences is
+not read. So every call follows this shape, and the limits are hard:
 
-- **The question** says what is being decided and why it is being asked now, and — on a
-  `multiSelect` — what a tick does and what happens to the options left unticked.
-- **The `label`** is a plain name for the thing, a few words, no jargon.
-- **The `description`** says, in full sentences: what I assumed or proposed, where it shows up in
-  the spec or the plan, and what changes if it is wrong.
+- **Sentences of 15 words or fewer**, one fact each. Split rather than join with "and", ";" or ",".
+- **No internal names without a plain meaning.** A section name ("pre-mortem"), a coined term
+  ("land gate", "the tree"), a field name ("Done when"), an ADR number, a tool or agent name
+  ("herdr", "verifier fan-out") — replace it with what it does. If the name must stay, add what it
+  is in two or three words, once.
+- **No symbols as words** in a label — no `=`, `+`, `→`, `/`.
+- **The question: at most three short sentences.** What these are, what a tick does, what happens
+  to the rest.
+- **The `label`: at most five plain words** saying what the choice does.
+- **The `description`: three short lines**, always in this order:
+  `Now: <what the spec does>.` · `Other option: <the alternative>.` · `Cost: <what the current
+  choice costs>.` Add one `Why: <reason>.` line only when the cost alone would not explain it.
 
-Compare, for one assumed risk in a triage sweep:
+Compare, for one defaulted decision in a triage sweep:
 
 ```
-bad   Q: Three assumptions were never confirmed. Which of these are wrong?
-      label: Pre-mortem: a step reports ok over a tree the next step does not recognise
-      description: This is the failure the risks section prepares for.
+bad   Q: These four decisions about how the loop behaves were recommended in earlier rounds and
+         never answered. The spec currently treats them as accepted. Tick the ones you want to
+         decide yourself and I will ask each one with its options.
+      label: Stall = herdr state + timer
+      description: A step counts as stalled when herdr reports the agent idle or blocked with no
+         result file. Timers (plan 1h, implement 4h, review 2h) are only a backstop. The other
+         option was timers only. Cost: a long silent build can look idle and pause a healthy run.
 
-good  Q: When I wrote the spec I guessed three things you never confirmed. Tick any that are
-         wrong and I will ask you about each one. The ones you leave unticked I mark as confirmed.
-      label: Biggest risk: lost work
-      description: I assumed the most likely way this fails is: one step says "done", but the next
-         step cannot find that work in git, so it builds on nothing. The Risks section and two
-         safety checks are designed around this. Tick if the real risk is something else.
+good  Q: I chose these 4 things myself. You never confirmed them. Tick the ones you want to decide.
+         Unticked ones stay as they are.
+      label: How a stuck step is found
+      description: Now: a step is stuck when its terminal is idle and it wrote no result.
+         Other option: only use time limits (plan 1h, build 4h).
+         Cost: a long quiet build can look stuck, and the run pauses.
 ```
 
 Before a call, read each question as someone who has not seen this document for a month. If it
-only makes sense with the spec open, it is not finished.
+only makes sense with the spec open, or a sentence runs past 15 words, it is not finished.
 
 **The prose comes first, then one call for the round.** The message carries the reasoning, the
 playback and the open questions; the call carries the choices. The tool takes at most four

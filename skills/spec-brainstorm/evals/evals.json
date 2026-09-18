@@ -411,6 +411,10 @@
         {
           "id": "self_contained",
           "text": "Each question is answerable without the spec open: no unexplained section name, coined term or ADR number, and each option's description says what was assumed or proposed, where it is used and what changes if it is wrong"
+        },
+        {
+          "id": "short_sentences",
+          "text": "Every sentence in a question or description is 15 words or fewer; labels are at most five plain words with no symbols; each description reads Now / Other option / Cost"
         }
       ]
     }
