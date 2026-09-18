@@ -407,6 +407,10 @@
         {
           "id": "plain_english",
           "text": "Question text, option labels and descriptions are plain B2-level English: short sentences, common words, no idioms, real names and numbers kept"
+        },
+        {
+          "id": "self_contained",
+          "text": "Each question is answerable without the spec open: no unexplained section name, coined term or ADR number, and each option's description says what was assumed or proposed, where it is used and what changes if it is wrong"
         }
       ]
     }

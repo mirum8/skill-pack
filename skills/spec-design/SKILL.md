@@ -283,6 +283,14 @@ common words, no idioms, a technical term explained in a few words the first tim
 table names, status codes and costs; plain is not vague. A question the user has to read twice
 gets "whatever you think", and the choice is made silently after all.
 
+**Every question carries its own context.** The tool shows only the question, labels and
+descriptions — the message before the call is often collapsed. So the question says which part of
+the product the choice is about and why it is open; each option's description says what it means
+for the schema, the endpoints or the build order, and what it costs. Never lean on the plan's own
+shorthand — a milestone number, a phase title, a coined term — without saying what it is. Read each
+question as someone who has not seen the spec for a month; if it only makes sense with the files
+open, rewrite it.
+
 An answer that differs from the draft is applied to pass 2 before pass 3 starts: rewrite the
 contracts it touches, and re-cut the leaves if it moved the split.
 

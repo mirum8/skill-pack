@@ -128,6 +128,37 @@ the first time it appears. Plain does not mean vague: keep the real names, numbe
 costs — "Postgres 16, one table per entity" beats "a relational store". A question the user has to
 read twice is answered with "whatever you think", which is the failure the tool exists to prevent.
 
+**Every question carries its own context, because the prose before it is not seen.** The tool
+shows the question, the labels and the descriptions; the message above the call is often collapsed
+by then, and the user may be coming back to this spec after weeks. So a question never leans on the
+document's own shorthand — a section name ("pre-mortem", "Part 5"), a coined term ("the land gate",
+"the tree"), an ADR number — without saying in everyday words what it means. Context beats
+brevity: a clear question of three sentences is better than a short one nobody can answer.
+
+- **The question** says what is being decided and why it is being asked now, and — on a
+  `multiSelect` — what a tick does and what happens to the options left unticked.
+- **The `label`** is a plain name for the thing, a few words, no jargon.
+- **The `description`** says, in full sentences: what I assumed or proposed, where it shows up in
+  the spec or the plan, and what changes if it is wrong.
+
+Compare, for one assumed risk in a triage sweep:
+
+```
+bad   Q: Three assumptions were never confirmed. Which of these are wrong?
+      label: Pre-mortem: a step reports ok over a tree the next step does not recognise
+      description: This is the failure the risks section prepares for.
+
+good  Q: When I wrote the spec I guessed three things you never confirmed. Tick any that are
+         wrong and I will ask you about each one. The ones you leave unticked I mark as confirmed.
+      label: Biggest risk: lost work
+      description: I assumed the most likely way this fails is: one step says "done", but the next
+         step cannot find that work in git, so it builds on nothing. The Risks section and two
+         safety checks are designed around this. Tick if the real risk is something else.
+```
+
+Before a call, read each question as someone who has not seen this document for a month. If it
+only makes sense with the spec open, it is not finished.
+
 **The prose comes first, then one call for the round.** The message carries the reasoning, the
 playback and the open questions; the call carries the choices. The tool takes at most four
 questions of two to four options, which sits under the batch ceiling — so when more than four
