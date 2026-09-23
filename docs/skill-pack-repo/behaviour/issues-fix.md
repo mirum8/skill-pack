@@ -89,8 +89,10 @@ flowchart TD
 - **SB-issues-fix-006** — `<source>` is detected in a fixed order: an existing file path → the file
   source; issue numbers or URLs → the GitHub source with discovery skipped; no argument → GitHub
   discovery when a GitHub remote exists and `gh` is authenticated, otherwise the first root list file
-  of `issues.md`, `bugs.md`, `todo.md`, `backlog.md`; multi-line text that reads as a list → the
-  inline source.
+  of `issues.md`, `bugs.md`, `todo.md`, `backlog.md`, and failing that the one backlog in
+  `./issues/` — a `*.md` that is not a `*-notes.md` and still holds an unticked item, with several
+  such files being a question for the user; multi-line text that reads as a list → the inline
+  source.
   *States it:* `skills/issues-fix/references/issue-sources.md`
   *Enforced by:* —
   *Tested by:* —

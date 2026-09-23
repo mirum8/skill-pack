@@ -25,8 +25,12 @@ Detected in this order, from the argument:
 2. **Issue refs** — `#42`, `42`, an issue URL → the **GitHub** source, with discovery skipped.
 3. **No argument** → GitHub when the repo has a GitHub remote *and* `command -v gh >/dev/null &&
    gh auth status` passes. Otherwise look for a list file at the repo root — `issues.md`, `bugs.md`,
-   `todo.md`, `backlog.md`, in that order — and **name the file you found before using it**, because
-   silently picking one of four files is how a run edits a document nobody meant to hand you.
+   `todo.md`, `backlog.md`, in that order. None there → look in `./issues/`, where `/r:issues-draft`
+   writes its backlogs: every `*.md` except a `*-notes.md` (that is the reply to the sender, which
+   nothing parses) and except a file with no unticked item (that backlog is finished). **Name the
+   file you found before using it**, because silently picking one of several files is how a run
+   edits a document nobody meant to hand you. Two or more backlogs left in `./issues/` is two
+   candidates with nothing to choose between them — list them and ask.
 4. **Multi-line text that reads as a list** → the **inline** source.
 
 Neither a file nor a usable tracker, or two candidates with nothing to choose between them: **ask**.

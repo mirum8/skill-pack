@@ -49,7 +49,8 @@ any trailing `/` from path arguments (Claude Code's `@backlog.md` arrives verbat
   gate.
 - **No argument** → GitHub discovery (open issues labeled `bug`) when the repo has a GitHub remote
   and `gh` is authenticated; otherwise the first list file found at the repo root — `issues.md`,
-  `bugs.md`, `todo.md`, `backlog.md` — **named to the user before it is used**, and checked for
+  `bugs.md`, `todo.md`, `backlog.md` — and failing that, a backlog in `./issues/` (any `*.md` but a
+  `*-notes.md`, holding at least one unticked item) — **named to the user before it is used**, and checked for
   `### Phase N` headings first, since a repo whose only list file is a plan lands here by default.
   Neither available, or two candidates with nothing to choose between them: **ask**. This is the one
   place the run stops for input.
