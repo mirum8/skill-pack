@@ -36,7 +36,7 @@ Four things shape the design:
 
 **The message** is the text itself, pasted into the prompt, or `@notes.md` / a path to a file holding it (strip a leading `@` and any trailing `/`). With no argument, use the message already in this conversation — the common case. If there is no message in reach, ask for one; that is the only place this run stops for input.
 
-- **`--out <slug|path>`** → name the output. A bare slug becomes `issues-<slug>-<yyyy-MM-dd>.md` and `issues-<slug>-<yyyy-MM-dd>-notes.md`, dated with today (Step 0); a path is used as given, undated, with `-notes` inserted before the extension for the second file — a name the user typed in full is the name they want. Default: a slug from the project or the subject of the message, written into an existing `issues/` directory if the repo has one and at the repo root otherwise — a project that keeps a folder for these has decided where they go, and it is usually git-ignored on purpose.
+- **`--out <slug|path>`** → name the output. A bare slug becomes `issues/issues-<slug>-<yyyy-MM-dd>.md` and `issues/issues-<slug>-<yyyy-MM-dd>-notes.md`, dated with today (Step 0); a path is used as given, undated, with `-notes` inserted before the extension for the second file — a name the user typed in full is the name they want. Default: a slug from the project or the subject of the message. Every pair without an explicit path goes into `./issues/` at the repo root, created if it is missing — one fixed folder keeps every backlog in one place instead of scattering dated files across the root.
 - **`--no-verify`** → split and classify without reading any code, for a message that arrives before the repo does or one about a codebase you do not have here. The backlog is still written; every item is marked `unverified` in the notes and the report says so, because an unverified backlog looks exactly like a verified one on disk.
 
 ## Step 0 — Resolve the message and the codebase
@@ -111,15 +111,15 @@ Write both, always, even when one has a single entry — a missing notes file re
 
 The **backlog file** holds title plus acceptance criteria and nothing else — no `touches`, no `risk`: `/r:issues-fix` re-derives both against the code as it stands when the fix happens, and a hint that has aged into a lie is worse than none. The exact format both files use — and the parser contract the backlog side has to satisfy — is [references/output-format.md](references/output-format.md). Read it before writing anything.
 
-Before writing, look for an existing pair under this slug on **any** date — `issues-<slug>-*.md`. A follow-up message about the same subject merges into the pair it finds, name and date unchanged: the suffix records the day the backlog was opened, and a second file would split the backlog `/r:issues-fix` reads in half. Never silently overwrite either file — say what you found, and either merge into it, keeping every existing ticked item exactly as it is, or write beside it under a new slug. A ticked item is done — never re-offer it and never un-tick it.
+Before writing, look for an existing pair under this slug on **any** date — `issues/issues-<slug>-*.md`. A follow-up message about the same subject merges into the pair it finds, name and date unchanged: the suffix records the day the backlog was opened, and a second file would split the backlog `/r:issues-fix` reads in half. Never silently overwrite either file — say what you found, and either merge into it, keeping every existing ticked item exactly as it is, or write beside it under a new slug. A ticked item is done — never re-offer it and never un-tick it.
 
 ## Step 5 — Report
 
 Say what happened, in the shape the sender's own message can be checked against:
 
 ```
-Message: 16 numbered asks → issues-carnet-2026-08-18.md (12 items)
-                          + issues-carnet-2026-08-18-notes.md (6 entries)
+Message: 16 numbered asks → issues/issues-carnet-2026-08-18.md (12 items)
+                          + issues/issues-carnet-2026-08-18-notes.md (6 entries)
 Verified against avtoportal @ main 4c953b5.
 
 Backlog (12):

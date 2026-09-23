@@ -4,8 +4,8 @@ One message in, two documents out. They share a slug and nothing else: the backl
 machine, the notes are read by the person who sent the message.
 
 ```
-issues-<slug>-<yyyy-MM-dd>.md        the backlog  — /r:issues-fix reads this
-issues-<slug>-<yyyy-MM-dd>-notes.md  the reply    — nothing parses this
+issues/issues-<slug>-<yyyy-MM-dd>.md        the backlog  — /r:issues-fix reads this
+issues/issues-<slug>-<yyyy-MM-dd>-notes.md  the reply    — nothing parses this
 ```
 
 `<slug>` names the subject and the suffix the day the backlog was opened, read from `date +%F`

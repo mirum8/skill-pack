@@ -74,9 +74,9 @@ graph TD
   *Tested by:* —
 
 - **SB-issues-draft-007** — With no `--out`, the slug comes from the project or the message's
-  subject, and the pair is written into an existing `issues/` directory if the repo has one and at
-  the repo root otherwise: a project that keeps a folder for these has decided where they go, and
-  it is usually git-ignored on purpose.
+  subject, and every pair without an explicit path is written into `./issues/` at the repo root,
+  created if it is missing: one fixed folder keeps every backlog in one place instead of scattering
+  dated files across the root.
   *States it:* `skills/issues-draft/SKILL.md`
   *Enforced by:* —
   *Tested by:* —
@@ -277,7 +277,7 @@ graph TD
   *Tested by:* —
 
 - **SB-issues-draft-034** — Before writing, the run looks for an existing pair under this slug on
-  **any** date (`issues-<slug>-*.md`). A follow-up message about the same subject merges into the
+  **any** date (`issues/issues-<slug>-*.md`). A follow-up message about the same subject merges into the
   pair it finds, name and date unchanged: the suffix records the day the backlog was opened, and a
   second file would split the backlog `/r:issues-fix` reads in half.
   *States it:* `skills/issues-draft/SKILL.md`, `skills/issues-draft/references/output-format.md`
