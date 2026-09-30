@@ -66,6 +66,7 @@ printf '#!/bin/sh\necho "out line"\necho "err line" >&2\nexit 3\n'              
 printf '#!/bin/sh\necho "started"\nexec sleep 3600\n'                              > "$FIX/fake-hang.sh"
 printf '#!/bin/sh\nprintf "\\033[?1049h"\nprintf "dirty\\r\\n"\nsleep 0.5\nexit 0\n' > "$FIX/fake-dirty.sh"
 printf '#!/bin/sh\nexec sleep 3600\n'                                              > "$FIX/fake-blank.sh"
+printf '#!/bin/sh\nprintf "aborted\\r\\n"\nsleep 0.5\nexit 1\n'                       > "$FIX/fake-abort.sh"
 printf '#!/bin/sh\nprintf "hello\\r\\n"\nsleep 0.4\nprintf "\\033[2J\\033[H"\nexec sleep 3600\n' > "$FIX/fake-goesblank.sh"
 printf '#!/bin/sh\ntouch "$XDG_CONFIG_HOME/marker"\necho seeded\nexec sleep 3600\n' > "$FIX/fake-marker.sh"
 chmod +x "$FIX"/*.sh
@@ -168,6 +169,7 @@ if ! command -v tmux >/dev/null 2>&1; then
            "run-tty returns the command's exit code" \
            "stop is idempotent" \
            "stop --expect-exited catches a dirty exit" \
+           "stop --expect-exited --status N expects a documented non-zero exit" \
            "state stays in the throwaway dir" \
            "two suffixes are two independent apps" \
            "a handle prefix cannot resolve another session"; do skipc "$t (tmux absent)"; done
@@ -330,6 +332,29 @@ D=$(TUI_SESSION_SUFFIX=dirty start fake-dirty.sh) && {
     && ok "an app that exits with the alternate screen still on exits 8, and says so" \
     || bad "an app that exits with the alternate screen still on exits 8, and says so" "exit $rc: $out"
 } || skipc "an app that exits with the alternate screen still on exits 8 (fixture would not start)"
+
+X=$(TUI_SESSION_SUFFIX=abort1 start fake-abort.sh) && {
+  sleep 1.2
+  out=$(cd "$REPO" && TUI_SESSION_SUFFIX=abort1 bash "$TUI" stop "$X" --expect-exited 2>&1); rc=$?
+  [[ $rc == 8 ]] && grep -q 'status 1' <<<"$out" \
+    && ok "a restored exit with status 1 fails a plain --expect-exited" \
+    || bad "a restored exit with status 1 fails a plain --expect-exited" "exit $rc: $out"
+} || skipc "a restored exit with status 1 fails a plain --expect-exited (fixture would not start)"
+
+X=$(TUI_SESSION_SUFFIX=abort2 start fake-abort.sh) && {
+  sleep 1.2
+  out=$(cd "$REPO" && TUI_SESSION_SUFFIX=abort2 bash "$TUI" stop "$X" --expect-exited --status 1 2>&1); rc=$?
+  [[ $rc == 0 ]] && ok "--status 1 accepts an app whose documented exit is 1" \
+                 || bad "--status 1 accepts an app whose documented exit is 1" "exit $rc: $out"
+} || skipc "--status 1 accepts an app whose documented exit is 1 (fixture would not start)"
+
+X=$(TUI_SESSION_SUFFIX=abort3 start fake-tui.sh) && {
+  (cd "$REPO" && TUI_SESSION_SUFFIX=abort3 bash "$TUI" send "$X" -l q) >/dev/null 2>&1; sleep 0.8
+  out=$(cd "$REPO" && TUI_SESSION_SUFFIX=abort3 bash "$TUI" stop "$X" --expect-exited --status 1 2>&1); rc=$?
+  [[ $rc == 8 ]] && grep -q 'status 0, expected 1' <<<"$out" \
+    && ok "--status 1 rejects an app that exited 0" \
+    || bad "--status 1 rejects an app that exited 0" "exit $rc: $out"
+} || skipc "--status 1 rejects an app that exited 0 (fixture would not start)"
 fi
 
 ( cd "$REPO" && git worktree remove --force "$TMP/wt" ) >/dev/null 2>&1

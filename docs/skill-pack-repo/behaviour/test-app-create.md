@@ -809,8 +809,10 @@ flowchart TD
 
 - **SB-test-app-create-093** — `stop --expect-exited` is **the terminal-restoration check** and
   exits `8` with the reason named for each of its three failures: still running, exited with the
-  alternate screen still on, or a non-zero status. An app that quits but leaves the alternate
-  screen on is the defect users actually report, and no in-process harness can see it.
+  alternate screen still on, or a non-zero status. `--status N` names the status the app is
+  documented to exit with (an aborted run that exits 1), and then any other status fails, 0
+  included. An app that quits but leaves the alternate screen on is the defect users actually
+  report, and no in-process harness can see it.
   *States it:* `skills/test-app-create/scripts/tui-session.sh`
   *Enforced by:* `skills/test-app-create/scripts/tui-session.sh`
   *Tested by:* `skills/test-app-create/tests/tui-session.test.sh`

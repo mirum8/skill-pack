@@ -23,7 +23,8 @@
 #   resize HANDLE WxH           resizes, then verifies the resize took
 #   probe [--timeout S] -- CMD  prints tui | cli | unknown — the surface discriminator
 #   status HANDLE               one line: running|exited|absent exit=N geom=WxH alt=0|1
-#   stop HANDLE [--expect-exited]         idempotent; --expect-exited checks the exit was clean
+#   stop HANDLE [--expect-exited [--status N]]  idempotent; --expect-exited checks the exit was clean
+#                               (status N, default 0, for an app whose documented exit is non-zero)
 #   run-tty [opts] -- CMD...    runs a command on a pty and returns ITS exit code
 #
 # Exit codes are the whole contract. Each one exists because the failure it names
@@ -411,9 +412,13 @@ cmd_stop_quiet() {
 
 cmd_stop() {
   bind_handle "${1:?handle}"; shift
-  local expect=0
+  local expect=0 want=0
   while [[ $# -gt 0 ]]; do
-    case $1 in --expect-exited) expect=1; shift ;; *) die $E_USAGE "unknown stop option: $1" ;; esac
+    case $1 in
+      --expect-exited) expect=1; shift ;;
+      --status) [[ ${2:-} =~ ^[0-9]+$ ]] || die $E_USAGE "--status needs an exit code"; want=$2; expect=1; shift 2 ;;
+      *) die $E_USAGE "unknown stop option: $1" ;;
+    esac
   done
   # Idempotent by contract, and that is what lets a caller's teardown run on EVERY
   # exit path — including one where the deploy died before it started anything.
@@ -428,7 +433,8 @@ cmd_stop() {
     st=$(app_status)
     if ! app_exited;      then why="the app is still running — it did not quit"
     elif [[ $alt == 1 ]]; then why="the app exited with the ALTERNATE SCREEN still on — the terminal was not restored"
-    elif [[ $st != 0 ]];  then why="the app exited with status $st"
+    elif [[ $st != "$want" && $want == 0 ]]; then why="the app exited with status $st"
+    elif [[ $st != "$want" ]]; then why="the app exited with status $st, expected $want"
     fi
     if [[ -n $why ]]; then cmd_stop_quiet; die $E_UNCLEAN "$why"; fi
   fi
