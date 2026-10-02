@@ -97,6 +97,14 @@ flowchart TD
   *Enforced by:* —
   *Tested by:* —
 
+- **SB-diff-explain-012** — All prose on the page and in the terminal reply is written in ASD-STE100
+  Simplified Technical English, by the rules in `references/ste100.md`: approved simple words with
+  one meaning, active voice, simple tenses, descriptive sentences of at most 25 words, paragraphs of
+  at most six sentences. Code, identifiers and paths are technical names and stay as written.
+  *States it:* `skills/diff-explain/SKILL.md`, `skills/diff-explain/references/ste100.md`
+  *Enforced by:* —
+  *Tested by:* —
+
 - **SB-diff-explain-011** — Every run records one `result` row with `outcome`
   (`written|empty|no-show-me|bad-scope`), `files`, `explained` and `flags`.
   *States it:* `skills/diff-explain/SKILL.md`

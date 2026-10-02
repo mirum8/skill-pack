@@ -6,7 +6,7 @@
       "name": "one-page-outside-the-repo-and-a-terminal-list",
       "kind": "behaviour",
       "prompt": "/r:diff-explain",
-      "expected_output": "It prints the one `git diff HEAD` command it reads, loads show-me with the Skill tool, and writes a single HTML page under `${TMPDIR:-/tmp}/diff-explain/` — never inside the repo — with a summary, a change map, sections grouped by behaviour with show-me views beside their `file:line` hunks, and a 'look closely here' list of at most seven pointers. It opens the page and replies with the path and that list as plain `file:line — reason` lines. It edits no source file.",
+      "expected_output": "It prints the one `git diff HEAD` command it reads, loads show-me with the Skill tool, and writes a single HTML page under `${TMPDIR:-/tmp}/diff-explain/` — never inside the repo — with a summary, a change map, sections grouped by behaviour with show-me views beside their `file:line` hunks, and a 'look closely here' list of at most seven pointers. All prose on the page and in the reply follows ASD-STE100 — simple approved words, active voice, sentences of at most 25 words — while code, identifiers and paths stay as written. It opens the page and replies with the path and that list as plain `file:line — reason` lines. It edits no source file.",
       "files": [],
       "fixture": null,
       "assertions": []

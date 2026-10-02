@@ -4,7 +4,7 @@ description: >-
   a map of the files it touches, the shape of each change drawn with the external `show-me`
   skill's views — call-tree, control-flow and file-tree diffs, Mermaid sequences, component trees —
   beside the hunks they explain, and a short "look closely here" list of the lines a reviewer
-  should not skim. Use on "/r:diff-explain", "/r:diff-explain --staged", "/r:diff-explain
+  should not skim. All prose is written in ASD-STE100 Simplified Technical English. Use on "/r:diff-explain", "/r:diff-explain --staged", "/r:diff-explain
   HEAD~3..HEAD", "/r:diff-explain <commit>", "/r:diff-explain --base main". Report-only: it
   explains and points, it never fixes, and the page is written outside the repo. NOT for finding
   defects (`/r:code-bugs`), the review-and-fix pipeline (`/r:task-review`), a readability verdict
@@ -24,6 +24,13 @@ bugs, judge style, or edit a file. A pointer here is "read this carefully", neve
 the verdicts belong to `/r:code-bugs` and `/r:task-review`, which verify what they claim.
 
 **Not automatic.** The frontmatter blocks the Skill tool, so it runs only when typed.
+
+**All prose is ASD-STE100.** Read `${CLAUDE_SKILL_DIR}/references/ste100.md` before writing a word
+of the page. Every sentence a person reads — the summary, each concern, each pointer, the terminal
+reply — follows it: approved simple words, one meaning per word, active voice, at most 25 words a
+sentence. Code, identifiers and paths are technical names and stay as written. A reviewer reads
+this page fast and beside the code, often in a second language; a sentence that needs a second read
+costs the time the page exists to save.
 
 ## Invocation
 
@@ -68,7 +75,7 @@ A page drawn without it is a different skill's output under this one's name.
 
 ### 4. Build the page
 
-One HTML file — `show-me`'s HTML branch — with these sections, each only when it carries something:
+One HTML file — `show-me`'s HTML branch — its prose in STE, with these sections, each only when it carries something:
 
 - **Summary.** Two to four sentences on what the change does and why, then the scope command and
   `N files, +A −D`.
@@ -105,7 +112,7 @@ it, do not run it; that skill opens a socket and is typed by the person who want
 
 ### 6. Reply
 
-In the terminal: the path, the scope command, and the "look closely here" list as plain
+In the terminal, in the same STE: the path, the scope command, and the "look closely here" list as plain
 `file:line — reason` lines, so the reply is useful to someone who never opens the page. Nothing
 else from the page is restated.
 
