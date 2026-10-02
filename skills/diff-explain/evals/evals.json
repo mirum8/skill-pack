@@ -1,0 +1,35 @@
+{
+  "skill_name": "diff-explain",
+  "evals": [
+    {
+      "id": 0,
+      "name": "one-page-outside-the-repo-and-a-terminal-list",
+      "kind": "behaviour",
+      "prompt": "/r:diff-explain",
+      "expected_output": "It prints the one `git diff HEAD` command it reads, loads show-me with the Skill tool, and writes a single HTML page under `${TMPDIR:-/tmp}/diff-explain/` — never inside the repo — with a summary, a change map, sections grouped by behaviour with show-me views beside their `file:line` hunks, and a 'look closely here' list of at most seven pointers. It opens the page and replies with the path and that list as plain `file:line — reason` lines. It edits no source file.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 1,
+      "name": "an-empty-diff-writes-no-page",
+      "kind": "behaviour",
+      "prompt": "/r:diff-explain --staged — nothing is staged",
+      "expected_output": "It reports no changes in `git diff --cached`, writes no page, and records `empty`. It does not fall back to the unstaged diff or to the last commit, which would explain a change nobody asked about.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 2,
+      "name": "show-me-missing-is-a-named-stop",
+      "kind": "behaviour",
+      "prompt": "/r:diff-explain HEAD~1..HEAD — the show-me skill is not installed",
+      "expected_output": "It stops, says show-me is missing and how to add it, writes no page and records `no-show-me`. It does not draw the views itself and present the result as this skill's page.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    }
+  ]
+}

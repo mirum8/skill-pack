@@ -97,6 +97,18 @@ else
     "codex plugin" optional
 fi
 
+show_me=""
+for d in "$HOME/.claude/skills/show-me" "$HOME/.agents/skills/show-me"; do
+  [[ -f $d/SKILL.md ]] && { show_me=$d; break; }
+done
+if [[ -n $show_me ]]; then
+  printf '  \033[32m✓\033[0m %-14s %-9s %s\n' "show-me skill" optional "$show_me"
+else
+  missing_optional=$((missing_optional + 1))
+  printf '  \033[33m!\033[0m %-14s %-9s absent — add with: npx skills add humanlayer/skills --skill show-me\n' \
+    "show-me skill" optional
+fi
+
 echo
 if (( missing_mandatory )); then
   echo "$missing_mandatory mandatory prerequisite(s) missing. The pipeline cannot run honestly"

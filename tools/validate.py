@@ -182,7 +182,7 @@ BUNDLED = {
 EXTERNAL = {"test-app", "agent-browser", "frontend-design", "skill-creator", "sonar",
             "deploy", "codex", "html", "html-diagram", "html-plan", "htmx",
             "todo-creator-pro", "sdd-idea", "sdd-impl", "sdd-feature", "sdd-change",
-            "sdd-undo", "code-reviewer", "comment-cleaner"}
+            "sdd-undo", "code-reviewer", "comment-cleaner", "show-me"}
 # Named but never invoked: claudemd-patch's job is to find and DELETE the
 # leftovers of this retired skill, so the name has to appear for the search to
 # work. Not a dangling reference — the opposite of one.

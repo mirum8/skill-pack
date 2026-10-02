@@ -1,6 +1,6 @@
 # r — a personal Claude Code skill pack
 
-Twenty-six engineering skills and the eight agents they dispatch, in one repository,
+Twenty-seven engineering skills and the eight agents they dispatch, in one repository,
 loaded as a skills-directory plugin named `r`. Every skill is reachable as
 `/r:<name>`.
 
@@ -53,7 +53,7 @@ skills-directory case. Whether plugin discovery follows a *symlinked* entry is
 documented neither way, and it fails identically to a malformed manifest, so the
 pack does not rely on it.
 
-## The twenty-six skills
+## The twenty-seven skills
 
 | command | does |
 |---|---|
@@ -67,6 +67,7 @@ pack does not rely on it.
 | `/r:code-scan` | PMD + SpotBugs + Semgrep as local CLIs, then triage and fix |
 | `/r:code-adversarial` | the real Codex review, never an imitation of it |
 | `/r:code-refactor` | restructure behind a behaviour-locking test |
+| `/r:diff-explain` | a diff → one HTML page drawing the shape of the change with `show-me`, plus what a reviewer should read closely |
 | `/r:spec-brainstorm` | idea → one `spec.html`: domain model, user stories, modules, stack, API |
 | `/r:spec-design` | docs → `todo.md` + `tech-design.md`: milestones, contracts, leaves and a dependency graph; rewrites a plan that already exists rather than overwriting it |
 | `/r:plan-run` | build a whole `todo.md` phase by phase; non-overlapping phases can run in parallel sessions |
@@ -90,14 +91,16 @@ alphabetically sorted `/` menu groups the families: `claudemd-*`, `code-*`,
 is a rulebook rather than an action, and "hexagonal" is the word someone reaches for.
 
 `task-run`, `task-quick`, `issues-fix`, `plan-run`, `spec-design`, `ui-prototype`,
-`page-serve` and `pack-maintain` carry `disable-model-invocation: true` — each says
+`page-serve`, `pack-maintain` and `diff-explain` carry `disable-model-invocation: true` — each says
 in its own text that it must never fire on its own, and the frontmatter enforces
 that rather than trusting the prose. Each mutates the repo or a plan on a scale
 nobody wants arrived at by inference — or, in `page-serve`'s case, opens a socket
 that `--lan` makes reachable from every device on the network, which is the same
-thing nobody wants inferred. They stay invocable by name; they just will not
+thing nobody wants inferred. `diff-explain` changes nothing and is flagged by choice: a
+review page is asked for when someone sits down to review, not inferred from talk about a diff.
+They stay invocable by name; they just will not
 auto-load, and their descriptions are not in context at all, which is why none of
-the eight counts against the 16,000-character listing budget below.
+the nine counts against the 16,000-character listing budget below.
 
 `task-review` says the same thing but carries no flag, on purpose. The flag is
 all-or-nothing: it blocks the Skill tool outright, so it cannot tell "the model
@@ -139,6 +142,7 @@ no review at all.
 | `gh` (authenticated) | `task-run` issue sources and PRs; `issues-fix` against GitHub | GitHub stops being one of the sources |
 | `codex` plugin | `code-adversarial`, and the **default fixer** in `task-review` (see below) | the review step is recorded as **skipped** and named; the fixers fall back to Claude and say so |
 | `tmux` | driving a **terminal** app in a real pty — `test-app-create`'s TUI track and `task-review` Step 8 on a `tui` surface | the TUI checks are recorded as **not run** and named, and that track is reported blocked rather than clean; web and command-line projects are unaffected |
+| `show-me` skill | `diff-explain` draws every view with it — `npx skills add humanlayer/skills --skill show-me` | `diff-explain` stops and names it; nothing else uses it |
 | `herdr` | `--herdr` on `plan-run` and `issues-fix` — a worktree and a watchable session per unit, however many run at once | the flag stops and names it; both skills run their serial path and lose no coverage, only wall-clock |
 
 `--herdr` also needs the repo to have been **trusted in Claude Code** at least once. Workspace trust
