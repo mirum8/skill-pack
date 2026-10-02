@@ -30,7 +30,7 @@ flowchart TD
 ## Entries
 
 - **SB-diff-explain-001** — The skill turns one git diff into one self-contained HTML page showing
-  the shape of the change — summary, change map, per-concern `show-me` views beside their hunks, and
+  the shape of the change — summary, change map, per-concern pseudocode and `show-me` views, and
   a "look closely here" list. It is report-only: it never edits a file, never hunts bugs and never
   issues a verdict.
   *States it:* `skills/diff-explain/SKILL.md`
@@ -102,6 +102,16 @@ flowchart TD
   one meaning, active voice, simple tenses, descriptive sentences of at most 25 words, paragraphs of
   at most six sentences. Code, identifiers and paths are technical names and stay as written.
   *States it:* `skills/diff-explain/SKILL.md`, `skills/diff-explain/references/ste100.md`
+  *Enforced by:* —
+  *Tested by:* —
+
+- **SB-diff-explain-013** — Each concern leads with a pseudocode diff (or another `show-me` view),
+  not raw hunks. Real code is visible only for look-closely lines, changed public signatures, API
+  contracts, schema, migration or config lines, security and data-boundary checks, and hunks of
+  about six lines or fewer — at most about 15 lines a section. The full hunks sit in a collapsed
+  `Source` block, so nothing is hidden. Pseudocode names the real symbols and keeps every branch,
+  check, early return and side effect of the code, in order.
+  *States it:* `skills/diff-explain/SKILL.md`
   *Enforced by:* —
   *Tested by:* —
 

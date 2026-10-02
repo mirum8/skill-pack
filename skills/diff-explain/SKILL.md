@@ -1,11 +1,11 @@
 ---
 description: >-
   Turn a git diff into one self-contained HTML page a person reviews from: what the change does,
-  a map of the files it touches, the shape of each change drawn with the external `show-me`
-  skill's views — call-tree, control-flow and file-tree diffs, Mermaid sequences, component trees —
-  beside the hunks they explain, and a short "look closely here" list of the lines a reviewer
-  should not skim. All prose is written in ASD-STE100 Simplified Technical English. Use on "/r:diff-explain", "/r:diff-explain --staged", "/r:diff-explain
-  HEAD~3..HEAD", "/r:diff-explain <commit>", "/r:diff-explain --base main". Report-only: it
+  a map of the files it touches, the logic of each change as a pseudocode diff or another view
+  from the external `show-me` skill — call-tree and file-tree diffs, Mermaid sequences, component
+  trees — with real code shown only where the exact text matters, and a short "look closely here"
+  list of the lines a reviewer should not skim. All prose is ASD-STE100 Simplified Technical
+  English. Use on "/r:diff-explain", "/r:diff-explain --staged", "/r:diff-explain HEAD~3..HEAD", "/r:diff-explain <commit>", "/r:diff-explain --base main". Report-only: it
   explains and points, it never fixes, and the page is written outside the repo. NOT for finding
   defects (`/r:code-bugs`), the review-and-fix pipeline (`/r:task-review`), a readability verdict
   (`/r:code-quality`), or a finished milestone's report (`/r:plan-report`).
@@ -82,16 +82,40 @@ One HTML file — `show-me`'s HTML branch — its prose in STE, with these secti
 - **Change map.** A file-tree `diff` view of the touched files — added, removed, renamed — each with
   a one-line role. Listed-only files sit here, marked as such.
 - **One section per concern.** Group hunks by the behaviour they change, not by file: a change that
-  spans a controller, a service and a test is one section. Pick the `show-me` view that fits it —
-  a call-tree diff, a control- or state-flow diff, a Mermaid sequence, a component tree — and put
-  the hunks it explains beside it, labelled `file:line`. A concern no view makes clearer gets the
-  hunk and one sentence, not a decorative diagram.
+  spans a controller, a service and a test is one section. Lead with a **pseudocode diff** —
+  `show-me`'s `+`/`-` view of the logic in plain steps — or whichever `show-me` view fits better: a
+  call-tree diff, a state-flow diff, a Mermaid sequence, a component tree. Real code is the
+  exception, not the content; see *Pseudocode first, code where it counts* below. End the section
+  with its full hunks in a collapsed `<details>` block labelled `Source — file:line`.
 - **Look closely here.** At most seven entries, each `file:line` and the reason a reviewer should
   slow down: a behaviour change inside what reads as a refactor, a check that was removed, a new
   path no test reaches, an edge the old code handled and the new one does not visibly handle. Each
   is a pointer, worded as one. An empty list is allowed and said plainly — padding it teaches the
   reader to skip it.
 - **Not explained.** The listed-only files and why each was not drawn.
+
+#### Pseudocode first, code where it counts
+
+A page of raw hunks is `git diff` with styling: the reviewer still rebuilds the logic in their head,
+which is the work the page exists to do for them. So each concern shows the logic as pseudocode,
+and real code appears only where the exact text **is** the thing to review:
+
+- a line in the "look closely here" list — the reviewer must judge the code itself there;
+- a changed public signature, API contract, schema or migration line, or config key — there the
+  exact text is the change;
+- a security or data-boundary check — validation, auth, escaping, a transaction boundary — where a
+  paraphrase can hide the one character that matters;
+- a hunk of about six lines or fewer, where pseudocode would be as long as the code.
+
+At most about **15 lines of visible real code per section**; cut a longer excerpt to the lines that
+matter and label it `file:line`. Everything else stays in the collapsed `Source` block, so nothing
+is hidden — only out of the way.
+
+**Pseudocode is a summary of the code, never a rewrite of it.** Name the real functions, fields and
+types as written; keep every branch, check, early return and side effect the code has, in the same
+order. Drop only syntax: types, imports, logging, boilerplate. A pseudocode view that leaves out a
+condition is worse than the raw hunk, because the reviewer trusts it and stops reading. Write its
+step text in STE, like the rest of the prose.
 
 The page is self-contained: inline CSS and JS, Mermaid and highlight.js from `cdnjs.cloudflare.com`,
 light and dark, readable on a phone. **HTML-escape every byte of diff and source text** before it
