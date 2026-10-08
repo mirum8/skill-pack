@@ -21,6 +21,10 @@ Everything under "Resolve first" is closed by a person, or by `/r:plan-unblock` 
       Owner: platform. Blocks: Phase 9. Timebox: an hour. Output: a line in `tech-design.md`.
       Resolved: 2026-06-04 — a queue; cron cannot honour the 30s target. Alternative: cron.
 
+## Deferred
+- **Payout CSV export for admins** — no story asks for it; the payouts list covers the v1 need.
+  Removed by `/r:plan-simplify`.
+
 ## Waves
 <!-- generated from the Depends on edges — regenerate, never hand-edit -->
 - Wave 0: Phase 1, Phase 2
@@ -122,7 +126,10 @@ into acceptance criteria. It does not read upward and follows no links out. So:
 **Is** — the detail that survives being written before the code exists:
 
 - **Schema**: column types, nullability, defaults, indexes, unique constraints, foreign keys.
-- **API**: method, path, request shape, response shape, and every status code including errors.
+- **API**: method, path, request shape, response shape, and the status codes a caller acts on —
+  success, and each error the documents name or a caller must handle differently.
+- **Safeguards**: each retry, timeout, breaker, rate limit, idempotency key, cache or edge-case branch
+  with its trigger beside it — the fact about this system that makes it necessary.
 - **Types**: signatures, and the invariants that matter.
 - **Boundaries**: which module owns what, and what may import what.
 - **Tests**: named, with the case each one locks.

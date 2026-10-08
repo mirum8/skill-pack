@@ -566,10 +566,18 @@ flowchart TD
   *Enforced by:* —
   *Tested by:* —
 
-- **SB-spec-design-133** — The simplify pass's applied, added, kept, dismissed and question lists
-  reach the single gate; a `blocked: no-agent` result is a named skip recorded as
-  `simplify: "skipped"`, never a simplification done in the caller's context.
+- **SB-spec-design-133** — The simplify pass applies the clear cases silently and asks an
+  `AskUserQuestion` only for unclear units; every change reaches the single gate with its reason,
+  where the user can bring any back; a `blocked: no-agent` result is a named skip
+  recorded as `simplify: "skipped"`. A Codex finding that would restore a removed unit is dismissed,
+  unless the removal took a story.
   *States it:* `skills/spec-design/SKILL.md`
+  *Enforced by:* —
+  *Tested by:* —
+
+- **SB-spec-design-134** — Contracts carry only the status codes a caller acts on, and a safeguard
+  enters a contract only with its trigger written beside it.
+  *States it:* `skills/spec-design/SKILL.md`, `skills/spec-design/references/design-contracts.md`
   *Enforced by:* —
   *Tested by:* —
 
@@ -1101,7 +1109,7 @@ flowchart TD
 ## Prose-only behaviours
 
 Held up by wording alone — no *Enforced by:* and no *Tested by:* — so nothing fails if one quietly
-stops being true. **75 of 133 entries**, and they cluster: the three steps where a person is in the
+stops being true. **76 of 134 entries**, and they cluster: the three steps where a person is in the
 loop (the Codex challenge, the gate, the hand-off) are prose-only end to end.
 
 - **Invocation and flags** — 003, 004, 005, 006, 007, 008, 009. Nothing reads the flags but the
@@ -1117,7 +1125,7 @@ loop (the Codex challenge, the gate, the hand-off) are prose-only end to end.
   `tech-design.md` passes every check in the pack.
 - **Step 3.5, the design questions** — 046, 047, 048, 049, 050, 131. Whether the bar was applied is
   visible only as `designChoicesAsked` in a row the same run writes about itself.
-- **Step 6.3, the simplify pass** — 132, 133.
+- **Step 6.3, the simplify pass** — 132, 133, 134.
 - **Step 6.5, the Codex challenge — the whole step** — 065, 066, 067, 068, 069, 070, 071, 072, 073.
   Nothing verifies that the review ran, that `--background` was passed, that the rubric stayed at
   five, that findings were verified before being applied, or that a skip was reported as a skip.

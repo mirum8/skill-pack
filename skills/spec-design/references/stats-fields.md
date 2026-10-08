@@ -41,10 +41,12 @@ user ticked to decide. Revisited near zero over many plans means the bar sits in
 and the list is a cheap receipt; revisited often means the bar is too high — those choices belong
 in Step 3.5, where they are asked before pass 3 builds on them rather than after.
 
-**`simplify` is `ran` | `skipped`, and the four counts beside it say whether Step 6.3 earns its
-pass.** `skipped` means no `Agent` tool reached it, never that the plan was simple. `simplifyRaised` against `simplifyApplied` and `simplifyKept` is the reading: findings mostly kept
-mean the readers flag complexity the specs ask for, and everything applied means nothing is being
-checked. `simplifyLeavesAdded` is non-zero only on a rewrite, where landed code is read.
+**`simplify` is `ran` | `skipped`, and the counts beside it say whether Step 6.3 earns its
+pass.** `skipped` means no `Agent` tool reached it, never that the plan was simple. Read
+`simplifyKeptByUser` against `simplifyUnitsAsked`: a user who keeps most units is being asked about
+things with real reasons, and the rubric is too aggressive; one who accepts every proposal on plans
+that still feel heavy means the readers are too timid. `simplifyPhasesAdded` is non-zero only on a
+rewrite, where built phases exist.
 
 **`codexReview` is `ran` | `skipped` | `blocked`, and it is the field that stops a missing plugin
 reading as a clean plan.** `skipped` means Codex is not installed; `blocked` means it is and the

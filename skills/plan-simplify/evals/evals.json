@@ -4,56 +4,66 @@
   "evals": [
     {
       "id": 0,
-      "name": "speculative-abstraction-is-cut",
+      "name": "one-question-per-unit-before-any-change",
       "kind": "behaviour",
       "prompt": "/r:plan-simplify docs/billing/todo.md",
-      "expected_output": "Two fresh readers are dispatched in one message. A PaymentProvider interface with one implementation and a provider-config table that no story exercises are cut; the leaf that built them is merged into its neighbour, edges and Files: are rewired, tech-design.md is trimmed in the same pass, and the gate lists the cut with the leaf that still meets each story it touched.",
+      "expected_output": "The plan is grouped into units (a phase, related phases, or a milestone). Two fresh readers run in one message. For every unit with a verified proposal, one AskUserQuestion question offers Simplify, Delete or Keep as is, recommended first, in plain short sentences. Nothing in todo.md or tech-design.md changes before the final Apply.",
       "files": [],
       "fixture": null,
       "assertions": []
     },
     {
       "id": 1,
-      "name": "requirement-backed-complexity-is-kept",
+      "name": "unjustified-unbuilt-phase-is-deleted-to-deferred",
       "kind": "behaviour",
       "prompt": "/r:plan-simplify docs/billing/todo.md",
-      "expected_output": "The spec's ADR accepts an outbox for payout events. A reader proposes replacing it with a direct call; the finding is recorded as kept, naming the ADR consequence, and the outbox leaf, its idempotency constraint and its tests stay in the plan unchanged.",
+      "expected_output": "Phase 9 builds an admin CSV export no story asks for. The user picks Delete. The phase and its contracts are removed, edges that pointed at it are rewired, unbuilt phases are renumbered, and a plain bullet naming it and the reason lands in ## Deferred above the first milestone.",
       "files": [],
       "fixture": null,
       "assertions": []
     },
     {
       "id": 2,
-      "name": "half-built-plan-gets-a-simplify-phase",
+      "name": "safeguard-without-trigger-is-proposed-for-simplify",
       "kind": "behaviour",
       "prompt": "/r:plan-simplify docs/billing/todo.md",
-      "expected_output": "Phases 1-6 are ticked. The explorer reads the landed code and finds a hand-rolled retry policy that duplicates the existing RetryTemplate, and Phase 8 (unbuilt) would build on it. Phases 1-6 keep their numbers, titles and ticks. A new 'Simplify' leaf is numbered 7, depends on the frozen leaves it touches, carries their story names in Implements:, keeps the landed tests' assertions unchanged, and the unbuilt leaves are renumbered above it with the old-to-new map reported.",
+      "expected_output": "Phase 5 adds a circuit breaker and retries around an internal module call. No trigger holds, so Simplify is recommended and the description says the user sees a clear error instead. A rate limit on the public signup endpoint in the same plan is kept, with its trigger shown in the final review.",
       "files": [],
       "fixture": null,
       "assertions": []
     },
     {
       "id": 3,
-      "name": "taste-only-built-code-gets-no-phase",
+      "name": "story-backed-unit-gets-no-delete-option",
       "kind": "behaviour",
       "prompt": "/r:plan-simplify docs/billing/todo.md",
-      "expected_output": "Landed code in a ticked phase is verbose but nothing unbuilt builds on it and it carries no defect risk. No Simplify leaf is added; the report names the code and points at /r:code-refactor.",
+      "expected_output": "A unit that traces to a user story is offered Simplify and Keep only, never Delete. Where the spec itself asks for something that looks over-built, it is recorded as a question in Open questions, not cut.",
       "files": [],
       "fixture": null,
       "assertions": []
     },
     {
       "id": 4,
-      "name": "reuse-rewrites-a-leaf-without-file-line",
+      "name": "built-phase-gets-a-new-phase-not-an-edit",
       "kind": "behaviour",
       "prompt": "/r:plan-simplify docs/billing/todo.md",
-      "expected_output": "The explorer finds an existing CurrencyConverter that does what Phase 9 plans to build. After the code is read and its semantics confirmed, the item is rewritten to use it by type name, Files: drops the new file, and no file:LINE reference appears in the plan.",
+      "expected_output": "Phases 1-6 are built. For built Phase 4 the user picks Simplify. Phase 4 keeps its number, title and ticks. A new behaviour-preserving phase is added at the end of the plan, except that an unbuilt phase building on that code makes it go just before that phase, which then depends on it.",
       "files": [],
       "fixture": null,
       "assertions": []
     },
     {
       "id": 5,
+      "name": "final-review-then-apply",
+      "kind": "behaviour",
+      "prompt": "/r:plan-simplify docs/billing/todo.md",
+      "expected_output": "After all units are answered, the skill shows deleted, rewritten, added, kept, dismissed, questions and the renumbering map, runs check_todo.py --spec --against on the draft, then asks Apply / Change an answer / Cancel with AskUserQuestion. Only Apply writes both files; Cancel writes nothing and records mode declined.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 6,
       "name": "no-agent-tool-blocks-rather-than-reviewing-inline",
       "kind": "behaviour",
       "prompt": "/r:plan-simplify docs/billing/todo.md",
@@ -63,11 +73,11 @@
       "assertions": []
     },
     {
-      "id": 6,
+      "id": 7,
       "name": "embedded-in-spec-design-before-codex",
       "kind": "behaviour",
       "prompt": "/r:spec-design docs/billing/spec.html",
-      "expected_output": "After pass 3 and before the Codex challenge, spec-design follows plan-simplify over its draft: the readers run, outcomes are verified, the draft is simplified in place, and the applied/kept/dismissed/question lists appear at spec-design's single gate. Nothing is written before that gate and plan-simplify records no row of its own.",
+      "expected_output": "After pass 3 and before the Codex challenge, spec-design follows plan-simplify over its draft. Clear units (no story behind them, a safeguard with no trigger) are simplified or deleted without a question; only unclear units are asked with AskUserQuestion. Every change appears with its reason at spec-design's single gate, where the user can bring any back. A later Codex finding that would restore a removed unit is dismissed, unless the removal took a story.",
       "files": [],
       "fixture": null,
       "assertions": []

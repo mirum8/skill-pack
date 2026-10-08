@@ -209,11 +209,20 @@ until the leaves exist you cannot tell shared from local.
 
 - **Schema** — tables with real column types, nullability, defaults, indexes, unique constraints
   and foreign keys.
-- **API** — each endpoint's method and path, request and response shape, and every status code it
-  returns including the error ones.
+- **API** — each endpoint's method and path, request and response shape, and the status codes a
+  caller acts on: success, and each error the documents name or a caller must handle differently.
 - **Types** — the signatures introduced, and the invariants that matter (`DuplicateKey` is a
   replay, never a failure).
 - **Boundaries** — which module owns what, and what may import what.
+
+**Plan the minimum that fully delivers the stories, and nothing beyond it.** A safeguard — a retry,
+a timeout, a circuit breaker, rate limiting, idempotency, a cache, pagination, an edge-case branch —
+goes into a contract only with its **trigger**: the fact about this system that makes it necessary
+(the provider documents duplicate webhooks; the endpoint is public; a characteristic sets a latency
+the uncached path misses). "Best practice" is not a trigger. Write the trigger beside it in
+`tech-design.md`, so the simplify pass and the human can check it; a safeguard with none is
+over-engineering, and Step 6.3 will propose cutting it. A rare case with no trigger fails loudly — a
+clear error — rather than getting a recovery path.
 
 Write only what is shared. A contract used by exactly one leaf belongs in that leaf's items, not
 in `tech-design.md` — hoisting it adds a hop for the reader and reaches nobody extra.
@@ -398,15 +407,23 @@ flagged `disable-model-invocation`, so the Skill tool cannot load it; reading th
 Its placeholders are not substituted when read that way — its skill-directory placeholder means
 `${CLAUDE_PLUGIN_ROOT}/skills/plan-simplify`, and its plugin-root placeholder means the root that
 path starts with. Hand it the draft directory, the documents, and the stories, ADR consequences,
-characteristics and v1 line Step 1 pulled out. On a rewrite, the frozen leaves are the ones Step
-1.5 froze, and its explorer may add a `Simplify` leaf for landed code that later leaves would build
-on.
+characteristics and v1 line Step 1 pulled out. On a rewrite, its built phases are the leaves Step
+1.5 froze, and a built unit it simplifies or removes becomes a new leaf rather than an edit.
+
+**It runs silently, and asks only what is unclear.** Embedded, it applies the clear cases itself —
+a leaf or item that traces to no story or requirement, a safeguard with no trigger — and puts an
+`AskUserQuestion` only to the unclear ones: the documents half-ask for it, a whole milestone would
+go, or its readers disagree. A fresh draft has nothing built and the user has just answered Step 3.5;
+a question per leaf would be a second interview about a plan they have not seen yet. Its review
+folds into this skill's gate, where every change is listed with its reason. Under `--yes` it asks
+nothing, and every deleted leaf still lands in `## Deferred`.
 
 **It runs before Codex on purpose.** Codex's coverage question then reads the simplified plan, so a
 cut that took a story with it is caught by a second reader rather than shipped. `--shallow` runs it
 too: over-built leaves are a pass-1 defect.
 
-Carry its lists to the gate — applied, added, kept, dismissed, questions — the way Codex's are.
+Carry its lists to the gate — deleted, rewritten, added, kept, dismissed, questions — the way
+Codex's are.
 Questions go to Open questions. A `blocked: no-agent` result is a **named skip** here, said at the
 gate and recorded as `simplify: "skipped"`; the run continues to Codex, never a simplification done
 in this context and called one.
@@ -460,6 +477,12 @@ each against the documents and the real code, and classify:
 - **minor, or a matter of taste** → note it, do not rewrite. A plan churned over style costs a pass
   and changes nothing an implementer would notice.
 - **not real** → dismiss it, with the reason.
+
+**A finding that would put back something the user removed in Step 6.3 is dismissed**, with
+"removed by the user" as its reason — it sits in `## Deferred`, and the coverage question is about
+stories, not about safeguards with no trigger. A finding that a removal took a *story* or a named
+requirement is the exception: that is the simplify pass breaking its own rule, so it is major and the
+removal is undone.
 
 **Carry all three lists out.** Raised, applied, dismissed — into the gate and the report. Drop them
 and "Codex raised three majors and every one was dismissed" reads exactly like "Codex found
@@ -520,7 +543,8 @@ what was actually built?):
 ## Step 8 — the gate
 
 **Before writing anything to disk, show the decomposition and wait.** Milestones, leaf titles,
-the graph, the wave table, **what the simplify pass cut, added and kept (Step 6.3)**, **what Codex
+the graph, the wave table, **what the simplify pass deleted, rewrote, added and kept, each with its reason (Step 6.3)** — the
+user may bring any of them back here: it is restored from `## Deferred` and the draft re-checked —, **what Codex
 raised and what you did about it (Step 6.5)**, and the
 Step 3.5 answers the plan is built on — then stop for a yes. Say plainly when the Codex review was
 skipped for want of the plugin; an unreviewed plan and a reviewed-and-clean one must not look
@@ -612,7 +636,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
  "milestones":0,"leaves":0,"waves":0,"maxWaveWidth":0,
  "designChoicesAsked":0,"designChoicesRecorded":0,"silentChoicesListed":0,
  "silentChoicesRevisited":0,"checkerProblems":0,"openQuestions":0,
- "simplify":"ran","simplifyRaised":0,"simplifyApplied":0,"simplifyKept":0,"simplifyLeavesAdded":0,
+ "simplify":"ran","simplifyUnitsAsked":0,"simplifySimplified":0,"simplifyDeleted":0,
+ "simplifyKeptByUser":0,"simplifyPhasesAdded":0,
  "codexReview":"ran","codexRaised":0,"codexApplied":0,"codexDismissed":0,
  "inputShape":"none","leavesFrozen":0,"leavesResplit":0,"leavesAdded":0,"leavesDropped":0,
  "fieldsInferred":0}
@@ -659,7 +684,8 @@ the only thing that will ever notice it drifting.
 - Never fake the Codex review, substitute an imitation of it, or report a skipped one as done.
   Never point it at `/r:code-adversarial` or a `run.sh` — those review a diff and there is none.
 - Never skip the simplify pass (Step 6.3) or run it after Codex, and never report a blocked one as
-  run. Never let it cut a story, a test or a safeguard — it keeps those, by its own rules.
+  run. Never let a Codex finding restore what the user removed there, unless it took a story.
+- Never write a safeguard into a contract without its trigger.
 - Never apply a Codex finding without verifying it against the documents and the real code, and
   never rewrite the plan for a minor or stylistic one.
 - Never silently resolve a design choice that met the Step 3.5 bar. Ask it right after pass 2, or,

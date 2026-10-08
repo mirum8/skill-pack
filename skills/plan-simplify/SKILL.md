@@ -1,15 +1,16 @@
 ---
 description: >-
-  Review a build plan for over-engineering and simplify it without losing a requirement: cut
-  speculative abstractions, infrastructure and contracts no story needs, merge phases that only
-  scaffold, and rewrite phases to extend code the repo already has instead of building it again.
-  On a half-built plan it also reads the code the ticked phases landed, and where that code is
-  over-built in a way later phases would inherit, adds a behaviour-preserving "Simplify" phase —
-  built phases are never edited. Every cut is checked against the spec's stories, decisions and
-  characteristics, and the plan checker runs over the result. Reads todo.md + tech-design.md from
-  /r:spec-design; drafts to one side and writes only after a yes. Runs inside /r:spec-design
-  before its Codex challenge, and deliberately as "/r:plan-simplify". NOT for writing the plan
-  (/r:spec-design), building it (/r:plan-run) or refactoring code now (/r:code-refactor).
+  Walk a phased build plan unit by unit — a phase, a few related phases, or a milestone — and for
+  each one look for a simpler way to deliver it, or a reason it is not needed at all. Every item
+  must trace to the spec, and every safeguard (retry, circuit breaker, rate limit, idempotency,
+  cache, edge-case branch) must name the concrete trigger in this system that justifies it; "best
+  practice" alone is not one. Asks one AskUserQuestion per unit — simplify, delete or keep — then
+  shows the whole changed plan and writes it only after a yes. An unbuilt unit is rewritten or
+  deleted (deletions go to a `## Deferred` list); a built one is never edited — a new phase
+  simplifies or removes it. Reads todo.md + tech-design.md from /r:spec-design; runs inside
+  /r:spec-design before its Codex challenge, and deliberately as "/r:plan-simplify". NOT for
+  writing the plan (/r:spec-design), building it (/r:plan-run) or refactoring code now
+  (/r:code-refactor).
 model: opus
 effort: high
 disable-model-invocation: true
@@ -17,10 +18,18 @@ disable-model-invocation: true
 
 # plan-simplify
 
-Find what a plan builds that its documents do not need, take it out, and prove nothing the
-documents do need went with it. **Simple, not simplistic**: the simplest plan that still fully
-delivers every story, with the validation, error handling, safeguards and tests those stories need.
-A cut that saves a phase and drops a requirement is a defect, not a simplification.
+**The goal: the simplest plan that fully and correctly implements the spec.** Not the safest-looking
+one, not the most complete one — the minimum that delivers every story, built well. Two failures sit
+on either side of it, and both are defects:
+
+- **Over-engineering** — a phase, a retry, a breaker, an extra status code, an edge-case branch, a
+  config flag that nothing in this system needs. It costs build time, review time and a larger
+  surface for bugs, and it is what a plan drafted from a spec drifts toward.
+- **Under-building** — a cut that takes a story, a test, a named error or a safeguard this system
+  does need. A smaller plan that ships a bug is not simpler, it is wrong.
+
+So the burden of proof is on the plan: **every phase has to show why it is there, and why it is not
+simpler.** The user decides every change, one unit at a time.
 
 ## Invocation
 
@@ -30,115 +39,137 @@ A cut that saves a phase and drops a requirement is a defect, not a simplificati
   `docs/*/todo.md` (several → ask which), then `todo.md`, `PLAN.md` at the root.
 - **`<doc>...`** — the documents the plan was derived from. Omitted, the `spec.html` beside the plan
   plus any document the plan's header names.
-- **`--yes`** — skip the gate in Step 7. Every outcome is still reported.
+- **`--yes`** — take every recommendation without asking (Steps 4 and 6). Every deletion still lands
+  in `## Deferred`, so nothing is lost and every decision stays visible.
 
 **Embedded** — `/r:spec-design` reads this file and follows it over its draft before its Codex
-challenge. Then the caller hands over the draft directory, the documents and the requirement inputs
-it already extracted, and four things change: work on the draft in place, skip Step 6's checker
-(the caller's own check runs over the result), skip Steps 7–9 (the caller's gate shows the outcome
-lists, the caller writes, the caller's stats row carries the counts), and return the outcome lists
-of Step 3 plus the phases added in Step 5.
+challenge. The caller hands over the draft directory, the documents and the requirement inputs it
+already extracted. Steps 1–3 and 5 run as written; **Step 4 runs silently**. A fresh plan has
+nothing built, every change is free to undo, and the user already answered the design questions —
+so a question per unit would be a second interview about a draft nobody has seen. Apply the
+recommendation for every **clear** unit yourself: one that traces to no ledger entry, or a safeguard
+with no trigger. Ask with `AskUserQuestion` only the **unclear** ones — the documents half-ask for
+it, a whole milestone would go, or the readers disagree. The final review (Step 6) folds into the
+caller's gate, where the user sees every change with its reason and can bring any of them back; the
+checker, the write and the stats row are the caller's. Return the decisions per unit with their
+reasons, which were applied silently and which were asked, the kept units, the dismissed findings and
+the questions.
 
 ## Step 1 — read the plan, the documents and the code
 
 Read `todo.md`, the `tech-design.md` (or `design.md`) beside it, and every document. No documents at
-all → the plan's own checklist items are the requirements; only cuts that keep every item's
-observable behaviour are in bounds, and the gate says so.
+all → the plan's own checklist items stand in for the requirements, and the final review says so.
 
-**Mark what is frozen.** A leaf is frozen when it carries a `- [x]` item, a `<!-- built: … -->`
+**Mark what is built.** A phase is built when it carries a `- [x]` item, a `<!-- built: … -->`
 marker, or is already under way: a `.task-plans/*.md` plan whose source names that phase and whose
-`status:` is not `done`. A started leaf counts because its branch is building what the plan says
-now — rewrite it and that branch builds something the plan no longer contains. Frozen leaves keep
-number, title, ticks and ticked wording exactly; only an unticked item inside one may change.
+`status:` is not `done`. A started phase counts because its branch is building what the plan says
+now. A built phase keeps its number, title, ticks and ticked wording exactly — it is the record of
+what shipped.
 
-**Build the requirements ledger before judging anything.** It is the guard every cut is checked
-against, so it is written first, while nothing argues for a cut yet:
+**Build the requirements ledger before judging anything** — while nothing argues for a cut yet:
 
 - every user story by name, and what its acceptance asks;
-- every ADR consequence — a consequence the spec accepted is work it wants, not complexity;
+- every explicit "must" in the documents — a validation rule, an error response, a security or
+  privacy rule, a limit;
+- every ADR consequence the spec accepted;
 - the architectural characteristics and the number each one sets;
-- every validation rule, error response, status code and security rule the documents name;
+- every external system the product talks to, and what its documentation says it does (retries a
+  webhook, returns 429, can hang);
 - the v1 line.
+
+The ledger separates **what the spec asks for** from **what the plan added**. Only the second is
+open to a cut here; disagreement with the first is a question, never a cut.
 
 **In an existing codebase, find the reuse index** — the doc `/r:reuse-index` writes, linked from the
 root `CLAUDE.md` or under `docs/` — and pass it to the explorer.
 
-## Step 2 — two fresh readers, in parallel
+## Step 2 — group the plan into units
+
+A **unit** is what one question is about: usually one phase; a few phases that only make sense
+together (a schema, the service on it and the endpoint over it); or a whole milestone when the
+question is whether that area is needed at all. Group by what a single decision covers — never mix
+built and unbuilt phases in one unit, since the two take different actions.
+
+## Step 3 — two fresh readers, in parallel
 
 Dispatch both in **one message** with the `Agent` tool, `subagent_type: "general-purpose"`, each
-handed the absolute path of [references/rubric.md](references/rubric.md)
-(`${CLAUDE_SKILL_DIR}/references/rubric.md`) and told to follow its section for that role:
+handed the ledger, the units, the built list and the absolute path of
+[references/rubric.md](references/rubric.md) (`${CLAUDE_SKILL_DIR}/references/rubric.md`), told to
+follow its section for that role:
 
-- **Plan reviewer** — the unbuilt leaves and `tech-design.md` against the documents and the ledger.
-- **Code explorer** — only when the repo has code. For each unbuilt leaf, what existing code already
-  does part of it; for each frozen leaf, whether the code it landed is over-built.
+- **Plan reviewer** — for every unit: does it trace to the ledger, does every safeguard in it have
+  a trigger, and what is the simplest shape that still meets what it traces to.
+- **Code explorer** — only when the repo has code. For an unbuilt unit, what existing code already
+  does part of it; for a built unit, whether the code it landed is over-built.
 
 They are separate readers because the context that wrote a plan defends its own decomposition, and
 because exploring code fills a context the plan judgement does not need.
 
-**No `Agent` tool → stop with `blocked: no-agent`** and say so. Reviewing inline in the same
-context is the single-reader run this step exists to avoid, and reporting it as a review would be
-the confident wrong answer. Embedded, return the block to the caller, which names it at its gate.
+**No `Agent` tool → stop with `blocked: no-agent`** and say so. Reviewing inline in the same context
+is the single-reader run this step exists to avoid. Embedded, return the block to the caller.
 
-A reader that returns nothing is a **named gap** in the report, never "no findings".
+A reader that returns nothing is a **named gap**, never "no findings".
 
-## Step 3 — verify every finding
+**Verify before asking.** The readers propose; you check each proposal against the ledger, the
+documents and the code. Drop what is not real — a misread, a reuse candidate whose semantics differ,
+code that does not exist — and keep the reason for the final review. A proposal that would cut what
+the documents ask for is not a cut but a **question** for the spec, recorded in Open questions.
 
-The readers propose; this step decides. Check each finding against the ledger, the documents and
-the code, and give it exactly one outcome:
+**The trigger test is the heart of it.** A safeguard is justified by a fact about *this* system, not
+by being good practice in general: a circuit breaker on a user-facing call to an external service
+that can hang has one; on an internal call it does not. Rate limiting on a public endpoint has one;
+on an admin endpoint behind auth it does not. The rubric has the table. A trigger you cannot point at
+— in the ledger, an external system's documentation, or the code — does not exist.
 
-| outcome | when |
-|---|---|
-| **apply** | It is real, the simpler shape is concrete, and after it every ledger entry is still met by some leaf. |
-| **keep** | The complexity serves a ledger entry. Name the entry. A kept finding is a correct plan, not a miss. |
-| **dismiss** | Not real — a misread, a reuse candidate whose semantics differ from what the leaf needs, code that does not exist. Give the reason. |
-| **question** | The documents themselves demand the complexity and the finding argues they are over-built. Never cut against the spec: it goes to Open questions with the trade named. |
+**Never proposed for removal:** a story's main path and anything its acceptance names; an error,
+validation or limit the documents name; authentication and access checks; data integrity where data
+or money could be lost; a safeguard whose trigger holds; a test for behaviour that stays — tests go
+only with the behaviour they covered. A rare case with no trigger **fails loudly** instead of being
+handled: a clear error, never a silent continue on bad data.
 
-**Never cut, whatever the finding says:** a story or any of its acceptance; a test an item names
-(tests may move with a merge, never disappear); validation, error responses or status codes the
-documents or contracts name; auth, money, persistence and concurrency safeguards — constraints,
-idempotency, transactions; the verification step for an architectural characteristic; an ADR
-consequence; a `Done when:`; a `## Resolve first` entry.
+## Step 4 — one question per unit
 
-**A reuse finding is applied only when the code was read and does what the leaf needs** — same
-semantics, not the same name. Write it into the item by type or module name: "extend
-`LedgerService` with `reverse(entryId)`", never a `file:LINE`. Lines move before a later leaf runs,
-and an imagined citation reads exactly like a real one; `/r:task-run`'s planner writes the
-line-level map with the files open.
+For every unit with a verified proposal — only the unclear ones when embedded — ask with
+`AskUserQuestion` — up to four units per call, in
+plan order, as many calls as it takes. A unit with nothing to propose is not asked; it appears in the
+final review as unchanged.
 
-Carry all four lists out. "Five findings, all kept" and "no findings" are opposite facts about a
-plan and must not look alike.
+Each question names the unit in plain words and says in one or two short sentences what the readers
+found. The options, recommended first and labelled `(Recommended)`:
 
-## Step 4 — apply to the unbuilt part
+- **Simplify** — the description says what the simpler shape is and what goes.
+- **Delete** — only when the unit traces to nothing the spec asks for.
+- **Keep as is.**
+
+Offer only the options the readers' findings support: a unit that traces to a story has no Delete; a
+unit that is justified but over-built has Simplify and Keep. Each `description` uses three short
+lines — `Now:` what the plan has · `Change:` what it would become · `User sees:` what a v1 user
+experiences after it, e.g. "a clear 502 instead of a silent retry". Use `preview` when the choice is
+between two shapes of the same contract.
+
+Write in plain English at B2 level: sentences of 15 words or fewer, the real names kept, no plan
+shorthand without its meaning. A question the user has to read twice gets "whatever you think", and
+the decision is then made by nobody.
+
+## Step 5 — draft the decisions
 
 Work on a draft: the caller's directory when embedded, otherwise copies of `todo.md` and
-`tech-design.md` in a scratch directory. The real files stay byte-identical until Step 8.
+`tech-design.md` in a scratch directory. The real files stay byte-identical until Step 7.
 
-- Remove or merge leaves; a merged leaf stays inside 5–12 items and one session's work.
-- Rewire every `**Depends on:**` the change touches, and update `**Files:**` where reuse means a file
-  is no longer created.
-- Trim `tech-design.md` in the same pass, so the two files stay one document.
-- **Renumber unbuilt leaves only**, above the highest frozen one, so every dependency stays
-  lower-numbered. Keep an old → new map; it is reported.
-- Every item still stands alone — repeat the contract it needs rather than pointing at a milestone.
+**An unbuilt unit:**
 
-## Step 5 — over-built code that already landed
+- **Simplify** → rewrite its phases in place: items, `**Files:**`, `**Depends on:**`, the contracts
+  in `tech-design.md`. A rewritten phase stays inside 5–12 items and one session's work; phases left
+  too thin merge into a neighbour. Reuse is written by type or module name, never `file:LINE`.
+- **Delete** → remove its phases and their contracts, rewire every edge that pointed at them, and add
+  one plain bullet per phase to **`## Deferred`** — what it was and why it went. The section sits
+  above the first `## Milestone`, beside `## Resolve first`, in plain bullets, never `- [ ]`: nothing
+  under it is work, and a checkbox would read as a task. It is how a deletion stays recoverable.
 
-A frozen leaf is never edited; over-built code it landed is **new work**, a new leaf. Add one only
-when all four hold:
-
-1. **The complexity is real** — the explorer read the code, not the plan text.
-2. **No ledger entry needs it.**
-3. **It costs something later** — an unbuilt leaf will build on it, or it carries a defect risk such
-   as two mechanisms for one concern. Code that is merely not how you would write it, with nothing
-   building on it, gets no leaf: name it in the report and point at `/r:code-refactor`.
-4. **The simpler shape preserves behaviour** — the landed tests stay green with their assertions
-   unchanged, except tests of an internal mechanism the leaf removes.
-
-The leaf, in the plan's usual shape:
+**A built unit is never edited.** **Simplify** or **Delete** becomes a **new phase** that does it:
 
 ```markdown
-### Phase 9 — Simplify payout retry handling
+### Phase 14 — Simplify payout retry handling
 **Implements:** Replay a payout safely
 **Depends on:** Phase 6 · Phase 7
 **Files:** `.../PayoutRetryPolicy.java` (delete) · `.../PayoutService.java`
@@ -148,15 +179,21 @@ The leaf, in the plan's usual shape:
 **Done when:** `mvn -pl payments test` is green.
 ```
 
-- **Implements** — the story names of the frozen leaves it simplifies, verbatim.
-- **Numbered** right after the highest frozen leaf, so the unbuilt leaves that build on that code can
-  depend on it; add those edges.
-- **Placed** in the milestone of the first unbuilt leaf that builds on it, or the last milestone that
-  still has unbuilt leaves. Never in a milestone whose leaves are all built — that reopens a
-  milestone `/r:plan-report` may already have written up. If every milestone is built, add
-  `## Milestone N — Simplification`.
+- **Implements** — the story names of the built phases it changes, verbatim.
+- **Simplify keeps behaviour** — the landed tests stay green with their assertions unchanged, except
+  tests of an internal mechanism the phase removes. **Delete** removes the feature, its tests and its
+  migrations forward (a new migration, never an edited one).
+- **Placed at the end of the plan**, in the last milestone that still has unbuilt phases, or a new
+  `## Milestone N — Simplification` when every milestone is built. **Except** when an unbuilt phase
+  builds on that code: then the new phase goes just before it, and that phase depends on it — so it
+  is not first built on the complex code and simplified a second time.
+- Never placed in a fully built milestone: that reopens a milestone `/r:plan-report` may already
+  have written up.
 
-## Step 6 — check the draft
+**Renumber unbuilt phases only**, above the highest built one, keeping every dependency
+lower-numbered. Keep an old → new map for the final review.
+
+Then check the draft — standalone only; embedded, the caller checks the same draft:
 
 ```sh
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/spec-design/scripts/check_todo.py" <draft>/todo.md \
@@ -164,57 +201,61 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/spec-design/scripts/check_todo.py" <draft>
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/plan-unblock/scripts/resolve_scope.py" <draft>/todo.md --check
 ```
 
-`--against` is the freeze guard and `--spec` the coverage guard: a story that lost its last leaf is
-reported there. Fix what they report and re-run. **A finding is never fixed by loosening a check** —
-it means a cut took something it was not allowed to; undo that cut and move it to **keep**.
-Embedded runs skip this step, because the caller checks the same draft.
+`--against` guards the built phases and `--spec` the coverage. **A finding is never fixed by
+loosening a check** — it means a decision took something it was not allowed to; undo that change and
+tell the user which answer it was.
 
-## Step 7 — the gate
+## Step 6 — the final review
 
-Show, before writing anything:
+Show the whole changed plan in one message:
 
-- **applied** — each cut: what goes, and which leaf still meets the ledger entries it touched;
-- **added** — each Simplify leaf with the four reasons from Step 5;
-- **kept** — each finding with the ledger entry that needs the complexity;
-- **dismissed** — each with its reason;
-- **questions** — the trades only the user can make;
-- **renumbered** — the old → new map, and the leaf count before and after.
+- **deleted** — each unbuilt phase, now in `## Deferred`, with its reason;
+- **rewritten** — each simplified phase, what went and what stayed;
+- **added** — each new phase for a built unit, and where it sits;
+- **kept** — each unit you asked about and the user kept, and each one a reader flagged that turned
+  out justified, with the trace or trigger;
+- **dismissed** — each reader finding dropped in verification, with its reason;
+- **questions** — the trades only a change to the spec can make;
+- **renumbered** — the old → new map, and the phase count before and after.
 
-Then stop for a yes. The user may drop individual cuts; dropped ones move to **kept**, the draft is
-re-derived and re-checked. A decline writes nothing and goes to Step 9 with `mode: "declined"`.
-`--yes` skips the wait.
+Then ask with `AskUserQuestion`: **Apply** (recommended) · **Change an answer** · **Cancel**. Change
+an answer re-asks those units, re-drafts and comes back here. Cancel writes nothing and goes to Step 8
+with `mode: "declined"`. `--yes` skips the question.
 
-## Step 8 — write
+## Step 7 — write
 
-Replace `todo.md` and `tech-design.md` together, add the questions to the plan's Open questions,
-and leave both as working-tree changes — `git diff` is the record of what was cut. Then say:
+Replace `todo.md` and `tech-design.md` together, add the questions to the plan's Open questions, and
+leave both as working-tree changes — `git diff` is the record of what changed. Then say which phase
+numbers moved — an earlier `--from N`, or a `/r:plan-run` already running on this plan, holds stale
+numbers and has to be restarted — and give the next command, `/r:plan-run <plan>`.
 
-- which phase numbers moved — an earlier `--from N`, or a `/r:plan-run` already running on this
-  plan, holds stale numbers and has to be restarted;
-- the next command, `/r:plan-run <plan>`.
+## Step 8 — record the run
 
-## Step 9 — record the run
-
-Counts only, never a path or a title. Always, including a decline or a block:
+Counts only, never a path or a title. Always, including a cancel or a block:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
-{"skill":"r:plan-simplify","mode":"applied","leavesBefore":0,"leavesAfter":0,
- "leavesFrozen":0,"findingsRaised":0,"applied":0,"kept":0,"dismissed":0,"questions":0,
- "reuseApplied":0,"simplifyLeavesAdded":0,"checkerProblems":0,"readers":2}
+{"skill":"r:plan-simplify","mode":"applied","phasesBefore":0,"phasesAfter":0,"phasesBuilt":0,
+ "units":0,"unitsAsked":0,"simplified":0,"deleted":0,"keptByUser":0,"phasesAdded":0,
+ "dismissed":0,"questions":0,"checkerProblems":0,"readers":2}
 STATS_JSON
 ```
 
-`mode` is `applied` | `declined` | `blocked`. `kept` against `applied` is the pair to read: a skill
-whose findings are mostly kept is raising complexity the specs ask for, and one that applies
-everything is not checking. The script always exits 0; never retry it.
+`mode` is `applied` | `declined` | `blocked`. Read `keptByUser` against `unitsAsked`: a user who keeps
+most units is being asked about things with real reasons the readers missed, and the rubric is too
+aggressive; one who accepts everything while the plans still feel heavy means the readers are too
+timid. The script always exits 0; never retry it.
 
 ## Never do this
 
-- Never cut a ledger entry, and never cut against the documents — that is a question, not a cut.
-- Never drop a test, a validation, an error response or a safeguard to make a plan smaller.
-- Never edit, renumber, retitle or un-tick a frozen leaf, including one `/r:task-run` has started.
-- Never apply a reuse finding nobody verified in the code, and never cite `file:LINE`.
-- Never add a Simplify leaf for taste, or one that changes behaviour.
+- Never change a unit the user has not answered for, except under `--yes`, and never write before
+  the final Apply.
+- Never edit, renumber, retitle or un-tick a built phase — a new phase does the change.
+- Never offer Delete for a unit that traces to a story, and never cut what the documents ask for —
+  that is a question for the spec.
+- Never keep a safeguard on "best practice" alone, and never cut one whose trigger holds.
+- Never drop a test while the behaviour it covers stays, a named error, an access check or a
+  data-integrity guard.
+- Never lose a deleted phase — it goes to `## Deferred`.
+- Never cite `file:LINE`, and never accept a reuse proposal nobody verified in the code.
 - Never review in the caller's context when the `Agent` tool is missing — stop and say so.
-- Never write the real files before the gate, and never report a block or a silent reader as clean.
