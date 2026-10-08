@@ -9,7 +9,7 @@ written without knowing what question it answers gets a plausible number instead
 1. The rewrite fields
 2. `maxWaveWidth`
 3. `designChoicesAsked`, and the silent-choice pair
-4. `codexReview`
+4. `codexReview`, and the simplify pass
 5. `checkerProblems`
 6. The cross-skill pair
 
@@ -40,6 +40,11 @@ questions instead of being answered — under `--yes`, or when the user declined
 user ticked to decide. Revisited near zero over many plans means the bar sits in the right place
 and the list is a cheap receipt; revisited often means the bar is too high — those choices belong
 in Step 3.5, where they are asked before pass 3 builds on them rather than after.
+
+**`simplify` is `ran` | `skipped`, and the four counts beside it say whether Step 6.3 earns its
+pass.** `skipped` means no `Agent` tool reached it, never that the plan was simple. `simplifyRaised` against `simplifyApplied` and `simplifyKept` is the reading: findings mostly kept
+mean the readers flag complexity the specs ask for, and everything applied means nothing is being
+checked. `simplifyLeavesAdded` is non-zero only on a rewrite, where landed code is read.
 
 **`codexReview` is `ran` | `skipped` | `blocked`, and it is the field that stops a missing plugin
 reading as a clean plan.** `skipped` means Codex is not installed; `blocked` means it is and the

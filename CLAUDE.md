@@ -571,13 +571,16 @@ silently**: picking a winner is a decision, and a sweep that made two files agre
 whichever direction was easier to phrase.
 
 **Skills that must never self-trigger** (`task-run`, `task-quick`, `issues-fix`, `plan-run`,
-`spec-design`, `ui-prototype`, `page-serve`, `pack-maintain`, `diff-explain`) carry
+`spec-design`, `plan-simplify`, `ui-prototype`, `page-serve`, `pack-maintain`, `diff-explain`) carry
 `disable-model-invocation: true` in frontmatter — the enforcement, not just a sentence in the body. Most of them mutate the repo or a
 plan on a scale nobody wants arrived at by inference, so they are invoked deliberately or not at
 all. `page-serve` is the one that mutates nothing and still belongs: it opens a listening socket,
 and `--lan` makes that socket reachable from every device on the network, which is the same class
 of thing. `diff-explain` mutates nothing either and is flagged by choice: a review page is something
-a person asks for when they sit down to review, never a side effect of talking about a diff. Two consequences follow and are easy to forget: their descriptions leave the listing
+a person asks for when they sit down to review, never a side effect of talking about a diff.
+`plan-simplify` is the one flagged skill another skill runs: `/r:spec-design` reaches it by reading
+its `SKILL.md` and following the embedded mode, because the flag blocks the Skill tool and the
+listing budget has no room for its description. Two consequences follow and are easy to forget: their descriptions leave the listing
 budget entirely (they are not in the router's context), and **no prompt can route to them**, so their own `trigger` eval cases are untestable by
 design and their `neighbour-exclusion` cases pass without measuring anything — `tools/run-evals.py`
 skips both kinds and says why rather than counting them as passes.

@@ -12,7 +12,7 @@ description: >-
   reformatted and re-derived against the documents with every leaf that already carries a tick frozen. Stack-agnostic;
   optional free text for what the documents cannot say (priorities, a deadline, what to defer).
   Asks where a design decision is genuinely open and would change the contracts or the split.
-  The draft is challenged by the real Codex where installed - findings verified, major ones
+  The draft is simplified by /r:plan-simplify, then challenged by the real Codex where installed - findings verified, major ones
   fixed, all three lists reported. Invoked deliberately as "/r:spec-design" - never routed to.
   --shallow gives the build order alone. NOT for writing the spec - that's /r:spec-brainstorm;
   NOT for building the plan - that's /r:plan-run or /r:task-run.
@@ -385,6 +385,32 @@ can tell what it was guarding. The shape is in
 closes these: it probes what the repo can answer, puts the rest to a person, and stamps each entry
 with what settled it.
 
+## Step 6.3 — simplify the draft
+
+The draft is complete and nothing is on disk. Before anyone challenges it, take out what it builds
+that the documents do not need. A plan drafted from a spec drifts toward over-engineering — an
+interface for one implementation, a queue nobody asked for, a scaffolding leaf — and the context
+that drafted it is the worst placed to see that.
+
+**Follow `/r:plan-simplify` in its embedded mode**: read
+`${CLAUDE_PLUGIN_ROOT}/skills/plan-simplify/SKILL.md` and do what it says over the draft. It is
+flagged `disable-model-invocation`, so the Skill tool cannot load it; reading the file is the route.
+Its placeholders are not substituted when read that way — its skill-directory placeholder means
+`${CLAUDE_PLUGIN_ROOT}/skills/plan-simplify`, and its plugin-root placeholder means the root that
+path starts with. Hand it the draft directory, the documents, and the stories, ADR consequences,
+characteristics and v1 line Step 1 pulled out. On a rewrite, the frozen leaves are the ones Step
+1.5 froze, and its explorer may add a `Simplify` leaf for landed code that later leaves would build
+on.
+
+**It runs before Codex on purpose.** Codex's coverage question then reads the simplified plan, so a
+cut that took a story with it is caught by a second reader rather than shipped. `--shallow` runs it
+too: over-built leaves are a pass-1 defect.
+
+Carry its lists to the gate — applied, added, kept, dismissed, questions — the way Codex's are.
+Questions go to Open questions. A `blocked: no-agent` result is a **named skip** here, said at the
+gate and recorded as `simplify: "skipped"`; the run continues to Codex, never a simplification done
+in this context and called one.
+
 ## Step 6.5 — Codex challenges the plan
 
 The draft is complete and nothing is on disk. Before the user sees it, have the **real Codex**
@@ -494,7 +520,8 @@ what was actually built?):
 ## Step 8 — the gate
 
 **Before writing anything to disk, show the decomposition and wait.** Milestones, leaf titles,
-the graph, the wave table, **what Codex raised and what you did about it (Step 6.5)**, and the
+the graph, the wave table, **what the simplify pass cut, added and kept (Step 6.3)**, **what Codex
+raised and what you did about it (Step 6.5)**, and the
 Step 3.5 answers the plan is built on — then stop for a yes. Say plainly when the Codex review was
 skipped for want of the plugin; an unreviewed plan and a reviewed-and-clean one must not look
 alike at the one moment a human is deciding.
@@ -585,6 +612,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
  "milestones":0,"leaves":0,"waves":0,"maxWaveWidth":0,
  "designChoicesAsked":0,"designChoicesRecorded":0,"silentChoicesListed":0,
  "silentChoicesRevisited":0,"checkerProblems":0,"openQuestions":0,
+ "simplify":"ran","simplifyRaised":0,"simplifyApplied":0,"simplifyKept":0,"simplifyLeavesAdded":0,
  "codexReview":"ran","codexRaised":0,"codexApplied":0,"codexDismissed":0,
  "inputShape":"none","leavesFrozen":0,"leavesResplit":0,"leavesAdded":0,"leavesDropped":0,
  "fieldsInferred":0}
@@ -630,6 +658,8 @@ the only thing that will ever notice it drifting.
   every one is named at the gate. Never invent a `Done when:` to satisfy the checker.
 - Never fake the Codex review, substitute an imitation of it, or report a skipped one as done.
   Never point it at `/r:code-adversarial` or a `run.sh` — those review a diff and there is none.
+- Never skip the simplify pass (Step 6.3) or run it after Codex, and never report a blocked one as
+  run. Never let it cut a story, a test or a safeguard — it keeps those, by its own rules.
 - Never apply a Codex finding without verifying it against the documents and the real code, and
   never rewrite the plan for a minor or stylistic one.
 - Never silently resolve a design choice that met the Step 3.5 bar. Ask it right after pass 2, or,

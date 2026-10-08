@@ -71,6 +71,7 @@ pack does not rely on it.
 | `/r:spec-brainstorm` | idea → one `spec.html`: domain model, user stories, modules, stack, API |
 | `/r:spec-design` | docs → `todo.md` + `tech-design.md`: milestones, contracts, leaves and a dependency graph; rewrites a plan that already exists rather than overwriting it |
 | `/r:plan-run` | build a whole `todo.md` phase by phase; non-overlapping phases can run in parallel sessions |
+| `/r:plan-simplify` | review a plan for over-engineering and simplify it without losing a requirement; reuses existing code, adds Simplify phases for over-built landed code |
 | `/r:plan-report` | one finished milestone → a self-contained HTML report: design as built, SVG diagrams, cited snippets |
 | `/r:plan-unblock` | settle a plan's `## Resolve first` blockers — probe what the repo answers, ask a person the rest |
 | `/r:hexagonal-architecture` | Hexagonal Lite boundaries: what lives in core, what a module may import |

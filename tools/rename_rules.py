@@ -60,7 +60,7 @@ RETIRED_PACKED = {
 # never existed and make validate report an R-4 cut-over that has nothing to cut over from.
 # They are part of the pack all the same, which is what packed_skills() is for.
 PACK_NATIVE = frozenset({"diff-explain", "issues-draft", "pack-compact", "pack-maintain", "page-serve",
-                         "plan-report", "plan-run", "plan-unblock", "reuse-index",
+                         "plan-report", "plan-run", "plan-simplify", "plan-unblock", "reuse-index",
                          "task-quick", "ui-prototype"})
 
 

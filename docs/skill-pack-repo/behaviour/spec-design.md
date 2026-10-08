@@ -556,6 +556,23 @@ flowchart TD
   *Enforced by:* `skills/task-run/task-run-implement.workflow.js`
   *Tested by:* —
 
+## Step 6.3 — the simplify pass
+
+- **SB-spec-design-132** — After pass 3 and before the Codex challenge, the draft is simplified by
+  following `/r:plan-simplify` in its embedded mode — read from its `SKILL.md`, because the flag on
+  that skill blocks the Skill tool. Running before Codex lets Codex's coverage question catch a cut
+  that took a story with it.
+  *States it:* `skills/spec-design/SKILL.md`
+  *Enforced by:* —
+  *Tested by:* —
+
+- **SB-spec-design-133** — The simplify pass's applied, added, kept, dismissed and question lists
+  reach the single gate; a `blocked: no-agent` result is a named skip recorded as
+  `simplify: "skipped"`, never a simplification done in the caller's context.
+  *States it:* `skills/spec-design/SKILL.md`
+  *Enforced by:* —
+  *Tested by:* —
+
 ## Step 6.5 — Codex challenges the draft
 
 - **SB-spec-design-065** — Before the user sees the decomposition and while nothing is on disk, the
@@ -1084,7 +1101,7 @@ flowchart TD
 ## Prose-only behaviours
 
 Held up by wording alone — no *Enforced by:* and no *Tested by:* — so nothing fails if one quietly
-stops being true. **73 of 131 entries**, and they cluster: the three steps where a person is in the
+stops being true. **75 of 133 entries**, and they cluster: the three steps where a person is in the
 loop (the Codex challenge, the gate, the hand-off) are prose-only end to end.
 
 - **Invocation and flags** — 003, 004, 005, 006, 007, 008, 009. Nothing reads the flags but the
@@ -1100,6 +1117,7 @@ loop (the Codex challenge, the gate, the hand-off) are prose-only end to end.
   `tech-design.md` passes every check in the pack.
 - **Step 3.5, the design questions** — 046, 047, 048, 049, 050, 131. Whether the bar was applied is
   visible only as `designChoicesAsked` in a row the same run writes about itself.
+- **Step 6.3, the simplify pass** — 132, 133.
 - **Step 6.5, the Codex challenge — the whole step** — 065, 066, 067, 068, 069, 070, 071, 072, 073.
   Nothing verifies that the review ran, that `--background` was passed, that the rubric stayed at
   five, that findings were verified before being applied, or that a skip was reported as a skip.

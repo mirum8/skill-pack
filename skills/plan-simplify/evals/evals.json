@@ -1,0 +1,76 @@
+{
+  "skill_name": "plan-simplify",
+  "notes": "disable-model-invocation is set, so no prompt can route here: every case is a behaviour case and run-evals.py skips them until a fixture and a judge exist.",
+  "evals": [
+    {
+      "id": 0,
+      "name": "speculative-abstraction-is-cut",
+      "kind": "behaviour",
+      "prompt": "/r:plan-simplify docs/billing/todo.md",
+      "expected_output": "Two fresh readers are dispatched in one message. A PaymentProvider interface with one implementation and a provider-config table that no story exercises are cut; the leaf that built them is merged into its neighbour, edges and Files: are rewired, tech-design.md is trimmed in the same pass, and the gate lists the cut with the leaf that still meets each story it touched.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 1,
+      "name": "requirement-backed-complexity-is-kept",
+      "kind": "behaviour",
+      "prompt": "/r:plan-simplify docs/billing/todo.md",
+      "expected_output": "The spec's ADR accepts an outbox for payout events. A reader proposes replacing it with a direct call; the finding is recorded as kept, naming the ADR consequence, and the outbox leaf, its idempotency constraint and its tests stay in the plan unchanged.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 2,
+      "name": "half-built-plan-gets-a-simplify-phase",
+      "kind": "behaviour",
+      "prompt": "/r:plan-simplify docs/billing/todo.md",
+      "expected_output": "Phases 1-6 are ticked. The explorer reads the landed code and finds a hand-rolled retry policy that duplicates the existing RetryTemplate, and Phase 8 (unbuilt) would build on it. Phases 1-6 keep their numbers, titles and ticks. A new 'Simplify' leaf is numbered 7, depends on the frozen leaves it touches, carries their story names in Implements:, keeps the landed tests' assertions unchanged, and the unbuilt leaves are renumbered above it with the old-to-new map reported.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 3,
+      "name": "taste-only-built-code-gets-no-phase",
+      "kind": "behaviour",
+      "prompt": "/r:plan-simplify docs/billing/todo.md",
+      "expected_output": "Landed code in a ticked phase is verbose but nothing unbuilt builds on it and it carries no defect risk. No Simplify leaf is added; the report names the code and points at /r:code-refactor.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 4,
+      "name": "reuse-rewrites-a-leaf-without-file-line",
+      "kind": "behaviour",
+      "prompt": "/r:plan-simplify docs/billing/todo.md",
+      "expected_output": "The explorer finds an existing CurrencyConverter that does what Phase 9 plans to build. After the code is read and its semantics confirmed, the item is rewritten to use it by type name, Files: drops the new file, and no file:LINE reference appears in the plan.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 5,
+      "name": "no-agent-tool-blocks-rather-than-reviewing-inline",
+      "kind": "behaviour",
+      "prompt": "/r:plan-simplify docs/billing/todo.md",
+      "expected_output": "In a context with no Agent tool the skill stops with blocked: no-agent, writes nothing, records mode blocked, and does not review the plan itself in the same context.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 6,
+      "name": "embedded-in-spec-design-before-codex",
+      "kind": "behaviour",
+      "prompt": "/r:spec-design docs/billing/spec.html",
+      "expected_output": "After pass 3 and before the Codex challenge, spec-design follows plan-simplify over its draft: the readers run, outcomes are verified, the draft is simplified in place, and the applied/kept/dismissed/question lists appear at spec-design's single gate. Nothing is written before that gate and plan-simplify records no row of its own.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    }
+  ]
+}
