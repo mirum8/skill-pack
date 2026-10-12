@@ -41,6 +41,7 @@ node --test skills/task-run/tests/control-flow.test.mjs    # one workflow's bran
 node --test skills/task-review/tests/control-flow.test.mjs
 bash skills/spec-design/tests/check_todo.test.sh            # the plan graph
 bash skills/spec-brainstorm/tests/check_spec.test.sh        # the spec gate
+bash skills/spec-design/tests/change_impact.test.sh         # what a requirement change touches, and the stops
 bash skills/reuse-index/tests/reuse-index.test.sh           # corpus → candidates → diff
 bash skills/code-scan/tests/local-scan.test.sh              # scoping + the fail-closed contract
 bash skills/code-adversarial/tests/run.test.sh              # the Codex wrapper's exit codes
@@ -541,6 +542,7 @@ reader owned by one skill stays that skill's reader. Rules that are load-bearing
 **`r-loop` lives in its own repository (`../r-loop`) and reads the plan format this pack writes.**
 It parses `todo.md` itself — `### Phase N`, `**Files:**`, `**Done when:**`, `## Resolve first`,
 `## Milestone N`, the `<!-- built: … -->` marker — and writes its phase plans to `.task-plans/`.
+It ignores the `**Reworks:**` line and the `<!-- changes: … -->` line a requirement change adds.
 Nothing here calls it or depends on it. But a change to any of those shapes in `/r:spec-design`,
 `resolve_scope.py` or `milestone_scope.py` is a breaking change for a second tool that no suite
 here runs, so name it in the commit.

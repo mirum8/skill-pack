@@ -12,9 +12,9 @@ description: >-
   --explain for an unfamiliar domain adds the domain narrative, actors, event timeline, glossary
   and a worked example, and researches how the industry actually builds this. --feature for a
   feature inside an existing repo ("/r:spec-brainstorm --feature let users export invoices as
-  CSV") reads the code first. --continue resumes an unfinished or under-interviewed document,
-  and restructures one written in an older shape. NOT for the phased implementation plan -
-  that's /r:spec-design.
+  CSV") reads the code first. --continue resumes an unfinished or old-shape document; --change
+  applies a changed requirement to a spec whose plan is partly built. NOT for the phased
+  implementation plan - that's /r:spec-design.
 model: fable
 effort: high
 ---
@@ -78,6 +78,13 @@ Everything else runs as in the default mode: the delta rounds, the `path:line` r
 floor, the write gate. `--explain` composes with it, but on this path the repo is the research
 and the external fan-out stays off unless a specific question survives reading the code.
 
+## `--change` — the requirements moved after the plan was built on them
+
+`/r:spec-brainstorm --change "finance approves invoices, not the author"` updates a written spec
+for a business change, when `todo.md` beside it may already be partly built. It interviews only
+the area the change touches, and leaves a record `/r:spec-design` reads to plan the rework. The
+section `## --change` below owns it.
+
 ## Read these before you act
 
 At each gate, read the named file **in full**. A skimmed one produces output that looks right and
@@ -94,7 +101,7 @@ is wrong in ways nobody catches until implementation.
 Do this silently, then report it in one line.
 
 - **Resume.** Glob `docs/*/interview-notes.md`. If one exists, say so and offer to continue it,
-  restart it, or start something else. `--continue` skips that offer — see below.
+  restart it, or start something else. `--continue` and `--change` skip that offer — see below.
 - **Existing plan guard.** If the repo already has a document that owns its plan — a root
   `PROJECT.md`, or a specification another tool maintains — say so and offer to extend that
   instead. A second document gives the repo two answers to the same question, and the stale one
@@ -387,6 +394,106 @@ which is which at the gate, because they carry different risk:
 Then re-run `check_spec.py` before showing it: a restructure moves the whole file at once, so it is
 the run most likely to leave a dead anchor or a part with no lede.
 
+## `--change` — apply a requirement change
+
+`/r:spec-brainstorm --change [<path or slug>] "<what changed>"`. A spec must already exist. With no
+path, glob `docs/*/spec.html` and ask which if there are several; with none, say so and offer a
+normal run — there is nothing to change.
+
+This is not `--continue`. `--continue` finishes a document; `--change` moves one that was finished,
+and the code may already hold the old answer. Everything below exists because of that second half.
+
+### Map the change before you ask anything
+
+Read the spec, `interview-notes.md` and the `todo.md` beside them. Name the stories and ADRs the
+change touches, each with an effect: **changed** (same story, new behaviour), **retired** (the
+business dropped it), **added** (new), or an ADR **superseded**. Then ask the plan what is built:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/spec-design/scripts/change_impact.py" \
+  docs/<topic>/todo.md --stories "<story>" "<story>"
+```
+
+It prints JSON: each story's leaves with their state — `built`, `partly` or `unbuilt` — the
+unmerged `phase-*` branches, and `stops`. Show it as a table before the first question:
+
+| Story / ADR | Effect | Leaves | State |
+|---|---|---|---|
+| Approve an invoice | changed | Phase 3 | built |
+| Self-approve small invoices | retired | Phase 5 | built |
+| ADR-4 | superseded | — | — |
+
+**A stop ends the run here, before any question.** A stop is a leaf of a touched story that is
+partly built, or a `phase-*` branch nobody merged. Both mean the plan on disk is not the whole
+truth: half a leaf's work landed and half did not, or a phase finished on a branch the base never
+saw. A change planned over either reworks code that is not where the plan says. Name each stop
+with its fix — finish the phase (`/r:plan-run --from N`, or `--land` for a finished branch) or
+abandon it (delete the branch, un-tick the items and revert their code) — and run `--change` again
+after. Record the run with `stopped: true`.
+
+The script decides `built` / `partly` / `unbuilt`, never a read of the checkboxes. A leaf with one
+tick among five open items reads like "not started" at a glance, and that is the leaf a change
+does the most damage to.
+
+### Interview only what the change touches
+
+Use the `--continue` mechanics — audit the ledger, re-derive the gaps, offer the three choices —
+but only over the rows and decisions the change reaches. The rest of the document was settled
+before the change and nothing about the change unsettles it; re-asking it spends the user's
+attention on what did not move.
+
+A question only the business can answer, and that the user cannot answer now, goes to
+`## Open questions` with `Owner:` and `Blocks:`, never to a default. `/r:spec-design` turns it
+into a `## Resolve first` entry on the rework leaf, so `/r:plan-run` stops before building on a
+guess.
+
+### Confirm, then write
+
+The gate names the sections that will change, plus every story and ADR effect:
+
+> "This change touches three stories and one decision. Approve an invoice — changed: finance
+> approves, the author cannot (Part 1, Part 4 Approvals row). Self-approve small invoices —
+> retired. Escalate a rejected invoice — added, after the v1 line. ADR-4 superseded by ADR-9.
+> Built work this reaches: Phase 3 and Phase 5; `/r:spec-design` will plan their rework. Apply?"
+
+On yes, update in place, as `--continue` does:
+
+- **A changed story keeps its `<h3>` name**, and only its body is rewritten. Built leaves cite
+  that name; a new name orphans them.
+- **A retired story stays where it is**, as `<h3 class="retired">`, followed by one line:
+  `Retired <yyyy-mm-dd> — <reason>`. It needs no Given/When/Then and it leaves the v1 line.
+  Deleting it breaks every built leaf that cites it, and the record of why it existed goes with
+  it.
+- **An added story appends**, the same as on `--continue`.
+- **A reversed decision gets a new ADR**, and the old one is marked `superseded by ADR-n` and
+  stays.
+
+Then append the change record to `interview-notes.md` (`references/interview.md` §10 owns the
+format):
+
+```
+## Changes
+### 2026-10-12 — Finance approves invoices
+- Why: <the business reason, in the user's words>
+- Stories: changed "Approve an invoice"; retired "Self-approve small invoices"; added "Escalate a rejected invoice"
+- ADRs: ADR-9 supersedes ADR-4
+- Built when recorded: "Approve an invoice" — Phase 3 (built); "Self-approve small invoices" — Phase 5 (built)
+```
+
+The heading line is the change's handle, and `/r:spec-design` writes it into the plan once the
+plan absorbs it. An entry the plan does not list is pending — so write one entry per change, and
+never edit an entry the plan already lists: change the business again, and that is a new entry.
+
+Run `check_spec.py`. It checks that every name in the record resolves, in the state the record
+says.
+
+### Hand off to the plan
+
+Step 5 runs as usual, and it names the rework: which built leaves the change reaches and what
+`/r:spec-design` will add for each — a rework leaf for a changed story, a removal leaf for a
+retired one. Re-running the same `/r:spec-design` command plans them, with every built phase
+frozen.
+
 ## Step 5 — hand off
 
 Summarize the folder, the mode used, the sections and diagrams included, every row you settled as
@@ -399,7 +506,8 @@ Summarize the folder, the mode used, the sections and diagrams included, every r
 which turns the document into a phased plan beside it. Offer to refine any section or diagram first
 — cheaper now than after the plan is built on it. When a `todo.md` already sits beside the spec and
 this run reversed a decision, say that the plan was built on the old answer and that re-running the
-same command rewrites it with every built phase frozen.
+same command rewrites it with every built phase frozen. After `--change`, name the built leaves
+the change reaches, from the record.
 
 ## Step 6 — record the run
 
@@ -414,6 +522,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
  "rowsAsked":0,"rowsAssumed":0,"openQuestions":0,"sections":0,"diagrams":0,
  "adrs":0,"adrsFromLog":0,"decisionsDefaulted":0,"decisionsReviewed":0,"decisionsChanged":0,
  "drivingCharacteristics":0,"restructured":false,
+ "storiesChanged":0,"storiesRetired":0,"storiesAdded":0,"adrsSuperseded":0,
+ "builtLeavesTouched":0,"stopped":false,
  "researchRan":"skipped","checkerProblems":0,"wrote":false,"blockedReason":null}
 STATS_JSON
 ```
@@ -423,9 +533,15 @@ current one. Both are `mode: continue` but not the same unit of work — one rew
 interviews for a ranking and alternatives, the other settles two rows — so averaging their
 `rounds` and `questionsAsked` describes neither.
 
-`mode` is `full` | `explain` | `feature` | `continue`; it keeps the other numbers comparable, since
-an `--explain` run researches and a `--feature` run reads a codebase, so their question counts
-answer different questions.
+`mode` is `full` | `explain` | `feature` | `continue` | `change`; it keeps the other numbers
+comparable, since an `--explain` run researches and a `--feature` run reads a codebase, so their
+question counts answer different questions.
+
+**The change fields are filled on `mode: change` and zero elsewhere.** `builtLeavesTouched` counts
+the built leaves the change reaches — the rework this run hands to `/r:spec-design`, and the
+number that says whether changes arrive before the build or after it. `stopped: true` is a run
+that ended at a stop, with `wrote: false` and no `blockedReason`: the skill ran, the plan was
+not in a state a change can be planned over.
 
 **`rowsAsked` against `rowsAssumed` is the bar this skill is tuned on.** All-asked means the
 interview offloads decisions the skill should make; all-assumed means it guesses at things one
@@ -461,7 +577,7 @@ what was written. Never retry it.
 
 ## Never do this
 
-- Never reference a path outside this skill's directory.
+- Never reference a path outside this skill's directory except through `${CLAUDE_PLUGIN_ROOT}`.
 - Never create or change `spec.html` before the user has said yes to what you're about to write.
   `interview-notes.md` is the working transcript and is written as you go.
 - Never ask how big or how serious the project is. Read it from the answers and say how you read it.
@@ -494,5 +610,10 @@ what was written. Never retry it.
   here; story handles are their `<h3>` names.
 - Never write schema columns, indexes, code or build phases — that is below this document's ceiling.
 - Never write a `todo.md` here — that's `/r:spec-design`.
+- Never delete a story a plan may cite. Retire it as `<h3 class="retired">`; a deleted name
+  orphans every built leaf that implements it.
+- Never write a change while a stop stands — a partly built leaf of a touched story, or an unmerged
+  `phase-*` branch. The plan is not the whole truth until it is resolved.
+- Never edit a `## Changes` entry the plan already lists. A second change is a second entry.
 - Never object twice to the same decision.
 - Never claim research ran when it didn't, and never run it without `--explain`.

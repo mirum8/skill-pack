@@ -214,6 +214,23 @@ What that still allows:
 - **Anything unbuilt is free**: re-split, re-scope, renumber, drop, rewire. New leaves number above
   the highest frozen one, so numeric order stays a valid build order and no edge points backwards.
 - **A story the documents changed after a leaf shipped is new work**, never an edit to that leaf.
+  That work is a **rework leaf**, or a **removal leaf** for a retired story:
+
+  ```markdown
+  ### Phase 10 — Finance approves invoices
+  **Implements:** Approve an invoice
+  **Reworks:** Phase 3
+  **Depends on:** Phase 3
+  **Files:** `approval/ApprovalService.java` (modify), `approval/ApprovalServiceTest.java` (modify)
+  - [ ] `ApprovalService.approve` rejects a caller who authored the invoice with 403
+  - [ ] the test that let the author approve is rewritten to expect 403
+  **Done when:** `mvn test -Dtest=ApprovalServiceTest` is green.
+  ```
+
+  `Reworks:` names the built leaf, which must be lower and in `Depends on`. The frozen leaf stays
+  as it is, citing the story as it shipped. The changes a plan has absorbed are listed under its
+  title as `<!-- changes: <yyyy-mm-dd> — <title>; … -->`, one heading per `## Changes` entry in
+  the spec's `interview-notes.md`.
 
 Two things the rewrite must not manufacture. A milestone grouping, an edge or an `Implements:` name
 no author wrote is **inferred**, and every one is named as inferred at the gate — an inferred edge

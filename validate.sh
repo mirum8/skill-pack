@@ -74,6 +74,7 @@ echo "==> bundled scripts"
 # a review wrapper that banked a skip as clean, a worktree stack that collided with the main one.
 # All of those fail by producing a plausible answer, so a passing pipeline is not evidence.
 for t in skills/spec-brainstorm/tests/check_spec.test.sh \
+         skills/spec-design/tests/change_impact.test.sh \
          skills/reuse-index/tests/reuse-index.test.sh \
          skills/code-scan/tests/local-scan.test.sh \
          skills/code-adversarial/tests/run.test.sh \

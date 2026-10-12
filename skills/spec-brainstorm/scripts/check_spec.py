@@ -219,7 +219,7 @@ def check_adrs(t, out):
     blk = part(t, "decision")
     if not blk:
         return
-    defined, missing_alt = [], []
+    defined, missing_alt, superseded = [], [], []
     heads = [(m.start(), strip(m.group(1)).strip()) for m in
              re.finditer(r"<h3\b[^>]*>(.*?)</h3>", blk, re.S | re.I)]
     bounds = [h[0] for h in heads] + [len(blk)]
@@ -228,8 +228,12 @@ def check_adrs(t, out):
         if not m:
             continue
         defined.append(m.group(1))
-        if not re.search(r"alternativ", strip(blk[a:b]), re.I):
+        body = strip(blk[a:b])
+        if not re.search(r"alternativ", body, re.I):
             missing_alt.append(f"ADR-{m.group(1)}")
+        sup = re.search(r"superseded\s+by\s+ADR-(\d+)", body, re.I)
+        if sup:
+            superseded.append((m.group(1), sup.group(1)))
     if not defined:
         out("spec.html", "the Decisions part carries no ADR — each is an <h3> reading "
                          "'ADR-<n> — <title>'. If the interview's ## Decisions log was empty, say "
@@ -244,10 +248,22 @@ def check_adrs(t, out):
         out("spec.html", f"{', '.join('ADR-' + n for n in undefined[:4])} referenced but never "
                          f"written — a row that points at a missing ADR states a decision and "
                          f"hides its reason, which is worse than inlining the reason")
+    # A superseded ADR stays, because it is the only record of why the earlier answer stopped
+    # working -- which makes the pointer to its successor the one thing in it that must resolve.
+    for old, new in superseded:
+        if old == new:
+            out("spec.html", f"ADR-{old} is superseded by itself — a reversed decision gets a new "
+                             f"ADR, and the old one points at it")
+        elif new not in defined:
+            out("spec.html", f"ADR-{old} is superseded by ADR-{new}, which is not written — the "
+                             f"decision that replaced it has no record")
     if missing_alt:
         out("spec.html", f"{', '.join(missing_alt[:4])} has no Alternatives field — a decision "
                          f"with no live alternative was a default, and belongs in the Technologies "
                          f"table with one clause of why")
+
+
+RETIRED_H3 = re.compile(r"""\bclass\s*=\s*["'][^"']*\bretired\b""", re.I)
 
 
 def check_stories(t, out):
@@ -257,13 +273,15 @@ def check_stories(t, out):
     if not blk:
         out("spec.html", "no 'User stories' section — /r:spec-design has nothing to build phases "
                          "against, and the v1 line has nothing to name")
-        return []
+        return [], []
 
-    names = [strip(m.group(1)).strip() for m in re.finditer(r"<h3\b[^>]*>(.*?)</h3>", blk, re.S | re.I)]
+    heads = [(strip(m.group(2)).strip(), bool(RETIRED_H3.search(m.group(1))))
+             for m in re.finditer(r"<h3\b([^>]*)>(.*?)</h3>", blk, re.S | re.I)]
+    names = [n for n, _ in heads]
     if not names:
         out("spec.html", "User stories section has no <h3> story names — each story is an <h3> "
                          "whose text is its handle. See sections.md §3")
-        return []
+        return [], []
 
     dupes = sorted({n for n in names if names.count(n) > 1})
     if dupes:
@@ -272,28 +290,35 @@ def check_stories(t, out):
 
     # Each story's block runs to the next <h3>. Acceptance criteria are what make it checkable.
     starts = [m.start() for m in re.finditer(r"<h3\b", blk, re.I)] + [len(blk)]
-    for name, a, b in zip(names, starts, starts[1:]):
+    for (name, retired), a, b in zip(heads, starts, starts[1:]):
+        if retired:
+            continue
         body = strip(blk[a:b])
         if not (re.search(r"\bgiven\b", body, re.I) and re.search(r"\bthen\b", body, re.I)):
             out("spec.html", f"story '{name}' has no acceptance criteria — every story carries "
                              f"Given/When/Then, or it is a wish")
-    return names
+    return names, [n for n, r in heads if r]
 
 
-def check_v1(t, names, out):
+def check_v1(t, names, retired, out):
     blk = section(t, "v1", "scope")
     if not blk:
         out("spec.html", "no v1 section — say which stories ship first; /r:spec-design has nothing "
                          "to order phases against without it")
         return
     prose = strip(blk)
-    named = [n for n in names if n and n.lower() in prose.lower()]
-    if names and not named:
+    active = [n for n in names if n not in retired]
+    named = [n for n in active if n and n.lower() in prose.lower()]
+    if active and not named:
         out("spec.html", "the v1 section names no story — it must say which stories ship first "
                          "and which are deferred, by name")
     # A name in the v1 line that no story defines is a phase pointing at nothing.
     quoted = {strip(m.group(1)).strip() for m in re.finditer(r"<(?:strong|b|code)\b[^>]*>(.*?)</(?:strong|b|code)>",
                                                              blk, re.S | re.I)}
+    shipped_retired = sorted(q for q in quoted if q in retired)
+    if shipped_retired:
+        out("spec.html", f"the v1 line names a retired story: {', '.join(shipped_retired)} — the "
+                         f"business dropped it; it ships in no version")
     unknown = sorted(q for q in quoted if len(q) > 8 and q not in names
                      and not re.search(r"\d", q) and " " in q)
     if unknown:
@@ -346,7 +371,7 @@ def check_codebase_facts(t, out):
 
 def check_spec(t, explained, out):
     if not t:
-        return []
+        return [], []
     prose = strip(t)
 
     if re.search(r"<script\b", t, re.I):
@@ -387,12 +412,12 @@ def check_spec(t, explained, out):
     check_characteristics(t, out)
     check_components(t, out)
     check_adrs(t, out)
-    names = check_stories(t, out)
-    check_v1(t, names, out)
+    names, retired = check_stories(t, out)
+    check_v1(t, names, retired, out)
     check_codebase_facts(t, out)
     if explained:
         check_tags(prose, t.count("\n") + 1, out)
-    return names
+    return names, retired
 
 
 BASE_ROWS = ["users-and-job", "core-flow", "process", "domain-model", "scale", "anti-scope",
@@ -510,6 +535,58 @@ def check_defaulted(notes, spec, out):
         f"or run the decision review and record what the user picked")
 
 
+def check_changes(notes, spec, names, retired, out):
+    """The `## Changes` record /r:spec-brainstorm --change writes, which /r:spec-design reads to
+    decide what to rework. Every name in it must resolve in the spec, in the state the entry says:
+    a change that names a story nobody can find is a rework nobody plans. The grammar is mirrored
+    in spec-design/scripts/change_impact.py, which is the reader that acts on it -- change one,
+    change the other."""
+    sec = re.search(r"^##\s+Changes\s*$(.*?)(?=^##\s|\Z)", notes, re.M | re.S)
+    if not sec:
+        return
+    defined = {m.group(1) for m in re.finditer(r"<h3\b[^>]*>\s*ADR-(\d+)\b", spec, re.I)}
+    heads = list(re.finditer(r"^###\s+(.+?)\s*$", sec.group(1), re.M))
+    latest = {}
+    for i, h in enumerate(heads):
+        body = sec.group(1)[h.end():heads[i + 1].start() if i + 1 < len(heads) else None]
+        raw = " ".join(h.group(1).split())
+        if not re.match(r"\d{4}-\d{2}-\d{2}\s*[—–-]\s*\S", raw):
+            out("interview-notes.md", f"change {raw!r} has no date — the heading is "
+                                      f"'### <yyyy-mm-dd> — <title>', and it is the change's handle")
+        if not re.search(r"^\s*-\s*Why:\s*\S", body, re.M):
+            out("interview-notes.md", f"change {raw!r} has no 'Why:' line — the reason is what a "
+                                      f"later reader needs to judge the rework")
+        st = re.search(r"^\s*-\s*Stories:\s*(.+)$", body, re.M)
+        if not st:
+            out("interview-notes.md", f"change {raw!r} has no 'Stories:' line")
+        for part in ([p.strip() for p in st.group(1).split(";") if p.strip()] if st else []):
+            m = re.match(r'^(changed|retired|added)\s+"([^"]+)"$', part)
+            if not m:
+                out("interview-notes.md", f"change {raw!r}: cannot read {part!r} — each story is "
+                                          f'changed "<name>", retired "<name>" or added "<name>"')
+                continue
+            eff, name = m.group(1), " ".join(m.group(2).split())
+            if name not in names:
+                out("interview-notes.md", f"change {raw!r}: {name!r} is no story in the spec — "
+                                          f"story names are frozen, so this is a reworded name")
+            else:
+                latest[name] = (raw, eff)
+        adrs = re.search(r"^\s*-\s*ADRs:\s*(.+)$", body, re.M)
+        for n in (re.findall(r"ADR-(\d+)", adrs.group(1)) if adrs else []):
+            if n not in defined:
+                out("interview-notes.md", f"change {raw!r} names ADR-{n}, which the spec does not "
+                                          f"define")
+    # The record is append-only, so an older entry may name a story a later one retired. Only the
+    # latest entry per story has to agree with the spec's current state.
+    for name, (raw, eff) in latest.items():
+        if eff == "retired" and name not in retired:
+            out("interview-notes.md", f"change {raw!r}: {name!r} is not marked retired in the "
+                                      f"spec — its <h3> carries class=\"retired\"")
+        elif eff != "retired" and name in retired:
+            out("interview-notes.md", f"change {raw!r}: {name!r} is {eff}, but the spec says "
+                                      f"it is retired")
+
+
 def main():
     d = Path(sys.argv[1] if len(sys.argv) > 1 else ".")
     if not d.is_dir():
@@ -531,8 +608,9 @@ def main():
 
     notes = read("interview-notes.md")
     explained = check_interview(notes, out)
-    check_spec(spec, explained, out)
+    names, retired = check_spec(spec, explained, out)
     check_defaulted(notes, spec, out)
+    check_changes(notes, spec, names, retired, out)
 
     if not problems:
         print(f"clean — {d}")

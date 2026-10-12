@@ -565,9 +565,6 @@ plan <<'EOF'
 EOF
 against_silent "one carried over is not" "resolved 'Resolve first' entry is gone"
 
-echo
-printf '  %d passed, %d failed\n' "$pass" "$fail"
-[[ $fail == 0 ]]
 
 echo
 echo "== the Resolve-first contract is mirrored at authoring time, as notes =="
@@ -629,3 +626,302 @@ grep -q "Does port-forwarding" <<<"$out" && [ "$rc" = 0 ] \
 grep -q "A well-formed one" <<<"$out" \
   && bad "a well-formed entry produces no note" "$out" \
   || ok "a well-formed entry produces no note"
+
+# ---------------------------------------------------------------------------------------------
+# Rework: a requirement changed after a leaf shipped. The frozen leaf stays the record of what was
+# built; the change is a NEW leaf that names it on a `**Reworks:**` line. Each rule below is a way
+# that line could claim to rework something that was never built, or run before it.
+# ---------------------------------------------------------------------------------------------
+
+echo
+echo "== a rework leaf on a built phase, after it and depending on it =="
+plan <<'EOF'
+## v1
+### Phase 1 — Approval flow <!-- built: phase-approval-flow -->
+**Implements:** S
+**Depends on:** —
+**Files:** `a.java` (new)
+- [x] the author approves `a`
+**Done when:** `mvn test` is green.
+
+### Phase 2 — Finance approves invoices
+**Implements:** S
+**Reworks:** Phase 1
+**Depends on:** Phase 1
+**Files:** `a.java` (modify)
+- [ ] finance approves `a`; the author no longer can
+**Done when:** `mvn test -Dtest=ApprovalTest` is green.
+EOF
+silent "is accepted" "reworks"
+
+echo
+echo "== a rework leaf on a phase that was never built =="
+plan <<'EOF'
+## v1
+### Phase 1 — Approval flow
+**Implements:** S
+**Depends on:** —
+**Files:** `a.java` (new)
+- [ ] the author approves `a`
+**Done when:** `mvn test` is green.
+
+### Phase 2 — Finance approves invoices
+**Implements:** S
+**Reworks:** Phase 1
+**Depends on:** Phase 1
+**Files:** `a.java` (modify)
+- [ ] finance approves `a`
+**Done when:** `mvn test` is green.
+EOF
+says "is reported — there is nothing built to rework" "reworks Phase 1, which is not built"
+
+echo
+echo "== a partly ticked phase counts as built for a rework =="
+plan <<'EOF'
+## v1
+### Phase 1 — Approval flow
+**Implements:** S
+**Depends on:** —
+**Files:** `a.java` (new)
+- [x] the author approves `a`
+- [ ] the author is notified about `a`
+**Done when:** `mvn test` is green.
+
+### Phase 2 — Finance approves invoices
+**Implements:** S
+**Reworks:** Phase 1
+**Depends on:** Phase 1
+**Files:** `a.java` (modify)
+- [ ] finance approves `a`
+**Done when:** `mvn test` is green.
+EOF
+silent "is not reported as unbuilt" "which is not built"
+
+echo
+echo "== a rework leaf numbered before what it reworks =="
+plan <<'EOF'
+## v1
+### Phase 1 — Finance approves invoices
+**Implements:** S
+**Reworks:** Phase 2
+**Depends on:** —
+**Files:** `a.java` (modify)
+- [ ] finance approves `a`
+**Done when:** `mvn test` is green.
+
+### Phase 2 — Approval flow <!-- built: phase-approval-flow -->
+**Implements:** S
+**Depends on:** —
+**Files:** `a.java` (new)
+- [x] the author approves `a`
+**Done when:** `mvn test` is green.
+EOF
+says "is reported" "reworks Phase 2, which comes after it"
+
+echo
+echo "== a rework leaf that does not depend on what it reworks =="
+plan <<'EOF'
+## v1
+### Phase 1 — Approval flow <!-- built: phase-approval-flow -->
+**Implements:** S
+**Depends on:** —
+**Files:** `a.java` (new)
+- [x] the author approves `a`
+**Done when:** `mvn test` is green.
+
+### Phase 2 — Finance approves invoices
+**Implements:** S
+**Reworks:** Phase 1
+**Depends on:** —
+**Files:** `b.java` (new)
+- [ ] finance approves `b`
+**Done when:** `mvn test` is green.
+EOF
+says "is reported — it could run in the same wave" "reworks Phase 1 but does not depend on it"
+
+echo
+echo "== a rework leaf naming a phase that does not exist =="
+plan <<'EOF'
+## v1
+### Phase 1 — Finance approves invoices
+**Implements:** S
+**Reworks:** Phase 7
+**Depends on:** —
+**Files:** `a.java` (modify)
+- [ ] finance approves `a`
+**Done when:** `mvn test` is green.
+EOF
+says "is reported" "reworks Phase 7, which does not exist"
+
+echo
+echo "== a rework leaf naming no phase at all =="
+plan <<'EOF'
+## v1
+### Phase 1 — Finance approves invoices
+**Implements:** S
+**Reworks:** the approval flow
+**Depends on:** —
+**Files:** `a.java` (modify)
+- [ ] finance approves `a`
+**Done when:** `mvn test` is green.
+EOF
+says "is reported" "'Reworks' names no phase"
+
+echo
+echo "== --against: a rework target must have been built in the plan being replaced =="
+prev <<'EOF'
+## v1
+### Phase 1 — Approval flow
+**Implements:** S
+**Depends on:** —
+**Files:** `a.java` (new)
+- [ ] the author approves `a`
+**Done when:** `mvn test` is green.
+EOF
+plan <<'EOF'
+## v1
+### Phase 1 — Approval flow <!-- built: phase-approval-flow -->
+**Implements:** S
+**Depends on:** —
+**Files:** `a.java` (new)
+- [x] the author approves `a`
+**Done when:** `mvn test` is green.
+
+### Phase 2 — Finance approves invoices
+**Implements:** S
+**Reworks:** Phase 1
+**Depends on:** Phase 1
+**Files:** `a.java` (modify)
+- [ ] finance approves `a`
+**Done when:** `mvn test` is green.
+EOF
+against "a target the rewrite marked built itself is reported" "Phase 1 was not built in the previous plan"
+prev < <(executed_plan)
+plan <<'EOF'
+### Phase 1 — Ledger schema <!-- built: phase-ledger-schema -->
+**Implements:** S
+**Depends on:** —
+**Files:** `a.java` (new)
+- [x] `V1__ledger.sql` creates `ledger_entry`
+**Done when:** `mvn test` is green.
+
+### Phase 2 — Ledger keeps a currency
+**Implements:** S
+**Reworks:** Phase 1
+**Depends on:** Phase 1
+**Files:** `b.java` (new)
+- [ ] `V2__currency.sql` adds `currency` to `ledger_entry`
+**Done when:** `mvn test` is green.
+EOF
+against_silent "a target built in the previous plan is accepted" "not built in the previous plan"
+
+echo
+echo "== --against: the applied-change record is carried over =="
+prev <<'EOF'
+# Plan
+<!-- changes: 2026-10-01 — Finance approves invoices -->
+### Phase 1 — A <!-- built: phase-a -->
+**Implements:** S
+**Depends on:** —
+- [x] built `a`
+**Done when:** `mvn test` is green.
+EOF
+plan <<'EOF'
+# Plan
+### Phase 1 — A <!-- built: phase-a -->
+**Implements:** S
+**Depends on:** —
+- [x] built `a`
+**Done when:** `mvn test` is green.
+EOF
+against "a dropped entry is reported" "applied change is gone from the rewrite: '2026-10-01 — Finance approves invoices'"
+plan <<'EOF'
+# Plan
+<!-- changes: 2026-10-01 — Finance approves invoices; 2026-10-12 — Rejections escalate -->
+### Phase 1 — A <!-- built: phase-a -->
+**Implements:** S
+**Depends on:** —
+- [x] built `a`
+**Done when:** `mvn test` is green.
+EOF
+against_silent "a kept entry, with a new one beside it, is not" "applied change is gone"
+
+# ---------------------------------------------------------------------------------------------
+# Retired stories. A story the business dropped stays in the spec as <h3 class="retired">, because
+# built leaves still cite it. The checker must accept those citations and must not demand a phase
+# for it — but an UNBUILT leaf that still plans to build a retired story is planning dead work.
+# ---------------------------------------------------------------------------------------------
+SD="$TMP/retired"; mkdir -p "$SD"
+cat > "$SD/spec.html" <<'EOF'
+<h2>User stories</h2>
+<h3>Approve an invoice</h3><p>Given … then …</p>
+<h3 class="retired">Self-approve small invoices</h3><p>Retired 2026-10-12 — finance approves everything.</p>
+<h2>The v1 line</h2>
+EOF
+spec_says() {
+  local out; out=$(python3 "$CHECK" "$SD/todo.md" 2>&1)
+  grep -qiE "$2" <<<"$out" && ok "$1" || bad "$1" "no match for /$2/ in:${out:0:400}"
+}
+spec_silent() {
+  local out; out=$(python3 "$CHECK" "$SD/todo.md" 2>&1)
+  grep -qiE "$2" <<<"$out" && bad "$1" "unexpected /$2/ in:${out:0:400}" || ok "$1"
+}
+
+echo
+echo "== a built leaf cites a retired story, and a removal leaf reworks it =="
+cat > "$SD/todo.md" <<'EOF'
+## v1
+### Phase 1 — Approval flow <!-- built: phase-approval-flow -->
+**Implements:** Approve an invoice
+**Depends on:** —
+**Files:** `a.java` (new)
+- [x] the author approves `a`
+**Done when:** `mvn test` is green.
+
+### Phase 2 — Self-approval <!-- built: phase-self-approval -->
+**Implements:** Self-approve small invoices
+**Depends on:** Phase 1
+**Files:** `b.java` (new)
+- [x] small invoices approve themselves in `b`
+**Done when:** `mvn test` is green.
+
+### Phase 3 — Remove self-approval
+**Implements:** Self-approve small invoices
+**Reworks:** Phase 2
+**Depends on:** Phase 2
+**Files:** `b.java` (modify)
+- [ ] delete the self-approval path in `b` and its tests
+**Done when:** `mvn test -Dtest=ApprovalTest` is green and `grep -r selfApprove src/` finds nothing.
+EOF
+spec_silent "the citations are accepted" "doesn't define|retired story"
+spec_silent "and no story is reported as unplanned" "no phase"
+
+echo
+echo "== a retired story nobody cites needs no phase =="
+cat > "$SD/todo.md" <<'EOF'
+## v1
+### Phase 1 — Approval flow
+**Implements:** Approve an invoice
+**Depends on:** —
+**Files:** `a.java` (new)
+- [ ] finance approves `a`
+**Done when:** `mvn test` is green.
+EOF
+spec_silent "is not reported" "no phase"
+
+echo
+echo "== an unbuilt leaf that still plans a retired story =="
+cat > "$SD/todo.md" <<'EOF'
+## v1
+### Phase 1 — Approval flow
+**Implements:** Approve an invoice · Self-approve small invoices
+**Depends on:** —
+**Files:** `a.java` (new)
+- [ ] finance approves `a`
+**Done when:** `mvn test` is green.
+EOF
+spec_says "is reported" "Phase 1 .*implements a retired story: Self-approve small invoices"
+
+echo
+printf '  %d passed, %d failed\n' "$pass" "$fail"
+[[ $fail == 0 ]]

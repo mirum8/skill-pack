@@ -76,7 +76,9 @@ Nothing else about the page is a layout — it is a document that scrolls, not a
 
 `<h3>` carries two contracts and no others. Inside the **User stories** section it is a story
 name — one per story, nothing else at that level, because `scripts/check_spec.py` and
-`/r:spec-design` both read that text verbatim as the story's handle. Inside **Part 6** it is
+`/r:spec-design` both read that text verbatim as the story's handle. A retired story keeps its
+`<h3>` and adds `class="retired"`; style it muted (a struck-through or greyed heading), never
+hidden, since built phases still name it. Inside **Part 6** it is
 `ADR-<n> — <title>`. Sub-headings anywhere else are `<h4>`.
 
 **Every `<h2>` carries an `id`**, part or section, and every id is kebab-case and stable across

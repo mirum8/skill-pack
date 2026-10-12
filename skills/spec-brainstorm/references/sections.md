@@ -107,10 +107,14 @@ Three rules:
 - **The name is the handle, and in the HTML it is an `<h3>`.** One `<h3>` per story inside the
   User stories section, nothing else at that level. It must be unique in the document, and it is
   what a phase's `Implements:` line carries verbatim — `scripts/check_spec.py` and
-  `/r:spec-design` both read the `<h3>` text. Keep names stable across a `--continue`; new
-  stories append.
-- **Every story has acceptance criteria** in Given/When/Then. A story without them is a wish,
-  and `scripts/check_spec.py` reports it.
+  `/r:spec-design` both read the `<h3>` text. Keep names stable across a `--continue` and a
+  `--change`; new stories append.
+- **A story the business dropped is retired, never deleted.** It stays in place as
+  `<h3 class="retired">`, followed by one line, `Retired <yyyy-mm-dd> — <reason>`, and it has no
+  acceptance criteria and no place in the v1 line. Built phases still cite its name, and the
+  line is the only record of why it stopped being wanted.
+- **Every story has acceptance criteria** in Given/When/Then, except a retired one. A story
+  without them is a wish, and `scripts/check_spec.py` reports it.
 - **A story states a need, not a solution.** "As a clerk I want a Kafka topic" is not a story.
 
 Stories that are deferred are still written; the v1 line is what separates them.

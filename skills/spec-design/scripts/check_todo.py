@@ -9,7 +9,8 @@
 With --spec, also checks that every user story in the spec reaches a phase.
 With --tech-design, checks the plan's spine against the contracts file beside it.
 With --against, checks that a REWRITE preserved every leaf that already carries landed work -- the
-ticks, the numbers and the built markers a half-executed plan is the only record of.
+ticks, the numbers and the built markers a half-executed plan is the only record of -- and every
+requirement change the previous plan had already absorbed.
 With --slice, answers one question instead: may these leaves run CONCURRENTLY, each in its own
 worktree? That is /r:plan-run's preflight, and it is a different question from "is this plan any
 good" -- so it reports only the two things that make a slice unsafe (an unbuilt dependency, a
@@ -55,9 +56,17 @@ def strip(t):
     return html.unescape(re.sub(r"<[^>]+>", " ", t))
 
 
+RETIRED_H3 = re.compile(r"""\bclass\s*=\s*["'][^"']*\bretired\b""", re.I)
+
+
 def spec_stories(p):
     """Story names are the <h3> headings inside the spec's User stories section, and a phase's
-    Implements: line carries them verbatim. Returns None when there is no spec to check against."""
+    Implements: line carries them verbatim. Returns (active, retired), or None when there is no
+    spec to check against.
+
+    A retired story is an <h3 class="retired">: the business dropped it after a leaf may already
+    have built it. It stays in the spec because those built leaves still cite it, so it is a name a
+    citation may use -- but one no unbuilt leaf may still be planning to build."""
     if not p or not p.exists():
         return None
     t = p.read_text(encoding="utf-8", errors="replace")
@@ -66,9 +75,12 @@ def spec_stories(p):
     for i, (_, end, title) in enumerate(heads):
         if "user stor" in title or "stories" in title:
             nxt = heads[i + 1][0] if i + 1 < len(heads) else len(t)
-            return [" ".join(strip(m.group(1)).split())
-                    for m in re.finditer(r"<h3\b[^>]*>(.*?)</h3>", t[end:nxt], re.S | re.I)]
-    return []
+            active, retired = [], []
+            for m in re.finditer(r"<h3\b([^>]*)>(.*?)</h3>", t[end:nxt], re.S | re.I):
+                name = " ".join(strip(m.group(2)).split())
+                (retired if RETIRED_H3.search(m.group(1)) else active).append(name)
+            return active, retired
+    return [], []
 
 
 def phase_deps(block):
@@ -183,6 +195,33 @@ def phase_blocks(text):
     return out
 
 
+def phase_reworks(block):
+    """The built leaves this one changes or removes. None when the line is absent; an empty set
+    when it is present and names no phase, which is a defect rather than "reworks nothing"."""
+    m = re.search(r"^\*\*Reworks:\*\*\s*(.+)$", block, re.M)
+    if not m:
+        return None
+    return {int(n) for n in re.findall(r"(?:Phase\s*)?(\d+)", m.group(1))}
+
+
+def is_frozen(slug, block):
+    """Landed work: a built marker, or at least one tick. Not the same as done -- a partly ticked
+    leaf has landed work too, and that is what a rework or a freeze has to respect."""
+    return bool(slug) or bool(ticked_items(block))
+
+
+CHANGES = re.compile(r"<!--\s*changes:\s*(.+?)\s*-->", re.S)
+
+
+def applied_changes(text):
+    """The requirement changes this plan has absorbed, one handle per `## Changes` entry in the
+    spec's interview-notes.md, in the form '<date> — <title>'. A change not listed is pending."""
+    out = []
+    for m in CHANGES.finditer(text):
+        out += [" ".join(h.split()) for h in m.group(1).split(";") if h.strip()]
+    return out
+
+
 def ticked_items(block):
     """Ticked item text, inner whitespace collapsed. Collapsed rather than byte-identical because a
     rewrite may re-wrap a line -- but the WORDS are the identity, the same rule /r:plan-run uses to
@@ -276,6 +315,13 @@ def check_against(prev_text, new_text, out):
     that is the point of rewriting -- so this reads only the frozen set, and says nothing about the
     rest.
     """
+    absorbed = set(applied_changes(new_text))
+    for h in applied_changes(prev_text):
+        if h not in absorbed:
+            out(f"an applied change is gone from the rewrite: {h!r}. The '<!-- changes: -->' line "
+                f"is how a plan says it already absorbed that change -- drop it and the next "
+                f"rewrite plans the same rework twice.")
+
     kept = {n.lower() for n in resolved_entries(new_text)}
     for name in resolved_entries(prev_text):
         if name.lower() not in kept:
@@ -296,6 +342,14 @@ def check_against(prev_text, new_text, out):
         return
 
     new = phase_blocks(new_text)
+    prev_frozen = {n for n, _, slug, b in prev if is_frozen(slug, b)}
+    prev_title = {n: t for n, t, _, _ in prev}
+    for n, t, _, b in new:
+        for r in sorted(phase_reworks(b) or ()):
+            if r in prev_title and r not in prev_frozen:
+                out(f"Phase {n} — {t}: reworks Phase {r}, but Phase {r} was not built in the "
+                    f"previous plan. A rework changes what shipped; a leaf the rewrite marked "
+                    f"built itself has nothing shipped behind it.")
     by_num = {n: (t, b) for n, t, _, b in new}
     by_title, by_slug = {}, {}
     for n, t, slug, _ in new:
@@ -427,9 +481,16 @@ def main():
         out("no v1 / Advanced headings")
 
     created, referenced = set(), []
-    deps, files_of, title_of, done_of = {}, {}, {}, {}
+    deps, files_of, title_of, done_of, frozen_of, reworks = {}, {}, {}, {}, {}, {}
     for num, b in zip(nums, blocks):
         title = b.splitlines()[0].strip()
+        frozen_of[num] = is_frozen(BUILT.search(title), b)
+        rw = phase_reworks(b)
+        if rw is not None:
+            if not rw:
+                out(f"{title}: 'Reworks' names no phase. It points at the built leaf this one "
+                    f"changes, as 'Phase N'.")
+            reworks[num] = rw
         title_of[num] = title
         files_of[num] = phase_files(b)
         # "done" is every item ticked -- the same rule /r:plan-run uses to skip a leaf, and what
@@ -504,6 +565,24 @@ def main():
                 # that silently -- the run builds on something it has not built yet.
                 out(f"{title_of[n]}: depends on Phase {d}, which comes AFTER it. A leaf may depend "
                     f"only on lower-numbered leaves, so that numeric order is a valid build order.")
+
+    # A rework leaf changes what an earlier leaf shipped. The earlier leaf stays as the record of
+    # what was built, so the rework has to come after it, wait for it, and point at something that
+    # actually landed -- otherwise it reworks a plan, not a codebase.
+    for n, targets in reworks.items():
+        for r in sorted(targets):
+            if r not in known:
+                out(f"{title_of[n]}: reworks Phase {r}, which does not exist")
+            elif r >= n:
+                out(f"{title_of[n]}: reworks Phase {r}, which comes after it. A rework is numbered "
+                    f"above the leaf it changes.")
+            else:
+                if r not in deps[n]:
+                    out(f"{title_of[n]}: reworks Phase {r} but does not depend on it -- add Phase "
+                        f"{r} to 'Depends on', or the two could land in the same wave.")
+                if not frozen_of[r]:
+                    out(f"{title_of[n]}: reworks Phase {r}, which is not built. Unbuilt work is "
+                        f"re-planned in place; a rework leaf is only for code that shipped.")
 
     wave, cyclic = compute_waves(deps)
     if cyclic:
@@ -584,19 +663,31 @@ def main():
     # --- traceability -----------------------------------------------------------
     # Implements: lines carry story names verbatim, separated by " · ". Matching is exact
     # because a paraphrase is indistinguishable from a story nobody planned.
-    stories = spec_stories(spec_p)
+    found = spec_stories(spec_p)
+    stories, retired = found if found is not None else (None, [])
     if stories is None:
         note(f"no spec found next to {todo_p.name} — story coverage not checked")
-    elif not stories:
+    elif not stories and not retired:
         note("the spec has no User stories section with <h3> names — story coverage not checked")
     else:
         cited = set()
-        for line in re.findall(r"^\*\*Implements:\*\*\s*(.+)$", t, re.M):
-            cited |= {" ".join(n.split()) for n in re.split(r"\s*[·;]\s*|\s*,\s(?=[A-Z])", line) if n.strip()}
+        for num, b in zip(nums, blocks):
+            line = re.search(r"^\*\*Implements:\*\*\s*(.+)$", b, re.M)
+            if not line:
+                continue
+            names = {" ".join(n.split()) for n in
+                     re.split(r"\s*[·;]\s*|\s*,\s(?=[A-Z])", line.group(1)) if n.strip()}
+            cited |= names
+            dead = sorted(names & set(retired))
+            # A built leaf citing a retired story is history; a rework leaf citing one is the
+            # removal. Anything else is a leaf still planning to build what the business dropped.
+            if dead and not frozen_of[num] and num not in reworks:
+                out(f"{title_of[num]}: implements a retired story: {', '.join(dead)}. Drop it "
+                    f"from the leaf, or make the leaf the removal with a 'Reworks:' line.")
         missing = [s for s in stories if s not in cited]
         if missing:
             out(f"stories in the spec with no phase: {', '.join(missing)}")
-        extra = sorted(cited - set(stories))
+        extra = sorted(cited - set(stories) - set(retired))
         if extra:
             out(f"phases cite stories the spec doesn't define (check for a reworded name): "
                 f"{', '.join(extra)}")

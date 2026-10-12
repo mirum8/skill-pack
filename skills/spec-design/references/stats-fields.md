@@ -6,7 +6,7 @@ written without knowing what question it answers gets a plausible number instead
 
 ## Contents
 
-1. The rewrite fields
+1. The rewrite fields, and the change fields
 2. `maxWaveWidth`
 3. `designChoicesAsked`, and the silent-choice pair
 4. `codexReview`, and the simplify pass
@@ -21,6 +21,15 @@ started, and one that re-splits nothing did no work — both fine individually, 
 common means this mode is not earning its complexity. `fieldsInferred` counts what the skill
 supplied that no author wrote — the number to watch first if an inferred edge ever turns out
 wrong, and the only measure of how much of a `foreign` plan was guessed.
+
+**The change fields say whether requirement changes land before the build or after it.**
+`changesApplied` counts the `## Changes` entries this rewrite absorbed. `leavesReworked` and
+`leavesRemoved` count the rework and removal leaves it wrote for them: zero against a non-zero
+`changesApplied` means the changes reached only unbuilt work, which is the cheap case, and the
+two being high means changes keep arriving after the code. `stopped: true` with
+`blockedReason: "change-stop"` is a run that refused to plan over a partly built leaf or an
+unmerged branch. It is a declined run, but not a rejected decomposition, so read it apart from
+the other `declined` rows.
 
 **`maxWaveWidth` is the number that judges the graph.** A `Depends on:` line on every leaf costs
 something on every plan and buys exactly one thing: leaves that can be built at the same time. If

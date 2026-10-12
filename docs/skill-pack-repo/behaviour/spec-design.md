@@ -263,6 +263,39 @@ flowchart TD
   *Enforced by:* —
   *Tested by:* —
 
+- **SB-spec-design-135** — A requirement change reaches the plan as a `## Changes` entry in the
+  spec's `interview-notes.md`, and an entry is **pending** until the plan lists its heading on a
+  `<!-- changes: … -->` line under its title. Pending changes are read through `change_impact.py`,
+  never by comparing the two files by eye, so a change is absorbed exactly once.
+  *States it:* `skills/spec-design/SKILL.md`
+  *Enforced by:* `skills/spec-design/scripts/change_impact.py`
+  *Tested by:* `skills/spec-design/tests/change_impact.test.sh`
+
+- **SB-spec-design-136** — A **stop ends the run before any draft**: a leaf of a touched story
+  that is partly built, an unmerged `phase-*` branch (finished or halted), or a change entry the
+  script cannot read. Each means the plan on disk is not the whole truth, so the run records
+  `mode: declined`, `stopped: true`, `blockedReason: change-stop`, names each stop with its fix,
+  and writes nothing.
+  *States it:* `skills/spec-design/SKILL.md`
+  *Enforced by:* `skills/spec-design/scripts/change_impact.py`
+  *Tested by:* `skills/spec-design/tests/change_impact.test.sh`
+
+- **SB-spec-design-137** — A built leaf of a **changed** story gets a **rework leaf**, and one of a
+  **retired** story a **removal leaf**: numbered above the highest frozen leaf, citing the story,
+  with `**Reworks:** Phase N` and N in `Depends on`. The frozen leaf is never edited. The draft
+  lists every pending change as applied; `change_impact.py --check-plan` fails a draft that leaves
+  a built leaf of a touched story unreworked.
+  *States it:* `skills/spec-design/SKILL.md`, `skills/spec-design/references/design-contracts.md`
+  *Enforced by:* `skills/spec-design/scripts/change_impact.py`, `skills/spec-design/scripts/check_todo.py`
+  *Tested by:* `skills/spec-design/tests/change_impact.test.sh`, `skills/spec-design/tests/check_todo.test.sh`
+
+- **SB-spec-design-138** — A question the change left open becomes a `## Resolve first` entry whose
+  `Blocks:` names the rework leaf, never the built one, so `/r:plan-run` stops before building the
+  rework on a guess.
+  *States it:* `skills/spec-design/SKILL.md`
+  *Enforced by:* —
+  *Tested by:* —
+
 ## Step 2 — pass 1: milestones, leaves and the graph
 
 - **SB-spec-design-030** — Pass 1 works backwards from the v1 line — the smallest run of leaves that
@@ -872,6 +905,28 @@ flowchart TD
   *Enforced by:* —
   *Tested by:* `skills/spec-design/tests/check_todo.test.sh`
 
+- **SB-spec-design-139** — A `**Reworks:**` line must name a phase that exists, is numbered below
+  the leaf, is in its `Depends on`, and is **built** (a marker or at least one tick — a partly
+  ticked leaf counts); a line that names no phase is reported too. A rework of unbuilt work is
+  re-planning in place, not a rework.
+  *States it:* `skills/spec-design/SKILL.md`
+  *Enforced by:* `skills/spec-design/scripts/check_todo.py`
+  *Tested by:* `skills/spec-design/tests/check_todo.test.sh`
+
+- **SB-spec-design-140** — A **retired** story (`<h3 class="retired">` in the spec) needs no phase,
+  and a built leaf or a `Reworks:` leaf may cite it; an unbuilt leaf that still implements it is
+  reported, because it plans work the business dropped.
+  *States it:* `skills/spec-design/SKILL.md`
+  *Enforced by:* `skills/spec-design/scripts/check_todo.py`
+  *Tested by:* `skills/spec-design/tests/check_todo.test.sh`
+
+- **SB-spec-design-141** — `--against` also reports an applied change dropped from the
+  `<!-- changes: -->` line, and a `Reworks:` target that was not built in the previous plan — a
+  rewrite cannot mark a leaf built itself and then rework it.
+  *States it:* `skills/spec-design/SKILL.md`
+  *Enforced by:* `skills/spec-design/scripts/check_todo.py`
+  *Tested by:* `skills/spec-design/tests/check_todo.test.sh`
+
 ## Step 8 — the gate
 
 - **SB-spec-design-100** — **Nothing is written to disk before the gate.** It shows the milestones,
@@ -927,6 +982,13 @@ flowchart TD
   *Tested by:* —
 
 - **SB-spec-design-107** — `--shallow` gates the same way; `--yes` skips the gate entirely.
+  *States it:* `skills/spec-design/SKILL.md`
+  *Enforced by:* —
+  *Tested by:* —
+
+- **SB-spec-design-142** — With a pending change, the migration table gains `rework` and `remove`
+  rows, and each is read out item by item: a change to code that already shipped is the one kind of
+  leaf that can break something working.
   *States it:* `skills/spec-design/SKILL.md`
   *Enforced by:* —
   *Tested by:* —
@@ -1076,6 +1138,13 @@ flowchart TD
   *Enforced by:* `lib/record-run.py`
   *Tested by:* `lib/tests/stats.test.sh`
 
+- **SB-spec-design-143** — `changesApplied`, `leavesReworked`, `leavesRemoved` and `stopped`
+  say whether requirement changes land before the build or after it; a `change-stop` row is a
+  declined run but not a rejected decomposition, and is read apart from the other declines.
+  *States it:* `skills/spec-design/SKILL.md`, `skills/spec-design/references/stats-fields.md`
+  *Enforced by:* —
+  *Tested by:* —
+
 ## The downstream contract
 
 - **SB-spec-design-127** — Three things are load-bearing for `/r:task-run` and `/r:plan-run` and
@@ -1109,14 +1178,14 @@ flowchart TD
 ## Prose-only behaviours
 
 Held up by wording alone — no *Enforced by:* and no *Tested by:* — so nothing fails if one quietly
-stops being true. **76 of 134 entries**, and they cluster: the three steps where a person is in the
+stops being true. **79 of 143 entries**, and they cluster: the three steps where a person is in the
 loop (the Codex challenge, the gate, the hand-off) are prose-only end to end.
 
 - **Invocation and flags** — 003, 004, 005, 006, 007, 008, 009. Nothing reads the flags but the
   model, so `--shallow` writing a `tech-design.md` anyway, or `--yes` swallowing the Step 3.5
   questions along with the gate, would leave no trace.
 - **Step 1, the documents** — 010, 011, 012, 013, 014, 016, 017, 018.
-- **Step 1.5, the rewrite** — 019, 020, 023, 025, 026, 027, 028, 029. The *freeze* half is enforced
+- **Step 1.5, the rewrite** — 019, 020, 023, 025, 026, 027, 028, 029, 138. The *freeze* half is enforced
   (022, 024, 079–081); what is not is the draft staying in a scratch directory, the shape
   classification, and every inferred field being named as inferred.
 - **Step 2, sizing and grouping** — 030, 031, 033, 034.
@@ -1130,10 +1199,10 @@ loop (the Codex challenge, the gate, the hand-off) are prose-only end to end.
   Nothing verifies that the review ran, that `--background` was passed, that the rubric stayed at
   five, that findings were verified before being applied, or that a skip was reported as a skip.
 - **Step 7's human judgments** — 082.
-- **Step 8, the gate — the whole step** — 100, 101, 102, 103, 104, 105, 106, 107. Nothing enforces
+- **Step 8, the gate — the whole step** — 100, 101, 102, 103, 104, 105, 106, 107, 142. Nothing enforces
   that the draft stays off the real paths until a yes, and a run that wrote first and asked after
   would look identical afterwards.
 - **Step 9, the hand-off** — 108, 109, 110, 111, 112, 113, 114.
-- **Step 10's field meanings** — 117, 118, 119, 120, 121, 122, 123, 124, 125. The sink accepts any
+- **Step 10's field meanings** — 117, 118, 119, 120, 121, 122, 123, 124, 125, 143. The sink accepts any
   payload, so only the write itself and the exit-0 rule (116, 126) are enforced; what each number
   *means* is prose.

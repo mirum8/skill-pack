@@ -598,6 +598,63 @@ graph TD
   *Enforced by:* `skills/spec-brainstorm/scripts/check_spec.py`
   *Tested by:* `skills/spec-brainstorm/tests/check_spec.test.sh`
 
+- **SB-spec-brainstorm-166** — `--change` moves a **finished** spec for a business change, where
+  `--continue` finishes an unfinished one. It needs an existing spec — with none it offers a normal
+  run — and it differs because the code beside the spec may already hold the old answer.
+  *States it:* `skills/spec-brainstorm/SKILL.md`
+  *Enforced by:* —
+  *Tested by:* —
+
+- **SB-spec-brainstorm-167** — Before the first question, `--change` maps the change to stories and
+  ADRs with an effect each (changed, retired, added, superseded) and asks `change_impact.py` what
+  is built: each story's leaves as `built`, `partly` or `unbuilt`, shown as a table. The script
+  decides the state, never a read of the checkboxes.
+  *States it:* `skills/spec-brainstorm/SKILL.md`
+  *Enforced by:* `skills/spec-design/scripts/change_impact.py`
+  *Tested by:* `skills/spec-design/tests/change_impact.test.sh`
+
+- **SB-spec-brainstorm-168** — **A stop ends `--change` before any question**: a partly built leaf
+  of a touched story, or an unmerged `phase-*` branch. Each is named with its fix (finish, land or
+  abandon), and the run records `stopped: true`.
+  *States it:* `skills/spec-brainstorm/SKILL.md`
+  *Enforced by:* `skills/spec-design/scripts/change_impact.py`
+  *Tested by:* `skills/spec-design/tests/change_impact.test.sh`
+
+- **SB-spec-brainstorm-169** — `--change` interviews **only what the change touches**, with the
+  `--continue` mechanics; a business question the user cannot answer now goes to `## Open
+  questions` with `Owner:` and `Blocks:`, never to a default.
+  *States it:* `skills/spec-brainstorm/SKILL.md`
+  *Enforced by:* —
+  *Tested by:* —
+
+- **SB-spec-brainstorm-170** — A changed story keeps its `<h3>` name. A retired story is never
+  deleted: it stays as `<h3 class="retired">` with a `Retired <date> — <reason>` line, needs no
+  Given/When/Then, and must not appear in the v1 line, because built leaves still cite it.
+  *States it:* `skills/spec-brainstorm/SKILL.md`, `skills/spec-brainstorm/references/sections.md`, `skills/spec-brainstorm/references/html.md`
+  *Enforced by:* `skills/spec-brainstorm/scripts/check_spec.py`
+  *Tested by:* `skills/spec-brainstorm/tests/check_spec.test.sh`
+
+- **SB-spec-brainstorm-171** — A `superseded by ADR-n` pointer must resolve: n is written, and is
+  not the ADR itself.
+  *States it:* `skills/spec-brainstorm/references/sections.md`
+  *Enforced by:* `skills/spec-brainstorm/scripts/check_spec.py`
+  *Tested by:* `skills/spec-brainstorm/tests/check_spec.test.sh`
+
+- **SB-spec-brainstorm-172** — `--change` appends one `## Changes` entry to `interview-notes.md`
+  per change — `### <yyyy-mm-dd> — <title>`, `Why:`, `Stories:` with quoted, verbatim names, and
+  optional `ADRs:` — and never edits an entry the plan already lists. Every name must resolve in
+  the spec in the state the entry says.
+  *States it:* `skills/spec-brainstorm/SKILL.md`, `skills/spec-brainstorm/references/interview.md`
+  *Enforced by:* `skills/spec-brainstorm/scripts/check_spec.py`, `skills/spec-design/scripts/change_impact.py`
+  *Tested by:* `skills/spec-brainstorm/tests/check_spec.test.sh`, `skills/spec-design/tests/change_impact.test.sh`
+
+- **SB-spec-brainstorm-173** — On `mode: change` the run records `storiesChanged`,
+  `storiesRetired`, `storiesAdded`, `adrsSuperseded`, `builtLeavesTouched` and `stopped`;
+  `builtLeavesTouched` says whether changes arrive before the build or after it.
+  *States it:* `skills/spec-brainstorm/SKILL.md`
+  *Enforced by:* —
+  *Tested by:* —
+
 ## The interview protocol
 
 - **SB-spec-brainstorm-067** — `references/interview.md` is read **in full** before the first
@@ -1424,9 +1481,11 @@ graph TD
   *Enforced by:* —
   *Tested by:* —
 
-- **SB-spec-brainstorm-161** — Never reference a path outside this skill's directory. In practice the
-  one crossing is Step 6's `${CLAUDE_PLUGIN_ROOT}/lib/record-run.py`, the pack-wide sink every skill
-  writes to; nothing else reaches outside.
+- **SB-spec-brainstorm-161** — Never reference a path outside this skill's directory except through
+  `${CLAUDE_PLUGIN_ROOT}`. The two crossings are Step 6's `${CLAUDE_PLUGIN_ROOT}/lib/record-run.py`,
+  the pack-wide sink every skill writes to, and `--change`'s
+  `${CLAUDE_PLUGIN_ROOT}/skills/spec-design/scripts/change_impact.py`, the one reader of what a
+  plan has built.
   *States it:* `skills/spec-brainstorm/SKILL.md`
   *Enforced by:* `tools/validate.py`
   *Tested by:* —
@@ -1441,9 +1500,9 @@ SB-spec-brainstorm-001, 004, 005, 006, 007, 008, 010, 011, 012, 013, 014, 016, 0
 065, 067, 068, 069, 070, 071, 072, 073, 074, 075, 076, 077, 078, 079, 080, 081, 082, 083, 085, 087,
 088, 089, 091, 092, 093, 094, 096, 098, 101, 102, 103, 105, 106, 107, 109, 110, 111, 112, 113, 114,
 116, 120, 122, 123, 124, 125, 128, 138, 140, 141, 145, 146, 147, 148, 149, 151, 152, 155, 156, 157,
-158, 159, 160, 163, 164, 165.
+158, 159, 160, 163, 164, 165, 166, 169, 173.
 
-**102 of 165 entries.** The concentration is exactly where it would be expected: the interview
+**105 of 173 entries.** The concentration is exactly where it would be expected: the interview
 protocol and the research playbook are instructions to a model with no artifact to check them
 against, while everything the document *renders* — the seven parts, the ownership rule, the ADR
 fields, the story handles — is held by `check_spec.py` and its suite.

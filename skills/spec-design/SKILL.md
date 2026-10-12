@@ -8,12 +8,13 @@ description: >-
   name; writes todo.md with the contracts beside it in tech-design.md. Every leaf declares its
   dependencies, so the plan is a graph that says which units may be built at once and refuses a
   wave whose members collide on a file. One leaf is exactly one /r:task-run. An existing plan,
-  in any shape including a hand-written checkbox backlog, is an input never overwritten: it is
-  reformatted and re-derived against the documents with every leaf that already carries a tick frozen. Stack-agnostic;
+  in any shape (even a hand-written backlog), is an input never overwritten: it is
+  reformatted and re-derived against the documents with every leaf that already carries a tick frozen;
+  a requirement change (/r:spec-brainstorm --change) becomes rework leaves. Stack-agnostic;
   optional free text for what the documents cannot say (priorities, a deadline, what to defer).
   Asks where a design decision is genuinely open and would change the contracts or the split.
   The draft is simplified by /r:plan-simplify, then challenged by the real Codex where installed - findings verified, major ones
-  fixed, all three lists reported. Invoked deliberately as "/r:spec-design" - never routed to.
+  fixed, all three lists reported. Invoked only as "/r:spec-design".
   --shallow gives the build order alone. NOT for writing the spec - that's /r:spec-brainstorm;
   NOT for building the plan - that's /r:plan-run or /r:task-run.
 model: fable
@@ -150,7 +151,7 @@ Three things follow:
   no edge points backwards.
 - **A story the documents changed after a leaf shipped is new work**, never an edit to the frozen
   leaf. The plan is the record of what was built; rewriting it into the present tense destroys the
-  only copy.
+  only copy. Below, *Rework what a change touched* says what that new work looks like.
 
 ### What you may infer, and what you must label
 
@@ -164,6 +165,52 @@ authored one — the same reason `file:LINE` references are banned from this doc
 `**Done when:**` is the one field never invented. Derive a real command from the build files read
 in Step 1, or leave the leaf without one and let the checker report it before the gate. Writing
 `mvn test` to quiet a check is worse than the check failing.
+
+### Rework what a change touched
+
+When `/r:spec-brainstorm --change` moved the spec, `interview-notes.md` beside it carries a
+`## Changes` record: one entry per change, with its stories marked changed, retired or added. An
+entry is **pending** until this plan lists its heading on a `<!-- changes: … -->` line under the
+plan title. Read them through the script, never by reading the two files side by side:
+
+```bash
+python3 "${CLAUDE_SKILL_DIR}/scripts/change_impact.py" docs/<topic>/todo.md \
+  --notes docs/<topic>/interview-notes.md
+```
+
+It prints the pending changes, each touched story's leaves with their state (`built`, `partly`,
+`unbuilt`), the unmerged `phase-*` branches, and `stops`.
+
+**A stop ends the run before any draft.** A stop is a leaf of a touched story that is partly
+built, a `phase-*` branch nobody merged, or a change entry the script cannot read. Each one means
+the plan on disk is not the whole truth about what is built, or about what changed. Name each one
+with its fix — finish the phase (`/r:plan-run --from N`, or `--land` for a finished branch),
+abandon it (delete the branch, un-tick the items and revert their code), or fix the entry. Then go
+to Step 10 with `mode: "declined"`, `stopped: true` and `blockedReason: "change-stop"`. Nothing is
+written.
+
+With no stop, every pending change is planned like this:
+
+- **A built leaf of a changed story gets a rework leaf.** It is numbered above the highest frozen
+  leaf and carries `**Implements:** <the story>`, `**Reworks:** Phase N` and a `**Depends on:**`
+  that includes N. Its items change the code and its tests from the old behaviour to the new.
+  Its `Done when` proves the **new** behaviour: a test that passed against Phase N must fail, or
+  be rewritten, under the rework.
+- **A built leaf of a retired story gets a removal leaf**, in the same shape. Its items delete the
+  code and the tests that exist only for that story, and keep what other stories still use. Its
+  `Done when` proves the behaviour is gone: a test asserting the endpoint answers 404, a grep that
+  finds nothing.
+- **An unbuilt leaf is re-planned in place**, as any unbuilt leaf is. A retired story leaves the
+  unbuilt leaves that planned it; `check_todo.py` reports any that still cite it.
+- **A question the change left open**, one in the spec's Open questions with a `Blocks:`, becomes
+  a `## Resolve first` entry whose `Blocks:` names the rework leaf, never the built one.
+  `resolve_scope.py` rejects an open entry on a built phase, and `/r:plan-run` then stops before
+  building the rework on a guess.
+
+The frozen leaf is not touched: its number, title, ticks and `Implements:` line stay, citing the
+story as it was when it shipped. A retired story keeps its `<h3>` in the spec for exactly that
+reason. Add every pending change's heading to the draft's `<!-- changes: … -->` line, separated by
+`;`. `--against` keeps every heading a previous plan listed.
 
 ### Draft to one side
 
@@ -507,7 +554,13 @@ python3 "${CLAUDE_SKILL_DIR}/scripts/check_todo.py" <draft>/todo.md \
     --tech-design <draft>/tech-design.md \
     --against docs/<topic>/todo.md      # rewrite only — the plan this one replaces
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/plan-unblock/scripts/resolve_scope.py" <draft>/todo.md --check
+python3 "${CLAUDE_SKILL_DIR}/scripts/change_impact.py" docs/<topic>/todo.md \
+    --notes docs/<topic>/interview-notes.md --check-plan <draft>/todo.md   # pending changes only
 ```
+
+The third one runs whenever Step 1.5 found a pending change. It exits 1 when a built leaf of a
+changed or retired story has no later leaf that reworks it and cites the story, or when the draft
+does not list a pending change as applied.
 
 The second one is the `## Resolve first` half, and it runs **unconditionally** — deciding whether
 that section is empty is the parse it exists to do. It exits 1 on any finding: an entry with no
@@ -518,7 +571,9 @@ Fix everything it reports, then re-run. It catches stories with no leaf, leaves 
 missing "done when", oversized leaves, numbering gaps, files referenced before they are created,
 **and the graph**: a missing `Depends on`, a cycle, a dependency on a higher-numbered leaf, a leaf
 item that defers outside its own block, two leaves sharing a file inside one wave, and a `##
-Waves` summary that has drifted from the edges. It prints the derived wave table either way.
+Waves` summary that has drifted from the edges. It prints the derived wave table either way. A
+`**Reworks:**` line must name a phase that exists, is lower, is in the leaf's `Depends on`, and is
+built; an unbuilt leaf that still implements a retired story is reported.
 
 `--tech-design` checks the two files are one document: a milestone whose contracts nobody can find, a
 contracts section for a milestone that doesn't exist, a name changed on one side only, and
@@ -526,13 +581,15 @@ contracts left inline while `tech-design.md` sits beside them. Omit it on `--sha
 
 `--against` is the mechanical guard on the freeze rule, and on a rewrite it is not optional. It
 reports a frozen leaf that vanished or was retitled, one that was renumbered, a tick that was lost
-or un-ticked, and a dropped `<!-- built: -->` marker. Where the previous plan had no `### Phase N`
+or un-ticked, a dropped `<!-- built: -->` marker, an applied change gone from the
+`<!-- changes: -->` line, and a `Reworks:` target that was not built in the previous plan. Where the previous plan had no `### Phase N`
 numbering, it checks the one thing that plan did carry: that every ticked item survived. **A
 finding here is never fixed by loosening the check** — it means the rewrite took something it was
 not allowed to take.
 
 Then four judgments a script can't make (five on a rewrite — add: does every frozen leaf still say
-what was actually built?):
+what was actually built? — and six with a change — add: does each rework or removal leaf's `Done
+when` prove the new state, and fail against the old one?):
 
 1. **Order** — could someone actually build leaf 3 with only 1 and 2 finished?
 2. **Slices** — does each leaf leave the project working and demonstrable?
@@ -579,12 +636,18 @@ Rewriting docs/billing/todo.md — found shape: packed (inline Design, no tech-d
   added     2   Phases 8–9 — "Export a statement" had no leaf
   dropped   1   old Phase 8 — the spec's v1 line no longer includes it
   inferred  6   3 × Depends on, 2 × Implements, 1 × milestone grouping
+  rework    1   Phase 10 — "Approve an invoice" changed (reworks Phase 3)
+  remove    1   Phase 11 — "Self-approve small invoices" retired (removes Phase 4)
 ```
+
+`rework` and `remove` appear only when a change is pending, with the change's heading above
+them.
 
 Read the `inferred` line out, item by item, not as a count: those are the claims nobody authored,
 and the gate is the only place a human can refuse one. `dropped` needs the same — a leaf removed
 because the documents changed is the right call; one removed because you missed it is invisible
-unless named here.
+unless named here. `rework` and `remove` are read out item by item too: each is a change to code
+that already shipped, which is the one kind of leaf that can break something working.
 
 `--shallow` gates the same way. With `--yes`, skip it.
 
@@ -598,7 +661,8 @@ On a rewrite, both files are replaced together. A `design.md` Step 1.5 read as t
 replaced by `tech-design.md` here, never left beside it: two contracts documents beside one plan are
 free to disagree, and only one of them is the file anything still reads. If the plan is tracked,
 leave it as a working-tree change and say so — `git diff`, the delete included, is the best record
-of what the rewrite moved.
+of what the rewrite moved. The draft already carries the `<!-- changes: … -->` line, so the move
+is what marks the changes applied — a declined rewrite leaves them pending.
 
 Report the leaf count, where the v1 line falls, the wave table, and anything you had to assume.
 **Lead with `## Resolve first` if it isn't empty** — those block real leaves and need a person, so
@@ -640,7 +704,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
  "simplifyKeptByUser":0,"simplifyPhasesAdded":0,
  "codexReview":"ran","codexRaised":0,"codexApplied":0,"codexDismissed":0,
  "inputShape":"none","leavesFrozen":0,"leavesResplit":0,"leavesAdded":0,"leavesDropped":0,
- "fieldsInferred":0}
+ "fieldsInferred":0,"changesApplied":0,"leavesReworked":0,"leavesRemoved":0,"stopped":false,
+ "blockedReason":null}
 STATS_JSON
 ```
 
@@ -679,6 +744,9 @@ the only thing that will ever notice it drifting.
   with the draft kept to one side until the gate passes.
 - Never renumber, re-split, retitle or un-tick a frozen leaf, and never drop one. `--against`
   reports all five, and a report there means the rewrite took something it wasn't allowed to.
+- Never plan a change over a stop — a partly built leaf of a touched story, an unmerged `phase-*`
+  branch, an unreadable change entry. Never edit a frozen leaf to say the new behaviour; the
+  change is a rework or removal leaf with a `Reworks:` line.
 - Never present an inferred milestone, edge or `Implements:` name as though someone authored it —
   every one is named at the gate. Never invent a `Done when:` to satisfy the checker.
 - Never fake the Codex review, substitute an imitation of it, or report a skipped one as done.

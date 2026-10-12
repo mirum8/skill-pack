@@ -533,6 +533,70 @@
           "text": "Choices left unticked are reported as seen and kept, not as never shown"
         }
       ]
+    },
+    {
+      "id": 18,
+      "kind": "behaviour",
+      "name": "pending-change-becomes-rework-leaves",
+      "prompt": "/r:spec-design docs/billing/spec.html",
+      "fixture": null,
+      "files": [
+        "docs/billing/spec.html — 'Approve an invoice' rewritten; 'Self-approve small invoices' is <h3 class=\"retired\">",
+        "docs/billing/interview-notes.md — one ## Changes entry: changed \"Approve an invoice\"; retired \"Self-approve small invoices\"",
+        "docs/billing/todo.md — split shape, Phases 1-5 built (Phase 3 implements 'Approve an invoice', Phase 5 'Self-approve small invoices'), Phases 6-8 unbuilt, no <!-- changes: --> line"
+      ],
+      "expected_output": "A rewrite that reads the pending change through change_impact.py, freezes Phases 1-5, adds a rework leaf (Implements: Approve an invoice, Reworks: Phase 3, Depends on includes 3) and a removal leaf (Implements: Self-approve small invoices, Reworks: Phase 5) above the highest frozen leaf, re-plans 6-8 in place without citing the retired story, adds the change heading to the <!-- changes: --> line, and shows rework and remove rows at the gate.",
+      "assertions": [
+        {
+          "id": "frozen_intact",
+          "text": "check_todo.py --against the previous plan reports nothing",
+          "check": "script"
+        },
+        {
+          "id": "rework_gate",
+          "text": "change_impact.py --check-plan over the draft exits 0",
+          "check": "script"
+        },
+        {
+          "id": "rework_done_when",
+          "text": "The rework leaf's Done when proves the new behaviour; the removal leaf's proves the old one is gone"
+        },
+        {
+          "id": "migration_rows",
+          "text": "The gate shows rework and remove rows, each read out item by item"
+        },
+        {
+          "id": "stats",
+          "text": "The stats row records mode: rewrite with changesApplied 1, leavesReworked 1, leavesRemoved 1"
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "kind": "behaviour",
+      "name": "change-over-unmerged-branch-stops",
+      "prompt": "/r:spec-design docs/billing/spec.html",
+      "fixture": null,
+      "files": [
+        "docs/billing/interview-notes.md — one pending ## Changes entry",
+        "a git branch phase-reports, not merged into main, whose todo.md marks Phase 6 <!-- built: phase-reports -->"
+      ],
+      "expected_output": "change_impact.py reports the branch as finished-not-landed and the run stops before any draft, naming the branch and /r:plan-run --land as the fix. Nothing is written; the stats row records mode: declined, stopped: true, blockedReason: change-stop.",
+      "assertions": [
+        {
+          "id": "nothing_written",
+          "text": "todo.md and tech-design.md are byte-identical after the run",
+          "check": "script"
+        },
+        {
+          "id": "names_branch",
+          "text": "The stop names phase-reports and the --land fix"
+        },
+        {
+          "id": "stats",
+          "text": "mode: declined, stopped: true, blockedReason: change-stop"
+        }
+      ]
     }
   ]
 }

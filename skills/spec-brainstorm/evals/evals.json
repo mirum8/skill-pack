@@ -417,6 +417,100 @@
           "text": "Every sentence in a question or description is 15 words or fewer; labels are at most five plain words with no symbols; each description reads Now / Other option / Cost"
         }
       ]
+    },
+    {
+      "id": 8,
+      "kind": "trigger",
+      "name": "routing-triggers-requirement-change",
+      "prompt": "the business changed the approval rule — finance approves invoices now, not the author. update the spec in docs/billing, half the todo is already built",
+      "expected_output": "spec-brainstorm loads in --change mode: it maps the change to stories and ADRs and reports what of the plan is already built before asking anything.",
+      "files": [],
+      "fixture": null,
+      "assertions": []
+    },
+    {
+      "id": 9,
+      "kind": "behaviour",
+      "name": "change-reaches-built-work",
+      "prompt": "/r:spec-brainstorm --change docs/billing \"finance approves invoices, not the author; small invoices no longer approve themselves\"",
+      "fixture": null,
+      "files": [
+        "docs/billing/spec.html — four stories including 'Approve an invoice' and 'Self-approve small invoices'; ADR-4 lets the author approve",
+        "docs/billing/todo.md — Phase 3 implements 'Approve an invoice' and Phase 5 'Self-approve small invoices', both with <!-- built: --> markers",
+        "docs/billing/interview-notes.md — status: generated, no ## Changes section"
+      ],
+      "persona": "Product owner. Confirms finance is one team of three and any member may approve. Has no answer yet for whether invoices already approved by their authors must be re-approved, and says so.",
+      "expected_output": "Before the first question it runs change_impact.py --stories and shows a table naming Phase 3 and Phase 5 as built. It interviews only the approval area. The unanswered re-approval question goes to ## Open questions with Owner and Blocks. At the gate it names the story and ADR effects and the built phases. On yes 'Approve an invoice' keeps its name, 'Self-approve small invoices' becomes <h3 class=\"retired\"> with a Retired line and leaves the v1 line, a new ADR supersedes ADR-4, and one ## Changes entry is appended. check_spec.py is clean, and the hand-off names the rework /r:spec-design will plan.",
+      "assertions": [
+        {
+          "id": "impact_first",
+          "text": "The built/partly/unbuilt table comes from change_impact.py and is shown before any question"
+        },
+        {
+          "id": "names_kept",
+          "text": "'Approve an invoice' keeps its <h3> text character for character",
+          "check": "script"
+        },
+        {
+          "id": "retired_not_deleted",
+          "text": "'Self-approve small invoices' is an <h3 class=\"retired\"> with a 'Retired <date> — <reason>' line, and is absent from the v1 line",
+          "check": "script"
+        },
+        {
+          "id": "adr_superseded",
+          "text": "ADR-4 is marked 'superseded by ADR-n' and stays; ADR-n exists",
+          "check": "script"
+        },
+        {
+          "id": "change_recorded",
+          "text": "interview-notes.md has one ## Changes entry with a dated heading, Why:, and Stories: changed \"Approve an invoice\"; retired \"Self-approve small invoices\"",
+          "check": "script"
+        },
+        {
+          "id": "open_question_kept",
+          "text": "The re-approval question is in ## Open questions with Owner and Blocks, not decided by default"
+        },
+        {
+          "id": "gate_before_write",
+          "text": "Nothing in spec.html changes before an explicit yes"
+        },
+        {
+          "id": "stats",
+          "text": "The stats row records mode: change with storiesChanged 1, storiesRetired 1 and builtLeavesTouched 2"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "kind": "behaviour",
+      "name": "change-stops-on-partly-built-leaf",
+      "prompt": "/r:spec-brainstorm --change docs/billing \"statements are PDF, not CSV\"",
+      "fixture": null,
+      "files": [
+        "docs/billing/spec.html — 'Export a statement' is one of its stories",
+        "docs/billing/todo.md — Phase 6 implements 'Export a statement' with two of five items ticked"
+      ],
+      "expected_output": "change_impact.py reports Phase 6 as partly built; the run stops before any question, names Phase 6 with the fix (finish it with /r:plan-run --from 6, or abandon it), writes nothing to spec.html or the notes' ## Changes, and records stopped: true.",
+      "assertions": [
+        {
+          "id": "stops",
+          "text": "No interview question is asked and spec.html is unchanged",
+          "check": "script"
+        },
+        {
+          "id": "names_fix",
+          "text": "The stop names Phase 6 and both ways out: finish it or abandon it"
+        },
+        {
+          "id": "no_record",
+          "text": "interview-notes.md gains no ## Changes entry",
+          "check": "script"
+        },
+        {
+          "id": "stats",
+          "text": "The stats row records mode: change, stopped: true, wrote: false"
+        }
+      ]
     }
   ]
 }

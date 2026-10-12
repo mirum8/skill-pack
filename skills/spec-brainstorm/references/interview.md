@@ -578,6 +578,30 @@ status: interviewing      # interviewing | generated-partial | generated
 Open questions use these four fields everywhere they appear — here and in the document, never
 a third shape.
 
+### `## Changes` — written by `--change`, read by `/r:spec-design`
+
+A finished spec that the business moved gets one entry per change, appended after the
+other sections:
+
+```markdown
+## Changes
+### 2026-10-12 — Finance approves invoices
+- Why: the audit found authors approving their own spend
+- Stories: changed "Approve an invoice"; retired "Self-approve small invoices"; added "Escalate a rejected invoice"
+- ADRs: ADR-9 supersedes ADR-4
+- Built when recorded: "Approve an invoice" — Phase 3 (built); "Self-approve small invoices" — Phase 5 (built)
+```
+
+- **The heading is the handle**: `### <yyyy-mm-dd> — <title>`. `/r:spec-design` copies it into
+  the plan's `<!-- changes: … -->` line once the plan absorbs the change; an entry not listed
+  there is pending.
+- **`Why:` and `Stories:` are required.** Each story is `changed "<name>"`, `retired "<name>"` or
+  `added "<name>"`, quoted and verbatim, separated by `;`. A name that does not resolve in the
+  spec is a rework nobody can plan, so `scripts/check_spec.py` reports it.
+- **`ADRs:` and `Built when recorded:` are for the reader.** The plan, not this line, decides what
+  is built when `/r:spec-design` runs.
+- An entry the plan already lists is never edited. A later change is a later entry.
+
 ### The Decisions log is written live, and that is the whole point
 
 Append to `## Decisions` **the moment a decision lands**, not at generate time. Four things go

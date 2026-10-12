@@ -383,5 +383,73 @@ python3 "$CHECK" "$TMP/nope" >/dev/null 2>&1; rc=$?
                || bad "a non-directory argument exits 2" "exit $rc, wanted 2"
 
 echo
+echo "== a requirement change: retired stories, superseded ADRs and the change record =="
+# A retired story stays in the spec as <h3 class="retired">, because a built phase still cites it.
+# It is history, not a wish, so it carries no Given/When/Then — and it must never be shipped again.
+RETIRE='s|<h2 id="v1">|<h3 class="retired">Merchant cancels a payout</h3><p>Retired 2026-10-12 — finance cancels payouts now.</p>\n<h2 id="v1">|'
+mutant "$RETIRE"
+silent "a retired story needs no acceptance criteria" "acceptance criteria"
+silent "and the spec stays clean" "problem"
+
+mutant "$RETIRE"'; s|Deferred:|Deferred: <strong>Merchant cancels a payout</strong>,|'
+says "a retired story in the v1 line is reported" "retired story.*v1 line|v1 line.*retired"
+
+mutant 's|<b>Status</b> accepted|<b>Status</b> superseded by ADR-7|'
+says "superseded by an ADR that was never written is reported" "ADR-1 is superseded by ADR-7, which"
+
+mutant 's|<b>Status</b> accepted|<b>Status</b> superseded by ADR-1|'
+says "an ADR superseded by itself is reported" "ADR-1 is superseded by itself"
+
+mutant "$RETIRE"
+cat >> "$TMP/interview-notes.md" <<'EOF'
+
+## Changes
+### 2026-10-12 — Finance cancels payouts
+- Why: merchants cancelled payouts already sent to the bank
+- Stories: changed "Finance reviews a held payout"; retired "Merchant cancels a payout"
+- ADRs: ADR-1
+EOF
+silent "a well-formed change record is clean" "problem"
+
+mutant "$RETIRE"
+cat >> "$TMP/interview-notes.md" <<'EOF'
+
+## Changes
+### 2026-10-12 — Finance cancels payouts
+- Stories: changed "Finance reviews payouts"; retired "Finance reviews a held payout"; added "Merchant cancels a payout"
+- ADRs: ADR-9
+EOF
+says "a change with no Why is reported" "no 'Why:' line"
+says "a changed story the spec does not define is reported" "'Finance reviews payouts'.*no story"
+says "a retired story still active in the spec is reported" "'Finance reviews a held payout'.*not marked retired"
+says "an added story that is retired is reported" "'Merchant cancels a payout'.*is retired"
+says "an ADR the spec does not define is reported" "ADR-9"
+
+mutant "$RETIRE"
+cat >> "$TMP/interview-notes.md" <<'EOF'
+
+## Changes
+### 2026-09-01 — Merchants cancel their own payouts
+- Why: support load
+- Stories: added "Merchant cancels a payout"
+
+### 2026-10-12 — Finance cancels payouts
+- Why: merchants cancelled payouts already sent to the bank
+- Stories: retired "Merchant cancels a payout"
+EOF
+silent "an older entry is judged by the latest one, so history stays append-only" "problem"
+
+mutant "$RETIRE"
+cat >> "$TMP/interview-notes.md" <<'EOF'
+
+## Changes
+### Finance cancels payouts
+- Why: x
+- Stories: changed Finance reviews a held payout
+EOF
+says "a change heading with no date is reported" "no date"
+says "an unquoted story is reported" "cannot read"
+
+echo
 printf '  %d passed, %d failed\n' "$pass" "$fail"
 [[ $fail == 0 ]]
