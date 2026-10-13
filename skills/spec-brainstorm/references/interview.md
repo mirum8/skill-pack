@@ -128,11 +128,23 @@ the first time it appears. Plain does not mean vague: keep the real names, numbe
 costs — "Postgres 16, one table per entity" beats "a relational store". A question the user has to
 read twice is answered with "whatever you think", which is the failure the tool exists to prevent.
 
-**Every question carries its own context, in short sentences.** The tool shows only the
-question, the labels and the descriptions; the message above the call is often collapsed, and the
-user may come back to this spec after weeks. Both failures are real: a label in the document's
-shorthand cannot be answered, and a description that packs everything into two long sentences is
-not read. So every call follows this shape, and the limits are hard:
+**Print a brief, then call the tool.** A bare question cannot be answered. The user does not know
+which step this is, what the code name in the header means, or why the document cannot settle it.
+So every call comes after a message, in the same plain English:
+
+- **One opening line** — what step this is and why you are asking now. "I checked the spec
+  against the change. Two decisions moved, and I need you for both."
+- **One short block per question** — what the thing is, in words someone who never opened the code
+  understands ("`mpOperCode` is the bank's code for the type of payment"); what the document does
+  today; what raised the question; and which option you would take, and why.
+
+The brief carries the reasoning. The call carries the choice. The current state is said once, in
+the brief — never repeated inside every option.
+
+**Every question still carries its own context, in short sentences.** The brief scrolls away, and
+the user may come back to this spec after weeks. A label in the document's shorthand cannot be
+answered, and a description that packs everything into two long sentences is not read. So every
+call follows this shape, and the limits are hard:
 
 - **Sentences of 15 words or fewer**, one fact each. Split rather than join with "and", ";" or ",".
 - **No internal names without a plain meaning.** A section name ("pre-mortem"), a coined term
@@ -143,9 +155,9 @@ not read. So every call follows this shape, and the limits are hard:
 - **The question: at most three short sentences.** What these are, what a tick does, what happens
   to the rest.
 - **The `label`: at most five plain words** saying what the choice does.
-- **The `description`: three short lines**, always in this order:
-  `Now: <what the spec does>.` · `Other option: <the alternative>.` · `Cost: <what the current
-  choice costs>.` Add one `Why: <reason>.` line only when the cost alone would not explain it.
+- **The `description`: what this option does and what it costs**, in one or two short sentences
+  on one line. No `Now:` / `Cost:` labels, and never a line break — the tool shows one as a broken
+  character.
 
 Compare, for one defaulted decision in a triage sweep:
 
@@ -158,18 +170,18 @@ bad   Q: These four decisions about how the loop behaves were recommended in ear
          result file. Timers (plan 1h, implement 4h, review 2h) are only a backstop. The other
          option was timers only. Cost: a long silent build can look idle and pause a healthy run.
 
-good  Q: I chose these 4 things myself. You never confirmed them. Tick the ones you want to decide.
-         Unticked ones stay as they are.
+good  brief: I chose 4 things about the run loop myself. You never confirmed them. The first one:
+         a step is stuck when its terminal is idle and it wrote no result. Time limits are only
+         a backstop. I kept that because a time limit alone stops slow steps that are fine.
+      Q: I chose these 4 things myself. Tick the ones you want to decide. Unticked ones stay.
       label: How a stuck step is found
-      description: Now: a step is stuck when its terminal is idle and it wrote no result.
-         Other option: only use time limits (plan 1h, build 4h).
-         Cost: a long quiet build can look stuck, and the run pauses.
+      description: Idle terminal and no result. A long quiet build can look stuck and pause the run.
 ```
 
 Before a call, read each question as someone who has not seen this document for a month. If it
 only makes sense with the spec open, or a sentence runs past 15 words, it is not finished.
 
-**The prose comes first, then one call for the round.** The message carries the reasoning, the
+**The prose comes first, then one call for the round.** The message carries the brief, the
 playback and the open questions; the call carries the choices. The tool takes at most four
 questions of two to four options, which sits under the batch ceiling — so when more than four
 choices are live, take the four with the most leverage (Rule 1 already ranks them) and let the rest

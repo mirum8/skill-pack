@@ -339,16 +339,24 @@ common words, no idioms, a technical term explained in a few words the first tim
 table names, status codes and costs; plain is not vague. A question the user has to read twice
 gets "whatever you think", and the choice is made silently after all.
 
-**Every question carries its own context, in short sentences.** The tool shows only the
-question, labels and descriptions — the message before the call is often collapsed. Hard limits:
+**Print a brief, then call the tool** — here, at the gate, and for the simplify questions in Step
+6.3. A bare question cannot be answered: the user does not know which step this is, what a code
+name means, or why the documents cannot settle it. The brief is one opening line — what step this
+is and why you are asking now — then one short block per question: what the thing is in plain
+words, what the draft does today, what raised the question, and which option you would take and
+why. The draft's current choice is said there, once, never repeated inside every option.
+
+**Every question still carries its own context, in short sentences**, because the brief scrolls
+away. Hard limits:
 
 - Sentences of 15 words or fewer, one fact each.
 - No plan shorthand — a milestone number, a phase title, a field name like `Done when`, a coined
   term — without its plain meaning. No `=`, `+` or `→` in a label.
 - The question: at most three short sentences — which part of the product, and why it is open.
 - The `label`: at most five plain words.
-- The `description`: three short lines — `Now: <the draft's choice>.` · `Other option: <the
-  alternative>.` · `Cost: <what the draft's choice costs>.`
+- The `description`: what this option does and what it costs, in one or two short sentences on
+  one line. No `Now:` / `Cost:` labels and no line breaks — the tool shows one as a broken
+  character.
 
 Read each question as someone who has not seen the spec for a month. If it only makes sense with
 the files open, or a sentence runs past 15 words, rewrite it.
@@ -460,8 +468,9 @@ characteristics and v1 line Step 1 pulled out. On a rewrite, its built phases ar
 **It runs silently, and asks only what is unclear.** Embedded, it applies the clear cases itself —
 a leaf or item that traces to no story or requirement, a safeguard with no trigger — and puts an
 `AskUserQuestion` only to the unclear ones: the documents half-ask for it, a whole milestone would
-go, or its readers disagree. A fresh draft has nothing built and the user has just answered Step 3.5;
-a question per leaf would be a second interview about a plan they have not seen yet. Its review
+go, or its readers disagree. Those questions follow Step 3.5's brief rule: say first what the
+simplify pass checked and what it already applied, then one block per unit it asks about. A fresh
+draft has nothing built and the user has just answered Step 3.5; a question per leaf would be a second interview about a plan they have not seen yet. Its review
 folds into this skill's gate, where every change is listed with its reason. Under `--yes` it asks
 nothing, and every deleted leaf still lands in `## Deferred`.
 
@@ -609,8 +618,9 @@ alike at the one moment a human is deciding.
 
 **Then the choices you made on your own** — the Step 3 list, as one `AskUserQuestion` call of up
 to four `multiSelect` questions grouped by milestone or kind, each listing up to four choices:
-*"Which of these do you want to decide yourself?"* Each option's `description` names the
-alternative and why you took this one. Nothing ticked means they were seen and kept — say so in
+*"Which of these do you want to decide yourself?"* Before the call, the brief says in one line
+that these are choices you made without asking, and gives each one a plain sentence. Each
+option's `description` names the alternative and why you took this one, on one line. Nothing ticked means they were seen and kept — say so in
 the report. Each ticked one is then asked as in Step 3.5, recommendation first. An answer that
 changes a contract re-runs pass 2 and pass 3 for that milestone and `check_todo.py` over the draft;
 Codex reviews again only under Step 6.5's rule, when the decomposition itself changed. An empty

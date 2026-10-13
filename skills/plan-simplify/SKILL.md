@@ -134,18 +134,28 @@ For every unit with a verified proposal — only the unclear ones when embedded 
 plan order, as many calls as it takes. A unit with nothing to propose is not asked; it appears in the
 final review as unchanged.
 
+**Print a brief before each call.** One opening line: what this pass checked, how many units, and
+what it already applied or will apply. Then one short block per unit the call asks about: what the
+unit is in plain words — explain every code, column or class name ("`mpOperCode` is the bank's
+code for the type of payment") — what the plan does today, what the readers found, and which
+option you would take and why. A bare question with a code name in its header cannot be answered;
+the brief gives the premise, and the call carries the choice.
+
 Each question names the unit in plain words and says in one or two short sentences what the readers
-found. The options, recommended first and labelled `(Recommended)`:
+found, so it still makes sense after the brief scrolls away. The options, recommended first and
+labelled `(Recommended)`:
 
 - **Simplify** — the description says what the simpler shape is and what goes.
 - **Delete** — only when the unit traces to nothing the spec asks for.
 - **Keep as is.**
 
 Offer only the options the readers' findings support: a unit that traces to a story has no Delete; a
-unit that is justified but over-built has Simplify and Keep. Each `description` uses three short
-lines — `Now:` what the plan has · `Change:` what it would become · `User sees:` what a v1 user
-experiences after it, e.g. "a clear 502 instead of a silent retry". Use `preview` when the choice is
-between two shapes of the same contract.
+unit that is justified but over-built has Simplify and Keep. Each `description` says what that
+option does and what it costs, in one or two short sentences on one line — what a v1 user sees
+after it where that is the point, e.g. "a clear 502 instead of a silent retry". The current plan is
+described once, in the brief, never repeated inside every option. No `Now:` / `Change:` labels and
+no line breaks: the tool shows one as a broken character. Use `preview` when the choice is between
+two shapes of the same contract.
 
 Write in plain English at B2 level: sentences of 15 words or fewer, the real names kept, no plan
 shorthand without its meaning. A question the user has to read twice gets "whatever you think", and

@@ -951,11 +951,14 @@ graph TD
 - **SB-spec-brainstorm-165** — **Every question is written in plain English at B2 level** — the
   tool's question text, labels and descriptions, and the prose questions: short sentences, common
   words, no idioms, a technical term explained once, real names, numbers and costs kept. Every
-  question also **carries its own context in short sentences**, because the prose before a tool
-  call is often collapsed: sentences of 15 words or fewer; no section name, coined term, field,
-  tool or ADR number without its plain meaning; no symbols in a label; the question at most three
-  sentences saying what a tick does; the label at most five plain words; each description three
-  short lines — `Now:`, `Other option:`, `Cost:`.
+  tool call comes **after a brief**: one line naming the step and why it asks now (on `--change`,
+  the change and the built phases it reaches), then per question what the thing is in plain words,
+  what the document does today, what raised it, and the recommendation with its reason. Every
+  question also **carries its own context in short sentences**, because the brief scrolls away:
+  sentences of 15 words or fewer; no section name, coined term, field, tool or ADR number without
+  its plain meaning; no symbols in a label; the question at most three sentences saying what a
+  tick does; the label at most five plain words; each description saying what that option does
+  and costs on one line, with no labels and no line breaks.
   *States it:* `skills/spec-brainstorm/SKILL.md`, `skills/spec-brainstorm/references/interview.md`
   *Enforced by:* —
   *Tested by:* —

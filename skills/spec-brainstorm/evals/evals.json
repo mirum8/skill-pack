@@ -414,7 +414,11 @@
         },
         {
           "id": "short_sentences",
-          "text": "Every sentence in a question or description is 15 words or fewer; labels are at most five plain words with no symbols; each description reads Now / Other option / Cost"
+          "text": "Every sentence in a question or description is 15 words or fewer; labels are at most five plain words with no symbols; each description says what that option does and costs on one line, with no Now / Other option / Cost labels and no line breaks"
+        },
+        {
+          "id": "brief_first",
+          "text": "Before each AskUserQuestion call a message names the step and why it asks now, then for each question explains the thing in plain words, what the document does today, what raised it, and the recommendation with its reason"
         }
       ]
     },

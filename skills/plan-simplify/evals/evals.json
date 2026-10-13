@@ -7,7 +7,7 @@
       "name": "one-question-per-unit-before-any-change",
       "kind": "behaviour",
       "prompt": "/r:plan-simplify docs/billing/todo.md",
-      "expected_output": "The plan is grouped into units (a phase, related phases, or a milestone). Two fresh readers run in one message. For every unit with a verified proposal, one AskUserQuestion question offers Simplify, Delete or Keep as is, recommended first, in plain short sentences. Nothing in todo.md or tech-design.md changes before the final Apply.",
+      "expected_output": "The plan is grouped into units (a phase, related phases, or a milestone). Two fresh readers run in one message. For every unit with a verified proposal, a brief is printed first — what the pass checked and applied, then each unit explained in plain words with the current plan and the recommendation — and then one AskUserQuestion question offers Simplify, Delete or Keep as is, recommended first, in plain short sentences, each description on one line. Nothing in todo.md or tech-design.md changes before the final Apply.",
       "files": [],
       "fixture": null,
       "assertions": []

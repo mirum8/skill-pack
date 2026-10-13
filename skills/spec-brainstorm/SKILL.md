@@ -139,10 +139,14 @@ The prose carries the reasoning and the open questions, then one call carries th
 recommendation first and labelled `(Recommended)`, each option's description naming its cost, no
 authored "Other". Every question — in the tool or in prose — is written in plain English at B2
 level: short sentences, common words, a technical term explained once, real names and numbers
-kept. **And every question carries its own context in short sentences**, because the prose before
-the call is often collapsed: sentences of 15 words or fewer, no internal name without its plain
-meaning, a label of at most five plain words, and each description as three short lines —
-`Now:`, `Other option:`, `Cost:` (`references/interview.md` §2). `references/interview.md` §2 has the mapping and the four-question ceiling.
+kept. **Every call comes after a brief**: one line saying what step this is and why you ask now,
+then one short block per question — what the thing is in plain words, what the document does
+today, what raised it, and which option you would take and why. A bare question cannot be
+answered. **The question still carries its own context in short sentences**, because the brief
+scrolls away: sentences of 15 words or fewer, no internal name without its plain meaning, a label
+of at most five plain words, and each description saying what that option does and costs, on one
+line with no line breaks. `references/interview.md` §2 has the brief, the mapping and the
+four-question ceiling.
 
 **Decide by default, and say that you guessed.** A wrong guess costs one sentence of correction —
 cheaper than asking almost every time. A decision you made goes into the coverage ledger as
@@ -441,6 +445,11 @@ Use the `--continue` mechanics — audit the ledger, re-derive the gaps, offer t
 but only over the rows and decisions the change reaches. The rest of the document was settled
 before the change and nothing about the change unsettles it; re-asking it spends the user's
 attention on what did not move.
+
+The brief before each call (`references/interview.md` §2) opens with the change itself: what moved
+in the business, which stories it reaches, and which built phases hold the old answer. Then one
+block per question, as usual. Without that line, a question about one column of a built phase
+reads as coming from nowhere.
 
 A question only the business can answer, and that the user cannot answer now, goes to
 `## Open questions` with `Owner:` and `Blocks:`, never to a default. `/r:spec-design` turns it

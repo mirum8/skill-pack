@@ -64,6 +64,10 @@ flowchart TD
   question offering Simplify, Delete or Keep, recommended first; a unit that traces to a story has no
   Delete, and what the documents themselves ask for is a question for the spec, never a removal.
   Embedded in `/r:spec-design`, clear units are decided silently and only unclear ones are asked.
+  Each call comes after a brief: what the pass checked and applied, then each asked unit in plain
+  words — every code name explained, the current plan, the finding, the recommendation and why.
+  Each `description` says what that option does and costs on one line, with no labels and no line
+  breaks.
   *States it:* `skills/plan-simplify/SKILL.md`
   *Enforced by:* —
   *Tested by:* —

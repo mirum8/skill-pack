@@ -454,10 +454,13 @@ flowchart TD
 
 - **SB-spec-design-131** — Every design question, in Step 3.5 and at the gate, is written in
   **plain English at B2 level**: short sentences, common words, no idioms, a technical term
-  explained once, the real table names, status codes and costs kept. Each question also **carries
-  its own context in short sentences**: 15 words or fewer each, no plan shorthand without its plain
-  meaning, the question at most three sentences, the label at most five plain words, and each
-  description three short lines — `Now:`, `Other option:`, `Cost:`.
+  explained once, the real table names, status codes and costs kept. Every call comes **after a
+  brief**: one line naming the step and why it asks now, then per question what the thing is in
+  plain words, what the draft does today, what raised it, and the recommendation with its reason.
+  Each question still **carries its own context in short sentences**: 15 words or fewer each, no
+  plan shorthand without its plain meaning, the question at most three sentences, the label at most
+  five plain words, and each description saying what that option does and costs on one line, with
+  no labels and no line breaks.
   *States it:* `skills/spec-design/SKILL.md`
   *Enforced by:* —
   *Tested by:* —
