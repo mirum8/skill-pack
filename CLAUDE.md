@@ -542,7 +542,8 @@ reader owned by one skill stays that skill's reader. Rules that are load-bearing
 **`r-loop` lives in its own repository (`../r-loop`) and reads the plan format this pack writes.**
 It parses `todo.md` itself — `### Phase N`, `**Files:**`, `**Done when:**`, `## Resolve first`,
 `## Milestone N`, the `<!-- built: … -->` marker — and writes its phase plans to `.task-plans/`.
-It ignores the `**Reworks:**` line and the `<!-- changes: … -->` line a requirement change adds.
+It reads the `**Reworks:**` line a requirement change adds (a phase that names a missing, later or
+self target is refused) and ignores the `<!-- changes: … -->` line.
 Nothing here calls it or depends on it. But a change to any of those shapes in `/r:spec-design`,
 `resolve_scope.py` or `milestone_scope.py` is a breaking change for a second tool that no suite
 here runs, so name it in the commit.
