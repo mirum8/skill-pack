@@ -355,6 +355,13 @@ X=$(TUI_SESSION_SUFFIX=abort3 start fake-tui.sh) && {
     && ok "--status 1 rejects an app that exited 0" \
     || bad "--status 1 rejects an app that exited 0" "exit $rc: $out"
 } || skipc "--status 1 rejects an app that exited 0 (fixture would not start)"
+
+X=$(TUI_SESSION_SUFFIX=reaper start fake-tui.sh --ttl 4711) && {
+  (cd "$REPO" && TUI_SESSION_SUFFIX=reaper bash "$TUI" stop "$X") >/dev/null 2>&1; sleep 0.3
+  left=$(ps -eo pid=,command= | awk '$2 == "sleep" && $3 == "4711" { print $1 }')
+  [[ -z $left ]] && ok "stop leaves no TTL reaper sleep behind" \
+                 || { bad "stop leaves no TTL reaper sleep behind" "still running: sleep 4711 (pid $left)"; kill $left 2>/dev/null; }
+} || skipc "stop leaves no TTL reaper sleep behind (fixture would not start)"
 fi
 
 ( cd "$REPO" && git worktree remove --force "$TMP/wt" ) >/dev/null 2>&1

@@ -403,7 +403,12 @@ cmd_run_tty() {
 
 cmd_stop_quiet() {
   [[ -n ${ID:-} ]] || return 0
-  [[ -f "$STATE/watchdog" ]] && kill "$(cat "$STATE/watchdog")" 2>/dev/null
+  if [[ -f "$STATE/watchdog" ]]; then
+    local reaper kids; reaper=$(cat "$STATE/watchdog")
+    kids=$(pgrep -P "$reaper" 2>/dev/null)
+    kill "$reaper" 2>/dev/null
+    [[ -n $kids ]] && kill $kids 2>/dev/null
+  fi
   tm kill-session -t "=$ID" >/dev/null 2>&1
   tm kill-server >/dev/null 2>&1
   [[ ${TUI_KEEP_STATE:-0} == 1 ]] || rm -rf "$STATE"
