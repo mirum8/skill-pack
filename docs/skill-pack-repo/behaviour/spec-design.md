@@ -172,6 +172,13 @@ flowchart TD
   *Enforced by:* —
   *Tested by:* —
 
+- **SB-spec-design-144** — A `--feature` spec (notes `scope: feature`) is a delta: stories, v1
+  line and deltas come from the feature doc, while the ADRs and characteristics come from the main
+  spec its `baseline:` line names. Both are read, and the plan is written beside the feature doc.
+  *States it:* `skills/spec-design/SKILL.md`
+  *Enforced by:* —
+  *Tested by:* —
+
 - **SB-spec-design-018** — In an existing codebase the code is read before anything is written:
   build files for real dependency versions, the migration folder for the real schema, the package
   layout, `CLAUDE.md`, and two existing tests to copy their style.
@@ -1181,13 +1188,13 @@ flowchart TD
 ## Prose-only behaviours
 
 Held up by wording alone — no *Enforced by:* and no *Tested by:* — so nothing fails if one quietly
-stops being true. **79 of 143 entries**, and they cluster: the three steps where a person is in the
+stops being true. **80 of 144 entries**, and they cluster: the three steps where a person is in the
 loop (the Codex challenge, the gate, the hand-off) are prose-only end to end.
 
 - **Invocation and flags** — 003, 004, 005, 006, 007, 008, 009. Nothing reads the flags but the
   model, so `--shallow` writing a `tech-design.md` anyway, or `--yes` swallowing the Step 3.5
   questions along with the gate, would leave no trace.
-- **Step 1, the documents** — 010, 011, 012, 013, 014, 016, 017, 018.
+- **Step 1, the documents** — 010, 011, 012, 013, 014, 016, 017, 018, 144.
 - **Step 1.5, the rewrite** — 019, 020, 023, 025, 026, 027, 028, 029, 138. The *freeze* half is enforced
   (022, 024, 079–081); what is not is the draft staying in a scratch directory, the shape
   classification, and every inferred field being named as inferred.

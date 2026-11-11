@@ -451,5 +451,200 @@ says "a change heading with no date is reported" "no date"
 says "an unquoted story is reported" "cannot read"
 
 echo
+echo "== --feature: a delta doc, with its decisions in the main spec =="
+# Two folders in one repo: docs/payouts is the main spec, docs/refunds the feature. The feature
+# names its main spec in its notes, links to the ADRs written there, and the main spec's notes
+# record the feature in return.
+FX="$TMP/fx"; MAIN="$FX/docs/payouts"; FEAT="$FX/docs/refunds"
+runfx() { python3 "$CHECK" "$1" 2>&1; }
+saysfx()   { local out; out=$(runfx "$2"); grep -qiE "$3" <<<"$out" && ok "$1" || bad "$1" "no match for /$3/ in:${out:0:400}"; }
+silentfx() { local out; out=$(runfx "$2"); grep -qiE "$3" <<<"$out" && bad "$1" "unexpected /$3/ in:${out:0:400}" || ok "$1"; }
+
+MAIN_SPEC=${GOOD_SPEC/'<h2 class="part" id="p2">'/'<h2 id="features">Features</h2>
+<p><a href="../refunds/spec.html">Refunds</a> — merchants refund a payout; decisions ADR-2.</p>
+
+<h2 class="part" id="p2">'}
+MAIN_SPEC=${MAIN_SPEC/'<h2 class="part" id="p7">'/'<h3 id="adr-2">ADR-2 — Refund by reversing the transfer</h3>
+<p><b>Status</b> accepted. <b>Context</b> Merchant requests a payout. <b>Decision</b> A refund
+reverses the bank transfer. <b>Alternatives</b> A new outgoing payment — rejected, it doubles
+fees. <b>Consequences</b> Reversals depend on the bank window. <b>Revisit when</b> the bank
+drops reversals.</p>
+
+<h2 class="part" id="p7">'}
+
+FEAT_SPEC='<h1>Refunds</h1>
+<nav class="sidenav">
+<ol class="toc">
+  <li class="p"><a href="#p1">Problem and stories</a></li>
+  <li class="p"><a href="#p2">Baseline</a></li>
+  <li class="p"><a href="#p3">Domain delta</a></li>
+  <li class="p"><a href="#p4">Behaviour</a></li>
+  <li class="p"><a href="#p5">Interface delta</a></li>
+  <li class="p"><a href="#p6">Fit check</a></li>
+  <li class="p"><a href="#p7">Rollout and risks</a></li>
+</ol>
+</nav>
+<h2 class="part" id="p1">Part 1 Problem and stories</h2>
+<p class="lede">Merchants cannot undo a payout sent in error.</p>
+<h2 id="stories">User stories</h2>
+<h3>Merchant refunds a payout</h3>
+<p>Given a paid payout under 24 hours old, when the merchant refunds it,
+then the transfer is reversed and the balance restored.</p>
+<h2 id="v1">The v1 line</h2>
+<p>v1 ships <strong>Merchant refunds a payout</strong>.</p>
+<h2 class="part" id="p2">Part 2 Baseline</h2>
+<p class="lede">Payouts end at paid today.</p>
+<p>The status enum stops at PAID (src/main/java/pay/PayoutStatus.java:12).</p>
+<h2 class="part" id="p3">Part 3 Domain delta</h2>
+<p class="lede">A payout gains one state, REFUNDED, after PAID.</p>
+<h2 class="part" id="p4">Part 4 Behaviour</h2>
+<p class="lede">A refund past 24 hours is refused with a reason.</p>
+<h2 class="part" id="p5">Part 5 Interface delta</h2>
+<p class="lede">POST /api/payouts/{id}/refund returns 202.</p>
+<h2 class="part" id="p6">Part 6 Fit check</h2>
+<p class="lede">Transfer latency holds; the reversal path is
+<a href="../payouts/spec.html#adr-2">ADR-2</a> in the main spec.</p>
+<h2 class="part" id="p7">Part 7 Rollout and risks</h2>
+<p class="lede">Behind the refunds flag, off by default; no backfill.</p>'
+
+feat_notes() {
+  cat > "$FEAT/interview-notes.md" <<'EOF'
+mode: full
+scope: feature
+baseline: docs/payouts/spec.html
+status: generated
+
+## Coverage
+- users-and-job: answered (round 1) — merchants undo a payout sent in error
+- core-flow: answered (round 1) — refund, reverse, restore
+- process: n/a — no approval step for refunds
+- domain-model: repo — PayoutStatus.java:12, one new state
+- scale: answered (round 1) — a few refunds a day
+- anti-scope: answered (round 1) — no partial refunds
+- boundaries: repo — Payouts owns the payout, PayoutService.java:30
+- api: answered (round 2) — one POST endpoint
+- stack-and-constraints: repo — existing Spring stack, pom.xml:20
+- integrations: answered (round 2) — the bank reversal call
+- failure-behaviour: answered (round 2) — refused past 24 hours
+- fit-check: answered (round 2) — latency holds; reversal is ADR-2 in the main spec
+- stories-and-v1: answered (round 2) — the one story ships
+- rollout: answered (round 2) — refunds flag, off by default
+EOF
+}
+main_notes() {
+  good_notes; mv "$TMP/interview-notes.md" "$MAIN/interview-notes.md"
+  cat >> "$MAIN/interview-notes.md" <<'EOF'
+
+## Features
+### 2026-11-11 — Refunds
+- Doc: docs/refunds/spec.html
+- ADRs: ADR-2
+EOF
+}
+fresh() {
+  rm -rf "$FX"; mkdir -p "$MAIN" "$FEAT"
+  printf '%s\n' "$MAIN_SPEC" > "$MAIN/spec.html"; main_notes
+  printf '%s\n' "$FEAT_SPEC" > "$FEAT/spec.html"; feat_notes
+}
+
+fresh
+silentfx "a feature doc and its main spec are both clean" "$FEAT" "problem"
+silentfx "the main spec carrying the feature's ADR and link is clean" "$MAIN" "problem"
+
+fresh
+printf '%s\n' "${FEAT_SPEC/'<h2 class="part" id="p7">'/'<h3>ADR-3 — Refund window</h3><p>Alternatives none.</p><h2 class="part" id="p7">'}" > "$FEAT/spec.html"
+saysfx "an ADR written in the feature doc is reported" "$FEAT" "written in the feature doc"
+
+fresh
+printf '%s\n' "${FEAT_SPEC/'ADR-2</a> in the main spec'/'ADR-7</a> in the main spec'}" > "$FEAT/spec.html"
+saysfx "an ADR the main spec does not carry is reported" "$FEAT" "ADR-7 referenced but not written in the main spec"
+
+fresh
+printf '%s\n' "${FEAT_SPEC/'../payouts/spec.html#adr-2'/'../ledger/spec.html#adr-2'}" > "$FEAT/spec.html"
+saysfx "a link to a file other than the main spec is reported" "$FEAT" "local link"
+
+fresh
+sed -i.bak '/^baseline:/d' "$FEAT/interview-notes.md"
+saysfx "a feature with no baseline line is reported" "$FEAT" "no 'baseline:' line"
+
+fresh
+sed -i.bak '/^## Features/,$d' "$MAIN/interview-notes.md"
+saysfx "a feature the main spec never recorded is reported" "$FEAT" "no ## Features entry"
+
+fresh
+CITE=" (src/main/java/pay/PayoutStatus.java:12)"
+printf '%s\n' "${FEAT_SPEC/"$CITE"/}" > "$FEAT/spec.html"
+saysfx "a Baseline with no path:line is reported" "$FEAT" "Baseline part cites no path:line"
+
+fresh
+printf '%s\n' "$GOOD_SPEC" > "$FEAT/spec.html"
+saysfx "a feature written as a whole app spec is reported" "$FEAT" "part\(s\) missing"
+
+fresh
+sed -i.bak 's/^- ADRs: ADR-2$/- ADRs: ADR-2, ADR-9/' "$MAIN/interview-notes.md"
+saysfx "a Features record naming an ADR the main spec lacks is reported" "$MAIN" "names ADR-9"
+
+echo
+echo "== a thin baseline read from code: no stories, no ranking, no decisions yet =="
+BASE="$FX/docs/shop"
+rm -rf "$FX"; mkdir -p "$BASE"
+cat > "$BASE/spec.html" <<'EOF'
+<h1>Shop</h1>
+<nav class="sidenav">
+<ol class="toc">
+  <li class="p"><a href="#p1">Business requirements</a></li>
+  <li class="p"><a href="#p2">Domain</a></li>
+  <li class="p"><a href="#p3">Architectural characteristics</a></li>
+  <li class="p"><a href="#p4">Logical components</a></li>
+  <li class="p"><a href="#p5">Architectural style</a></li>
+  <li class="p"><a href="#p6">Decisions</a></li>
+  <li class="p"><a href="#p7">Technical details</a></li>
+</ol>
+</nav>
+<h2 class="part" id="p1">Part 1 Business requirements</h2>
+<p class="lede">An order service for wholesale buyers, read from the code.</p>
+<h2 id="features">Features</h2>
+<p>None specified yet.</p>
+<h2 class="part" id="p2">Part 2 Domain</h2>
+<p class="lede">An order holds lines and moves from placed to shipped (Order.java:14).</p>
+<h2 class="part" id="p3">Part 3 Architectural characteristics</h2>
+<p class="lede">Observed, not ranked: synchronous requests under 200 ms in the load test (OrderLoadTest.java:40).</p>
+<h2 class="part" id="p4">Part 4 Logical components</h2>
+<p class="lede">One component.</p>
+<table>
+  <tr><th>Component</th><th>Owns</th></tr>
+  <tr><td>Orders</td><td><code>Order</code></td></tr>
+</table>
+<h2 class="part" id="p5">Part 5 Architectural style</h2>
+<p class="lede">A layered monolith, one deployable (pom.xml:8).</p>
+<h2 class="part" id="p6">Part 6 Decisions</h2>
+<p class="lede">No decision is recorded yet; features add them here.</p>
+<h2 class="part" id="p7">Part 7 Technical details</h2>
+<p class="lede">Spring Boot 3.3.4 on PostgreSQL 16.4, both from pom.xml:20.</p>
+EOF
+cat > "$BASE/interview-notes.md" <<'EOF'
+mode: full
+scope: baseline
+status: generated
+
+## Coverage
+- users-and-job: repo — README.md:3, wholesale buyers
+- core-flow: repo — OrderService.java:30, place then ship
+- process: n/a — no human step in the code
+- domain-model: repo — Order.java:14
+- scale: repo — OrderLoadTest.java:40
+- anti-scope: n/a — nothing to exclude in a read of existing code
+- arch-characteristics: repo — OrderLoadTest.java:40, observed only
+- boundaries: repo — one module, pom.xml:8
+- style-and-topology: repo — layered monolith, pom.xml:8
+- api: repo — OrderController.java:22
+- stack-and-constraints: repo — pom.xml:20
+- integrations: n/a — no outbound client in the code
+- failure-behaviour: repo — GlobalErrorHandler.java:10
+- decisions: n/a — none recorded until a feature adds one
+EOF
+silentfx "a thin baseline with no stories, ranking or ADR is clean" "$BASE" "problem"
+
+echo
 printf '  %d passed, %d failed\n' "$pass" "$fail"
 [[ $fail == 0 ]]

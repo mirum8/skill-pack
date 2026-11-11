@@ -181,12 +181,13 @@ graph TD
   Technical details, then a closing risks section. Each part summarises the one below it, so a
   reader can stop at any part boundary with a coarser but still true picture; any other order reads
   as a wall, because components make no sense before what the architecture is optimised for.
+  A `--feature` doc has its own seven parts instead (SB-spec-brainstorm-174).
   *States it:* `skills/spec-brainstorm/references/sections.md`, `skills/spec-brainstorm/SKILL.md`
   *Enforced by:* `skills/spec-brainstorm/scripts/check_spec.py`
   *Tested by:* `skills/spec-brainstorm/tests/check_spec.test.sh`
 
-- **SB-spec-brainstorm-018** — **A part is never dropped, only shortened** — a part with little to
-  say is three sentences. A missing part reads exactly like a question nobody asked, so the reader
+- **SB-spec-brainstorm-018** — **A part is never dropped, only shortened** — in the app shape and
+  in the feature shape alike; a part with little to say is three sentences. A missing part reads exactly like a question nobody asked, so the reader
   cannot tell an answered-badly part from an unasked one.
   *States it:* `skills/spec-brainstorm/references/sections.md`, `skills/spec-brainstorm/SKILL.md`
   *Enforced by:* `skills/spec-brainstorm/scripts/check_spec.py`
@@ -473,11 +474,12 @@ graph TD
 - **SB-spec-brainstorm-053** — On the `--feature` path **no claim about the existing system enters
   the document without a `path:line` citation**; anything uncited becomes an open question, not a
   fact. Its Round 1 is the delta (what is reused, what is new, what must **not** change — the
-  regression contract, the user-visible surface) and Round 2 is rollout; rounds 3–7 then run minus
+  regression contract, the user-visible surface) and Round 2 is rollout; the fit check replaces
+  round 5 and round 6's style question (SB-spec-brainstorm-176), and the remaining rounds run minus
   everything the code already answered, which is usually most of round 6.
   *States it:* `skills/spec-brainstorm/references/interview.md`, `skills/spec-brainstorm/SKILL.md`
   *Enforced by:* `skills/spec-brainstorm/scripts/check_spec.py`
-  *Tested by:* —
+  *Tested by:* `skills/spec-brainstorm/tests/check_spec.test.sh`
 
 - **SB-spec-brainstorm-054** — On the `--feature` path **the repo is the research**, so the external
   fan-out stays off even under `--explain` unless a specific question survives reading the code — a
@@ -485,6 +487,52 @@ graph TD
   asked how this is usually built. Which way it went is said in one line, so the user knows whether
   anything was searched.
   *States it:* `skills/spec-brainstorm/references/research.md`, `skills/spec-brainstorm/SKILL.md`
+  *Enforced by:* —
+  *Tested by:* —
+
+- **SB-spec-brainstorm-174** — `--feature` writes **two files behind one write gate**: a feature doc
+  `docs/<feature>/spec.html` in the feature shape — Problem & stories → Baseline → Domain delta →
+  Behaviour → Interface delta → Fit check → Rollout & risks — with notes `scope: feature` and
+  `baseline: <main spec>`, and changes to the project's main spec. The main spec's characteristics,
+  style and stack are cited, never restated. `/r:spec-design` is then run on the feature doc and
+  writes the feature's `todo.md` beside it.
+  *States it:* `skills/spec-brainstorm/SKILL.md`, `skills/spec-brainstorm/references/sections.md`
+  *Enforced by:* `skills/spec-brainstorm/scripts/check_spec.py`
+  *Tested by:* `skills/spec-brainstorm/tests/check_spec.test.sh`
+
+- **SB-spec-brainstorm-175** — **A feature's decisions live in the main spec**, so one document
+  holds every decision: its ADRs go into the main spec's Part 6 with the next free number (a
+  reversed one is superseded there), its domain, component and API changes into Parts 2, 4 and 7,
+  and Part 1's `Features` section links the feature doc. The main spec may run ahead of the code;
+  nothing waits for the build. The feature doc carries no ADR, every `ADR-n` it names must resolve
+  in the main spec, its one local link is to the main spec, and the main notes' `## Features` entry
+  names the feature doc and its ADRs.
+  *States it:* `skills/spec-brainstorm/SKILL.md`, `skills/spec-brainstorm/references/sections.md`, `skills/spec-brainstorm/references/interview.md`
+  *Enforced by:* `skills/spec-brainstorm/scripts/check_spec.py`
+  *Tested by:* `skills/spec-brainstorm/tests/check_spec.test.sh`
+
+- **SB-spec-brainstorm-176** — Under `--feature` the **fit check** replaces the forced trade-off over
+  characteristics and the style question: the inherited ones are stated, and only a feature that
+  presses on one is asked, logged in the main spec's `## Decisions` and written as an ADR there. The
+  coverage rows drop `arch-characteristics`, `style-and-topology` and `decisions` and add
+  `fit-check`.
+  *States it:* `skills/spec-brainstorm/SKILL.md`, `skills/spec-brainstorm/references/interview.md`
+  *Enforced by:* `skills/spec-brainstorm/scripts/check_spec.py`
+  *Tested by:* `skills/spec-brainstorm/tests/check_spec.test.sh`
+
+- **SB-spec-brainstorm-177** — The main spec is found by globbing `docs/*/spec.html` minus feature
+  docs; several → ask. **None → a thin one is written from the code in the same run**, notes
+  `scope: baseline`: all seven app parts, every claim `path:line`, a `Features` section instead of
+  stories, Parts 3 and 5 observed rather than ranked, Part 6 holding only what the feature decides.
+  The checker lets such a spec go without stories, a v1 line, a driving row or an ADR.
+  *States it:* `skills/spec-brainstorm/SKILL.md`, `skills/spec-brainstorm/references/sections.md`
+  *Enforced by:* `skills/spec-brainstorm/scripts/check_spec.py`
+  *Tested by:* `skills/spec-brainstorm/tests/check_spec.test.sh`
+
+- **SB-spec-brainstorm-178** — On `mode: feature` the run record fills `adrsToMain` (ADRs written
+  into the main spec — most features need none, so a high average means the fit check is skipped)
+  and `baselineCreated`; both are zero elsewhere.
+  *States it:* `skills/spec-brainstorm/SKILL.md`
   *Enforced by:* —
   *Tested by:* —
 
@@ -1300,14 +1348,13 @@ graph TD
   *Enforced by:* `skills/spec-brainstorm/scripts/check_spec.py`
   *Tested by:* —
 
-- **SB-spec-brainstorm-138** — The `path:line` check fires only over a **"Codebase facts"** heading,
-  and only when it cites at least four file-ish names with fewer than half carrying a line number.
-  Nothing else in the skill instructs the writer to create such a heading, so on a `--feature` run
-  that names the section differently the check is silently inert and the rule is carried by prose
-  alone.
+- **SB-spec-brainstorm-138** — The `path:line` check fires over a feature doc's **Baseline** part,
+  which must cite at least one `path:line`, and in any other spec over a **"Codebase facts"**
+  heading; both report when four or more file-ish names are cited with fewer than half carrying a
+  line number.
   *States it:* `skills/spec-brainstorm/scripts/check_spec.py`
-  *Enforced by:* —
-  *Tested by:* —
+  *Enforced by:* `skills/spec-brainstorm/scripts/check_spec.py`
+  *Tested by:* `skills/spec-brainstorm/tests/check_spec.test.sh`
 
 - **SB-spec-brainstorm-139** — `skills/spec-brainstorm/tests/check_spec.test.sh` is the **only** test
   this script gets, and `validate.sh` names it explicitly — a suite not in that list never runs and
@@ -1502,10 +1549,10 @@ SB-spec-brainstorm-001, 004, 005, 006, 007, 008, 010, 011, 012, 013, 014, 016, 0
 027, 028, 029, 032, 035, 036, 037, 038, 039, 042, 044, 046, 047, 048, 054, 058, 061, 062, 063, 064,
 065, 067, 068, 069, 070, 071, 072, 073, 074, 075, 076, 077, 078, 079, 080, 081, 082, 083, 085, 087,
 088, 089, 091, 092, 093, 094, 096, 098, 101, 102, 103, 105, 106, 107, 109, 110, 111, 112, 113, 114,
-116, 120, 122, 123, 124, 125, 128, 138, 140, 141, 145, 146, 147, 148, 149, 151, 152, 155, 156, 157,
-158, 159, 160, 163, 164, 165, 166, 169, 173.
+116, 120, 122, 123, 124, 125, 128, 140, 141, 145, 146, 147, 148, 149, 151, 152, 155, 156, 157,
+158, 159, 160, 163, 164, 165, 166, 169, 173, 178.
 
-**105 of 173 entries.** The concentration is exactly where it would be expected: the interview
+**105 of 178 entries.** The concentration is exactly where it would be expected: the interview
 protocol and the research playbook are instructions to a model with no artifact to check them
 against, while everything the document *renders* — the seven parts, the ownership rule, the ADR
 fields, the story handles — is held by `check_spec.py` and its suite.

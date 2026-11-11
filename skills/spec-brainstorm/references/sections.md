@@ -17,6 +17,7 @@ This file owns which parts and sections exist and what each must contain.
 11. Added by `--explain`
 12. Cross-references — what points where
 13. Section smells
+14. The feature shape — `--feature`
 
 ---
 
@@ -36,6 +37,9 @@ one below it, never a wrong one.
 | **6 · Decisions** | why it is this and not the obvious alternative | ADR-1 … ADR-n |
 | **7 · Technical details** | with what | Technologies · API · Rollout |
 | *closing* | what could still be wrong | Risks, assumptions & open questions |
+
+A `--feature` run writes a different seven parts — a delta against this document — and adds
+its decisions here (§14).
 
 Any other order reads as a wall: components make no sense before you know what the
 architecture is optimising for, and the style makes no sense before you know what components it
@@ -282,6 +286,8 @@ Six fields, and the two that carry the weight are **Alternatives** and **Consequ
   `chosen`, `corrected` or `overruled`; a `defaulted` entry is written `proposed`, so a reader can
   tell a decision the user made from one they never saw. A superseded ADR stays in the document;
   deleting it destroys the only record of why the earlier answer stopped working.
+  A `--feature` run writes its ADRs here too, continuing the numbering (§14), so this part is the
+  whole decision log of the project.
 - **`Context`** — the forces, in two or three sentences, naming the Part 3 characteristic or the
   Part 1 story that pushed on this. An ADR whose context names neither is one nobody can check.
 - **`Decision`** — one sentence, active voice, present tense.
@@ -478,3 +484,58 @@ Reject and rewrite when you see:
 The rule behind all of them: prefer a sentence carrying a number, a proper noun, or a decision.
 Prose carrying none of the three is usually filler — though a connecting sentence that makes two
 paragraphs read as one thought earns its place.
+
+---
+
+## 14. The feature shape — `--feature`
+
+A feature inside a system that already exists does not get a second app spec. The system's
+characteristics, style and stack are already decided; a feature that writes them out again reads
+as a rival design, and its ADRs land where a reader of the main spec never looks. So a `--feature`
+run writes **two files behind one gate**.
+
+### The feature doc — `docs/<feature>/spec.html`
+
+The build input. `/r:spec-design` writes the feature's `todo.md` beside it. Seven parts, each an
+`<h2 class="part">` with a lede, in this order — the same rules as §1 (shortened, never dropped):
+
+| Part | Answers | Holds |
+|---|---|---|
+| **1 · Problem & stories** | what has to become true, and for whom | Problem, non-goals · User stories (`<h3>` names, Given/When/Then) · The v1 line |
+| **2 · Baseline** | what exists today that this touches | entities, flows, endpoints, roles the feature reuses or changes — **every claim `path:line`**. The main spec is cited for architecture and stack, never restated |
+| **3 · Domain delta** | what the words and rules become | new or changed entities, states, invariants — before → after |
+| **4 · Behaviour** | what a user sees happen | key flows, edge cases, errors, permissions, UI or copy; the regression contract — what must **not** change |
+| **5 · Interface delta** | what callers see change | API, CLI, config, events, stored data; backward compatibility |
+| **6 · Fit check** | does the inherited architecture still hold | one row per inherited driving characteristic and one for the style: `holds`, with one clause why, or `pressured → ADR-n`, linking the ADR in the main spec |
+| **7 · Rollout & risks** | how it reaches production and what could go wrong | flag and default, migration (expand → migrate → contract), backfill, rollback, risks, open questions |
+
+**No ADR is written here.** Part 6 links to the main spec's ADRs (`../<topic>/spec.html#adr-n`),
+the one local link this document may carry. Most features pressure nothing and Part 6 is a table
+of `holds` — that is the expected outcome, not a thin part.
+
+### What the main spec gets, in the same run
+
+- **Part 1** — a `Features` section: one line per feature, linking its doc, naming its ADRs.
+- **Parts 2, 4 and 7** — the domain, component and API changes, written as the system now is.
+  The main spec describes the system as specified, and may run ahead of the code.
+- **Part 6** — the feature's ADRs, next free number, sourced from the `## Decisions` log in the main
+  spec's `interview-notes.md`; an ADR the feature reverses is marked `superseded by ADR-n` and stays.
+- **Its notes** — the decision log entries, and a `## Features` entry (`interview.md` §10).
+
+A reader of the main spec therefore sees every decision and the current system without opening a
+feature doc; a feature doc is opened only to build or audit that feature.
+
+### The thin baseline — no main spec yet
+
+The first `--feature` run in a repo with no main spec writes one, read from the code, beside the
+feature doc: `docs/<project>/spec.html`, notes `scope: baseline`. All seven app parts, every claim
+`path:line`:
+
+- **Part 1** — what the system is for, from the README and code, and the `Features` section; no
+  stories and no v1 line — the system's stories were never written, and inventing them now is
+  fiction. Features carry their own.
+- **Parts 3 and 5** — *observed*: what the code and its tests show, unranked. A ranking is a
+  decision nobody was asked for; the first feature that pressures a characteristic settles it.
+- **Part 6** — only what this feature decides; empty is fine, with a lede saying so.
+
+Keep it short — the point is a home for decisions and a baseline to cite, not a retroactive design.

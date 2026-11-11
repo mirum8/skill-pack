@@ -109,6 +109,13 @@ expensive thing a plan can do. Its **Architectural characteristics** part holds 
 numbers the whole design is traded against; a leaf that would miss one needs its own verification
 step, not a note. Read both before ordering anything.
 
+**A `--feature` spec is a delta, and its decisions live elsewhere.** Its notes say
+`scope: feature` and name the main spec in `baseline:`. Take the stories, v1 line, baseline,
+domain and interface deltas, behaviour and rollout from the feature doc; take the ADRs and the
+characteristics from the main spec's Decisions and Architectural characteristics parts — the
+feature doc's Fit check part links the ones it pressed on. Read both: planning from the feature
+doc alone re-decides what the main spec settled. The plan is written beside the feature doc.
+
 **In an existing codebase, read the code too** before writing anything: build files for real
 dependency versions, the migration folder for the real schema, the package layout, `CLAUDE.md`, and
 two existing tests to copy their style.

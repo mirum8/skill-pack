@@ -65,7 +65,8 @@ one a generator proposes unprompted.
 **Read the spec if there is one.** `docs/<topic>/spec.html` carries the audience and the
 architectural characteristics, which is the same material the Overview section wants. Derive it
 from there rather than re-asking: two interviews produce two answers to one question and nothing
-reconciles them.
+reconciles them. A feature doc (notes `scope: feature`) carries neither; take both from the main
+spec its `baseline:` line names.
 
 ## Step 1 — direction
 

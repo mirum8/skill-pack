@@ -38,7 +38,8 @@ simpler.** The user decides every change, one unit at a time.
 - **`<plan>`** — the `todo.md` to review. Omitted, it is found where `/r:plan-run` looks:
   `docs/*/todo.md` (several → ask which), then `todo.md`, `PLAN.md` at the root.
 - **`<doc>...`** — the documents the plan was derived from. Omitted, the `spec.html` beside the plan
-  plus any document the plan's header names.
+  plus any document the plan's header names. When that spec's notes say `scope: feature`, the main
+  spec its `baseline:` line names too — the ADRs and characteristics are written there.
 - **`--yes`** — take every recommendation without asking (Steps 4 and 6). Every deletion still lands
   in `## Deferred`, so nothing is lost and every decision stays visible.
 

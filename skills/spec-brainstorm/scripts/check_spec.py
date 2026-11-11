@@ -32,6 +32,15 @@ PARTS = [("business requirement", "Business requirements"), ("domain", "Domain")
          ("style", "Architectural style"), ("decision", "Decisions"),
          ("technical detail", "Technical details")]
 
+# A --feature document is a delta against the main spec (sections.md §14): the same seven-part
+# spine, but each part says what the feature adds or changes. What the feature inherits --
+# characteristics, style, stack -- is cited from the main spec, never restated, and its ADRs live
+# there too, so there is one decision log per project.
+FEATURE_PARTS = [("stor", "Problem & stories"), ("baseline", "Baseline"),
+                 ("domain", "Domain delta"), ("behavio", "Behaviour"),
+                 ("interface", "Interface delta"), ("fit", "Fit check"),
+                 ("rollout", "Rollout & risks")]
+
 # Adjectives that are not measurements. Flagged only inside Part 3 and only in a row carrying no
 # digit at all — that part's entire job is turning "fast" into "repaint under 16 ms", and a row
 # with a number beside the word is doing exactly that. Deliberately excludes the -ility nouns
@@ -91,7 +100,7 @@ def cells(row):
     return [strip(c) for c in re.findall(r"<t[dh]\b[^>]*>(.*?)</t[dh]>", row, re.S | re.I)]
 
 
-def check_parts(t, out):
+def check_parts(t, out, parts=PARTS):
     """sections.md §1: seven parts, always all seven, always in this order.
 
     The order is the deliverable — each part is the summary of the one below it, so a reordered
@@ -101,10 +110,10 @@ def check_parts(t, out):
              if re.search(r'class="[^"]*\bpart\b', m.group(1), re.I)]
     if not found:
         out("spec.html", 'no parts — the document is written as seven <h2 class="part"> parts in '
-                         'this order: ' + " · ".join(n for _, n in PARTS) + ". See sections.md §1")
+                         'this order: ' + " · ".join(n for _, n in parts) + ". See sections.md §1 and §14")
         return
     missing, out_of_order, i = [], [], 0
-    for word, name in PARTS:
+    for word, name in parts:
         at = next((j for j, title in enumerate(found) if word in title), None)
         if at is None:
             missing.append(name)
@@ -118,7 +127,7 @@ def check_parts(t, out):
                          f"nobody asked")
     if out_of_order:
         out("spec.html", f"part(s) out of order: {', '.join(out_of_order)} — the order is "
-                         f"{' → '.join(n for _, n in PARTS)}, and it is what lets a reader stop "
+                         f"{' → '.join(n for _, n in parts)}, and it is what lets a reader stop "
                          f"at any part boundary with a true picture")
     noid = [strip(m.group(2)) for m in re.finditer(r"<h2\b([^>]*)>(.*?)</h2>", t, re.S | re.I)
             if re.search(r'class="[^"]*\bpart\b', m.group(1), re.I)
@@ -158,13 +167,16 @@ def check_nav(t, out):
         out("spec.html", f"the contents list has {links} link(s) — all seven parts belong in it")
 
 
-def check_characteristics(t, out):
-    """sections.md §5: at most three driving characteristics, every one of them a number."""
+def check_characteristics(t, out, observed=False):
+    """sections.md §5: at most three driving characteristics, every one of them a number.
+
+    A baseline spec read from code (§14) records what the code shows, not a ranking nobody was
+    asked for, so it may carry no driving row until a feature's interview settles one."""
     blk = part(t, "characteristic")
     if not blk:
         return
     driving = re.findall(r'<tr\b[^>]*class="[^"]*\bdriving\b[^"]*"[^>]*>', blk, re.I)
-    if not driving:
+    if not driving and not observed:
         out("spec.html", 'no <tr class="driving"> rows in Architectural characteristics — mark the '
                          'two or three that win an argument; the class is how they are counted')
     elif len(driving) > 3:
@@ -213,7 +225,24 @@ def check_components(t, out):
                          f"boundary in the wrong place")
 
 
-def check_adrs(t, out):
+def check_feature_adrs(t, baseline_adrs, out):
+    """sections.md §14: a feature's decisions are written into the main spec, so a reader of the
+    main spec sees every decision without opening each feature. An ADR here would be a second log;
+    an ADR-n here has to resolve there."""
+    local = re.findall(r"<h3\b[^>]*>\s*ADR-(\d+)\b", t, re.I)
+    if local:
+        out("spec.html", f"ADR-{local[0]} is written in the feature doc — a feature's ADRs go into "
+                         f"the main spec's Decisions part, continuing its numbering; this document "
+                         f"links to them")
+    if baseline_adrs is None:
+        return
+    missing = sorted({n for n in re.findall(r"\bADR-(\d+)\b", strip(t))} - baseline_adrs, key=int)
+    if missing:
+        out("spec.html", f"{', '.join('ADR-' + n for n in missing[:4])} referenced but not written "
+                         f"in the main spec — the decision has to land there with this feature")
+
+
+def check_adrs(t, out, observed=False):
     """sections.md §8: Part 6 is the only place a 'why' is argued, so every ADR the rest of the
     document points at has to exist, and every ADR has to have had a live alternative."""
     blk = part(t, "decision")
@@ -234,6 +263,8 @@ def check_adrs(t, out):
         sup = re.search(r"superseded\s+by\s+ADR-(\d+)", body, re.I)
         if sup:
             superseded.append((m.group(1), sup.group(1)))
+    if not defined and observed:
+        return
     if not defined:
         out("spec.html", "the Decisions part carries no ADR — each is an <h3> reading "
                          "'ADR-<n> — <title>'. If the interview's ## Decisions log was empty, say "
@@ -356,12 +387,25 @@ def check_tags(prose, lines, out):
         out("spec.html", "[likely] with no stated inference — write [likely: <what you reasoned from>]")
 
 
-def check_codebase_facts(t, out):
-    """interview.md §7: no claim about the existing system enters the document without path:line."""
-    blk = re.search(r"Codebase facts(.*?)(?=<h[123]\b|\Z)", t, re.S | re.I)
-    if not blk:
-        return
-    hits = FILEISH.findall(strip(blk.group(1)))
+def check_codebase_facts(t, out, feature=False):
+    """interview.md §7: no claim about the existing system enters the document without path:line.
+
+    In a feature doc the Baseline part is exactly those claims, so it is checked whole and must
+    cite at least one line."""
+    if feature:
+        text = strip(part(t, "baseline"))
+        if not text.strip():
+            return
+        hits = FILEISH.findall(text)
+        if not [h for h in hits if h]:
+            out("spec.html", "the Baseline part cites no path:line — it states what exists today, "
+                             "and a claim about existing code without one is an open question")
+            return
+    else:
+        blk = re.search(r"Codebase facts(.*?)(?=<h[123]\b|\Z)", t, re.S | re.I)
+        if not blk:
+            return
+        hits = FILEISH.findall(strip(blk.group(1)))
     cited = [h for h in hits if h]
     if len(hits) >= 4 and len(cited) * 2 < len(hits):
         out("spec.html", f"Codebase facts cites {len(hits)} file(s) but only {len(cited)} with a "
@@ -369,7 +413,7 @@ def check_codebase_facts(t, out):
                          f"open question, not a fact")
 
 
-def check_spec(t, explained, out):
+def check_spec(t, explained, out, shape="app", d=Path("."), linkable=(), baseline_adrs=None):
     if not t:
         return [], []
     prose = strip(t)
@@ -395,10 +439,14 @@ def check_spec(t, explained, out):
             out("spec.html", f"{what} in the document — that is below its ceiling; modules, "
                              f"technologies, stories and the API are as low as this goes")
 
-    # This is one self-contained file. Any local link is dead or points at something unwritten.
+    # This is one self-contained file. The one local link it may carry is between a feature doc
+    # and its main spec (§14); anything else is dead or points at something unwritten.
     for m in re.finditer(r'href="(?!https?:|mailto:|#)([^"]+)"', t):
-        out("spec.html", f"local link href=\"{m.group(1)}\" — spec.html is the only file; there is "
-                         f"nothing beside it to link to")
+        target = (d / m.group(1).split("#")[0]).resolve()
+        if target in linkable:
+            continue
+        out("spec.html", f"local link href=\"{m.group(1)}\" — spec.html links only to its main spec "
+                         f"or to the feature docs its notes list under ## Features")
         break
 
     # A technology the design uses should carry a version. Require 2+ mentions so a technology
@@ -407,14 +455,20 @@ def check_spec(t, explained, out):
         if len(re.findall(rf"\b{tech}\b", prose)) >= 2 and not re.search(rf"\b{tech}\b[^.\n]{{0,24}}\d", prose):
             out("spec.html", f"'{tech}' is used but never versioned — pin it")
 
-    check_parts(t, out)
+    feature, observed = shape == "feature", shape == "baseline"
+    check_parts(t, out, FEATURE_PARTS if feature else PARTS)
     check_nav(t, out)
-    check_characteristics(t, out)
-    check_components(t, out)
-    check_adrs(t, out)
-    names, retired = check_stories(t, out)
-    check_v1(t, names, retired, out)
-    check_codebase_facts(t, out)
+    names, retired = [], []
+    if feature:
+        check_feature_adrs(t, baseline_adrs, out)
+    else:
+        check_characteristics(t, out, observed)
+        check_components(t, out)
+        check_adrs(t, out, observed)
+    if not observed:
+        names, retired = check_stories(t, out)
+        check_v1(t, names, retired, out)
+    check_codebase_facts(t, out, feature)
     if explained:
         check_tags(prose, t.count("\n") + 1, out)
     return names, retired
@@ -425,6 +479,12 @@ BASE_ROWS = ["users-and-job", "core-flow", "process", "domain-model", "scale", "
              "stack-and-constraints", "integrations", "failure-behaviour", "decisions",
              "stories-and-v1"]
 EXPLAIN_ROWS = ["actors", "vocabulary"]
+# A feature inherits its characteristics and style from the main spec and logs its decisions
+# there; what it owes instead is the fit check against them. A baseline read from code has no
+# stories of its own -- its features carry them.
+FEATURE_ROWS = [r for r in BASE_ROWS
+                if r not in ("arch-characteristics", "style-and-topology", "decisions")] + ["fit-check"]
+BASELINE_ROWS = [r for r in BASE_ROWS if r != "stories-and-v1"]
 
 # A row is settled by one of these. The first four say someone or something told you, and each
 # owes an evidence clause; `assumed` says you decided it, which is honest and still unfinished.
@@ -450,13 +510,12 @@ def check_interview(t, out):
 
     m = re.search(r"^mode:\s*(\w+)", t, re.M)
     explained = bool(m) and m.group(1).lower() == "explain"
-    m = re.search(r"^scope:\s*([\w-]+)", t, re.M)
-    scope = m.group(1).lower() if m else "new-service"
+    scope, _ = notes_scope(t)
 
-    expected = list(BASE_ROWS)
+    expected = list({"feature": FEATURE_ROWS, "baseline": BASELINE_ROWS}.get(scope, BASE_ROWS))
     if explained:
         expected += EXPLAIN_ROWS
-    if scope != "new-service":
+    if scope not in ("new-service", "baseline"):
         expected.append("rollout")
 
     block = re.search(r"^##\s*Coverage\s*$(.*?)(?=^##\s|\Z)", t, re.M | re.S)
@@ -587,6 +646,89 @@ def check_changes(notes, spec, names, retired, out):
                                       f"it is retired")
 
 
+def notes_scope(notes):
+    m = re.search(r"^scope:\s*([\w-]+)", notes, re.M)
+    scope = m.group(1).lower() if m else "new-service"
+    m = re.search(r"^baseline:\s*(\S+)", notes, re.M)
+    return scope, (m.group(1) if m else None)
+
+
+def find(d, rel):
+    """A repo-relative path, resolved from the topic folder upwards."""
+    for base in [d.resolve(), *d.resolve().parents]:
+        if (base / rel).exists():
+            return (base / rel).resolve()
+    return None
+
+
+def adrs_in(spec):
+    return {m.group(1) for m in re.finditer(r"<h3\b[^>]*>\s*ADR-(\d+)\b", spec, re.I)}
+
+
+def feature_docs(notes):
+    """`## Features` — one entry per feature whose decisions this main spec carries."""
+    sec = re.search(r"^##\s+Features\s*$(.*?)(?=^##\s|\Z)", notes, re.M | re.S)
+    if not sec:
+        return []
+    heads = list(re.finditer(r"^###\s+(.+?)\s*$", sec.group(1), re.M))
+    entries = []
+    for i, h in enumerate(heads):
+        body = sec.group(1)[h.end():heads[i + 1].start() if i + 1 < len(heads) else None]
+        doc = re.search(r"^\s*-\s*Doc:\s*(\S+)", body, re.M)
+        adrs = re.search(r"^\s*-\s*ADRs:\s*(.+)$", body, re.M)
+        entries.append((" ".join(h.group(1).split()), doc.group(1) if doc else None,
+                        re.findall(r"ADR-(\d+)", adrs.group(1)) if adrs else []))
+    return entries
+
+
+def check_features(notes, spec, d, out):
+    """The record a --feature run leaves in the main spec's notes: which feature doc it serves and
+    which ADRs it wrote here. Each has to resolve, or the main spec points at decisions or a doc
+    that a reader cannot find."""
+    entries = feature_docs(notes)
+    if entries and not section(spec, "feature"):
+        out("spec.html", "the notes list features but Part 1 has no Features section linking them")
+    defined = adrs_in(spec)
+    for title, doc, adrs in entries:
+        if not re.match(r"\d{4}-\d{2}-\d{2}\s*[—–-]\s*\S", title):
+            out("interview-notes.md", f"feature {title!r} has no date — the heading is "
+                                      f"'### <yyyy-mm-dd> — <title>'")
+        if not doc:
+            out("interview-notes.md", f"feature {title!r} has no 'Doc:' line")
+        elif not find(d, doc):
+            out("interview-notes.md", f"feature {title!r}: {doc} does not exist")
+        for n in adrs:
+            if n not in defined:
+                out("interview-notes.md", f"feature {title!r} names ADR-{n}, which the spec does "
+                                          f"not define")
+
+
+def check_baseline_link(d, notes, out):
+    """A feature doc names its main spec, and the main spec records the feature in return. The
+    second half is what makes the main spec complete: without it the feature's decisions exist
+    only for someone who already knows the feature doc is there."""
+    _, rel = notes_scope(notes)
+    if rel is None:
+        out("interview-notes.md", "scope: feature with no 'baseline:' line — name the main spec "
+                                  "(docs/<topic>/spec.html) this feature writes its decisions into")
+        return None
+    found = find(d, rel)
+    if not found:
+        out("interview-notes.md", f"baseline {rel} does not exist — the main spec is written in "
+                                  f"the same run as the feature doc")
+        return None
+    main_notes = found.parent / "interview-notes.md"
+    mine = (d / "spec.html").resolve()
+    listed = main_notes.exists() and any(
+        doc and find(found.parent, doc) == mine
+        for _, doc, _ in feature_docs(main_notes.read_text(encoding="utf-8", errors="replace")))
+    if not listed:
+        out("interview-notes.md", f"{main_notes.parent.name}/interview-notes.md has no ## Features "
+                                  f"entry whose Doc: is this feature — record it there with the "
+                                  f"ADRs written for it")
+    return found
+
+
 def main():
     d = Path(sys.argv[1] if len(sys.argv) > 1 else ".")
     if not d.is_dir():
@@ -608,9 +750,21 @@ def main():
 
     notes = read("interview-notes.md")
     explained = check_interview(notes, out)
-    names, retired = check_spec(spec, explained, out)
+    scope, _ = notes_scope(notes)
+    shape = {"feature": "feature", "baseline": "baseline"}.get(scope, "app")
+    linkable, baseline_adrs = set(), None
+    if shape == "feature":
+        base = check_baseline_link(d, notes, out)
+        if base:
+            linkable.add(base)
+            baseline_adrs = adrs_in(base.read_text(encoding="utf-8", errors="replace"))
+    else:
+        linkable = {p for p in (find(d, doc) for _, doc, _ in feature_docs(notes) if doc) if p}
+    names, retired = check_spec(spec, explained, out, shape, d, linkable, baseline_adrs)
     check_defaulted(notes, spec, out)
     check_changes(notes, spec, names, retired, out)
+    if shape != "feature":
+        check_features(notes, spec, d, out)
 
     if not problems:
         print(f"clean — {d}")

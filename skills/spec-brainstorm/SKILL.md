@@ -12,7 +12,7 @@ description: >-
   --explain for an unfamiliar domain adds the domain narrative, actors, event timeline, glossary
   and a worked example, and researches how the industry actually builds this. --feature for a
   feature inside an existing repo ("/r:spec-brainstorm --feature let users export invoices as
-  CSV") reads the code first. --continue resumes an unfinished or old-shape document; --change
+  CSV") writes a delta doc, its ADRs in the main spec. --continue resumes an unfinished or old-shape document; --change
   applies a changed requirement to a spec whose plan is partly built. NOT for the phased
   implementation plan - that's /r:spec-design.
 model: fable
@@ -29,6 +29,8 @@ characteristics → logical components → architectural style → decisions →
 a closing risks section. Each part summarises the one below it, so a reader can stop at any
 boundary with a coarser but still true picture. `references/sections.md` owns what goes in each;
 the order is not negotiable and no part is dropped — a part with little to say is three sentences.
+A `--feature` run writes a delta doc with its own seven parts instead, and puts its decisions in
+the main spec (below, and `sections.md` §14).
 
 **The ceiling.** This document stops at components, the style, named technologies and the API.
 No column types, indexes, code or build order — those belong to `/r:spec-design`, which reads
@@ -74,9 +76,42 @@ turn it on because the domain looks interesting.
 `/r:spec-brainstorm --feature let users export invoices as CSV` settles the scope, so don't ask
 it. Read the repo first (`references/interview.md` §7) and open with what you found.
 
-Everything else runs as in the default mode: the delta rounds, the `path:line` rule, the coverage
-floor, the write gate. `--explain` composes with it, but on this path the repo is the research
-and the external fan-out stays off unless a specific question survives reading the code.
+**A feature is a delta against a system that already has its architecture**, so it does not get a
+second app spec. Restating the characteristics, the style and the stack for a CSV export produces a
+document that reads like a rival design of the whole system, and its ADRs end up where nobody
+reading the main spec will look. Two files instead, one write gate:
+
+- **The feature doc** `docs/<feature>/spec.html` — the build input, in the feature shape
+  (`references/sections.md` §14): problem & stories · baseline (what exists, every claim
+  `path:line`) · domain delta · behaviour · interface delta · fit check · rollout & risks.
+  `/r:spec-design` writes this feature's `todo.md` beside it.
+- **The main spec** — the project's one `docs/<topic>/spec.html`. It stays the single place to read
+  the current system and every decision: the feature's ADRs go into its Part 6 with the next free
+  number, a decision that reverses an older one supersedes it there, the domain, component and API
+  changes land in Parts 2, 4 and 7, and Part 1's `Features` section links the feature doc. The
+  spec may run ahead of the code — nothing waits for the build.
+
+**Find the main spec first.** Glob `docs/*/spec.html` and drop those whose notes say
+`scope: feature`. One left: that is it. Several: ask which. None: write a thin one from the code in
+the same run (`sections.md` §14) — all seven parts, every claim cited, Parts 3 and 5 stated as
+observed rather than ranked, Part 6 holding only what this feature decides.
+
+**Fit check, not a new architecture.** Read the main spec's Parts 3, 5 and 6 before asking
+anything. The feature inherits them; round 5's forced trade-off and round 6's style question are
+replaced by one check — does this feature put pressure on any inherited characteristic or on the
+style? Where it does not, say so in a line. Where it does, that is a real decision: ask it, log it,
+and it becomes an ADR in the main spec.
+
+The rest runs as in the default mode: the `path:line` rule, the coverage floor (feature rows,
+`interview.md` §11), the decision log — kept in the main spec's `interview-notes.md`, because its
+Part 6 is assembled from it — and the write gate, which names the changes to both files. The
+feature's own notes carry `scope: feature` and `baseline: docs/<topic>/spec.html`, and the main
+notes get a `## Features` entry (`interview.md` §10). `--explain` composes with it, but on this
+path the repo is the research and the external fan-out stays off unless a specific question
+survives reading the code.
+
+`--continue` and `--change` on a feature doc follow the same split: stories change in the feature
+doc, decisions are added or superseded in the main spec.
 
 ## `--change` — the requirements moved after the plan was built on them
 
@@ -102,6 +137,8 @@ Do this silently, then report it in one line.
 
 - **Resume.** Glob `docs/*/interview-notes.md`. If one exists, say so and offer to continue it,
   restart it, or start something else. `--continue` and `--change` skip that offer — see below.
+- **Under `--feature`**, the main spec is the baseline, not a collision and not a rival plan — the
+  two guards below apply to the feature doc's own folder only.
 - **Existing plan guard.** If the repo already has a document that owns its plan — a root
   `PROJECT.md`, or a specification another tool maintains — say so and offer to extend that
   instead. A second document gives the repo two answers to the same question, and the stale one
@@ -194,6 +231,9 @@ of decisions the user never saw under a heading that says they made them.
 the seven parts, the diagrams, the decisions you'll write up as ADRs, and anything you defaulted
 rather than asked. Writing first and summarizing afterwards is not confirmation.
 
+Under `--feature` the plan names both files: the feature doc's parts, and for the main spec each
+ADR by its new number, each one it supersedes, and the sections of Parts 1, 2, 4 and 7 it changes.
+
 If any coverage row is still `open` or `assumed`, this gate is not a yes/no. Name those rows, say
 what you'd default each to, and offer the third option: **another round on them.** Otherwise the
 user has to notice the hole themselves, usually after the file is written.
@@ -230,7 +270,11 @@ placeholder text, filler prose, a story with no acceptance criteria, a v1 line n
 isn't defined, a claim about existing code with no `path:line`, a coverage row settled with no
 evidence, a `defaulted` decision or a `proposed` ADR under a `decisions` row that claims to be
 settled, and — under `--explain` — confidence tags that stopped partway or cite no source — all
-invisible on a read-through, which is why they belong to a script.
+invisible on a read-through, which is why they belong to a script. The notes' `scope:` picks the
+shape: under `feature` it checks the feature spine, a Baseline with no `path:line`, an ADR written
+in the feature doc, an `ADR-n` the main spec does not carry, and a main spec whose notes never
+recorded the feature; under `baseline` it lets a thin spec go without stories, a ranking or ADRs.
+Run it on the main spec's folder too after a `--feature` run.
 
 Then six judgments a script cannot make. Be willing to delete your own work.
 
@@ -512,7 +556,9 @@ Summarize the folder, the mode used, the sections and diagrams included, every r
 /r:spec-design docs/<topic>/spec.html
 ```
 
-which turns the document into a phased plan beside it. Offer to refine any section or diagram first
+which turns the document into a phased plan beside it. After `--feature` the command names the
+feature doc, `/r:spec-design docs/<feature>/spec.html`: the plan sits beside the feature, and
+spec-design reads the decisions from the main spec its notes name. Offer to refine any section or diagram first
 — cheaper now than after the plan is built on it. When a `todo.md` already sits beside the spec and
 this run reversed a decision, say that the plan was built on the old answer and that re-running the
 same command rewrites it with every built phase frozen. After `--change`, name the built leaves
@@ -532,7 +578,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/lib/record-run.py" <<'STATS_JSON'
  "adrs":0,"adrsFromLog":0,"decisionsDefaulted":0,"decisionsReviewed":0,"decisionsChanged":0,
  "drivingCharacteristics":0,"restructured":false,
  "storiesChanged":0,"storiesRetired":0,"storiesAdded":0,"adrsSuperseded":0,
- "builtLeavesTouched":0,"stopped":false,
+ "builtLeavesTouched":0,"stopped":false,"baselineCreated":false,"adrsToMain":0,
  "researchRan":"skipped","checkerProblems":0,"wrote":false,"blockedReason":null}
 STATS_JSON
 ```
@@ -551,6 +597,11 @@ the built leaves the change reaches — the rework this run hands to `/r:spec-de
 number that says whether changes arrive before the build or after it. `stopped: true` is a run
 that ended at a stop, with `wrote: false` and no `blockedReason`: the skill ran, the plan was
 not in a state a change can be planned over.
+
+**The feature fields are filled on `mode: feature` and zero elsewhere.** `adrsToMain` counts the
+ADRs this run wrote into the main spec — most features should need none, so a high average means
+the fit check is being skipped and features are re-deciding the architecture. `baselineCreated` is
+a first feature in a repo with no main spec.
 
 **`rowsAsked` against `rowsAssumed` is the bar this skill is tuned on.** All-asked means the
 interview offloads decisions the skill should make; all-assumed means it guesses at things one
@@ -609,8 +660,10 @@ what was written. Never retry it.
 - Never accept an adjective as a requirement. Reflect it back as a number or a rule.
 - Never state a price, quota, limit or version you did not read this session.
 - Never introduce a component, service or technology no story and no characteristic forces.
-- Never drop one of the seven parts. Shorten it to three sentences; a missing part reads exactly
-  like a question nobody asked.
+- Never drop one of the seven parts — of the app shape, or of the feature shape under `--feature`.
+  Shorten it to three sentences; a missing part reads exactly like a question nobody asked.
+- Never write an ADR into a feature doc, and never restate the main spec's characteristics, style
+  or stack there. Decisions live in the main spec; the feature doc links to them.
 - Never let a characteristic through as an adjective, and never carry more than three as driving.
 - Never write an ADR at generate time that was not logged during the interview, and never write
   one whose only alternative you invented to fill the field.

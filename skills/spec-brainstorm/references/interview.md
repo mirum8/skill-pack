@@ -437,9 +437,12 @@ asking after the user takes it.
 The flag means the user has told you the scope. Don't re-ask it — read the code and open with
 what you found.
 
-**Before any question**, read in this order, capped at ~15 files: build files (real dependency
-*versions*), the migration folder (real schema), the package layout, lint or architecture
-rules, `CLAUDE.md`, existing docs, and **two existing tests** to copy their style.
+**Before any question**, read the main spec (SKILL.md `--feature` says how to find it) — its
+Parts 3, 5 and 6 are what this feature inherits, and its ADRs are what it must not re-decide.
+Then the code, in this order, capped at ~15 files: build files (real dependency *versions*), the
+migration folder (real schema), the package layout, lint or architecture rules, `CLAUDE.md`,
+existing docs, and **two existing tests** to copy their style. With no main spec, this read is
+also the thin baseline's source (`sections.md` §14).
 
 **No claim about the existing system enters the document without a `path:line` citation.**
 Anything uncited becomes an open question, not a fact.
@@ -464,8 +467,15 @@ code cannot tell you:
 default), feature flag name and default, backfill runtime against real row counts, rollback
 and its point of no return.
 
-Then rounds 3–7 as normal, minus everything the code already answered — which is usually most
-of round 6.
+**The fit check replaces round 5 and round 6's style question.** The characteristics and the
+style are inherited; asking them again invites a second architecture. State each inherited
+driving characteristic and the style, and say whether this feature presses on it — a CSV export of
+every invoice presses on a "p95 under 200 ms, synchronous" target; a new filter does not. Only a
+pressure is asked, as the forced trade-off round 5 would ask it, and its answer is logged in the
+main spec's `## Decisions` and becomes an ADR there. Record the outcome as the `fit-check` row.
+
+Then rounds 3, 4, 6 (the component cut and API only) and 7–8 as normal, minus everything the code
+already answered — which is usually most of round 6.
 
 ---
 
@@ -534,7 +544,8 @@ user is asked to accept. The notes are your own transcript; write them as you go
 ```markdown
 ---
 topic: invoice-reconciliation
-scope: new-service        # new-service | feature | replacement
+scope: new-service        # new-service | feature | replacement | baseline
+baseline: docs/<topic>/spec.html   # scope: feature only — the main spec this feature writes into
 mode: default             # default | explain
 status: interviewing      # interviewing | generated-partial | generated
 ---
@@ -613,6 +624,24 @@ other sections:
 - **`ADRs:` and `Built when recorded:` are for the reader.** The plan, not this line, decides what
   is built when `/r:spec-design` runs.
 - An entry the plan already lists is never edited. A later change is a later entry.
+
+### `## Features` — written by `--feature` into the main spec's notes
+
+One entry per feature whose decisions the main spec carries:
+
+```markdown
+## Features
+### 2026-11-11 — Invoice CSV export
+- Doc: docs/invoice-export/spec.html
+- ADRs: ADR-12; ADR-13 supersedes ADR-4
+```
+
+- **`Doc:`** is repo-relative and must exist; the feature doc's own notes name this spec back in
+  `baseline:`. `scripts/check_spec.py` checks both directions.
+- **`ADRs:`** lists every ADR the feature wrote here; each must be defined in this spec. A feature
+  that pressured nothing writes `- ADRs: none`.
+- The decisions themselves are logged in this file's `## Decisions`, tagged with the feature —
+  Part 6 is assembled from one log.
 
 ### The Decisions log is written live, and that is the whole point
 
@@ -702,6 +731,15 @@ script as a row you skipped. Copy them verbatim.
 | `stories-and-v1` | the stories, and which ship first |
 
 **Add `rollout`** whenever anything already exists: the migration shape, and how to undo it.
+
+**Under `scope: feature`** the rows `arch-characteristics`, `style-and-topology` and `decisions`
+are dropped — inherited, and logged in the main spec — and **`fit-check`** is added: each inherited
+driving characteristic and the style, `holds` or pressured with the ADR it produced. `rollout`
+applies.
+
+**Under `scope: baseline`** (a thin main spec read from code) `stories-and-v1` is dropped and
+`rollout` does not apply. Most rows settle as `repo — path:line`; what the code cannot say is
+`n/a` with a reason, never a guess.
 
 **Under `--explain`, add** `actors` (who acts, what each may authorise) and `vocabulary` (the
 terms of art, and the word that doesn't mean what it looks like).

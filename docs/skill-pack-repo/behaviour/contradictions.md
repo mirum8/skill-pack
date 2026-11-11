@@ -185,13 +185,17 @@ ever tests `== "explain"`, so nothing breaks today and all three disagree.
 `spec-brainstorm`'s never-do list says never reference a path outside this skill's directory; Step
 6 calls `${CLAUDE_PLUGIN_ROOT}/lib/record-run.py`. The exception is correct and unwritten.
 
-## C-25 — a documented check that is silently inert · **fail-open** · open
+## C-25 — a documented check that is silently inert · **fail-open** · resolved for feature docs
 
 `spec-brainstorm/SKILL.md` Step 4 lists "a claim about existing code with no `path:line`" among
 what `check_spec.py` catches. `check_codebase_facts()` only fires under a literal "Codebase facts"
 heading, and nothing in `SKILL.md`, `sections.md` or `interview.md` ever tells the writer to create
 one. On a real `--feature` run the check never runs and the rule is prose-only — while the prose
 says a script holds it.
+
+Resolved 2026-11-11 for `--feature`: a feature doc's Baseline part is checked whole and must cite
+at least one `path:line` (SB-spec-brainstorm-138). An app spec still needs the "Codebase facts"
+heading for the check to fire.
 
 ## C-26 — the open-question ratio is two different numbers · open
 

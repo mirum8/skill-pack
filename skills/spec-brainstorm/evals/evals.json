@@ -172,11 +172,11 @@
       "prompt": "/r:spec-brainstorm --feature add returns and refunds to the orders service",
       "fixture": "../../brainstorm-workspace/fixtures/wholesale-orders",
       "persona": "Tech lead owning the wholesale-orders Spring Boot service, 4 Java devs. Customer can request a return on a SHIPPED order within 30 days. Partial returns required (some lines, partial quantities). Warehouse approves or rejects on receipt. Approved return triggers a refund via the existing billing service through the existing orders.v1 Kafka topic. A refund must never exceed what was paid for the returned lines. EUR only. Stack questions: 'whatever the repo already does'. Outbox pattern non-negotiable, Flyway append-only, no code comments.",
-      "expected_output": "Reads the repo before asking anything and opens with what it found. No depth question and no scope question. The document cites real path:line references and describes only the delta, and includes a rollout section because an existing system is touched. No stack re-decision, and no external research.",
+      "expected_output": "Reads the repo before asking anything and opens with what it found. No depth question and no scope question. The repo has no main spec, so it writes a thin one from the code (scope: baseline) beside the feature doc, behind the same write gate. The feature doc is in the feature shape — problem & stories, baseline, domain delta, behaviour, interface delta, fit check, rollout & risks — cites real path:line references and carries no ADR; any decision becomes an ADR in the main spec, which records the feature under ## Features. No stack re-decision, no re-ranked characteristics, and no external research.",
       "assertions": [
         {
           "id": "files",
-          "text": "Creates spec.html and interview-notes.md inside the repo's docs/<topic>/",
+          "text": "Creates spec.html and interview-notes.md in two folders: the feature's docs/<feature>/ and a thin main spec's docs/<project>/",
           "check": "script"
         },
         {
@@ -219,8 +219,27 @@
           "check": "script"
         },
         {
-          "id": "seven_parts_delta",
-          "text": "All seven parts are present even though this is a delta — Parts 3 and 5 say what is unchanged about the existing service rather than being omitted",
+          "id": "feature_shape",
+          "text": "The feature doc has the seven feature parts (problem & stories, baseline, domain delta, behaviour, interface delta, fit check, rollout & risks) and no characteristics or style part; its notes say scope: feature and name the main spec in baseline:",
+          "check": "script"
+        },
+        {
+          "id": "thin_baseline",
+          "text": "With no main spec in the repo, writes one from the code with scope: baseline — seven app parts, Parts 3 and 5 observed rather than ranked, no invented stories",
+          "check": "script"
+        },
+        {
+          "id": "adrs_in_main_spec",
+          "text": "Writes no ADR into the feature doc; any ADR (e.g. the outbox for refund events, if pressured) is in the main spec's Decisions part, and the main notes carry a ## Features entry naming the feature doc and its ADRs",
+          "check": "script"
+        },
+        {
+          "id": "fit_check",
+          "text": "Asks no forced trade-off over characteristics and no style question; states the inherited ones and asks only where the feature presses on one"
+        },
+        {
+          "id": "checker_clean",
+          "text": "check_spec.py reports clean on both folders",
           "check": "script"
         }
       ]
