@@ -552,7 +552,7 @@ graph TD
   *Tested by:* —
 
 - **SB-spec-brainstorm-057** — Before asking anything, `--continue` **audits the ledger**: for every
-  settled row it looks for evidence — a quoted answer under `## Answers`, a `path:line` or URL
+  settled row it looks for evidence — a logged answer under `## Answers`, a `path:line` or URL
   citation, or a written `n/a` reason. A row with none was inferred, so it is downgraded to
   `assumed`, added to the gap list, and **the downgrade is said out loud**.
   *States it:* `skills/spec-brainstorm/SKILL.md`
@@ -614,7 +614,7 @@ graph TD
   *Tested by:* —
 
 - **SB-spec-brainstorm-063** — On a resume, an ADR is written **only when the alternative is on the
-  record** — named in the document, or recoverable from a quoted answer under `## Answers`. For
+  record** — named in the document, or recoverable from a logged answer under `## Answers`. For
   every other decision there are exactly two allowed moves: ask for what else was on the table and
   write the answers into `## Decisions` as they land, or name them in Part 6 as *defaults nobody
   discussed*. Inventing the alternative is the one thing that is never allowed.
@@ -962,6 +962,14 @@ graph TD
   losing it costs everything.
   *States it:* `skills/spec-brainstorm/references/interview.md`, `skills/spec-brainstorm/SKILL.md`
   *Enforced by:* `skills/spec-brainstorm/scripts/check_spec.py`
+  *Tested by:* —
+
+- **SB-spec-brainstorm-179** — Each entry in `interview-notes.md` is a short summary, in the
+  skill's own words, of what the answer settled — never the user's dictated speech copied in.
+  Their exact words are kept only where the wording is the content: a name, a defined term, a
+  story title, a threshold.
+  *States it:* `skills/spec-brainstorm/references/interview.md`
+  *Enforced by:* —
   *Tested by:* —
 
 - **SB-spec-brainstorm-098** — **The `## Decisions` log is written the moment a decision lands, not

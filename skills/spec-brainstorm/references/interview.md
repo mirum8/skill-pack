@@ -541,6 +541,12 @@ interrupted, and losing it costs everything.
 This file is **not** behind the write gate — that gate covers `spec.html`, the document the
 user is asked to accept. The notes are your own transcript; write them as you go.
 
+**Write what was settled, in your own words — never the user's speech.** Users often dictate, and
+a dictated answer carries fillers, restarts and half-sentences; copied into the notes it reads as
+a raw recording, not a record. Each entry is a short summary of what the answer decided: the
+fact, the number, the rule, the reason. Keep their exact words only where the wording is the
+content — a name, a term they defined, a story title, a threshold.
+
 ```markdown
 ---
 topic: invoice-reconciliation

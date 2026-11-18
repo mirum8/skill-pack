@@ -314,7 +314,7 @@ first pass; resuming and then quietly deciding everything yourself makes `--cont
 Read the whole notes file first, then **do not take the ledger at face value.** A row an earlier
 run marked `answered` may have been decided rather than asked.
 
-For every settled row, look for its evidence — a quoted answer under `## Answers`, a `path:line` or
+For every settled row, look for its evidence — a logged answer under `## Answers`, a `path:line` or
 URL citation, or a written `n/a` reason. A row with none was inferred. Downgrade it to `assumed`,
 put it in the gap list, and **say which rows you downgraded**:
 
@@ -365,7 +365,7 @@ A document written before the log existed records its reasoning as prose — a n
 when", a paragraph explaining where a line falls, a risk with an accepted trade. That gives Context
 and Consequences honestly, and almost never **Alternatives**, because the option live at the time
 was never written down. So an ADR is written here only when the alternative is *on the record* —
-named in the document, or recoverable from a quoted answer under `## Answers`. For every other
+named in the document, or recoverable from a logged answer under `## Answers`. For every other
 decision, do one of two things and never a third:
 
 1. **Ask.** List them in one batch — "these five look like real decisions; what else was on the
