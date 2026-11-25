@@ -118,13 +118,8 @@ def main(argv):
         return 0
 
     text = plan.read_text(encoding="utf-8", errors="replace")
-    blocks = re.split(r"^(?=###\s+Phase\s+\d+)", text, flags=re.M)
     files_of, built = {}, set()
-    for b in blocks:
-        m = re.match(r"###\s+Phase\s+(\d+)", b)
-        if not m:
-            continue
-        n = int(m.group(1))
+    for n, _, _, b in check.phase_blocks(text):
         files_of[n] = {f for f in check.phase_files(b) if check.comparable(f)}
         if check.BUILT.search(b.split("\n", 1)[0]) or re.search(r"^- \[x\]", b, re.M):
             built.add(n)

@@ -44,7 +44,6 @@ from pathlib import Path
 
 # Copied from check_todo.py: the leaf heading, and the tick that makes a leaf done.
 PHASE_HEAD = re.compile(r"^###\s+Phase\s+(\d+)\s*[—-]\s*(.+)$", re.M)
-PHASE_SPLIT = r"(?=^###\s+Phase\s+\d+)"
 OPEN_ITEM = re.compile(r"^\s*-\s*\[ \]", re.M)
 DONE_ITEM = re.compile(r"^\s*-\s*\[[xX]\]", re.M)
 
@@ -105,10 +104,10 @@ PERSON_OWNER = re.compile(r"\b(legal|finance|procurement|hr|people|compliance|se
 
 def phases(text):
     """(num -> block) for every leaf, plus the numbers in document order."""
-    heads = PHASE_HEAD.findall(text)
-    blocks = re.split(PHASE_SPLIT, text, flags=re.M)[1:]
-    nums = [int(n) for n, _ in heads]
-    return nums, dict(zip(nums, blocks))
+    ms = list(PHASE_HEAD.finditer(text))
+    ends = [m.start() for m in ms[1:]] + [len(text)]
+    nums = [int(m.group(1)) for m in ms]
+    return nums, {int(m.group(1)): text[m.start():e] for m, e in zip(ms, ends)}
 
 
 def built(block):

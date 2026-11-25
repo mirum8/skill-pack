@@ -290,6 +290,26 @@ run "no mode given"                       1 "$TMP/todo.md"
 run "--phases with nothing after it"      1 "$TMP/todo.md" --outstanding --phases
 
 echo
+echo "== a heading that is not 'Phase N — title' never shifts the leaves after it =="
+plan <<'EOF'
+# P
+## Resolve first
+- [ ] **Stale blocker** — nobody ever closed this.
+  Owner: platform. Blocks: Phase 2.
+
+### Phase 1 — Open
+- [ ] a thing
+
+### Phase 1a — Inserted
+- [ ] another thing
+
+### Phase 2 — Already built
+- [x] the thing
+EOF
+run "a plan with a stray heading parses"  0 "$TMP/todo.md" --outstanding
+eq  "the built Phase 2 is still moot"     'd["blockedPhasesBuilt"]' '[2]'
+
+echo
 printf '  %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
 

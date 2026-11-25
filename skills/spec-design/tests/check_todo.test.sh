@@ -923,5 +923,43 @@ EOF
 spec_says "is reported" "Phase 1 .*implements a retired story: Self-approve small invoices"
 
 echo
+echo "== a heading that is not 'Phase N — title' never shifts the leaves after it =="
+# A '### Phase 34a' heading is not a leaf to any reader, and the pairing of headings with blocks
+# must not count it as one: when it did, every later phase was read with the text of the phase
+# above it, so a built leaf read as unbuilt and a rework pointed at the wrong phases.
+plan <<'EOF'
+# Demo — Implementation Plan
+
+## Milestone 1 — Core
+### Phase 1 — One
+**Implements:** Store a thing
+**Depends on:** —
+**Files:** `a.txt` (new)
+- [ ] a
+**Done when:** green.
+
+### Phase 1a — Inserted
+**Implements:** Store a thing
+**Depends on:** Phase 1
+**Files:** `b.txt` (new)
+- [ ] b
+**Done when:** green.
+
+### Phase 2 — Two <!-- built: two -->
+**Implements:** Read a thing
+**Depends on:** Phase 1
+**Files:** `c.txt` (new)
+- [x] c
+**Done when:** green.
+EOF
+got=$(PYTHONPATH=skills/spec-design/scripts python3 -c '
+import sys, check_todo
+for n, _, slug, b in check_todo.phase_blocks(open(sys.argv[1]).read()):
+    print(n, slug, b.splitlines()[0])' "$TMP/todo.md")
+grep -qx "2 two ### Phase 2 — Two <!-- built: two -->" <<<"$got" \
+  && ok "Phase 2 is paired with its own block" || bad "Phase 2 is paired with its own block" "$got"
+says "the stray heading is reported" "Phase 1a.*not a leaf heading"
+
+echo
 printf '  %d passed, %d failed\n' "$pass" "$fail"
 [[ $fail == 0 ]]

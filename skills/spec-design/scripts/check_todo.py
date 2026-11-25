@@ -180,15 +180,20 @@ def wave_table(by_wave, done_of, files_of, plan_name):
 
 BUILT = re.compile(r"<!--\s*built:\s*([^\s>]+?)\s*-->")
 MILESTONE = re.compile(r"^##\s+Milestone\s+(\d+)\s*[—-]\s*(.+)$", re.M)
+PHASE_HEAD = re.compile(r"^###\s+Phase\s+(\d+)\s*[—-]\s*(.+)$", re.M)
+
+
+def leaf_slices(text):
+    ms = list(PHASE_HEAD.finditer(text))
+    ends = [m.start() for m in ms[1:]] + [len(text)]
+    return [(m.group(1), m.group(2), text[m.start():e]) for m, e in zip(ms, ends)]
 
 
 def phase_blocks(text):
     """(num, title, slug, block) per leaf, in document order. `title` has the built-marker and any
     done tick stripped; `slug` is the marker's value, which /r:plan-run writes when a leaf lands."""
-    heads = re.findall(r"^###\s+Phase\s+(\d+)\s*[—-]\s*(.+)$", text, re.M)
-    blocks = re.split(r"(?=^###\s+Phase\s+\d+)", text, flags=re.M)[1:]
     out = []
-    for (n, raw), b in zip(heads, blocks):
+    for n, raw, b in leaf_slices(text):
         m = BUILT.search(raw)
         title = " ".join(BUILT.sub("", raw).replace("✅", " ").split())
         out.append((int(n), title, m.group(1) if m else None, b))
@@ -459,7 +464,13 @@ def main():
         note(n)
 
     # --- structural contract /r:task-run depends on -------------------------------
-    heads = re.findall(r"^###\s+Phase\s+(\d+)\s*[—-]\s*(.+)$", t, re.M)
+    for line in re.findall(r"^###\s+Phase\b.*$", t, re.M):
+        if not PHASE_HEAD.match(line):
+            out(f"{line.strip()}: not a leaf heading — leaves are numbered '### Phase N — title' "
+                f"with an integer N, so no reader sees it and its text is read as part of the "
+                f"leaf above")
+    slices = leaf_slices(t)
+    heads = [(n, raw) for n, raw, _ in slices]
     if not heads:
         out("no '### Phase N — title' headings — /r:task-run cannot locate a phase")
         print("\n".join(f"  - {p}" for p in problems))
@@ -471,7 +482,7 @@ def main():
     if nums != list(range(nums[0], nums[0] + len(nums))):
         out(f"phase numbers have gaps or repeats: {nums}")
     # --- per-phase --------------------------------------------------------------
-    blocks = re.split(r"(?=^###\s+Phase\s+\d+)", t, flags=re.M)[1:]
+    blocks = [b for _, _, b in slices]
     # Scoped to the PHASE blocks, never the whole file. `## Resolve first` entries carry checkboxes
     # of their own, so a whole-file search would find one there and pass a plan whose leaves have no
     # acceptance criteria at all -- which is the only thing this check was ever about.

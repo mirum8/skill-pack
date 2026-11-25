@@ -122,5 +122,27 @@ out=$(python3 "$WARN" "$PLAN" --repo "$REPO" 2>&1); rc=$?
 [[ $rc == 1 ]] && ok "no --slice at all exits 1" || bad "no --slice at all exits 1" "exit $rc: $out"
 
 echo
+echo "== a heading that is not 'Phase N — title' never replaces the leaf it follows =="
+cat > "$TMP/stray.md" <<'EOF'
+### Phase 2 — A UI leaf
+**Depends on:** —
+**Files:** `internal/ui/selection.go` (new)
+- [ ] does a
+
+### Phase 2a — Inserted
+**Depends on:** —
+**Files:** `internal/ops/extra.go` (new)
+- [ ] does a2
+
+### Phase 3 — Another UI leaf
+**Depends on:** —
+**Files:** `internal/ui/events.go` (new)
+- [ ] does b
+EOF
+out=$(python3 "$WARN" "$TMP/stray.md" --slice 2,3 --base main --repo "$REPO" 2>&1); rc=$?
+[[ $rc == 2 ]] && grep -q "internal/ui is claimed by Phase 2, Phase 3" <<<"$out" \
+  && ok "Phase 2 keeps its own files" || bad "Phase 2 keeps its own files" "exit $rc: ${out:0:400}"
+
+echo
 printf '  %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
